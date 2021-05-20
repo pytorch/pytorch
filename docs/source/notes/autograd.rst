@@ -41,59 +41,70 @@ launch the training - what you run is what you differentiate.
 Locally disabling gradient computation
 --------------------------------------
 
-There are several ways to locally disable gradients: setting
-``requires_grad``, enabling no-grad mode, and enabling inference mode. Below, we
-describe the different mechanisms and how they are used. We also describe a
-similar mechanism, ``.eval()`` (evaluation mode), that is often mixed up with
-the three.
+There are several mechanisms available from Python to locally disable gradient
+computation:
 
-Default Mode (Grad Mode)
-^^^^^^^^^^^^^^^^^^^^^^^^
+To disable gradients across entire blocks of code, there are grad modes
+like no-grad mode and inference mode.
+For more fine-grained exclusion of subgraphs from gradient computation,
+there is setting the ``requires_grad`` field of a tensor.
 
-All operations that have at least one input with ``requires_grad=True`` will recorded
-in the backward graph by default.
-This allows us to compute gradients when running ``output.backward()``
-as described above in :ref:`how-autograd-encodes-history`.
+Below, in addition to discussing the mechanisms above, we also describe
+evaluation mode (:meth:``nn.Module.eval()``), a method that is not actually used
+to disable gradient computation but, because of its name, is often mixed up with the three.
 
-This default "mode" is the mode we are implicitly in when no other modes like
-no-grad and inference mode are enabled.
-Unlike the other modes, grad mode is also the only mode where ``requires_grad`` is not overridden.
-In fact, the primary purpose of no-grad mode is to override ``requires_grad``.
+Setting ``requires_grad``
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To be contrasted with "no-grad mode" the default mode is sometimes called "grad mode".
+:attr:`requires_grad` is a flag that allows for fine-grained exclusion of
+subgraphs from gradient computation. It takes effect in both the forward
+and backward passes:
 
-Setting the ``requires_grad`` flag of leaf tensors
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+During the forward pass, an operation is only recorded in the backward graph if
+at least one of its input tensors require grad.
+During the backward pass (``.backward()``), only leaf tensors with
+``requires_grad=True`` will have gradients accumulated into their ``.grad``
+fields.
 
-:attr:`requires_grad` is a flag that allows for fine-grained exclusion of subgraphs
-from gradient computation.
-Every tensor has this flag, but setting this flag really only makes sense for leaf
-tensors (tensors that do not have a ``grad_fn``, e.g., a module's parameters).
+It is important to note that even though every tensor has this flag,
+*setting* it only makes sense for leaf tensors (tensors that do not have a
+``grad_fn``, e.g., a module's parameters).
 Non-leaf tensors (tensors that do have ``grad_fn``) are actually defined to always
-have ``requires_grad=True``.
+have ``requires_grad=True``. This implies that outputs of operations
+recorded by the backward graph automatically have ``require_grad=True``.
 
-Setting ``requires_grad`` can take effect in both the forward and backward passes:
-During the forward pass, an operation is only recorded in the backward graph if at least one
-of its input tensors require grad. The output of this operation is then defined to
-have ``require_grad=True`` as well since it is a non-leaf tensor.
-During ``.backward()``, only leaf tensors with ``requires_grad=True`` will have
-gradients accumulated into their ``.grad`` fields.
+Setting ``requires_grad`` should be the main way you should control which parts
+of the model are part of the gradient computation, for example, if you need to
+freeze parts of your pretrained model during model fine-tuning.
 
-Since it is a common pattern, ``requires_grad`` flags can also be applied to modules
-via :meth:`nn.Module.requires_grad_()`.
+To freeze parts of your model, simply apply ``.requires_grad_(False)`` to
+the parameters that you don't want updated. And as described above,
+since computations that use these parameters as inputs would not be recorded in
+the forward pass, they won't have their ``.grad`` fields updated in the backward
+pass because they won't be part of the backward graph in the first place, as
+desired.
+
+Because this is such a common pattern, ``requires_grad`` can also be set at
+the module level with :meth:`nn.Module.requires_grad_()`.
 When applied to a module, ``.requires_grad_()`` takes effect on all
 of the module's parameters (which set ``requires_grad=True`` by default).
 
-Setting ``requires_grad`` should be the main way you should control which parts of the model
-are part of the gradient computation. For example, setting ``requires_grad``
-is used if you need to freeze part of your pretrained model when finetuning.
-To freeze a module, simply apply ``module.requires_grad_(False)``.
-As this flag is propagated to the module's parameters, computations in the forward pass
-will not be recorded since none of the inputs would require grad.
-Because computations performed in this module during the forward pass are
-no longer part of the recorded backward graph, ``.backward()`` would not
-compute the gradients with respect to the modules parameters, and updates
-would not be made to them on the optimizer step, as desired.
+Grad Modes
+^^^^^^^^^^
+
+Apart from setting ``requires_grad`` there are also three possible modes
+enableable from Python that can affect how computations in PyTorch are
+processed by autograd internally: default mode (grad mode), no-grad mode,
+and inference mode, all of which can be togglable via context managers and
+decorators.
+
+The "default mode" is actually the mode we are implicitly in when no other modes like
+no-grad and inference mode are enabled. To be contrasted with
+"no-grad mode" the default mode is also sometimes called "grad mode".
+
+The most important thing to know about the default mode is that it is the only
+mode in which ``requires_grad`` takes effect. ``requires_grad`` is always overridden
+to be ``False`` in both the two other modes.
 
 No-grad Mode
 ^^^^^^^^^^^^
@@ -123,7 +134,7 @@ autograd tracking when updating the intialized parameters in-place.
 Inference Mode
 ^^^^^^^^^^^^^^
 
-Inference mode is an extreme version of no-grad mode. Just like in no-grad
+Inference mode is the extreme version of no-grad mode. Just like in no-grad
 mode, computations in inference mode are not recorded in the backward graph, but
 enabling inference mode will allow PyTorch to speed up your model even more.
 This better runtime comes with a drawback: tensors created in inference mode
@@ -138,7 +149,8 @@ It is recommended that you try out inference mode in the parts of your code
 that do not require autograd tracking. If it works out of the box
 for your use case it’s a free performance win. If you run into errors after
 enabling inference mode, check that you are not using tensors created in
-inference mode outside inference mode. It may also be possible that inference
+inference mode in computations that are recorded by autograd outside inference
+mode. It may also be possible that inference
 mode does not apply to your use case, in which case you can always switch
 back to no-grad mode.
 
@@ -147,6 +159,7 @@ For details on inference mode please see
 
 Evaluation Mode (``nn.Module.eval()``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 Evaluation mode is not actually a mechanism to locally disable gradient computation.
 It is included here anyway because it is sometimes confused to be such a mechanism.
 
