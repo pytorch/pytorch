@@ -2592,7 +2592,8 @@ class TestOperatorSignatures(JitTestCase):
                            '__rsub__',
                            '__rmul__',
                            '__rdiv__',
-                           '__rpow__'}
+                           '__rpow__',
+                           '__rmatmul__'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
