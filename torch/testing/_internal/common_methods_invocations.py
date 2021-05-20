@@ -1,5 +1,5 @@
 from functools import reduce, wraps, partial
-from itertools import product
+from itertools import product, chain
 from operator import mul
 import collections
 import operator
