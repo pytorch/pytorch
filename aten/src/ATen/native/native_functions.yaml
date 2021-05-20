@@ -278,15 +278,15 @@
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: sgn
+  structured_delegate: sgn.out
 
 - func: sgn_(Tensor(a!) self) -> Tensor(a!)
   variants: method
-  dispatch:
-    CompositeExplicitAutograd: sgn_
+  structured_delegate: sgn.out
 
 - func: sgn.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sgn_out
 
