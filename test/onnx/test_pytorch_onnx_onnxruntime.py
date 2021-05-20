@@ -8880,6 +8880,9 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(12)
         self.run_test(M(), (x,))
 
+        x = torch.ones(2, 0, 3)
+        self.run_test(M(), (x,))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
               **extra_kwargs):
