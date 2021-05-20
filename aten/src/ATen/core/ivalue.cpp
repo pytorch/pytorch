@@ -217,8 +217,8 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       subValues.insert(*this);
       c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
       auto match = py_obj->tryToInferType();
-      TORCH_INTERNAL_ASSERT(match.success(),
-            "Cannot infer type of ", py_obj->toStr(), "\n:", match.reason());
+      TORCH_CHECK_TYPE(match.success(),
+            "Cannot infer type of ", py_obj->toStr(), ": ", match.reason());
       auto contained_value = py_obj->toIValue(match.type());
       contained_value.getSubValues(subValues);
       break;
@@ -227,8 +227,8 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
-      TORCH_INTERNAL_ASSERT(
-          false, "sub ivalue is nat enabled for: ", this->tagKind());
+      TORCH_CHECK_TYPE(
+          false, "Cannot inspect value of type ", this->tagKind());
       // Fall through
     default:
       // don't record scalars.
@@ -337,6 +337,7 @@ size_t IValue::hash(const IValue& v) {
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
       return c10::get_hash(v.payload.as_tensor.unsafeGetTensorImpl());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case Tag::Storage:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
@@ -932,6 +933,34 @@ getClassConverter() {
   return classConverter;
 }
 
+// Needs to be in this .cpp file to access the full definition of PyObjectHolder
+std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDataPtrs(
+    const at::IValue& value) {
+  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+  // getSubValues works poorly on Python objects: it only works if they can be
+  // converted to a "regular" IValue type hence, for example, it doesn't support
+  // custom subclasses. Thus, instead, we extract the tensors through pickling.
+  if (value.isPyObject()) {
+    std::vector<at::Tensor> tensors =
+        value.toPyObjectHolder()->extractTensors();
+    data_ptrs.reserve(tensors.size());
+    for (const at::Tensor& tensor : tensors) {
+      data_ptrs.emplace_back(tensor.storage().data_ptr());
+    }
+  } else {
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
+    }
+  }
+  return data_ptrs;
+}
+
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   struct Ctx {
@@ -939,6 +968,8 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
         : remaining(srcs.size()),
           srcFutures(std::move(srcs)),
           asIvalue(srcFutures),
+          // No need to pass devices, because dstFuture won't directly contain
+          // the value, it will contain the srcFutures (which have no DataPtrs).
           dstFuture(make_intrusive<ivalue::Future>(asIvalue.type())) {}
     std::atomic<int32_t> remaining{0};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
@@ -953,15 +984,16 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     auto typePtr = ctx->srcFutures.get(0)->elementType();
     for (const auto i : c10::irange(ctx->srcFutures.size())) {
 
-      auto fut = ctx->srcFutures.get(i);
-      std::function<void()> func = [ctx, fut]() {
+      std::function<void(ivalue::Future&)> func = [ctx](ivalue::Future& fut) {
         // Set error and exit early if encountered.
-        if (fut->hasError()) {
-          ctx->dstFuture->setErrorIfNeeded(fut->exception_ptr());
+        if (fut.hasError()) {
+          ctx->dstFuture->setErrorIfNeeded(fut.exception_ptr());
           return;
         }
 
         if (--ctx->remaining == 0 && !ctx->dstFuture->completed()) {
+          // No need to pass DataPtrs, because dstFuture won't directly contain
+          // the value, it will contain the srcFutures (which have no DataPtrs).
           ctx->dstFuture->markCompleted(ctx->asIvalue);
         }
       };
@@ -969,6 +1001,19 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     }
   }
   return ctx->dstFuture;
+}
+
+namespace {
+
+std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
+  std::ostringstream oss;
+  std::copy(
+      devices.begin(),
+      devices.end(),
+      std::ostream_iterator<c10::Device>(oss, ", "));
+  return oss.str();
+}
+
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAny(
@@ -979,37 +1024,48 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     return res;
   }
   TypePtr typePtr = srcs.get(0)->elementType();
+  const std::vector<c10::Device>& devices = srcs.get(0)->devices();
   for (const auto i : c10::irange(srcs.size())) {
     if (srcs.get(i)->completed()) {
       return srcs.get(i);
     }
-    TORCH_CHECK(i == 0 || (*typePtr == *srcs.get(i)->elementType()));
+    TORCH_CHECK_TYPE(
+        i == 0 || (*typePtr == *srcs.get(i)->elementType()),
+        "Expected all futures to have the same type, but found ", *typePtr,
+        " in position 0 and ", *srcs.get(i)->elementType(), " in position ", i);
+    TORCH_CHECK_VALUE(
+        i == 0 || (devices == srcs.get(i)->devices()),
+        "Expected all futures to have the same devices, but found ",
+        formatSetOfDevices(devices), " in position 0 and ",
+        formatSetOfDevices(srcs.get(i)->devices()), " in position ", i);
   }
   struct Ctx {
-    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs, TypePtr typePtr)
+    explicit Ctx(
+        List<intrusive_ptr<ivalue::Future>> srcs,
+        TypePtr typePtr,
+        std::vector<c10::Device> devices)
         : srcFutures(std::move(srcs)),
-          dstFuture(make_intrusive<ivalue::Future>(typePtr)) {}
+          dstFuture(make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
     std::atomic<bool> done{false};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
     intrusive_ptr<ivalue::Future> dstFuture;
   };
-  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr);
-  std::function<void(size_t)> func = [ctx](size_t index) {
+  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr, devices);
+  std::function<void(ivalue::Future&)> func = [ctx](ivalue::Future& src) {
     if (!ctx->done.exchange(true)) {
       intrusive_ptr<ivalue::Future> dst = ctx->dstFuture;
-      intrusive_ptr<ivalue::Future> src = ctx->srcFutures.get(index);
       ctx->dstFuture.reset(); // Once future is satisfied, remove refs.
       ctx->srcFutures =
           List<intrusive_ptr<ivalue::Future>>(ctx->srcFutures.elementType());
-      if (src->hasError()) {
-        dst->setError(src->exception_ptr());
+      if (src.hasError()) {
+        dst->setError(src.exception_ptr());
       } else {
-        dst->markCompleted(src->constValue());
+        dst->markCompleted(src.constValue(), src.dataPtrs());
       }
     }
   };
   for (const auto i : c10::irange(ctx->srcFutures.size())) {
-    ctx->srcFutures.get(i)->addCallback([func, i]() { func(i); });
+    ctx->srcFutures.get(i)->addCallback(func);
   }
   return ctx->dstFuture;
 }

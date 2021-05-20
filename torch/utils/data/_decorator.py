@@ -15,7 +15,7 @@ class functional_datapipe(object):
         self.name = name
 
     def __call__(self, cls):
-        if isinstance(cls, Type):  # type: ignore
+        if isinstance(cls, Type):  # type: ignore[arg-type]
             if not isinstance(cls, _DataPipeMeta):
                 raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
         # with non_deterministic decorator
@@ -57,18 +57,18 @@ class non_deterministic(object):
 
     def __init__(self, arg: Union[Type[IterDataPipe], Callable[[], bool]]) -> None:
         # 1. Decorator doesn't have any argument
-        if isinstance(arg, Type):  # type: ignore
-            if not issubclass(arg, IterDataPipe):  # type: ignore
+        if isinstance(arg, Type):  # type: ignore[arg-type]
+            if not issubclass(arg, IterDataPipe):  # type: ignore[arg-type]
                 raise TypeError("Only `IterDataPipe` can be decorated with `non_deterministic`"
                                 ", but {} is found".format(arg.__name__))
-            self.cls = arg  # type: ignore
+            self.cls = arg  # type: ignore[assignment]
         # 2. Decorator has an argument of a function
         #    This class should behave differently given different inputs. Use this
         #    function to verify the determinism for each instance.
         #    When the function returns True, the instance is non-deterministic. Otherwise,
         #    the instance is a deterministic DataPipe.
-        elif isinstance(arg, Callable):  # type:ignore
-            self.deterministic_fn = arg  # type: ignore
+        elif isinstance(arg, Callable):  # type:ignore[arg-type]
+            self.deterministic_fn = arg  # type: ignore[assignment, misc]
         else:
             raise TypeError("{} can not be decorated by non_deterministic".format(arg))
 
@@ -80,10 +80,10 @@ class non_deterministic(object):
                 raise TypeError("{} is non-deterministic, but you set 'guaranteed_datapipes_determinism'. "
                                 "You can turn off determinism for this DataPipe if that is acceptable "
                                 "for your application".format(self.cls.__name__))
-            return self.cls(*args, **kwargs)  # type: ignore
+            return self.cls(*args, **kwargs)  # type: ignore[call-arg]
 
         # Decorate with a functional argument
-        if not (isinstance(args[0], Type) and  # type: ignore
+        if not (isinstance(args[0], Type) and  # type: ignore[arg-type]
                 issubclass(args[0], IterDataPipe)):
             raise TypeError("Only `IterDataPipe` can be decorated, but {} is found"
                             .format(args[0].__name__))
@@ -91,7 +91,7 @@ class non_deterministic(object):
         return self.deterministic_wrapper_fn
 
     def deterministic_wrapper_fn(self, *args, **kwargs) -> IterDataPipe:
-        res = self.deterministic_fn(*args, **kwargs)  # type: ignore
+        res = self.deterministic_fn(*args, **kwargs)  # type: ignore[call-arg, misc]
         if not isinstance(res, bool):
             raise TypeError("deterministic_fn of `non_deterministic` decorator is required "
                             "to return a boolean value, but {} is found".format(type(res)))
@@ -100,19 +100,15 @@ class non_deterministic(object):
             raise TypeError("{} is non-deterministic with the inputs, but you set "
                             "'guaranteed_datapipes_determinism'. You can turn off determinism "
                             "for this DataPipe if that is acceptable for your application"
-                            .format(self.cls.__name__))  # type: ignore
-        return self.cls(*args, **kwargs)  # type: ignore
+                            .format(self.cls.__name__))  # type: ignore[union-attr]
+        return self.cls(*args, **kwargs)  # type: ignore[call-arg, misc]
 
 
 ######################################################
 # typing
 ######################################################
-# Construct-time checking
-# Validate each DataPipe with hint as a subtype of the hint.
-def construct_time_validation(f):
-    if f.__name__ not in ('__init__', '__new__'):
-        raise TypeError("Can not decorate function {} with 'construct_time_validation'"
-                        .format(f.__name__))
+# Validate each argument of DataPipe with hint as a subtype of the hint.
+def argument_validation(f):
     signature = inspect.signature(f)
     hints = get_type_hints(f)
 
@@ -135,6 +131,26 @@ def construct_time_validation(f):
     return wrapper
 
 
+# Default value is True
+_runtime_validation_enabled: bool = True
+
+
+class runtime_validation_disabled(object):
+    prev: bool
+
+    def __init__(self) -> None:
+        global _runtime_validation_enabled
+        self.prev = _runtime_validation_enabled
+        _runtime_validation_enabled = False
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        global _runtime_validation_enabled
+        _runtime_validation_enabled = self.prev
+
+
 # Runtime checking
 # Validate output data is subtype of return hint
 def runtime_validation(f):
@@ -146,11 +162,15 @@ def runtime_validation(f):
 
     @wraps(f)
     def wrapper(self):
-        it = f(self)
-        for d in it:
-            if not self.type.issubtype_of_instance(d):
-                raise RuntimeError("Expected an instance of subtype {}, but found {}"
-                                   .format(self.type, d))
-            yield d
+        global _runtime_validation_enabled
+        if not _runtime_validation_enabled:
+            yield from f(self)
+        else:
+            it = f(self)
+            for d in it:
+                if not self.type.issubtype_of_instance(d):
+                    raise RuntimeError("Expected an instance of subtype {}, but found {}"
+                                       .format(self.type, d))
+                yield d
 
     return wrapper

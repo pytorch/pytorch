@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import json
@@ -42,7 +42,7 @@ def export_slow_tests(filename: str) -> None:
         print(f'Overwriting existent file: {filename}')
     with open(filename, 'w+') as file:
         slow_test_times: Dict[str, float] = filter_slow_tests(get_test_case_times())
-        json.dump(slow_test_times, file, indent='    ', separators=(',', ': '))
+        json.dump(slow_test_times, file, indent='    ', separators=(',', ': '), sort_keys=True)
         file.write('\n')
 
 

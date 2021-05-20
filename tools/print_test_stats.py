@@ -15,7 +15,7 @@ from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
-from xml.dom import minidom  # type: ignore[import]
+from xml.dom import minidom
 
 import requests
 from typing_extensions import TypedDict
@@ -631,12 +631,14 @@ class TestFile:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
             # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork,
-            # and distributed/test_distributed_spawn. In these cases, we store the test case that took the longest,
+            # and distributed/test_distributed_spawn and test_c10d_gloo.
+            # In these cases, we store the test case that took the longest,
             # as in these jobs, the duplicate tests are run in parallel.
             # For other unexpected cases, we should raise a warning.
             if self.name == 'test_cpp_extensions_aot' or \
                self.name == 'distributed/test_distributed_fork' or \
                self.name == 'distributed/test_distributed_spawn' or \
+               self.name == 'distributed/test_c10d_gloo' or \
                self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
                 time_difference = self.test_suites[suite_name].replace(test_case)
                 self.total_time += time_difference
@@ -648,7 +650,11 @@ class TestFile:
 
 
 def parse_report(path: str) -> Iterator[TestCase]:
-    dom = minidom.parse(path)
+    try:
+        dom = minidom.parse(path)
+    except Exception as e:
+        print(f"Error occurred when parsing {path}: {e}")
+        return
     for test_case in dom.getElementsByTagName('testcase'):
         yield TestCase(test_case)
 
@@ -912,16 +918,16 @@ if __name__ == '__main__':
     try:
         send_report_to_scribe(reports_by_file)
     except Exception as e:
-        print(f"error encountered when uploading to scribe: {e}")
+        print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
     # longest_tests can contain duplicates as the same tests can be spawned from different files
     longest_tests : List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():
+            total_time += test_suite.total_time
             if test_suite.total_time >= args.class_print_threshold:
                 test_suite.print_report(args.longest_of_class)
-                total_time += test_suite.total_time
                 longest_tests.extend(test_suite.test_cases.values())
     longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
@@ -931,10 +937,13 @@ if __name__ == '__main__':
         try:
             send_report_to_s3(obj)
         except Exception as e:
-            print(f"error encountered when uploading to s3: {e}")
+            print(f"ERROR ENCOUNTERED WHEN UPLOADING TO S3: {e}")
 
-    print(f"Total runtime is {datetime.timedelta(seconds=int(total_time))}")
-    print(f"{len(longest_tests)} longest tests of entire run:")
+    print(f"Total runtime is {datetime.timedelta(seconds=total_time)}")
+    print(
+        f"{len(longest_tests)} longest tests of entire run"
+        f" (ignoring suites totaling less than {args.class_print_threshold} seconds):"
+    )
     for test_case in reversed(longest_tests):
         print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")
 

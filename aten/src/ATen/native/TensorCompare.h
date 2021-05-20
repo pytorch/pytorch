@@ -24,4 +24,13 @@ DECLARE_DISPATCH(is_infinity_op_fn, isneginf_stub);
 using mode_fn = void (*)(Tensor&, Tensor&, const Tensor&, int64_t, bool);
 DECLARE_DISPATCH(mode_fn, mode_stub);
 
+using clamp_fn = void (*)(TensorIterator &);
+DECLARE_DISPATCH(clamp_fn, clamp_stub);
+DECLARE_DISPATCH(clamp_fn, clamp_min_stub);
+DECLARE_DISPATCH(clamp_fn, clamp_max_stub);
+
+DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar, Scalar), clamp_scalar_stub);
+DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar), clamp_min_scalar_stub);
+DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar), clamp_max_scalar_stub);
+
 }} // namespace at::native

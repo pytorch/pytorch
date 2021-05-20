@@ -150,6 +150,32 @@ class TORCH_API Block : public StmtNode<Block> {
     return true;
   }
 
+  // Creates a new block by cloning `this` block and replacing the given
+  // statement with a new statement. Note that `old_stmt` refers to a statement
+  // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
+  Block* clone_and_replace(Stmt* old_stmt, Stmt* new_stmt) {
+    if (new_stmt->get_parent()) {
+      throw malformed_input(
+          "Block replace Stmt with existing parent", new_stmt);
+    }
+
+    std::vector<Stmt*> stmts(stmts_.begin(), stmts_.end());
+    std::vector<Stmt*> cloned_stmts(stmts.size());
+    bool found = false;
+    for (int i = 0; i < static_cast<int>(stmts.size()); ++i) {
+      if (stmts[i] == old_stmt) {
+        found = true;
+        cloned_stmts[i] = new_stmt;
+      } else {
+        cloned_stmts[i] = Stmt::clone(stmts[i]);
+      }
+    }
+    if (!found) {
+      return nullptr;
+    }
+    return new Block(cloned_stmts);
+  }
+
   bool remove_stmt(Stmt* stmt) {
     auto pos = std::find(stmts_.begin(), stmts_.end(), stmt);
     if (pos == stmts_.end()) {
@@ -283,9 +309,6 @@ class TORCH_API Store : public StmtNode<Store> {
   const Expr* value() const {
     return value_;
   }
-  const Expr* mask() const {
-    return mask_;
-  }
   const Buf* buf() const {
     return buf_;
   }
@@ -293,25 +316,18 @@ class TORCH_API Store : public StmtNode<Store> {
   static Store* make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
-      const ExprHandle& value,
-      const ExprHandle& mask);
-
-  static Store* make(
-      const BufHandle& buf,
-      const std::vector<ExprHandle>& indices,
       const ExprHandle& value);
 
-  Store(
-      const Buf* buf,
-      std::vector<const Expr*> indices,
-      const Expr* value,
-      const Expr* mask);
+  Store(const Buf* buf, std::vector<const Expr*> indices, const Expr* value);
+
+  void set_indices(std::vector<const Expr*> indices) {
+    indices_ = indices;
+  };
 
  private:
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* value_;
-  const Expr* mask_;
 };
 
 // Allocate a buffer of given shapes and dtypes and bind it with the given
@@ -679,6 +695,38 @@ class TORCH_API For : public StmtNode<For> {
 
   For* cloneWithNewBody(Stmt* body) const {
     return new For(var_, start_, stop_, body, loop_options_);
+  }
+
+  Block* removeBody() {
+    auto res = body_;
+    set_parent(res, nullptr);
+    body_ = nullptr;
+    return res;
+  }
+
+  Block* setBody(Stmt* body) {
+    Block* b = dynamic_cast<Block*>(body);
+    if (!b) {
+      b = new Block({body});
+    }
+    body_ = b;
+    set_parent(body_, this);
+    return body_;
+  }
+
+  const Expr* setStart(const Expr* start) {
+    start_ = start;
+    return start_;
+  }
+
+  const Expr* setStop(const Expr* stop) {
+    stop_ = stop;
+    return stop_;
+  }
+
+  const Var* setVar(const Var* var) {
+    var_ = var;
+    return var_;
   }
 
  private:

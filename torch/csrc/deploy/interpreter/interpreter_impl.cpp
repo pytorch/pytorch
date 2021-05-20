@@ -5,8 +5,10 @@
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <iostream>
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
 #include <pybind11/embed.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -105,33 +107,27 @@ FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
 #undef DECLARE_LIBRARY_INIT
 
 extern "C" PyObject* initModule(void);
-extern "C" PyObject* PyInit__C(void);
 extern "C" struct _frozen _PyImport_FrozenModules[];
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 
-// We need to register a custom finder because we are registering `torch._C` as
-// a built-in module, and it will get skipped if target != None. This Finder
-// just ensures target == None.
 const char* startup = R"RAW(
 import sys
 
+# We need to register a custom meta path finder because we are registering
+# `torch._C` as a builtin module.
+#
+# Normally, builtins will be found by the `BuiltinImporter` meta path finder.
+# However, `BuiltinImporter` is hard-coded to assume that all builtin modules
+# are top-level imports.  Since `torch._C` is a submodule of `torch`, the
+# BuiltinImporter skips it.
 class F:
     def find_spec(self, fullname, path, target=None):
         if fullname == 'torch._C':
-            return sys.meta_path[1].find_spec('torch._C', None, None)
-        elif fullname == 'maskrcnn_benchmark._C':
-            return sys.meta_path[1].find_spec('maskrcnn_benchmark._C', None, None)
+            # Load this module using `BuiltinImporter`, but set `path` to None
+            # in order to trick it into loading our module.
+            return sys.meta_path[1].find_spec('torch._C', path=None, target=None)
         return None
 sys.meta_path.insert(0, F())
-# make loader importable
-
-import sys
-
-import importlib.machinery
-import importlib.util
-spec = importlib.machinery.ModuleSpec('maskrcnn_benchmark', None, is_package=True)  # type: ignore
-r = importlib.util.module_from_spec(spec)
-sys.modules['maskrcnn_benchmark'] = r
 
 # print("exec_prefix:", sys.base_exec_prefix)
 # print("_base_executable:", sys._base_executable)
@@ -267,7 +263,6 @@ struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
     FOREACH_LIBRARY(APPEND_INIT)
 #undef APPEND_INIT
     PyImport_AppendInittab("torch._C", initModule);
-    // PyImport_AppendInittab("maskrcnn_benchmark._C", PyInit__C);
 
     int ret = extendFrozenModules(
         _PyImport_FrozenModules, _PyImport_FrozenModules_torch);
@@ -294,6 +289,7 @@ struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
     status = PyConfig_SetString(&config, &config.executable, L"torch_deploy");
     status = PyConfig_SetString(&config, &config.prefix, L"");
     config.module_search_paths_set = 1;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     wchar_t* module_search_paths[0] = {};
     status = PyConfig_SetWideStringList(
         &config, &config.module_search_paths, 0, module_search_paths);
@@ -431,26 +427,37 @@ struct ConcreteInterpreterSessionImpl
     return wrap(call(unwrap(obj), m_args));
   }
 
-  Obj call_kwargs(Obj obj, std::vector<std::tuple<std::string, at::IValue>> kwargs) override {
-    std::vector<std::tuple<std::string, py::object>> kwargs_list;
-    kwargs_list.reserve(kwargs.size());
-    for (auto& kv: kwargs) {
-      kwargs_list.emplace_back(std::get<0>(kv), torch::jit::toPyObject(std::get<1>(kv)));
+  Obj call_kwargs(
+      Obj obj,
+      std::vector<at::IValue> args,
+      std::unordered_map<std::string, c10::IValue> kwargs) override {
+    py::tuple py_args(args.size());
+    for (size_t i = 0, N = args.size(); i != N; ++i) {
+      py_args[i] = torch::jit::toPyObject(args[i]);
     }
-    py::object o = py::cast(kwargs_list);
-    if(!o) {
-      throw py::error_already_set();
+
+    py::dict py_kwargs;
+    for (auto kv : kwargs) {
+      py_kwargs[py::cast(std::get<0>(kv))] =
+          torch::jit::toPyObject(std::get<1>(kv));
     }
-    py::dict py_kwargs(o);
-    py::list py_args;
     return wrap(call(unwrap(obj), py_args, py_kwargs));
+  }
+
+  Obj call_kwargs(Obj obj, std::unordered_map<std::string, c10::IValue> kwargs)
+      override {
+    std::vector<at::IValue> args;
+    return call_kwargs(obj, args, kwargs);
   }
 
   Obj attr(Obj obj, const char* attr) override {
     return wrap(unwrap(obj).attr(attr));
   }
 
-  static py::object call(py::handle object, py::handle args, py::handle kwargs = nullptr) {
+  static py::object call(
+      py::handle object,
+      py::handle args,
+      py::handle kwargs = nullptr) {
     PyObject* result = PyObject_Call(object.ptr(), args.ptr(), kwargs.ptr());
     if (!result) {
       throw py::error_already_set();

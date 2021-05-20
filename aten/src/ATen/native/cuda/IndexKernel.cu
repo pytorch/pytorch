@@ -13,6 +13,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <c10/util/MaybeOwned.h>
 #include <THC/THCTensorInfo.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -224,6 +225,9 @@ static void index_copy_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  // this kernel will not be called when torch.use_deterministic_algorithms(True)
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_copy_cuda", [&] {
@@ -249,10 +253,18 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
-  Tensor _mask = (mask.dim() == 0) ? mask.unsqueeze(0) : mask;
-  Tensor _self = (self.dim() == 0) ? self.unsqueeze(0) : self;
-  std::tie(_mask, _self) = expand_outplace(_mask, _self);
-  at::native::index_out(result, _self, c10::List<c10::optional<at::Tensor>>({_mask}));
+  auto mask_temp = (mask.dim() == 0)
+    ? c10::MaybeOwned<Tensor>::owned(mask.unsqueeze(0))
+    : c10::MaybeOwned<Tensor>::borrowed(mask);
+  auto self_temp = (self.dim() == 0)
+    ? c10::MaybeOwned<Tensor>::owned(self.unsqueeze(0))
+    : c10::MaybeOwned<Tensor>::borrowed(self);
+
+  // Cannot reassign to mask_temp and self_temp here! if they are
+  // owning and expand_outplace returns a borrow, the returned borrow
+  // would dangle.
+  auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
+  at::native::index_out(result, *std::get<1>(mask_self_expanded), c10::List<c10::optional<at::Tensor>>({*std::get<0>(std::move(mask_self_expanded))}));
 
   return result;
 }
@@ -396,10 +408,10 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self)
-      .add_input(self)
-      .add_input(mask_cont)
-      .add_input(maskPrefixSum)
+      .add_borrowed_output(self)
+      .add_borrowed_input(self)
+      .add_borrowed_input(mask_cont)
+      .add_borrowed_input(maskPrefixSum)
       .build();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -435,21 +447,20 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   TensorArg self_arg{self, "self", 1};
   TensorArg mask_arg{mask, "mask", 2};
   TensorArg source_arg{source, "source", 3};
-  checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
+  checkAllSameGPU(__func__, {self_arg, mask_arg, source_arg});
 
-  Tensor b_mask;
-  std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
 
-  if (b_mask.dtype() == ScalarType::Byte) {
+  if (b_mask->dtype() == ScalarType::Byte) {
     TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
   }
 
-  auto mask_dtype = b_mask.scalar_type();
+  auto mask_dtype = b_mask->scalar_type();
   if (mask_dtype == ScalarType::Bool) {
-    masked_scatter_cuda_impl<bool>(self, b_mask, source);
+    masked_scatter_cuda_impl<bool>(self, *b_mask, source);
   } else {
-    masked_scatter_cuda_impl<uint8_t>(self, b_mask, source);
+    masked_scatter_cuda_impl<uint8_t>(self, *b_mask, source);
   }
 
   return self;

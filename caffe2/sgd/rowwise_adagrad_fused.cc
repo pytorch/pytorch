@@ -2,6 +2,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsSumGradient)
     .NumInputs(6)
     .NumOutputs(2)
@@ -37,6 +38,7 @@ SparseLengthsSumGradient operator.
         "rounding option: 0 for nearest rounding, 1 for stochastic rounding")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradient,
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -46,6 +48,7 @@ REGISTER_CPU_OPERATOR(
         rowwise_adagrad_update_inlined,
         /*is_mean=*/false>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradient,
     SIMD,
@@ -58,6 +61,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 // Match the GPU Approx op, here Approx and Exact are the same for
 // RowWiseSparseAdagradFusedWithSparseLengthsSumGradient op
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsSumGradientApprox)
     .NumInputs(6)
     .NumOutputs(2)
@@ -93,6 +97,7 @@ SparseLengthsSumGradient operator.
         "rounding option: 0 for nearest rounding, 1 for stochastic rounding")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradientApprox,
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -102,6 +107,7 @@ REGISTER_CPU_OPERATOR(
         rowwise_adagrad_update_inlined,
         /*is_mean=*/false>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradientApprox,
     SIMD,
@@ -112,6 +118,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         rowwise_adagrad_update_inlined,
         /*is_mean=*/false>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient)
     .NumInputs(6)
     .NumOutputs(2)
@@ -144,6 +151,7 @@ SparseLengthsMeanGradient operator.
     .Output(1, "output_moment", "Updated moment")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient,
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -153,6 +161,7 @@ REGISTER_CPU_OPERATOR(
         rowwise_adagrad_update_inlined,
         /*is_mean=*/true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient,
     SIMD,
@@ -165,6 +174,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 // Match the GPU Approx op, here Approx and Exact are the same for
 // RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient op
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsMeanGradientApprox)
     .NumInputs(6)
     .NumOutputs(2)
@@ -200,6 +210,7 @@ SparseLengthsMeanGradient operator.
         "rounding option: 0 for nearest rounding, 1 for stochastic rounding")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdagradFusedWithSparseLengthsMeanGradientApprox,
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp<
@@ -209,6 +220,7 @@ REGISTER_CPU_OPERATOR(
         rowwise_adagrad_update_inlined,
         /*is_mean=*/true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagradFusedWithSparseLengthsMeanGradientApprox,
     SIMD,
@@ -219,6 +231,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         rowwise_adagrad_update_inlined,
         /*is_mean=*/true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradient)
     .NumInputs(7)
     .NumOutputs(3)
@@ -256,6 +269,7 @@ operator.
     .Output(2, "aux_grad", "Auxiliary gradient")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradient,
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp<
@@ -264,6 +278,7 @@ REGISTER_CPU_OPERATOR(
         int,
         rowwise_adagrad_update_inlined>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradient,
     SIMD,
@@ -273,6 +288,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         int,
         rowwise_adagrad_update_inlined>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox)
     .NumInputs(7)
@@ -314,6 +330,7 @@ operator.
     .Output(2, "aux_grad", "Auxiliary gradient")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox,
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp<
@@ -322,6 +339,7 @@ REGISTER_CPU_OPERATOR(
         int,
         rowwise_adagrad_update_inlined>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox,
     SIMD,

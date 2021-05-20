@@ -54,19 +54,13 @@ void codegenOutputQuery(
     minor = 0;
   } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
     major = 7;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     minor = (prop->major == 7 && prop->minor <= 2) ? prop->minor : 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
     major = 7;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     minor = (prop->major == 7 && prop->minor <= 5) ? prop->minor : 0;
   } else if (
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       nvrtc_major == 11 && nvrtc_minor == 0 &&
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       prop->major >= 8) { // 11.0 supports 3.5-8.0
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 8;
     minor = 0;
   }
@@ -76,6 +70,7 @@ void codegenOutputQuery(
 }
 
 // Compiles the specified kernel and stores the metadata required to run it
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FusedKernelCUDA::FusedKernelCUDA(
     at::DeviceIndex device,
     std::string name,
@@ -95,11 +90,13 @@ FusedKernelCUDA::FusedKernelCUDA(
           has_random),
       device_(device) {
   // Initializes driver's API context (if necessary)
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   CUcontext pctx = 0;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     cudaFree(0);
   }
 
@@ -111,17 +108,22 @@ FusedKernelCUDA::FusedKernelCUDA(
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
   prop_ = at::cuda::getCurrentDeviceProperties();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int major, minor;
   bool compile_to_sass = false;
   codegenOutputQuery(prop_, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   nvrtcProgram program;
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef __HIP_PLATFORM_HCC__
-  std::vector<const char*> args = {};
+  std::vector<const char*> args = {"--std=c++14"};
+#if ROCM_VERSION >= 40200
+  args.push_back("-hip-pch");
+#endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if CUDA_VERSION >= 11010
@@ -143,6 +145,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
   if (result != NVRTC_SUCCESS) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
@@ -154,6 +157,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t ptx_size;
 #if CUDA_VERSION >= 11010
   // compile_to_sass determines whether we are generating SASS or PTX, hence
@@ -200,6 +204,7 @@ static int ceilDiv(const int a, const int b) {
 void FusedKernelCUDA::launch_raw(
     const uint32_t numel,
     std::vector<void*>& arguments) const {
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   at::cuda::CUDAGuard{device_};
   // Hacked at::DeviceGuard (see note above)
   const auto prior_device = at::cuda::current_device();

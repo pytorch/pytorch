@@ -812,26 +812,26 @@ See :func:`torch.cholesky_inverse`
 
 add_docstr_all('clamp',
                r"""
-clamp(min, max) -> Tensor
+clamp(min=None, max=None) -> Tensor
 
 See :func:`torch.clamp`
 """)
 
 add_docstr_all('clamp_',
                r"""
-clamp_(min, max) -> Tensor
+clamp_(min=None, max=None) -> Tensor
 
 In-place version of :meth:`~Tensor.clamp`
 """)
 
 add_docstr_all('clip', r"""
-clip(min, max) -> Tensor
+clip(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp`.
 """)
 
 add_docstr_all('clip_', r"""
-clip_(min, max) -> Tensor
+clip_(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp_`.
 """)
@@ -2635,17 +2635,7 @@ add_docstr_all('permute',
                r"""
 permute(*dims) -> Tensor
 
-Returns a view of the original tensor with its dimensions permuted.
-
-Args:
-    *dims (int...): The desired ordering of dimensions
-
-Example:
-    >>> x = torch.randn(2, 3, 5)
-    >>> x.size()
-    torch.Size([2, 3, 5])
-    >>> x.permute(2, 0, 1).size()
-    torch.Size([5, 2, 3])
+See :func:`torch.permute`
 """)
 
 add_docstr_all('polygamma',
@@ -2660,6 +2650,13 @@ add_docstr_all('polygamma_',
 polygamma_(n) -> Tensor
 
 In-place version of :meth:`~Tensor.polygamma`
+""")
+
+add_docstr_all('positive',
+               r"""
+positive() -> Tensor
+
+See :func:`torch.positive`
 """)
 
 add_docstr_all('pow',
@@ -3531,7 +3528,12 @@ In-place version of :meth:`~Tensor.squeeze`
 
 add_docstr_all('std',
                r"""
-std(dim=None, unbiased=True, keepdim=False) -> Tensor
+std(dim, unbiased=True, keepdim=False) -> Tensor
+
+See :func:`torch.std`
+
+.. function:: std(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.std`
 """)
@@ -3813,6 +3815,26 @@ add_docstr_all('float',
 float(memory_format=torch.preserve_format) -> Tensor
 
 ``self.float()`` is equivalent to ``self.to(torch.float32)``. See :func:`to`.
+
+Args:
+    {memory_format}
+""".format(**common_args))
+
+add_docstr_all('cdouble',
+               r"""
+cdouble(memory_format=torch.preserve_format) -> Tensor
+
+``self.cdouble()`` is equivalent to ``self.to(torch.complex128)``. See :func:`to`.
+
+Args:
+    {memory_format}
+""".format(**common_args))
+
+add_docstr_all('cfloat',
+               r"""
+cfloat(memory_format=torch.preserve_format) -> Tensor
+
+``self.cfloat()`` is equivalent to ``self.to(torch.complex64)``. See :func:`to`.
 
 Args:
     {memory_format}
@@ -4188,7 +4210,12 @@ In-place version of :meth:`~Tensor.unsqueeze`
 
 add_docstr_all('var',
                r"""
-var(dim=None, unbiased=True, keepdim=False) -> Tensor
+var(dim, unbiased=True, keepdim=False) -> Tensor
+
+See :func:`torch.var`
+
+.. function:: var(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.var`
 """)
@@ -4425,6 +4452,27 @@ tensor_split(indices_or_sections, dim=0) -> List of Tensors
 See :func:`torch.tensor_split`
 """)
 
+add_docstr_all('hsplit',
+               r"""
+hsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.hsplit`
+""")
+
+add_docstr_all('vsplit',
+               r"""
+vsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.vsplit`
+""")
+
+add_docstr_all('dsplit',
+               r"""
+dsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.dsplit`
+""")
+
 add_docstr_all('stft',
                r"""
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
@@ -4651,6 +4699,11 @@ add_docstr_all('is_sparse',
 Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
 """)
 
+add_docstr_all('is_sparse_csr',
+               r"""
+Is ``True`` if the Tensor uses sparse CSR storage layout, ``False`` otherwise.
+""")
+
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
@@ -4710,4 +4763,40 @@ as_subclass(cls) -> Tensor
 Makes a ``cls`` instance with the same data pointer as ``self``. Changes
 in the output mirror changes in ``self``, and the output stays attached
 to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
+""")
+
+add_docstr_all('crow_indices',
+               r"""
+crow_indices() -> IntTensor
+
+Returns the tensor containing the compressed row indices of the :attr:`self`
+tensor when :attr:`self` is a sparse CSR tensor of layout ``sparse_csr``.
+The ``crow_indices`` tensor is strictly of shape (:attr:`self`.size(0) + 1)
+and of type ``int32`` or ``int64``. When using MKL routines such as sparse
+matrix multiplication, it is necessary to use ``int32`` indexing in order
+to avoid downcasting and potentially losing information.
+
+Example::
+    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr.crow_indices()
+    tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
+
+""")
+
+add_docstr_all('col_indices',
+               r"""
+col_indices() -> IntTensor
+
+Returns the tensor containing the column indices of the :attr:`self`
+tensor when :attr:`self` is a sparse CSR tensor of layout ``sparse_csr``.
+The ``col_indices`` tensor is strictly of shape (:attr:`self`.nnz())
+and of type ``int32`` or ``int64``.  When using MKL routines such as sparse
+matrix multiplication, it is necessary to use ``int32`` indexing in order
+to avoid downcasting and potentially losing information.
+
+Example::
+    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr.col_indices()
+    tensor([0, 1, 2, 3, 4], dtype=torch.int32)
+
 """)
