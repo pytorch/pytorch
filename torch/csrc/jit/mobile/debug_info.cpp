@@ -14,7 +14,8 @@ namespace jit {
 namespace {
 
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
-    const DebugInfoTuple& source_callstack, const std::string& caller_name) {
+    const DebugInfoTuple& source_callstack,
+    const std::string& caller_name) {
   constexpr size_t kSourceRange = 1;
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
@@ -91,7 +92,8 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
       root_scope_string + "(" + top_module_type_name + ")";
   std::string caller_fn_name = "FunctionName_UNKNOWN";
   for (const auto& debug_info : source_callstacks) {
-    auto debug_info_pair = getStackTraceWithModuleHierarchy(debug_info, caller_fn_name);
+    auto debug_info_pair =
+        getStackTraceWithModuleHierarchy(debug_info, caller_fn_name);
     auto entries = std::move(debug_info_pair.first);
     stack_entries.insert(stack_entries.end(), entries.begin(), entries.end());
     module_info += debug_info_pair.second;

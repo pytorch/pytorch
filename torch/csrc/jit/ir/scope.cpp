@@ -88,7 +88,11 @@ InlinedCallStackPtr InlinedCallStack::intrusive_from_this() {
 }
 
 InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
-    : fn_(fn), source_range_(std::move(source_range)) {}
+    : fn_(fn), source_range_(std::move(source_range)) {
+  if (fn_) {
+    set_function_name(fn_->name());
+  }
+}
 
 InlinedCallStack::InlinedCallStack(
     Function* fn,
@@ -96,7 +100,11 @@ InlinedCallStack::InlinedCallStack(
     c10::optional<ModuleInstanceInfo> module_instance_info)
     : fn_(fn),
       source_range_(std::move(source_range)),
-      module_instance_info_(std::move(module_instance_info)) {}
+      module_instance_info_(std::move(module_instance_info)) {
+  if (fn_) {
+    set_function_name(fn_->name());
+  }
+}
 
 InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
@@ -104,7 +112,11 @@ InlinedCallStack::InlinedCallStack(
     SourceRange source_range)
     : callee_(std::move(callee)),
       fn_(fn),
-      source_range_(std::move(source_range)) {}
+      source_range_(std::move(source_range)) {
+  if (fn_) {
+    set_function_name(fn_->name());
+  }
+}
 
 InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
@@ -114,7 +126,11 @@ InlinedCallStack::InlinedCallStack(
     : callee_(std::move(callee)),
       fn_(fn),
       source_range_(std::move(source_range)),
-      module_instance_info_(std::move(module_instance_info)) {}
+      module_instance_info_(std::move(module_instance_info)) {
+  if (fn_) {
+    set_function_name(fn_->name());
+  }
+}
 
 c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
   return callee_;

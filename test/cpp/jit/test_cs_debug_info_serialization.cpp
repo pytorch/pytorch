@@ -67,8 +67,7 @@ bool validate_debug_info(
             lhs_module.value().class_type()->name().value()) &&
            (rhs_module.value().instance_name() ==
             lhs_module.value().instance_name())) &&
-          (rhs_fn_name == lhs_fn_name) &&
-          (rhs_sr == lhs_sr))) {
+          (rhs_fn_name == lhs_fn_name) && (rhs_sr == lhs_sr))) {
       return false;
     }
     if (csptr1->callee()) {

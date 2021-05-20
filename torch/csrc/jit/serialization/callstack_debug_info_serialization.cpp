@@ -20,13 +20,14 @@ c10::IValue InlinedCallStackSerializer::serialize(
     return cs_it->second;
   }
   // Inlined callstack pointer is serialized as tuple of 4 elements
-  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack), function name}
-  // Note function name is serialized separately because Function is only in memory
-  // structure. It gets constructed by JIT from serialized Code at runtime.
-  // As such even InlinedCallStack get constructed by JIT at runtime during graph
-  // inlining. However, we introduce serialization/deserialization of it in order
-  // to generate callstack debug information, _when_ equivalent InlinedCallStack cannot
-  // be constructed at runtime. For example, in lite interpreter or delegated backend.
+  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack),
+  // function name} Note function name is serialized separately because Function
+  // is only in memory structure. It gets constructed by JIT from serialized
+  // Code at runtime. As such even InlinedCallStack get constructed by JIT at
+  // runtime during graph inlining. However, we introduce
+  // serialization/deserialization of it in order to generate callstack debug
+  // information, _when_ equivalent InlinedCallStack cannot be constructed at
+  // runtime. For example, in lite interpreter or delegated backend.
   std::vector<c10::IValue> elements;
   elements.reserve(4);
   elements.emplace_back(
@@ -140,7 +141,8 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
 
   auto tup_elems = tup->elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 4);
-  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack), function name}
+  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack),
+  // function name}
   auto module_instance_info =
       deserialize_module_instance_info(tup_elems[0], cu);
   int64_t source_range_tag = tup_elems[1].toInt();
