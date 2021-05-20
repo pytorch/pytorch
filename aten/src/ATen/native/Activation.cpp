@@ -153,6 +153,11 @@ TORCH_META_FUNC(softshrink_backward) (
   build_binary_op(maybe_get_output(), grad, self);
 }
 
+TORCH_META_FUNC(gelu) (const Tensor & self) {
+  set_output(0, self.sizes(), {}, self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT), {});
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -302,6 +307,12 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   const Tensor & grad, const Tensor & self, const Scalar& lambd, const Tensor& grad_input
 ) {
   shrink_backward_stub(device_type(), *this, lambd);
+}
+
+TORCH_IMPL_FUNC(gelu_out_cpu) (
+  const Tensor& self, const Tensor& result
+) {
+  GeluKernel(kCPU, *this);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -771,19 +782,6 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
   return std::tuple<Tensor, Tensor>{input_grad, weight_grad};
-}
-
-Tensor gelu_cpu(const Tensor& self) {
-  Tensor Y = at::native::empty_like(
-      self,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto it = TensorIterator::unary_op(Y, self);
-  GeluKernel(kCPU, it);
-  return Y;
 }
 
 Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
