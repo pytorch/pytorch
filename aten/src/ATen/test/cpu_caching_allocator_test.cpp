@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/ATen.h>
 
 #include <c10/mobile/CPUCachingAllocator.h>
