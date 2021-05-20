@@ -2913,16 +2913,30 @@ def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples + [vec_sample]
 
-def sample_inputs_diag_embed(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+def sample_inputs_diagonal(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad, low=None, high=None)
 
-    cases = ((S, S),)
+    vec_sample = SampleInput(make_tensor((M, )))
 
-    def generator():
-        for shape in cases:
-            yield(SampleInput(make_arg(shape)))
+    # 2D Tensors
+    tensors_2d = (
+        make_arg((M, M), low=None, high=None),
+        make_arg((3, 5), low=None, high=None),
+        make_arg((5, 3), low=None, high=None),
+    )
 
-    return list(generator())
+    # 3D Tensors
+    tensors_3d = (
+        make_arg((M, M, M), low=None, high=None),
+    )
+
+    args_2d = ((), (2,), (-2,), (1,), (2,))
+    args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
+
+    tensors = [*product(tensors_2d, args_2d), *product(tensors_3d, args_3d)]
+
+    samples = [SampleInput(tensor, args=arg) for tensor, arg in tensors]
+    return samples + [vec_sample]
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -4415,7 +4429,12 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_diag_embed),
+           sample_inputs_func=sample_inputs_diagonal),
+    OpInfo('diagonal',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_diagonal),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
@@ -6531,18 +6550,6 @@ def method_tests():
         ('clone', (), NO_ARGS, 'scalar'),
         ('contiguous', (S, S), NO_ARGS, '', (True,)),
         ('contiguous', torch.randn(S, S).transpose(0, 1), NO_ARGS, 'not_contiguous', (True,)),
-        ('diagonal', (M, M), NO_ARGS, '2d'),
-        ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
-        ('diagonal', (3, 5), (2,), '2d_wide_pos'),
-        ('diagonal', (3, 5), (-2,), '2d_wide_neg'),
-        ('diagonal', (5, 3), NO_ARGS, '2d_tall'),
-        ('diagonal', (5, 3), (2,), '2d_tall_pos'),
-        ('diagonal', (5, 3), (-2,), '2d_tall_neg'),
-        ('diagonal', (M, M), (1,), '2d_1'),
-        ('diagonal', (M, M), (2,), '2d_2'),
-        ('diagonal', (M, M, M), (1, 1, 2), '3d_1'),
-        ('diagonal', (M, M, M), (2, 0, 1), '3d_2'),
-        ('diagonal', (M, M, M), (-2, 0, 1), '3d_3'),
         ('tril', (M, M), NO_ARGS),
         ('tril', (M, M), (2,), 'idx'),
         ('tril', (S, M, M), NO_ARGS, 'batched'),
