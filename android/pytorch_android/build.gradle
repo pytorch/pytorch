@@ -17,8 +17,8 @@ android {
         }
         externalNativeBuild {
             cmake {
-              if(System.env.BUILD_LITE_INTERPRETER == '1') {
-                arguments "-DANDROID_STL=c++_shared", "-DBUILD_LITE_INTERPRETER=ON"
+              if(System.env.BUILD_LITE_INTERPRETER == '0') {
+                arguments "-DANDROID_STL=c++_shared", "-DBUILD_LITE_INTERPRETER=OFF"
               } else {
                 arguments "-DANDROID_STL=c++_shared"
               }
@@ -37,12 +37,12 @@ android {
     sourceSets {
         main {
             java {
-              if(System.env.BUILD_LITE_INTERPRETER == '1') {
-                println 'Build pytorch_jni_lite'
-              } else {
+              if(System.env.BUILD_LITE_INTERPRETER == '0') {
                 println 'Build pytorch_jni'
                 exclude 'org/pytorch/LiteModuleLoader.java'
                 exclude 'org/pytorch/LiteNativePeer.java'
+              } else {
+                println 'Build pytorch_jni_lite'
               }
             }
             jniLibs.srcDirs = ['src/main/jniLibs']
