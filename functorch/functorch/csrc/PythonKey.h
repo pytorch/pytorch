@@ -1,4 +1,4 @@
-#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/pybind.h>
 #include <ATen/Tensor.h>
 #include <torch/library.h>
 
