@@ -1029,6 +1029,13 @@ class TensorExprFuser {
       }
     }
 
+    if (node->kind() == aten::unsqueeze) {
+      // `dim` argument must be a constant.
+      if (node->input(1)->node()->kind() != prim::Constant) {
+        return false;
+      }
+    }
+
     if (node->kind() == aten::conv2d) {
       if (!tensorexpr::conv2dIsSupportedJit(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
