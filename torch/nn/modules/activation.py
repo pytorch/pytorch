@@ -62,6 +62,26 @@ class Threshold(Module):
             self.threshold, self.value, inplace_str
         )
 
+class Mish(Module):
+    """Implementation of Mish: Self Regularized Non-Monotonic Activation Function
+         Mish activation is defined as: f(x) = xtanh(softplus(x))
+         Paper: https://www.bmvc2020-conference.com/assets/papers/0928.pdf
+     Shape:
+         - Input: :math:`(N, *)` where `*` means, any number of additional
+           dimensions
+         - Output: :math:`(N, *)`, same shape as the input
+     Examples::
+         >>> m = nn.Mish()
+         >>> input = autograd.Variable(torch.randn(2))
+         >>> print(input)
+         >>> print(m(input))
+     """
+
+    def forward(self, input):
+        return (input * torch.tanh(torch.nn.Softplus(input).beta))
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
 
 class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise:
