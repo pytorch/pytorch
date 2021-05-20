@@ -265,6 +265,7 @@ struct SchemaParser {
       } break;
       case TypeKind::StringType:
       case TypeKind::OptionalType:
+      case TypeKind::UnionType:
       case TypeKind::NumberType:
       case TypeKind::IntType:
       case TypeKind::BoolType:

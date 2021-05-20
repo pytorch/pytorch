@@ -195,8 +195,11 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   virtual bool hasFreeVariables() const {
     return false;
   }
-  // list of types this type contains, e.g. for a List then element type of a
-  // list for a tuple, the types of the tuple elements
+  // A list of the syntactic types that appear in the type constructor
+  // (which, in some cases, is not the same as the set of types of
+  // values that might appear in the variable). For example, both
+  // `List[T]` and `Optional[T]` "contain" only `T`, even though
+  // `Optional[T]` could also be `None`.
   virtual at::ArrayRef<TypePtr> containedTypes() const {
     return {};
   }

@@ -66,6 +66,15 @@ Value* tryConvertToType(
     }
   }
 
+  //// Transform `Union[T, None]` to `Optional[T]` for schema matching
+  //// purposes only
+  //if (UnionTypePtr union_type = concrete_type->cast<UnionType>()) {
+  //  auto maybeOpt = union_type->toOptional();
+  //  if (maybeOpt) {
+  //    return tryConvertToType(loc, graph, *maybeOpt, value, allow_conversions);
+  //  }
+  //}
+
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types

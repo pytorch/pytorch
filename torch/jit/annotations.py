@@ -318,6 +318,8 @@ def try_ann_to_type(ann, loc):
         if value is None:
             raise ValueError(f"Unknown type annotation: '{ann.__args__[1]}' at {loc.highlight()}")
         return DictType(key, value)
+    if is_union(ann):
+        return UnionType([try_ann_to_type(a, loc) for a in ann.__args__])
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
             contained = ann.__args__[0]

@@ -186,7 +186,7 @@ NoneStatus canBeNone(Value* v) {
   }
   if (v->type()->kind() == OptionalType::Kind ||
       (v->type()->kind() == UnionType::Kind &&
-       v->type()->expect<UnionType>()->can_hold_none())) {
+       v->type()->expect<UnionType>()->canHoldNone())) {
     return MAYBE;
   }
   return NEVER;
@@ -1187,7 +1187,7 @@ struct to_ir {
       }
     }
     if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
-      UnionTypePtr remaining = union_type->withoutNone();
+      TypePtr remaining = union_type->withoutNone();
       Refinement present(name, remaining);
       if (tok == TK_IS) {
         return RefinementSet({}, {present});
@@ -2947,7 +2947,7 @@ struct to_ir {
         // has the type Optional[T]
         if ((type->kind() == OptionalType::Kind ||
              (type->kind() == UnionType::Kind &&
-              type->expect<UnionType>()->can_hold_none())) &&
+              type->expect<UnionType>()->canHoldNone())) &&
             expr->type()->isSubtypeOf(NoneType::get())) {
           Node* none = graph->createNone();
           none->output()->setType(type);

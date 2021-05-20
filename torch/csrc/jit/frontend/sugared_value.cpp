@@ -119,7 +119,14 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"ndim", "prim"},          {"name", "prim"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
+
   auto kind = value_->type()->kind();
+
+  // Special case calling `unchecked_unwrap_optional` on `Union[T, None]`
+  if (kind == UnionType::Kind && value_->type()->expect<UnionType>()->toOptional()){
+    kind = OptionalType::Kind;
+  }
+
   auto types_for_builtin = builtin_properties.find(kind);
   if (types_for_builtin != builtin_properties.end()) {
     auto builtin_entry = types_for_builtin->second.find(field);

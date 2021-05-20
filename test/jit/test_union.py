@@ -1,3 +1,4 @@
+import io
 import os
 import sys
 
@@ -331,17 +332,16 @@ class TestUnion(JitTestCase):
         self.assertEqual(fn(1), 1)
         self.assertEqual(fn(2), None)
 
-        buffer = io.BytesIO()
-        torch.jit.save(fn, buffer)
-        l = torch.jit.load(buffer)
+        save_buffer = io.BytesIO()
+        torch.jit.save(fn, save_buffer)
+        load_buffer = io.BytesIO(save_buffer.getvalue())
+        l = torch.jit.load(load_buffer)
 
         s = l.code
 
         FileCheck().check("Union[int, NoneType, str]")     \
                    .check("Union[int, NoneType, str]")     \
                    .run(s)
-
-
 
     def test_union_subclasses_larger_union(self):
         def fn() -> Union[int, str, torch.Tensor]:
