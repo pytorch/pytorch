@@ -21,7 +21,8 @@ stages:
   jobs:
   - template: job_templates/wheel-wait-template.yml
   variables:
-    _TARGET_BRANCH_TO_CHECK: ${{ parameters.GitHubPyTorchPRTrigger.TARGET_BRANCH_TO_CHECK_AZ_DEVOPS_PR}}
+    _TARGET_BRANCH_TO_CHECK: ${{parameters.GitHubPyTorchPRTrigger.TARGET_BRANCH_TO_CHECK_AZ_DEVOPS_PR}}
+    _NUMBER_BUILD_PR: ${{parameters.GitHubPyTorchPRTrigger.PR_NUMBER}}
 
 - stage: 'PRCustomTests'
   displayName: 'Run custom unit tests on PyTorch wheels'
