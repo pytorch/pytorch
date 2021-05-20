@@ -62,7 +62,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             yield self.fn(data, *self.args, **self.kwargs)
 
     def __len__(self) -> int:
-        if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
+        if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise NotImplementedError
 

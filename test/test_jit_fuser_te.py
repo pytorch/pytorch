@@ -2,7 +2,6 @@ import operator
 import unittest
 import contextlib
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
@@ -17,13 +16,13 @@ torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests
-from torch.testing._internal.jit_utils import JitTestCase, _inline_everything, \
+from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
 
 from textwrap import dedent
 from itertools import product, permutations
 
-from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
+from test_jit import backward_graph, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
@@ -472,23 +471,6 @@ class TestTEFuser(JitTestCase):
             s = self.checkScript(clamp_int, (x, eta), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(s.graph_for(x, eta))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
-    def test_dropout(self):
-        for device in self.devices:
-            def func(x):
-                x = torch.nn.functional.dropout(x)
-                return torch.nn.functional.relu(x)
-
-            a = torch.randn(4, 4, dtype=torch.float, device=device, requires_grad=True)
-            s = torch.jit.script(func)
-            c = s(a)
-            c = s(a)
-            warmup_backward(c.sum())
-            # skip_check to skip extra bailout nodes in between
-            graph = backward_graph(s, skip_check=True)
-            self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
-
     def test_add_bool(self):
         sizes = [(1,), (2,), (4, 4)]
         for device, size in product(self.devices, sizes):
@@ -749,62 +731,6 @@ class TestTEFuser(JitTestCase):
             ge = self.checkTrace(self.fn_test_exp, (x, y))
             self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
-    @torch._jit_internal._disable_emit_hooks_decorator
-    @_inline_everything
-    def test_fuse_decompose_normalization(self):
-        class ResLike(torch.jit.ScriptModule):
-            def __init__(self, norm_module):
-                super(ResLike, self).__init__()
-                self.nm = norm_module
-
-            @torch.jit.script_method
-            def forward(self, x, y):
-                return y + torch.relu(self.nm(x))
-
-        def test_norm_decompose(nm, in_opt_graph, not_in_opt_graph, in_fusegraph):
-            model = ResLike(nm).cuda()
-            model_noopt = ResLike(nm).cuda()
-            model_noopt.load_state_dict(model.state_dict())
-            x = torch.randn(2, 16, 8, 8, device='cuda')
-            y = torch.randn(2, 16, 8, 8, device='cuda')
-
-            # FIXME: We need differentiation for CNNs for this optimization to trigger
-            with torch.no_grad():
-                out = model(x, y)
-                graph = model.graph_for(x, y)
-                rep = str(graph)
-
-                with torch.jit.optimized_execution(False):
-                    out_noopt = model_noopt(x, y)
-                    rep_noopt = str(model_noopt.graph_for(x, y))
-                self.assertEqual(out, out_noopt, prec=3e-5)
-
-            # Check that normalization op has really been decomposed
-            for node_in_graph in in_opt_graph:
-                self.assertIn(node_in_graph, rep)
-
-            for node_not_in_graph in not_in_opt_graph:
-                self.assertNotIn(node_not_in_graph, rep)
-                self.assertIn(node_not_in_graph, rep_noopt)
-
-            fusion_groups = [node for node in graph.nodes() if node.kind() == FUSION_GROUP]
-            self.assertEqual(len(fusion_groups), 1)
-            fused_graph = str(fusion_groups[0].g('Subgraph'))
-            for node_in_fusegraph in in_fusegraph:
-                self.assertIn(node_in_fusegraph, fused_graph)
-
-        # test for batchnorm decompose
-        bm = nn.BatchNorm2d(16)
-        test_norm_decompose(bm, ['aten::batch_norm_update_stats'],
-                            ['aten::batch_norm('], ['aten::sqrt'])
-
-        # test for layernorm decompose
-        lm = nn.LayerNorm(8)
-        test_norm_decompose(lm, ['aten::batch_norm_stats'],
-                            ['aten::layer_norm('], ['aten::sub', 'aten::mul', 'aten::add'])
-
     def test_threshold(self):
         for device in self.devices:
             def f(x):
@@ -837,68 +763,6 @@ class TestTEFuser(JitTestCase):
             out = scripted(x, p)
             self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                       "aten::_size_if_not_equal"))
-
-    @unittest.skip("deduplicating introduces aliasing in backward graph's outputs")
-    def test_fuser_deduplication(self):
-        # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
-        # see the discussion in PR #14957.
-        def f(x, y):
-            return torch.sigmoid(x + y)
-
-        b = torch.randn(5, 5, requires_grad=True)
-        a = torch.randn(5, 5, requires_grad=True)
-        s = self.checkScript(f, (a, b))
-        self.assertAllFused(s.graph_for(a, b), except_for={
-                            'aten::size', 'aten::_size_if_not_equal', 'prim::BroadcastSizes'})
-
-        c = s(a, b)
-        results = warmup_backward(c.sum(), [a, b])
-        ga2, gb2 = results.pop()
-        graph = backward_graph(s)
-        self.assertAllFused(graph)
-        # check that a, b share storage, i.e. were generated as a single output in the fuser
-        self.assertEqual(ga2.data_ptr(), gb2.data_ptr())
-
-    @unittest.skip("temporarily disabled because fusion was restricted in fixing #22833")
-    def test_fuser_iou(self):
-        # This checks if most of Intersection over Union is fused.
-        # In particular, the backward contains many _grad_sum_to_size.
-        def iou(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2):
-            ltx = torch.max(b1x1, b2x1)  # [N,M]
-            lty = torch.max(b1y1, b2y1)
-            rbx = torch.min(b1x2, b2x2)
-            rby = torch.min(b1y2, b2y2)
-
-            w = (rbx - ltx).clamp(min=0, max=float('inf'))  # [N,M]
-            h = (rby - lty).clamp(min=0, max=float('inf'))  # [N,M]
-            inter = w * h  # [N,M]
-
-            area1 = (b1x2 - b1x1) * (b1y2 - b1y2)  # [N,1]
-            area2 = (b2x2 - b2x1) * (b2y2 - b2y2)  # [1,M]
-            iou = inter / (area1 + area2 - inter)
-            return iou
-
-        box1 = torch.randn(5, 4, requires_grad=True)
-        box2 = torch.randn(5, 4, requires_grad=True)
-        # unsqueezing can currently not be fused
-        b1x1 = box1[:, 0].unsqueeze(1)  # [N,1]
-        b1y1 = box1[:, 1].unsqueeze(1)
-        b1x2 = box1[:, 2].unsqueeze(1)
-        b1y2 = box1[:, 3].unsqueeze(1)
-        b2x1 = box2[:, 0].unsqueeze(0)  # [1,N]
-        b2y1 = box2[:, 1].unsqueeze(0)
-        b2x2 = box2[:, 2].unsqueeze(0)
-        b2y2 = box2[:, 3].unsqueeze(0)
-
-        s = self.checkScript(iou, (b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2))
-        self.assertAllFused(s.graph_for(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2),
-                            except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
-
-        with enable_profiling_mode_for_profiling_tests(True):
-            c = s(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2)
-            warmup_backward(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
-            graph = backward_graph(s)
-            self.assertAllFused(graph, except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
@@ -1200,45 +1064,6 @@ class TestTEFuser(JitTestCase):
             script_f = self.checkScript(f, (x, y))
             self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
-    def test_grad_sum_to_size_elimination(self):
-
-        def my_broadcasted_cell(a, b, c):
-            return (a + b) + c
-
-        s1 = torch.randn(5, 1, requires_grad=True, device='cuda')
-        s2 = torch.randn(5, 5, requires_grad=True, device='cuda')
-
-        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1), profiling=ProfilingMode.PROFILING)
-        forward_graph = module.graph_for(s1, s1, s1)
-        self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
-                                                       "aten::_size_if_not_equal"))
-
-        old_plans = set()
-        for i in range(3):
-            # if we have s2, then the s1 are _grad_sum_to_size'd
-
-            args = s2 if i < 1 else s1, s2 if i < 2 else s1, s2
-            args = [a.detach_().requires_grad_() for a in args]
-            # recompile, so we don't trigger bailouts
-            module = self.checkScript(my_broadcasted_cell, args, profiling=ProfilingMode.PROFILING)
-            res = module(s2 if i < 1 else s1, s2 if i < 2 else s1, s2)
-            warmup_backward(res.sum(), args)
-            grads = torch.autograd.grad(res.sum(), args)
-            for inp, gr in zip(args, grads):
-                self.assertEqual(inp.shape, gr.shape)
-            backward = None
-            # this is a workaround for the backward graphs not being
-            # in order for Python 2
-            for g in all_backward_graphs(module):
-                if str(g) not in old_plans:
-                    assert backward is None
-                    backward = g
-                    old_plans.add(str(backward))
-            num_grads = 1 if i > 0 else 0
-            self.assertEqual(len([n for n in backward.nodes() if n.kind() == 'aten::_grad_sum_to_size']), num_grads)
-
     def test_disabled(self):
         old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         torch._C._jit_override_can_fuse_on_cpu(False)
@@ -1441,6 +1266,7 @@ class TestTEFuser(JitTestCase):
             torch.round,
             torch.trunc,
             torch.frac,
+            F.hardshrink,
             lambda x: torch.threshold(x, 0, -10),
             lambda x: torch.clamp(x, -10, 10),
         ]
@@ -1566,7 +1392,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), device])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_binary_tensor_scalar_ops(self):
         def apply_with_scalar(fn, scalar):
             return lambda x: fn(x, scalar)
@@ -1675,7 +1500,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: enable in ir eval")
     def test_ternary_ops(self):
         def apply(fn):
             return lambda x, y, z: fn(x, y, z)
@@ -1955,6 +1779,29 @@ class TestTEFuser(JitTestCase):
                         script(x, one),
                         eager(x, one))
                 self.assertAllFused(script.graph_for(x, one))
+
+    def test_to_device(self):
+        def eager(x):
+            return x.to(device="cpu").relu()
+        x = torch.rand(8)
+        script = self.checkScript(eager, (x,))
+        self.assertAllFused(script.graph_for(x))
+
+    def test_dims(self):
+        def eager(x, y):
+            return x / (y + 0.0001)
+        x = torch.linspace(-1, 1, 768, dtype=torch.float32).as_strided((1, 1, 768), (768, 1, 1))
+        y = torch.tensor([[[2.0]]], dtype=torch.float32)
+        script = self.checkScript(eager, (x, y))
+        self.assertAllFused(script.graph_for(x, y))
+
+    def test_unsqueeze_var_dim(self):
+        def eager(x, y, z: int):
+            return x * torch.unsqueeze(y, dim=z)
+        x = torch.rand(4, 4, 64).permute(1, 0, 2)
+        y = torch.rand(4, 4)
+        z = 2
+        script = self.checkScript(eager, (x, y, z))
 
 if __name__ == '__main__':
     run_tests()
