@@ -1404,7 +1404,7 @@ class TestNormalizeOperators(JitTestCase):
                 if isinstance(v, torch.Tensor):
                     param_names.append(k)
                     param_values.append(v)
-                    fx_args.append(k)
+                    fx_args.append(f'{k} = {k}')
                 else:
                     fx_args.append(f'{k} = {repr(v)}')
 
