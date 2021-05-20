@@ -60,6 +60,9 @@ constexpr bool op_allowlist_contains(string_view allowlist, string_view item) {
 // and should be registered
 constexpr bool op_allowlist_check(string_view op_name) {
   assert(op_name.find("::") != string_view::npos);
+  if (op_name.find("(") != string_view::npos) {
+    throw std::runtime_error("Did not expect ( in operator name string");
+  }
 #if !defined(TORCH_OPERATOR_WHITELIST)
   // If the TORCH_OPERATOR_WHITELIST parameter is not defined,
   // all ops are to be registered
