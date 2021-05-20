@@ -234,7 +234,7 @@ void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ self, "input", 3 };
   checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
     self.scalar_type(), "cummax_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? (-1*std::numeric_limits<scalar_t>::infinity()) : std::numeric_limits<scalar_t>::lowest();
     scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::greater_equal<scalar_t>());
@@ -246,7 +246,7 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ self, "input", 3 };
   checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
     self.scalar_type(), "cummin_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? std::numeric_limits<scalar_t>::infinity() : std::numeric_limits<scalar_t>::max();
     scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::less_equal<scalar_t>());
