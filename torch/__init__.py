@@ -672,7 +672,6 @@ def _assert(condition, message):
 # Use the redundant form so that type checkers know that these are a part of
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
-
 from torch import cuda as cuda
 from torch import autograd as autograd
 from torch.autograd import (
@@ -686,6 +685,8 @@ from torch import nn as nn
 import torch.nn.intrinsic
 import torch.nn.quantizable
 import torch.nn.quantized
+# AO depends on nn, as well as quantized stuff -- so should be after those.
+from torch import ao as ao
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing
