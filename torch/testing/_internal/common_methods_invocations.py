@@ -1989,25 +1989,7 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
         np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
 
         if is_integral(x.dtype):
-            return fn(x, dtype=np_dtype)
-        return fn(x)
-
-    return wrapped_fn
-
-
-def np_unary_ufunc_integer_promotion_wrapper_with_astype(fn):
-    # Check np_unary_ufunc_integer_promotion_wrapper
-    def is_integral(dtype):
-        return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
-
-    @wraps(fn)
-    def wrapped_fn(x):
-        # As the default dtype can change, acquire it when function is called.
-        # NOTE: Promotion in PyTorch is from integer types to the default dtype
-        np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
-
-        if is_integral(x.dtype):
-            return fn(x).astype(np_dtype)
+            return fn(x.astype(np_dtype))
         return fn(x)
 
     return wrapped_fn
@@ -3176,7 +3158,7 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
                         requires_grad=requires_grad)
 
         with torch.no_grad():
-            t[torch.randn_like(t) > 0] = 0
+            t[0] = 0
 
         samples += (SampleInput(t),)  # type: ignore[assignment]
 
@@ -4561,7 +4543,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     UnaryUfuncInfo('special.i1',
                    aten_name='special_i1',
-                   ref=np_unary_ufunc_integer_promotion_wrapper_with_astype(scipy.special.i1),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1),
                    decorators=(precisionOverride({torch.float: 1e-4}),),
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
