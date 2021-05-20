@@ -413,14 +413,14 @@ class TestPDT(JitTestCase):
         def test_script_add_of_two_var(x, y):
             return x + y
 
-        make_global(test_script_add_of_two_var)
+        make_global(fn)
 
-        scripted_fn = torch.jit._script_pdt(test_script_add_of_two_var, example_inputs=[(1,2), ])
-        self.assertEqual(scripted_fn(10, 20), test_script_add_of_two_var(10, 20))
-        scripted_fn = torch.jit._script_pdt(test_script_add_of_two_var, example_inputs=[(1.6,2.9), ])
-        self.assertEqual(scripted_fn(-1.8, 20.14), test_script_add_of_two_var(-1.8, 20.14))
-        scripted_fn = torch.jit._script_pdt(test_script_add_of_two_var, example_inputs=[(89,27), ])
-        self.assertEqual(scripted_fn(88, 100), test_script_add_of_two_var(88, 100))
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(1,2), ])
+        self.assertEqual(scripted_fn(10, 20), fn(10, 20))
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(1.6,2.9), ])
+        self.assertEqual(scripted_fn(-1.8, 20.14), fn(-1.8, 20.14))
+        scripted_fn = torch.jit._script_pdt(fn, example_inputs=[(89,27), ])
+        self.assertEqual(scripted_fn(88, 100), fn(88, 100))
 
         def test_script_list(a):
             ans = 0.0
