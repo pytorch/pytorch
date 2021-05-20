@@ -129,10 +129,10 @@ void prelu_cuda_backward_kernel_share_weights(
   Tensor& weight_grad_collector,
   const scalar_t* weight_data) {
   at::TensorIterator iter = TensorIteratorConfig()
-      .add_output(input_grad)
-      .add_output(weight_grad_collector)
-      .add_input(input)
-      .add_input(grad_out)
+      .add_borrowed_output(input_grad)
+      .add_borrowed_output(weight_grad_collector)
+      .add_borrowed_input(input)
+      .add_borrowed_input(grad_out)
       .build();
 
   // N.B. `std::tuple` does not support `::operator=` on device code.
@@ -519,7 +519,7 @@ Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto it = TensorIterator::binary_op(dX, grad, self);
+  auto it = TensorIterator::borrowing_binary_op(dX, grad, self);
   GeluBackwardCUDAKernelImpl(it);
   return dX;
 }
