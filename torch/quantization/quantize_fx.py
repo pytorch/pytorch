@@ -8,9 +8,9 @@ from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
 from .fx.qconfig_utils import (
-    check_is_valid_convert_custom_config_dict, 
-    check_is_valid_fuse_custom_config_dict, 
-    check_is_valid_prepare_custom_config_dict, 
+    check_is_valid_convert_custom_config_dict,
+    check_is_valid_fuse_custom_config_dict,
+    check_is_valid_prepare_custom_config_dict,
     check_is_valid_qconfig_dict)
 from torch.nn.intrinsic import _FusedModule
 from typing import Dict, Any, List, Callable, Tuple, Optional, Set
