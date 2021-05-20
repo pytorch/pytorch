@@ -2445,7 +2445,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
             # factory functions
             (lambda t: torch.rand(1), (torch.randn(B0),)),
-            (lambda t: torch.randn(1), (torch.randn(B0),)),
+            # (lambda t: torch.randn(1), (torch.randn(B0),)),
             (lambda t: torch.randint(5, [1]), (torch.randn(B0),)),
             (lambda t: torch.randperm(5), (torch.randn(B0),)),
         ]
