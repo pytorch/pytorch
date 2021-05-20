@@ -53,11 +53,8 @@ ExportedStatMap filterMap(
 TEST(StatsTest, StatsTestClass) {
   MyCaffeClass a("first");
   MyCaffeClass b("second");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a.run(10);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     b.run(5);
   }
   EXPECT_SUBSET(

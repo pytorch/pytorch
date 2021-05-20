@@ -20,15 +20,12 @@ static Dimname dimnameFromString(const std::string& str) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, isNamed) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = at::zeros({3, 2, 5, 7});
   ASSERT_FALSE(tensor.has_names());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::zeros({3, 2, 5, 7});
   ASSERT_FALSE(tensor.has_names());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -55,7 +52,6 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, attachMetadata) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -75,7 +71,6 @@ TEST(NamedTensorTest, attachMetadata) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, internalSetNamesInplace) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");

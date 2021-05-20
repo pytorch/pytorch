@@ -1932,6 +1932,53 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+void inlineCallStackOfNode(
+    Node* n,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info);
+
+void inlineCallStackOfBlock(
+    Block* b,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  for (auto n : b->nodes()) {
+    inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
+  }
+}
+
+void inlineCallStackOfNode(
+    Node* new_node,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  auto new_node_cs = new_node->callstack();
+
+  InlinedCallStack* raw_callstack_ptr =
+      new_node_cs ? new_node_cs->get() : nullptr;
+
+  if (!new_cs_entries.count(raw_callstack_ptr)) {
+    if (new_node_cs) {
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+          *new_node_cs, callee, to_replace->sourceRange(), m_info);
+    } else {
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+          callee, to_replace->sourceRange(), m_info);
+    }
+  }
+  new_node->setCallStack(new_cs_entries.at(raw_callstack_ptr));
+  // We updated the inlined callstack of new_node.
+  // Same must be done for the nodes of the blocks of new_node.
+  // For example If node's block otherwise is not annotated appropriately.
+  for (auto block : new_node->blocks()) {
+    inlineCallStackOfBlock(block, new_cs_entries, callee, to_replace, m_info);
+  }
+}
+
 // inline_optimized_graph argument is used in substitute function call for
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
@@ -2008,26 +2055,12 @@ std::vector<Value*> inlineCallTo(
       continue;
     }
 
-    auto new_node_cs = new_node->callstack();
-
-    InlinedCallStack* raw_callstack_ptr =
-        new_node_cs ? new_node_cs->get() : nullptr;
-
-    if (!new_callstack_entries.count(raw_callstack_ptr)) {
-      if (new_node_cs) {
-        new_callstack_entries[raw_callstack_ptr] =
-            c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs,
-                callee,
-                to_replace->sourceRange(),
-                module_instance_info);
-      } else {
-        new_callstack_entries[raw_callstack_ptr] =
-            c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange(), module_instance_info);
-      }
-    }
-    new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
+    inlineCallStackOfNode(
+        new_node,
+        new_callstack_entries,
+        callee,
+        to_replace,
+        module_instance_info);
   }
   const auto& old_outputs = to_replace->outputs();
 

@@ -10,9 +10,7 @@ using namespace torch::jit;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryCleanUp, NoErrorWithoutRelease) {
   Module m("m");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
@@ -29,9 +27,7 @@ TEST(MemoryCleanUp, NoErrorWithoutRelease) {
 TEST(MemoryCleanUp, UnpackError) {
   at::globalContext().setReleaseWeightsWhenPrepacking(true);
   Module m("m");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):

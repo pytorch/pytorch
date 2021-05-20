@@ -240,7 +240,6 @@ void Pickler::pushInt(int64_t n) {
   } else {
     // Push 8 byte integer
     push<PickleOpCode>(PickleOpCode::LONG1);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     push<uint8_t>(8);
     push<int64_t>(n);
   }
@@ -296,7 +295,10 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
       std::string(toString(tensor.scalar_type())).append("Storage");
   pushGlobal("torch", data_type);
   // root_key
-  pushString(c10::to_string(tensor_data_.size()));
+  std::string root_key = get_tensor_id_ != nullptr
+      ? get_tensor_id_(tensor)
+      : c10::to_string(tensor_data_.size());
+  pushString(root_key);
   // location
   pushString(tensor.device().str());
   // size

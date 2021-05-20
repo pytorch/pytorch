@@ -306,11 +306,21 @@ struct EnumHolder;
 
 // Future
 struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
- public:
+ private:
+  // Keep this private in order to force users to go through make_intrusive and
+  // thus prevent creating a Future that's not held by an intrusive_ptr.
   explicit Future(TypePtr type, std::vector<c10::Device> devices={})
       : type_(std::move(type)),
         impl_(getTypeOfDevices(devices)),
         devices_(sortAndDeduplicateDevices(impl_, std::move(devices))) {}
+
+  friend c10::intrusive_ptr<Future>;
+
+ public:
+  Future(const Future&) = delete;
+  Future(Future&&) = delete;
+  Future& operator=(const Future&) = delete;
+  Future& operator=(Future&&) = delete;
 
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
@@ -360,13 +370,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       IValue value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           data_ptrs = c10::nullopt) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(
-        !completed(),
-        "Attempting to mark a completed Future as complete again. Note that "
-        "a Future can only be marked completed once.");
-
     // Start by performing all steps that can throw, before setting any field.
+    // Do this before even acquiring the mutex, because extractDataPtrs might
+    // acquire the GIL, which could lead to a lock inversion with our mutex.
+    // See https://github.com/pytorch/pytorch/issues/58239.
     std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs;
     std::vector<c10::Device> usedDevices;
     try {
@@ -382,9 +389,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         ensureIsSubsetOfDevices(usedDevices, devices_);
       }
     } catch (const std::exception&) {
-      setErrorInternal(std::current_exception(), lock);
+      setError(std::current_exception());
       return;
     }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    TORCH_CHECK(
+        !completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
 
     // Only set value_ and completed_ flag once all checks and preparation steps
     // have returned successfully to allow for proper error propagation.
@@ -399,7 +412,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       events_.push_back(std::move(event));
     }
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
@@ -425,8 +438,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // log errors and thats why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
-          "it is already marked completed (this is not neccessarily "
-          "an error):\n", tryRetrieveErrorMessageInternal(eptr));
+          "it is already marked completed (this is not necessarily "
+          "an error):\n",
+          tryRetrieveErrorMessageInternal(eptr));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",
@@ -473,7 +487,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(void)> callback) {
+  template <typename T>
+  void addCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&)");
+#endif
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
@@ -488,19 +508,69 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
-  c10::intrusive_ptr<Future> then(
-      std::function<IValue(void)> callback,
-      TypePtr type) {
-    auto fut = createInstance(std::move(type));
+  template <typename T>
+  c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
+    using IValueWithDataPtrs = std::
+        tuple<IValue, std::vector<std::reference_wrapper<const at::DataPtr>>>;
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        guts::disjunction<
+            std::is_invocable_r<IValue, T, Future&>,
+            std::is_invocable_r<IValueWithDataPtrs, T, Future&>>::value,
+        "The callback must have signature IValue(Future&) or "
+        "std::tuple<IValue, std::vector<std::reference_wrapper<const DataPtr>>>(Future&)");
+#endif
+    auto childFut = createInstance(std::move(type));
+    addCallback([childFut,
+                 cb = std::move(callback)](Future& parentFut) mutable {
+      try {
+        guts::if_constexpr<std::is_convertible<
+            typename std::result_of<T && (Future&)>::type,
+            IValueWithDataPtrs>::value>(
+            [&](auto identity) {
+              IValue value;
+              std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
+              std::tie(value, dataPtrs) = identity(cb)(parentFut);
+              childFut->markCompleted(std::move(value), std::move(dataPtrs));
+            },
+            [&](auto identity) {
+              childFut->markCompleted(identity(cb)(parentFut));
+            });
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
+      }
+    });
+    return childFut;
+  }
+
+  template <typename T>
+  c10::intrusive_ptr<Future> thenAsync(T callback, TypePtr type) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
+        "The callback must have signature c10::intrusive_ptr<Future>(Future&)");
+#endif
+    auto childFut = createInstance(std::move(type));
     addCallback(
-        [fut, cb = std::move(callback)]() {
+        [childFut, cb = std::move(callback)](Future& parentFut) mutable {
+          c10::intrusive_ptr<Future> intermediateFut;
           try {
-            fut->markCompleted(cb());
+            intermediateFut = cb(parentFut);
           } catch (std::exception&) {
-            fut->setError(std::current_exception());
+            childFut->setError(std::current_exception());
+            return;
           }
+          intermediateFut->addCallback(
+              [childFut = std::move(childFut)](Future& intermediateFut) {
+                if (intermediateFut.hasError()) {
+                  childFut->setError(intermediateFut.exception_ptr());
+                } else {
+                  childFut->markCompleted(
+                      intermediateFut.value(), intermediateFut.dataPtrs());
+                }
+              });
         });
-    return fut;
+    return childFut;
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
@@ -554,7 +624,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // how/when that happens) as it will ensure that the proper "environment" is
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
-  void invokeCallback(std::function<void(void)> callback) {
+  template<typename T>
+  void invokeCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&)");
+#endif
+
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
@@ -564,12 +641,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     c10::MultiStreamGuard streamGuard(streams);
     synchronizeWithCurrentStreams();
 
-    callback();
+    callback(*this);
   }
 
   // This method should be called before this future's value is used, as it
   // ensures that the CUDA streams that are "current" at the callsite properly
-  // synchonize with the value.
+  // synchronize with the value.
   void synchronizeWithCurrentStreams() {
     for (c10::Event& event : events_) {
       event.block(impl_.getStream(event.device()));
@@ -596,7 +673,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     eptr_ = std::move(eptr);
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
@@ -738,7 +815,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks_;
+  std::vector<std::function<void(Future&)>> callbacks_;
   std::exception_ptr eptr_;
 
   // An upcast pointer to a virtual class which allows us to manipulate events,

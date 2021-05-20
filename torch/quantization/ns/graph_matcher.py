@@ -9,10 +9,10 @@ from torch.fx.graph import Graph, Node
 from .utils import getattr_from_fqn
 from .ns_types import NSSubgraph, NSNodeTargetType
 from .mappings import (
+    get_base_name_to_sets_of_related_ops,
     get_unmatchable_types_map,
 )
 from .pattern_utils import (
-    get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
     get_reversed_fusions,
     end_node_matches_reversed_fusion,
@@ -144,10 +144,13 @@ class GraphMatchingException(Exception):
     pass
 
 class SubgraphTypeRelationship(enum.Enum):
-    # same type
+    # same type, known
     # example: F.linear and F.linear, or nn.Conv2d and nn.Conv2d
     EQUAL = enum.auto()
-    # same subgraph_relationship set, but not the same type
+    # same type, but the type is not known to Numerical Suite
+    # (user defined type, etc).
+    EQUAL_BUT_UKNOWN = enum.auto()
+    # known, same subgraph_relationship set, but not the same type
     # example: F.linear and toq.linear
     RELATED_BUT_NOT_EQUAL = enum.auto()
     # not related
@@ -172,6 +175,15 @@ def _get_subgraph_relationship_type(
             return SubgraphTypeRelationship.NOT_RELATED
 
     if node_a.op in ('call_function', 'call_method'):
+        key = (node_a.target, node_b.target)
+
+        if key not in type_a_related_to_b:
+            if node_a.target == node_b.target:
+                return SubgraphTypeRelationship.EQUAL_BUT_UKNOWN
+            else:
+                return SubgraphTypeRelationship.NOT_RELATED
+        # after this point, we are dealing with known types
+
         if node_a.target == node_b.target:
             node_a_has_prev = subgraph_a.base_op_node == subgraph_a.start_node
             node_b_has_prev = subgraph_b.base_op_node == subgraph_b.start_node
@@ -185,7 +197,6 @@ def _get_subgraph_relationship_type(
                 # TODO(future PR): check for matches start_op_node and base_op_node
                 return SubgraphTypeRelationship.EQUAL
 
-        key = (node_a.target, node_b.target)
         if key in type_a_related_to_b:
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
         else:
@@ -199,14 +210,19 @@ def _get_subgraph_relationship_type(
         mod_a = getattr_from_fqn(gm_a, node_a.target)
         assert isinstance(node_b.target, str)
         mod_b = getattr_from_fqn(gm_b, node_b.target)
-        # modules with equivalent types always match (i.e. nn.Conv2d and nn.Conv2d)
-        if type(mod_a) == type(mod_b):
-            return SubgraphTypeRelationship.EQUAL
+
         key = (type(mod_a), type(mod_b))
-        if key in type_a_related_to_b:
-            return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
+
+        if key not in type_a_related_to_b:
+            if type(mod_a) == type(mod_b):
+                return SubgraphTypeRelationship.EQUAL_BUT_UKNOWN
+            else:
+                return SubgraphTypeRelationship.NOT_RELATED
+        elif type(mod_a) == type(mod_b):
+            return SubgraphTypeRelationship.EQUAL
         else:
-            return SubgraphTypeRelationship.NOT_RELATED
+            return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
+
     return SubgraphTypeRelationship.NOT_RELATED
 
 def _get_name_for_subgraph(
@@ -393,6 +409,9 @@ def get_matching_subgraph_pairs(
 ({cur_subgraph_a}, {type_start_a}) and
 ({cur_subgraph_b}, {type_start_b}) are not related"""
                 raise GraphMatchingException(msg)
+            elif subgraph_relationship == SubgraphTypeRelationship.EQUAL_BUT_UKNOWN:
+                # skip matching but unknown types
+                continue
             key_name_a = _get_name_for_subgraph(
                 cur_subgraph_a, gm_a, base_name_to_sets_of_related_ops,
                 existing_names_a)

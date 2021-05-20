@@ -1,19 +1,64 @@
 #!/usr/bin/python3
 
-REMOTE_MODULE_TEMPLATE = """from typing import *
+
+def get_remote_module_template(enable_moving_cpu_tensors_to_cuda: bool):
+    return _TEMPLATE_PREFIX + (
+        _REMOTE_FORWARD_TEMPLATE_ENABLE_MOVING_CPU_TENSORS_TO_CUDA
+        if enable_moving_cpu_tensors_to_cuda
+        else _REMOTE_FORWARD_TEMPLATE
+    )
+
+
+_TEMPLATE_PREFIX = """from typing import *
 
 import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor
 from torch._jit_internal import Future
 from torch.distributed.rpc import RRef
-from typing import Tuple
+from typing import Tuple  # pyre-ignore: unused import
 
 
 {assign_module_interface_cls}
 
 
+def forward_async(self, {arg_types}){arrow_and_future_return_type}:
+    args = (self.module_rref, self.device, self.is_device_map_set, {args})
+    kwargs = {{{kwargs}}}
+    return rpc.rpc_async(
+        self.module_rref.owner(),
+        _remote_forward,
+        args,
+        kwargs,
+    )
+
+
+def forward(self, {arg_types}){arrow_and_return_type}:
+    args = (self.module_rref, self.device, self.is_device_map_set, {args})
+    kwargs = {{{kwargs}}}
+    ret_fut = rpc.rpc_async(
+        self.module_rref.owner(),
+        _remote_forward,
+        args,
+        kwargs,
+    )
+    return ret_fut.wait()
+
+
+_generated_methods = [
+    forward_async,
+    forward,
+]
+
+
 {jit_script_decorator}
+"""
+
+# This template may cause typing error (the mismatch between ``Tuple[()]`` and ``Tuple[Any]``)
+# even if the code is only used for instaniation but not execution.
+# Therefore, only include handling moving CPU tensors to a cuda device if necessary.
+# TODO: Merge these two templates together in the future once TorchScript syntax is improved.
+_REMOTE_FORWARD_TEMPLATE_ENABLE_MOVING_CPU_TENSORS_TO_CUDA = """
 def _remote_forward(
     module_rref: RRef[module_interface_cls], device: str, is_device_map_set: bool, {arg_types}){arrow_and_return_type}:
     module = module_rref.local_value()
@@ -21,17 +66,6 @@ def _remote_forward(
 
     if device.type != "cuda":
         return module.forward({args}, {kwargs})
-
-    # FIXME: Remote this line after fixing test_load_di_parts in
-    # torch/fb/training_toolkit/applications/sparse_nn/batch_distributed_inference/tests:batch_distributed_inference_test
-    # The error is that:
-    # 1) If annotation of Tuple[()] is used for out_args and ret, then the test fails because
-    # "Variable 'ret' previously has type Tuple[()] but is now being assigned to a value of type Tuple[Tensor]".
-    # 2) If annotation of Tuple[Any] is used for out_args and ret, the the test fails because
-    # "Variable 'ret' is annotated with type Tuple[Any] but is being assigned to a value of type Tuple[()]".
-    # 3) If there is no annotation, for out_args and ret, the the test fails because
-    # "Variable 'ret' previously has type Tuple[()] but is now being assigned to a value of type Tuple[Tensor]".
-    return module.forward({args}, {kwargs})
 
     # If the module is on a cuda device,
     # move any CPU tensor in args or kwargs to the same cuda device.
@@ -62,33 +96,12 @@ def _remote_forward(
         i = (i.cpu(),) if isinstance(i, Tensor) else (i,)
         ret = ret + i
     return ret
+"""
 
+_REMOTE_FORWARD_TEMPLATE = """
+def _remote_forward(
+    module_rref: RRef[module_interface_cls], device: str, is_device_map_set: bool, {arg_types}){arrow_and_return_type}:
+    module = module_rref.local_value()
 
-def forward_async(self, {arg_types}){arrow_and_future_return_type}:
-    args = (self.module_rref, self.device, self.is_device_map_set, {args})
-    kwargs = {{{kwargs}}}
-    return rpc.rpc_async(
-        self.module_rref.owner(),
-        _remote_forward,
-        args,
-        kwargs,
-    )
-
-
-def forward(self, {arg_types}){arrow_and_return_type}:
-    args = (self.module_rref, self.device, self.is_device_map_set, {args})
-    kwargs = {{{kwargs}}}
-    ret_fut = rpc.rpc_async(
-        self.module_rref.owner(),
-        _remote_forward,
-        args,
-        kwargs,
-    )
-    return ret_fut.wait()
-
-
-_generated_methods = [
-    forward_async,
-    forward,
-]
+    return module.forward({args}, {kwargs})
 """

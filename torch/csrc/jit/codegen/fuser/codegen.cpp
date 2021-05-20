@@ -56,7 +56,6 @@ static std::string scalarValue(const double v) {
       out << "POS_INFINITY";
     }
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     out << std::setprecision(16) << v;
   }
   return out.str();

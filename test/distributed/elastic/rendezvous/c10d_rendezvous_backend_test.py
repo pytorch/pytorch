@@ -4,8 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from base64 import b64encode
 from datetime import timedelta
-from typing import ClassVar
+from typing import ClassVar, cast
 from unittest import TestCase
 
 from torch.distributed import TCPStore
@@ -40,7 +41,7 @@ class CreateBackendTest(TestCase):
     def setUp(self) -> None:
         self._params = RendezvousParameters(
             backend="dummy_backend",
-            endpoint="localhost:29400",
+            endpoint="localhost:29300",
             run_id="dummy_run_id",
             min_nodes=1,
             max_nodes=1,
@@ -50,23 +51,28 @@ class CreateBackendTest(TestCase):
         )
 
         self._expected_endpoint_host = "localhost"
-        self._expected_endpoint_port = 29400
+        self._expected_endpoint_port = 29300
         self._expected_store_type = TCPStore
         self._expected_read_timeout = timedelta(seconds=10)
 
     def test_create_backend_returns_backend(self) -> None:
-        backend = create_backend(self._params)
+        backend, store = create_backend(self._params)
 
-        self.assertIsInstance(backend.store, self._expected_store_type)
+        self.assertEqual(backend.name, "c10d")
 
-        self.assertEqual(backend.name, "c10d-experimental")
-        self.assertEqual(backend.key, "torch.rendezvous." + self._params.run_id)
+        self.assertIsInstance(store, self._expected_store_type)
 
-        store = backend.store
+        tcp_store = cast(TCPStore, store)
 
-        self.assertEqual(store.host, self._expected_endpoint_host)  # type: ignore[attr-defined]
-        self.assertEqual(store.port, self._expected_endpoint_port)  # type: ignore[attr-defined]
-        self.assertEqual(store.timeout, self._expected_read_timeout)  # type: ignore[attr-defined]
+        self.assertEqual(tcp_store.host, self._expected_endpoint_host)  # type: ignore[attr-defined]
+        self.assertEqual(tcp_store.port, self._expected_endpoint_port)  # type: ignore[attr-defined]
+        self.assertEqual(tcp_store.timeout, self._expected_read_timeout)  # type: ignore[attr-defined]
+
+        backend.set_state(b"dummy_state")
+
+        state = store.get("torch.rendezvous." + self._params.run_id)
+
+        self.assertEqual(state, b64encode(b"dummy_state"))
 
     def test_create_backend_returns_backend_if_is_host_is_false(self) -> None:
         store = TCPStore(  # type: ignore[call-arg] # noqa: F841
@@ -96,7 +102,7 @@ class CreateBackendTest(TestCase):
     def test_create_backend_returns_backend_if_endpoint_port_is_not_specified(self) -> None:
         self._params.endpoint = self._expected_endpoint_host
 
-        self._expected_endpoint_port = 29500
+        self._expected_endpoint_port = 29400
 
         self.test_create_backend_returns_backend()
 

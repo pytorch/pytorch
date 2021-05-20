@@ -105,6 +105,7 @@ class ProcessGroup : public torch::CustomClassHolder {
     virtual int sourceRank() const;
 
     // Returns result tensors, if applicable.
+    // If work is not supposed to have result, we return empty list.
     virtual std::vector<at::Tensor> result();
 
     // Ensures that operations on the output tensors that are invoked
