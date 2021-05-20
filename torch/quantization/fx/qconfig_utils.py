@@ -97,3 +97,89 @@ def get_qconfig(qconfig_dict, module_type, module_name, global_qconfig):
     module_name_qconfig = get_module_name_qconfig(
         qconfig_dict, module_name, module_name_regex_qconfig)
     return module_name_qconfig
+
+def check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
+    r""" Checks if the given qconfig_dict has the correct keys
+
+    Args:
+      `qconfig_dict`: dictionary whose keys we want to check
+    """
+
+    qconfig_dict_allowed_keys = {"", "object_type", "module_name_regex", "module_name"}
+
+    for k in qconfig_dict.keys():
+        if k not in qconfig_dict_allowed_keys:
+            raise ValueError(
+                'Expected qconfig_dict to have the following keys: ' +
+                str(qconfig_dict_allowed_keys) + '. But found \'' + k +
+                '\' instead.')
+
+def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Dict[str, Any] = None) -> None:
+    r""" Checks if the given prepare_custom_config_dict has the correct keys
+
+    Args:
+      `prepare_custom_config_dict`: customization configuration dictionary for
+      quantization tool
+    """
+    if not prepare_custom_config_dict:
+        return
+
+    prepare_custom_config_dict_allowed_keys = {"standalone_module_name",
+                                               "standalone_module_class",
+                                               "float_to_observed_custom_module_class",
+                                               "non_traceable_module_name",
+                                               "non_traceable_module_class",
+                                               "additional_fuser_method_mapping",
+                                               "additional_qat__module_mapping",
+                                               "additional_fusion_pattern",
+                                               "additional_quant_pattern",
+                                               "input_quantized_idxs",
+                                               "output_quantized_idxs",
+                                               "preserved_attributes"}
+
+    for k in prepare_custom_config_dict.keys():
+        if k not in prepare_custom_config_dict_allowed_keys:
+            raise ValueError(
+                'Expected prepare_custom_config_dict to have the ' +
+                'following keys: ' + str(prepare_custom_config_dict_allowed_keys) +
+                '. But found \'' + k + '\' instead.')
+
+def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Dict[str, Any] = None) -> None:
+    r""" Checks if the given convert_custom_config_dict has the correct keys
+
+    Args:
+      `convert_custom_config_dict`: dictionary for custom configurations for
+      convert function
+    """
+    if not convert_custom_config_dict:
+        return
+
+    convert_custom_config_dict_allowed_keys = {"additional_object_mapping",
+                                               "observed_to_quantized_custom_module_class",
+                                               "preserved_attributes"}
+
+    for k in convert_custom_config_dict.keys():
+        if k not in convert_custom_config_dict_allowed_keys:
+            raise ValueError(
+                'Expected convert_custom_config_dict to have the following keys: ' +
+                str(convert_custom_config_dict_allowed_keys) + '. But found \'' + k +
+                '\' instead.')
+
+def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Dict[str, Any] = None) -> None:
+    r""" Checks if the given fuse_custom_config_dict has the correct keys
+
+    Args:
+      `fuse_custom_config_dict`: dictionary for custom configurations for fuse_fx
+    """
+    if not fuse_custom_config_dict:
+        return
+
+    fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
+                                            "preserved_attributes"}
+
+    for k in fuse_custom_config_dict.keys():
+        if k not in fuse_custom_config_dict_allowed_keys:
+            raise ValueError(
+                'Expected fuse_custom_config_dict to have the following keys: ' +
+                str(fuse_custom_config_dict_allowed_keys) + '. But found \'' + k +
+                '\' instead.')
