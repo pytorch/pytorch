@@ -79,7 +79,7 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   std::vector<py::object> pyArgs;
   std::vector<py::object> pyTensorArgs;
   std::vector<torch::jit::IValue> unwrappedArgs;
-  for (int idx = 0; idx < arguments.size(); idx++) {
+  for (unsigned idx = 0; idx < arguments.size(); idx++) {
     const auto ivalue = arguments[idx];
     if (ivalue.isTensor() && isPythonTensor(ivalue.toTensor())) {
       auto pyTensor = getPythonImpl(ivalue.toTensor());
@@ -97,7 +97,7 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
                                        .getElementType());
         py::list pyL;
 
-        for (int jdx = 0; jdx < l.size(); jdx++) {
+        for (unsigned jdx = 0; jdx < l.size(); jdx++) {
           auto nv = l.get(jdx);
           if (nv.isTensor() && isPythonTensor(nv.toTensor())) {
             auto pyTensor = getPythonImpl(nv.toTensor());
@@ -117,9 +117,8 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       }
     }
   }
-
   py::object torch_function =
-      PyObject_FastGetAttrString(pyTensorArgs[0].ptr(), "__torch_function__");
+      PyObject_FastGetAttrString(pyTensorArgs[0].ptr(), (char *)"__torch_function__");
   for (auto v : unwrappedArgs) {
     torch::jit::push(stack, v);
   }
@@ -161,7 +160,7 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   torch::jit::drop(stack, num_arguments);
   std::vector<c10::IValue> ret_ivalues;
   assert(outs.size() == op.schema().returns().size());
-  for (int idx = 0; idx < outs.size(); idx++) {
+  for (unsigned idx = 0; idx < outs.size(); idx++) {
     auto ret_type = op.schema().returns()[idx].type();
     if (ret_type->kind() == c10::TensorType::Kind) {
       torch::jit::push(stack, addPythonKey(py::cast<py::object>(outs[idx])));
