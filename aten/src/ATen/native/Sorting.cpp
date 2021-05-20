@@ -298,34 +298,60 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
   }
   auto tmp_values = self.clone(at::MemoryFormat::Contiguous);
   auto tmp_indices = at::empty(self.sizes(), self.options().dtype(kLong));
+
+  auto tmp_values_stride = tmp_values.strides()[dim];
+  auto tmp_indices_stride = tmp_indices.strides()[dim];
+  auto sizes = self.sizes();
+
+  TORCH_CHECK(indices.scalar_type() == kLong);
+
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(sizes, /*squash_dims=*/dim)
+    .add_output(tmp_values)
+    .add_output(tmp_indices)
+    .add_output(values)
+    .add_output(indices)
+    .build();
+
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "kthvalue_cpu", [&] {
-    dim_apply(
-        {tmp_values, tmp_indices, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
-          auto tmp_values = tl[0].accessor<scalar_t, 1>();
-          auto tmp_indices = tl[1].accessor<int64_t, 1>();
-          scalar_t* mode_value = tl[2].data_ptr<scalar_t>();
-          int64_t* mode_index = tl[3].data_ptr<int64_t>();
-          for (int64_t j = 0; j < tmp_indices.size(0); j++) {
-            tmp_indices[j] = j;
-          }
-          // we want NaN to be sorted as top for numpy compatibility
-          quick_select_template(
-              tmp_values,
-              k - 1,
-              [](scalar_t x, scalar_t y) -> bool {
-                return (
-                    (_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
-              },
-              [&](int64_t i, int64_t j) {
-                std::swap(tmp_values[i], tmp_values[j]);
-                std::swap(tmp_indices[i], tmp_indices[j]);
-              });
-          *mode_value = tmp_values[k - 1];
-          *mode_index = tmp_indices[k - 1];
-        });
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      for (int64_t i = 0; i < n; ++i) {
+        TensorAccessor<scalar_t, 1> tmp_values(
+            reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
+            &sizes[dim], &tmp_values_stride);
+        TensorAccessor<scalar_t, 1> tmp_indices(
+            reinterpret_cast<scalar_t*>(data[1] + i * strides[1]),
+            &sizes[dim], &tmp_indices_stride);
+        auto mode_value = reinterpret_cast<scalar_t*>(data[2] + i * strides[2]);
+        auto mode_index = reinterpret_cast<int64_t*>(data[3] + i * strides[3]);
+
+        for (int64_t j = 0; j < tmp_indices.size(0); j++) {
+          tmp_indices[j] = j;
+        }
+
+        // we want NaN to be sorted as top for numpy compatibility
+        quick_select_template(
+          tmp_values,
+          k - 1,
+          [](scalar_t x, scalar_t y) -> bool {
+            return (
+              (_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
+          },
+          [&](int64_t i, int64_t j) {
+            std::swap(tmp_values[i], tmp_values[j]);
+            std::swap(tmp_indices[i], tmp_indices[j]);
+          });
+        *mode_value = tmp_values[k - 1];
+        *mode_index = tmp_indices[k - 1];
+      }
+    };
+
+    int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
+    iter.for_each(loop, /*grain_size=*/grain_size);
   });
+
   if (!keepdim) {
     values.squeeze_(dim);
     indices.squeeze_(dim);
@@ -375,50 +401,65 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     dim = in.dim() - 1;
   }
 
+  auto sizes = in.sizes();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(sizes, /*squash_dims=*/dim)
+    .add_output(vals)
+    .add_output(inds)
+    .add_input(in)
+    .build();
+
   AT_DISPATCH_ALL_TYPES(in.scalar_type(), "median_out", [&] {
-    dim_apply({in, vals, inds}, dim, [&](int64_t it, TensorList tl) {
-      // Make the current row to be reduced contiguous
-      scalar_t* ip = tl[0].data_ptr<scalar_t>();
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      for (int64_t i = 0; i < n; ++i) {
+        auto valp = reinterpret_cast<scalar_t*>(data[0] + i * strides[0]);
+        auto indp = reinterpret_cast<int64_t*>(data[1] + i * strides[1]);
+        auto ip = reinterpret_cast<const scalar_t*>(data[2] + i * strides[2]);
 
-      // For torch.median, search for NaN and return it if found
-      if (!ignore_nan) {
-        scalar_t* nanp = std::find_if(ip, ip + size, _isnan<scalar_t>);
-        if (nanp != ip + size) {
-          *tl[1].data_ptr<scalar_t>() = *nanp;
-          *tl[2].data_ptr<int64_t>() = nanp - ip;
-          return;
+        // For torch.median, search for NaN and return it if found
+        if (!ignore_nan) {
+          const scalar_t* nanp = std::find_if(ip, ip + size, _isnan<scalar_t>);
+          if (nanp != ip + size) {
+            *valp = *nanp;
+            *indp = nanp - ip;
+            continue;
+          }
         }
+
+        // Vector of indices for indirectly partitioning input around median
+        std::vector<int64_t> idx(size);
+        auto first = idx.begin();
+        auto last = idx.end();
+        std::iota(first, last, 0);
+
+        // We partition the input around the median indirectly using the indices
+        // vector so that nth points to the index of the median in the unmodified
+        // input tensor.
+        auto nth = first;
+        if (!ignore_nan) {
+          // If we got here, there are no nan values
+          nth += (size - 1) / 2;
+          std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
+            return ip[i] < ip[j] || (ip[i] == ip[j] && i < j);
+          });
+        } else {
+          // For torch.nanmedian, compute median of non-nan values only
+          int64_t num_nan = std::count_if(ip, ip + size, _isnan<scalar_t>);
+          nth += (size - num_nan - 1) / 2;
+          std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
+            return ip[i] < ip[j] || (ip[i] == ip[j] && i < j) ||
+                (_isnan(ip[j]) && !_isnan(ip[i]));
+          });
+        }
+
+        *valp = ip[*nth];
+        *indp = *nth;
       }
-
-      // Vector of indices for indirectly partitioning input around median
-      std::vector<int64_t> idx(size);
-      auto first = idx.begin();
-      auto last = idx.end();
-      std::iota(first, last, 0);
-
-      // We partition the input around the median indirectly using the indices
-      // vector so that nth points to the index of the median in the unmodified
-      // input tensor.
-      auto nth = first;
-      if (!ignore_nan) {
-        // If we got here, there are no nan values
-        nth += (size - 1) / 2;
-        std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
-          return ip[i] < ip[j] || (ip[i] == ip[j] && i < j);
-        });
-      } else {
-        // For torch.nanmedian, compute median of non-nan values only
-        int64_t num_nan = std::count_if(ip, ip + size, _isnan<scalar_t>);
-        nth += (size - num_nan - 1) / 2;
-        std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
-          return ip[i] < ip[j] || (ip[i] == ip[j] && i < j) ||
-              (_isnan(ip[j]) && !_isnan(ip[i]));
-        });
-      }
-
-      *tl[1].data_ptr<scalar_t>() = ip[*nth];
-      *tl[2].data_ptr<int64_t>() = *nth;
-    });
+    };
+    int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
+    iter.for_each(loop, /*grain_size=*/grain_size);
   });
 
   return std::forward_as_tuple(values, indices);

@@ -5,41 +5,6 @@
 namespace at {
 namespace native {
 
-template <typename Fn>
-void dim_apply(TensorList tensors, int64_t dim, Fn f) {
-  AT_ASSERT(tensors.size() > 0);
-  auto t = tensors[0];
-  auto sizes = t.sizes();
-  int64_t ndim = t.dim();
-  int64_t itersize = 1;
-  for (int64_t i = 0; i < ndim; i++) {
-    if (i != dim) {
-      itersize *= t.size(i);
-    }
-  }
-  parallel_for(0, itersize, 1, [&](int64_t i_begin, int64_t i_end) {
-    std::vector<Tensor> narrowed_tensors;
-    narrowed_tensors.reserve(tensors.size());
-    for (int64_t it = i_begin; it < i_end; it++) {
-      narrowed_tensors.clear();
-      for (auto ti : tensors) {
-        int64_t i = it;
-        Tensor nt = ti;
-        for (int64_t d = 0; d < ndim; d++) {
-          if (d != dim) {
-            // this could be avoided for slower-changing dimensions if done
-            // better
-            nt = nt.select((d > dim ? 1 : 0), i % sizes[d]);
-            i = i / sizes[d];
-          }
-        }
-        narrowed_tensors.emplace_back(nt);
-      }
-      f(it, narrowed_tensors);
-    }
-  });
-}
-
 // ensure we get good values and indices for kthvalue, mode
 // this will always be with the reducing dim as 1-d
 inline void _reduction_with_indices_allocate_or_resize_output(

@@ -1915,69 +1915,91 @@ void qtopk_kernel(Tensor& values,
     int64_t dim,
     bool largest,
     bool sorted) {
+  auto sizes = self.sizes();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(sizes, /*squash_dims=*/dim)
+    .add_output(values)
+    .add_output(indices)
+    .add_input(self)
+    .build();
+
+  auto mode_values_stride = values.strides()[dim];
+  auto mode_indices_stride = indices.strides()[dim];
+  auto tmp_values_stride = self.strides()[dim];
+
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qtopk_cpu", [&] {
-    dim_apply(
-        {self, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
-          auto tmp_values = tl[0].accessor<scalar_t, 1>();
-          auto mode_values = tl[1].accessor<scalar_t, 1>();
-          auto mode_indices = tl[2].accessor<int64_t, 1>();
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      for (int64_t i = 0; i < n; ++i) {
+        TensorAccessor<scalar_t, 1> mode_values(
+            reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
+            &sizes[dim], &mode_values_stride);
+        TensorAccessor<int64_t, 1> mode_indices(
+            reinterpret_cast<int64_t*>(data[1] + i * strides[1]),
+            &sizes[dim], &mode_indices_stride);
+        TensorAccessor<scalar_t, 1> tmp_values(
+            reinterpret_cast<scalar_t*>(data[2] + i * strides[2]),
+            &sizes[dim], &tmp_values_stride);
 
-          auto n = tmp_values.size(0);
-          auto use_partial_sort = k * 64 <= n;
+        auto n = tmp_values.size(0);
+        auto use_partial_sort = k * 64 <= n;
 
-          using elem_t = std::pair<typename scalar_t::underlying, int64_t>;
-          std::vector<elem_t> queue(n);
-          for (int64_t j = 0; j < n; j++) {
-            queue[j].first = tmp_values[j].val_;
-            queue[j].second = j;
+        using elem_t = std::pair<typename scalar_t::underlying, int64_t>;
+        std::vector<elem_t> queue(n);
+        for (int64_t j = 0; j < n; j++) {
+          queue[j].first = tmp_values[j].val_;
+          queue[j].second = j;
+        }
+
+        // we want NaN to be sorted as top for numpy compatibility
+        if (use_partial_sort) {
+          if (largest) {
+            std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first > y.first;
+              });
+          } else {
+            std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first < y.first;
+              });
           }
-
-          // we want NaN to be sorted as top for numpy compatibility
-          if (use_partial_sort) {
-            if (largest) {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+        } else {
+          if (largest) {
+            std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first > y.first;
+              });
+            if (sorted) {
+              std::sort(queue.begin(), queue.begin() + k - 1,
                 [](const elem_t& x, const elem_t& y) -> bool {
                   return x.first > y.first;
-                });
-            } else {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return x.first < y.first;
                 });
             }
           } else {
-            if (largest) {
-              std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return x.first > y.first;
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k - 1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return x.first > y.first;
-                  });
-              }
-            } else {
-              std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
+            std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first < y.first;
+              });
+            if (sorted) {
+              std::sort(queue.begin(), queue.begin() + k -1,
                 [](const elem_t& x, const elem_t& y) -> bool {
                   return x.first < y.first;
                 });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k -1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return x.first < y.first;
-                  });
-              }
             }
           }
+        }
 
-          for (int64_t j = 0; j < k; j++) {
-            mode_values[j] = scalar_t(queue[j].first);
-            mode_indices[j] = queue[j].second;
-          }
-        });
+        for (int64_t j = 0; j < k; j++) {
+          mode_values[j] = scalar_t(queue[j].first);
+          mode_indices[j] = queue[j].second;
+        }
+      }
+    };
+
+    int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
+    iter.for_each(loop, /*grain_size=*/grain_size);
   });
 }
 
