@@ -78,8 +78,10 @@
 
 namespace py = pybind11;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* module;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THPGenerator *THPDefaultCPUGenerator = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -92,6 +94,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
   THPObjectPtr types(PySequence_Fast(arg, "expected a sequence"));
   if (!types) return nullptr;
 
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
   for (Py_ssize_t i = 0; i < num_classes; i++) {
@@ -229,7 +232,9 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *obj;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *doc_obj;
   if (!PyArg_ParseTuple(args, "OO", &obj, &doc_obj)) {
     return nullptr;
@@ -394,6 +399,9 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
   auto atensor = at::fromDLPack(dlMTensor);
 
+  // Make sure this capsule will never be used again.
+  PyCapsule_SetName(data, "used_dltensor");
+
   // It is possible that the call to at::fromDLPack is the very first
   // call to create a Tensor in PyTorch. If so, then _lazy_init has
   // not been called, and the attempt to call createPyObject will fail
@@ -403,8 +411,6 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   if(atensor.is_cuda()) {
     py::module::import("torch.cuda").attr("init")();
   }
-  // Make sure this capsule will never be used again.
-  PyCapsule_SetName(data, "used_dltensor");
   return THPVariable_Wrap(std::move(atensor));
   END_HANDLE_TH_ERRORS
 }
@@ -650,7 +656,7 @@ static PyObject * THPModule_are_vmap_fallback_warnings_enabled(PyObject* _unused
   END_HANDLE_TH_ERRORS
 }
 
-//NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+//NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  THPModule_initExtension,   METH_O,       nullptr},
   {"_autograd_init",  THPAutograd_initExtension, METH_NOARGS,  nullptr},
@@ -762,6 +768,7 @@ bool THDPBFloat16Storage_init(PyObject *module);
 bool THDPComplexDoubleStorage_init(PyObject *module);
 bool THDPComplexFloatStorage_init(PyObject *module);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -1076,4 +1083,5 @@ struct call_duplicate_guard {
   call_duplicate_guard() { pytorch_duplicate_guard(); }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static call_duplicate_guard _call_duplicate_guard;

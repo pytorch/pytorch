@@ -9,7 +9,7 @@ bool throw_func() {
   throw std::runtime_error("I'm throwing...");
 }
 
-template<class Functor>
+template <class Functor>
 inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
   try {
     std::forward<Functor>(functor)();
@@ -18,7 +18,7 @@ inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
     return;
   }
   ADD_FAILURE() << "Expected to throw exception with message \""
-    << expectedMessage << "\" but didn't throw";
+                << expectedMessage << "\" but didn't throw";
 }
 } // namespace
 
@@ -43,30 +43,32 @@ TEST(WarningTest, JustPrintWarning) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExceptionTest, ErrorFormatting) {
-  expectThrowsEq([]() {
-    TORCH_CHECK(false, "This is invalid");
-  }, "This is invalid");
+  expectThrowsEq(
+      []() { TORCH_CHECK(false, "This is invalid"); }, "This is invalid");
 
-  expectThrowsEq([]() {
-    try {
-      TORCH_CHECK(false, "This is invalid");
-    } catch (Error& e) {
-      TORCH_RETHROW(e, "While checking X");
-    }
-  }, "This is invalid (While checking X)");
+  expectThrowsEq(
+      []() {
+        try {
+          TORCH_CHECK(false, "This is invalid");
+        } catch (Error& e) {
+          TORCH_RETHROW(e, "While checking X");
+        }
+      },
+      "This is invalid (While checking X)");
 
-  expectThrowsEq([]() {
-    try {
-      try {
-        TORCH_CHECK(false, "This is invalid");
-      } catch (Error& e) {
-        TORCH_RETHROW(e, "While checking X");
-      }
-    } catch (Error& e) {
-      TORCH_RETHROW(e, "While checking Y");
-    }
-  },
-R"msg(This is invalid
+  expectThrowsEq(
+      []() {
+        try {
+          try {
+            TORCH_CHECK(false, "This is invalid");
+          } catch (Error& e) {
+            TORCH_RETHROW(e, "While checking X");
+          }
+        } catch (Error& e) {
+          TORCH_RETHROW(e, "While checking Y");
+        }
+      },
+      R"msg(This is invalid
   While checking X
   While checking Y)msg");
 }
@@ -94,5 +96,6 @@ TEST(ExceptionTest, DontCallArgumentFunctionsTwiceOnFailure) {
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(failInternalAssert());
-  EXPECT_EQ(assertionArgumentCounter, 2) << "TORCH_INTERNAL_ASSERT called argument twice";
+  EXPECT_EQ(assertionArgumentCounter, 2)
+      << "TORCH_INTERNAL_ASSERT called argument twice";
 }

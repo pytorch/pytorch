@@ -170,6 +170,7 @@ std::vector<Tensor> LBFGS::_clone_param() {
 std::tuple<double, Tensor> LBFGS::_directional_evaluate(
   const LossClosure& closure, const std::vector<Tensor>& x, double t, const Tensor& d) {
     _add_grad(t, d);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double loss;
     {
       torch::AutoGradMode enable_grad(true);
@@ -185,6 +186,7 @@ double _cubic_interpolate(
   c10::optional<std::tuple<double, double>> bounds = c10::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double xmin_bound, xmax_bound;
   if (bounds != c10::nullopt) {
     std::tie(xmin_bound, xmax_bound) = *bounds;
@@ -202,9 +204,11 @@ double _cubic_interpolate(
 
   auto d1 = (g1 + g2) - (3 * (f1 - f2) / (x1 - x2));
   auto d2_square = std::pow(d1, 2) - g1 * g2;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double d2;
   if (d2_square >= 0) {
     d2 = std::sqrt(d2_square);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double min_pos;
     if (x1 <= x2) {
       min_pos = x2 - ((x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2)));
@@ -229,6 +233,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
     g = g.clone(at::MemoryFormat::Contiguous);
     // evaluate objective and gradient using initial step
     auto obj_func_res = obj_func(x, t, d);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double f_new;
     Tensor g_new;
     std::tie(f_new, g_new) = obj_func(x, t, d);
@@ -298,6 +303,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
     // exact point satisfying the criteria
     bool insuf_progress = false;
     // find high and low points in bracket
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t low_pos, high_pos;
     std::tie(low_pos, high_pos) = bracket_f[0] <= bracket_f[1] ? std::make_tuple(0, 1) : std::make_tuple(1, 0);
     while(!done && (ls_iter < max_ls)) {

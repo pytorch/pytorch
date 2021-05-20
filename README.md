@@ -266,9 +266,11 @@ On Windows
 
 Choose Correct Visual Studio Version.
 
-Visual Studio upgrades are very often. Sometimes, there're regressions in some new versions.
-It'd best to use the same Visual Studio Version as [PyTorch CI's](https://github.com/pytorch/pytorch/blob/a1bd7918cc5a06cbef6c5178259bf0a7b5ab1ce3/.circleci/scripts/vs_install.ps1#L4).
+Sometimes there are regressions in new versions of Visual Studio, so
+it's best to use the same Visual Studio Version [16.8.5](https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/vs_install.ps1) as Pytorch CI's.
 You can use Visual Studio Enterprise, Professional or Community though PyTorch CI uses Visual Studio BuildTools.
+
+If you want to build legacy python code, please refert to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
 Build with CPU
 
@@ -284,16 +286,6 @@ Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
 Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
 <br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
-
-CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions from this table:
-| CUDA version | Newest supported VS version                             | PyTorch version |
-| ------------ | ------------------------------------------------------- | --------------- |
-| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |  0.4.1 ~ 1.5.1  |
-| 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.3.0 ~ 1.7.0  |
-| 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
-| 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
-
-Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
 Additional libraries such as
 [Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/master/.jenkins/pytorch/win-test-helpers/installation-helpers) to install them.

@@ -33,7 +33,7 @@ class ConcatIterDataPipe(IterDataPipe):
             if self.length == -1:
                 raise NotImplementedError
             return self.length
-        if all(isinstance(dp, Sized) and len(dp) >= 0 for dp in self.datapipes):
+        if all(isinstance(dp, Sized) for dp in self.datapipes):
             self.length = sum(len(dp) for dp in self.datapipes)
         else:
             self.length = -1

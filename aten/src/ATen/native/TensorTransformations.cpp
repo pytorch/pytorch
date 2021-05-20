@@ -62,6 +62,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   }
 
   if (in_tensor.is_quantized()) {
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(in_tensor.scalar_type(),
                                         "flip_quantized_cpu", [&] {
       flip_cpu_kernel<scalar_t>(

@@ -5,11 +5,11 @@ import shutil
 from .setup_helpers.env import IS_64BIT, IS_WINDOWS, check_negative_env_flag
 from .setup_helpers.cmake import USE_NINJA
 
+from setuptools import distutils
 
 def _overlay_windows_vcvars(env):
-    from distutils._msvccompiler import _get_vc_env
     vc_arch = 'x64' if IS_64BIT else 'x86'
-    vc_env = _get_vc_env(vc_arch)
+    vc_env = distutils._msvccompiler._get_vc_env(vc_arch)
     # Keys in `_get_vc_env` are always lowercase.
     # We turn them into uppercase before overlaying vcvars
     # because OS environ keys are always uppercase on Windows.

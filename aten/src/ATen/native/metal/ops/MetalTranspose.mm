@@ -17,6 +17,8 @@ namespace metal {
 Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(input.is_metal());
   auto ndims = input.dim();
+  // Support maximum eight channels on mobile
+  TORCH_CHECK(ndims <= 8);
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
   if (dim0 == dim1) {
@@ -28,7 +30,7 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   if (input.dim() == 2) {
     MetalTensorImplStorage mt{outputSizes};
-    mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
+    mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
     MPSImage* Y = mt.texture()->image();
     MPSImageTranspose* transpose = [[MPSImageTranspose alloc]
         initWithDevice:[MPSCNNContext sharedInstance].device];
@@ -42,14 +44,13 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
         std::vector<ushort>{input.sizes().begin(), input.sizes().end()});
     id<MTLBuffer> sizeBuf2 = makeMTLBuffer<ushort>(
         std::vector<ushort>{outputSizes.begin(), outputSizes.end()});
-    id<MTLBuffer> indexBuf = makeMTLBuffer(std::vector<ushort>(input.dim(), 1));
     MetalTensorImplStorage mt{outputSizes};
-    mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
+    mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
     MPSImage* Y = mt.texture()->image();
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
-        [[MPSCNNContext sharedInstance] specializedPipelineState:@"transpose"
+        [[MPSCNNContext sharedInstance] specializedPipelineState:"transpose"
                                                        Constants:@[
                                                          @(dim0),
                                                          @(dim1),
@@ -65,7 +66,6 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
     [encoder setTexture:[Y texture] atIndex:1];
     [encoder setBuffer:sizeBuf1 offset:0 atIndex:0];
     [encoder setBuffer:sizeBuf2 offset:0 atIndex:1];
-    [encoder setBuffer:indexBuf offset:0 atIndex:2];
 
     const auto& launchParams =
         mpscnn::spatialPointwiseKernelLaunchParams(state, Y);

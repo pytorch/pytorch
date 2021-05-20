@@ -12,6 +12,7 @@
 namespace torch {
 namespace utils {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyObject* thp_qscheme_array[at::COMPILE_TIME_NUM_QSCHEMES];
 
 void initializeQSchemes() {

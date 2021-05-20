@@ -182,16 +182,24 @@ class TestIterableDataPipeBasic(TestCase):
         img.save(temp_pngfile_pathname)
         datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
         datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
-        datapipe3 = dp.iter.RoutedDecoder(datapipe2, handlers=[decoder_imagehandler('rgb')])
-        datapipe3.add_handler(decoder_basichandlers)
 
-        for rec in datapipe3:
-            ext = os.path.splitext(rec[0])[1]
-            if ext == '.png':
-                expected = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
-                self.assertTrue(np.array_equal(rec[1], expected))
-            else:
-                self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
+        def _helper(dp, channel_first=False):
+            for rec in dp:
+                ext = os.path.splitext(rec[0])[1]
+                if ext == '.png':
+                    expected = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
+                    if channel_first:
+                        expected = expected.transpose(2, 0, 1)
+                    self.assertEqual(rec[1], expected)
+                else:
+                    self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
+
+        datapipe3 = dp.iter.RoutedDecoder(datapipe2, decoder_imagehandler('rgb'))
+        datapipe3.add_handler(decoder_basichandlers)
+        _helper(datapipe3)
+
+        datapipe4 = dp.iter.RoutedDecoder(datapipe2)
+        _helper(datapipe4, channel_first=True)
 
 
     def test_groupbykey_iterable_datapipe(self):

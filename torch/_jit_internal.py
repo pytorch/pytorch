@@ -15,6 +15,8 @@ from textwrap import dedent
 import torch
 import sys
 import builtins
+import io
+import pickle
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -1119,3 +1121,29 @@ def _isinstance(obj, target_type) -> bool:
 
     # handle non-containers
     return isinstance(obj, target_type)
+
+
+class _TensorExtractor(pickle.Pickler):
+    def __init__(self, *args, tensors: List[torch.Tensor], **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tensors = tensors
+
+    def persistent_id(self, obj):
+        if isinstance(obj, torch.Tensor):
+            self.tensors.append(obj)
+            return ""
+        else:
+            return None
+
+
+def _extract_tensors(obj):
+    r"""
+    This function is exclusively called from C++.
+    See ``torch/csrc/jit/python/python_ivalue.h``.
+
+    It extracts the tensors contained in the given object, through pickling.
+    """
+    tensors: List[torch.Tensor] = []
+    extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
+    extractor.dump(obj)
+    return tensors
