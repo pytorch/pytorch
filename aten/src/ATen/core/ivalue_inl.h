@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstdlib>
 #include <type_traits>
 #include <utility>
 
@@ -382,7 +383,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // leads to a silent synchronization/correctness issue. However, as this
       // might worsen perf in CPU-only cases, we should only do so after careful
       // benchmarks.
-      if (impl_.type() != c10::kCPU) {
+      if (impl_.type() != c10::kCPU || alwaysExtractDataPtrs()) {
         actualDataPtrs =
             data_ptrs.has_value() ? std::move(*data_ptrs) : extractDataPtrs(value);
         usedDevices = getDevicesOfDataPtrs(impl_, actualDataPtrs);
@@ -658,6 +659,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
             data_ptr, impl_.getStream(data_ptr.device()));
       }
     }
+  }
+
+  static bool alwaysExtractDataPtrs() {
+    // This is used by tests (or during debugging) to force Future to always
+    // inspect the value it holds to ensure it doesn't contain unexpected
+    // devices. This is very helpful to detect missing CUDA synchronization.
+    static bool shouldExtract = []() {
+      char* envVar = std::getenv("PYTORCH_FUTURE_ALWAYS_EXTRACT_DATAPTRS");
+      return envVar != nullptr;
+    }();
+    return shouldExtract;
   }
 
   void setErrorInternal(
