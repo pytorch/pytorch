@@ -128,8 +128,7 @@ int main(int argc, char* argv[]) {
 
     // First, let's specify the sizes:
     std::vector<const Expr*> dims = {
-        new IntImm(64),
-        new IntImm(32)}; // IntImm stands for Integer Immediate
+        new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
     // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
@@ -422,10 +421,8 @@ int main(int argc, char* argv[]) {
 
     // Let's print one of the elements from each array to verify that the
     // computation did happen:
-    std::cout << "A[10] = " << data_A[10]
-              << std::endl
-              << "B[10] = " << data_B[10]
-              << std::endl
+    std::cout << "A[10] = " << data_A[10] << std::endl
+              << "B[10] = " << data_B[10] << std::endl
               << "X[10] = A[10] + B[10] = " << data_X[10] << std::endl;
     // Prints:
     // A[10] = 3

@@ -32,9 +32,7 @@ void checkIR(Stmt* s, const std::string& pattern) {
 TEST(LoopNest, ExprSimple01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f",
-      {{16, "X"}, {5, "y"}},
-      [](const VarHandle& x, const VarHandle& y) {
+      "f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -54,9 +52,7 @@ TEST(LoopNest, ExprSimple01) {
 TEST(LoopNest, ExprLower01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f",
-      {{16, "x"}, {5, "y"}},
-      [](const VarHandle& x, const VarHandle& y) {
+      "f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -2682,9 +2678,7 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
 TEST(LoopNest, OuterLoopVectorization) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f",
-      {{8, "X"}, {8, "y"}},
-      [](const VarHandle& x, const VarHandle& y) {
+      "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -2916,6 +2910,30 @@ TEST(LoopNest, UnrollWithLet) {
     ASSERT_EQ(a_v[i], 7);
     ASSERT_EQ(b_v[i], 8);
   }
+}
+
+TEST(LoopNest, IsNormalized) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 50; i < 100; i++) {
+  //     A[i] = B[i];
+  //   }
+  BufHandle a_buf("A", {ExprHandle(100)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(100)}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto for_stmt =
+      For::make(i, 50, 100, Store::make(a_buf, {i}, Load::make(b_buf, {i})));
+  Block::make({for_stmt});
+  ASSERT_FALSE(LoopNest::isNormalized(for_stmt));
+
+  for_stmt->setStart(new IntImm(0));
+  ASSERT_TRUE(LoopNest::isNormalized(for_stmt));
+
+  VarHandle N("N", kInt);
+  for_stmt->setStart(N.node());
+  ASSERT_FALSE(LoopNest::isNormalized(for_stmt));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -3374,10 +3392,7 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
   auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for = For::make(j, 0, 15, for_body);
   auto outer_for = For::make(
-      i,
-      0,
-      10,
-      Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
+      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
   auto par = Block::make({outer_for});
   HashProvider hasher;
   auto hash_before = hasher.hash(par);
@@ -3510,19 +3525,15 @@ TEST(LoopNest, CacheReadsSimple) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 3);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3583,19 +3594,15 @@ TEST(LoopNest, CacheReadsOuter) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3636,19 +3643,15 @@ TEST(LoopNest, CacheReadsInternal) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3688,20 +3691,16 @@ TEST(LoopNest, CacheReadsInner) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   // note im changing the offset of the first arg of the first call to A.
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 34, j + 40) + A->load(i + 30, j + 41);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3741,19 +3740,15 @@ TEST(LoopNest, CacheWritesSimple) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -3966,9 +3961,7 @@ TEST(LoopNest, CompoundTensorUsed) {
 
   Tensor* A = new Tensor(a_buf.node(), body);
   Tensor* B = Compute(
-      "B",
-      {{10, "i"}, {3, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i, j + 1) + A->load(i, j + 2);
       });
 
@@ -4020,6 +4013,543 @@ TEST(LoopNest, InlineFromLoad) {
 # CHECK-NEXT: B[j] = j
 )IR",
       oss.str());
+}
+
+TEST(LoopNest, OptimizeConditionalsSimple) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //   }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {15}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 5, kLT),
+          Load::make(b_buf, {i}),
+          Load::make(c_buf, {i - 5})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, store);
+  auto par = Block::make({forI});
+
+  LoopNest nest(par, {a_buf.node()});
+  nest.optimizeConditionals();
+
+  std::ostringstream oss;
+  oss << *nest.root_stmt();
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i = 0; i < 5
+# CHECK-NEXT: A[i] = B[i]
+# CHECK: for (int i = 0; i < 15
+# CHECK-NEXT: A[i + 5] = C[i]
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(LoopNest, OptimizeConditionalsNestedConditions) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<10, IfThenElse(i<5, B[i], C[i-5]), D[i-10])
+  //   }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {10}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 10, kLT),
+          IfThenElse::make(
+              CompareSelect::make(i, 5, kLT),
+              Load::make(b_buf, {i}),
+              Load::make(c_buf, {i - 5})),
+          Load::make(d_buf, {i - 10})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, store);
+  auto par = Block::make({forI});
+
+  LoopNest nest(par, {a_buf.node()});
+  nest.optimizeConditionals();
+
+  std::ostringstream oss;
+  oss << *nest.root_stmt();
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i = 0; i < 5
+# CHECK-NEXT: A[i] = B[i]
+# CHECK: for (int i = 0; i < 5
+# CHECK-NEXT: A[i + 5] = C[i]
+# CHECK: for (int i = 0; i < 10
+# CHECK-NEXT: A[i + 10] = D[i]
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(LoopNest, OptimizeConditionalsMultipleStores) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //   }
+  //   for (int j = 0; j < 100; j++) {
+  //     B[j] = IfThenElse(j<30 ? 1 : 0, C[j], D[j])
+  //   }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {100}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto storeA = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 5, kLT),
+          Load::make(b_buf, {i}),
+          Load::make(c_buf, {i - 5})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, storeA);
+  auto storeB = Store::make(
+      b_buf,
+      {j},
+      IfThenElse::make(
+          CompareSelect::make(j, 30, kLT),
+          Load::make(c_buf, {j}),
+          Load::make(d_buf, {j})));
+  auto forJ = For::make(j, 0, 100, storeB);
+  auto par = Block::make({forI, forJ});
+
+  LoopNest nest(par, {a_buf.node()});
+  nest.optimizeConditionals();
+
+  std::ostringstream oss;
+  oss << *nest.root_stmt();
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i = 0; i < 5
+# CHECK-NEXT: A[i] = B[i]
+# CHECK: for (int i = 0; i < 15
+# CHECK-NEXT: A[i + 5] = C[i]
+# CHECK: for (int j = 0; j < 30
+# CHECK-NEXT: B[j] = C[j]
+# CHECK: for (int j = 0; j < 70
+# CHECK-NEXT: B[j + 30] = D[j + 30]
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(LoopNest, OptimizeConditionalsMultipleStoresInOneLoop) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 50; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //     B[j] = IfThenElse(j<30 ? 1 : 0, C[j], D[j])
+  //   }
+  // Only the first conditional, in the write to A, will be optimized.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {100}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto storeA = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 5, kLT),
+          Load::make(b_buf, {i}),
+          Load::make(c_buf, {i - 5})));
+  auto storeB = Store::make(
+      b_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 30, kLT),
+          Load::make(c_buf, {i}),
+          Load::make(d_buf, {i})));
+  auto forI = For::make(i, 0, 50, Block::make({storeA, storeB}));
+  auto par = Block::make({forI});
+
+  LoopNest nest(par, {a_buf.node()});
+  nest.optimizeConditionals();
+
+  std::ostringstream oss;
+  oss << *nest.root_stmt();
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i = 0; i < 5
+# CHECK-NEXT: A[i] = B[i]
+# CHECK-NEXT: B[i] = IfThenElse(i<30 ? 1 : 0, C[i], D[i])
+# CHECK: for (int i = 0; i < 45
+# CHECK-NEXT: A[i + 5] = C[i]
+# CHECK-NEXT: B[i + 5] = IfThenElse(i + 5<30 ? 1 : 0, C[i + 5], D[i + 5])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(LoopNest, OptimizeConditionalsOuterLoopVar) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i] = IfThenElse(i<10, IfThenElse(i<5, B[i], C[i-5]), D[i-10])
+  //     }
+  //   }
+  // Currently, this case where the condition variable `i` is not the
+  // inner-most loop variable, is not optimized.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {10}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 10, kLT),
+          IfThenElse::make(
+              CompareSelect::make(i, 5, kLT),
+              Load::make(b_buf, {i}),
+              Load::make(c_buf, {i - 5})),
+          Load::make(d_buf, {i - 10})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, For::make(j, 0, 100, store));
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
+TEST(LoopNest, OptimizeConditionalsCompValuesNotOrdered) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<5, IfThenElse(i<10, B[i], C[i-5]), D[i-10])
+  //   }
+  // No optimization should be done here because one of the conditions use '>'.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {10}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 5, kLT),
+          IfThenElse::make(
+              CompareSelect::make(i, 10, kLT),
+              Load::make(b_buf, {i}),
+              Load::make(c_buf, {i - 5})),
+          Load::make(d_buf, {i - 10})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, store);
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
+TEST(LoopNest, OptimizeConditionalsCompValuesNotConstants) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<N, IfThenElse(i<5, B[i], C[i-5]), D[i-10])
+  //   }
+  // No optimization should be done here because one of the conditions use '>'.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {10}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle N("N", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, N, kLT),
+          IfThenElse::make(
+              CompareSelect::make(i, 5, kLT),
+              Load::make(b_buf, {i}),
+              Load::make(c_buf, {i - 5})),
+          Load::make(d_buf, {i - 10})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, store);
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
+TEST(LoopNest, OptimizeConditionalsInvalidCondition) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<10, IfThenElse(i>5, B[i], C[i-5]), D[i-10])
+  //   }
+  // No optimization should be done here because one of the conditions use '>'.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {10}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 10, kLT),
+          IfThenElse::make(
+              CompareSelect::make(i, 5, kGT),
+              Load::make(b_buf, {i}),
+              Load::make(c_buf, {i - 5})),
+          Load::make(d_buf, {i - 10})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, store);
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
+TEST(LoopNest, OptimizeConditionalsInvalidCondition2) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(10<i, IfThenElse(i<5, B[i], C[i-5]), D[i-10])
+  //   }
+  // No optimization should be done here because of the invalid condition:
+  //    "10 < i".
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {10}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(10, i, kLT),
+          IfThenElse::make(
+              CompareSelect::make(i, 5, kLT),
+              Load::make(b_buf, {i}),
+              Load::make(c_buf, {i - 5})),
+          Load::make(d_buf, {i - 10})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, store);
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
+TEST(LoopNest, OptimizeConditionalsInvalidCondition3) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<10, IfThenElse(k<5, B[i], C[i-5]), D[i-10])
+  //   }
+  // No optimization should be done here because the conditions use different
+  // variables: "i < 10" and "k < 5"
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {10}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 10, kLT),
+          IfThenElse::make(
+              CompareSelect::make(k, 5, kLT),
+              Load::make(b_buf, {i}),
+              Load::make(c_buf, {i - 5})),
+          Load::make(d_buf, {i - 10})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, store);
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
+TEST(LoopNest, OptimizeConditionalsInvalidCondition4) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(k<10, IfThenElse(k<5, B[i], C[i-5]), D[i-10])
+  //   }
+  // No optimization should be done here because the conditions use the
+  // variable 'k' which is not a loop variable.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle d_buf("D", {10}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(k, 10, kLT),
+          IfThenElse::make(
+              CompareSelect::make(k, 5, kLT),
+              Load::make(b_buf, {i}),
+              Load::make(c_buf, {i - 5})),
+          Load::make(d_buf, {i - 10})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, store);
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
+TEST(LoopNest, OptimizeConditionalsNotNormalized) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 2; i < 20; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //   }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {15}, kInt);
+  VarHandle i("i", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto store = Store::make(
+      a_buf,
+      {i},
+      IfThenElse::make(
+          CompareSelect::make(i, 5, kLT),
+          Load::make(b_buf, {i}),
+          Load::make(c_buf, {i - 5})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 2, 20, store);
+  auto par = Block::make({forI});
+  LoopNest nest(par, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(nest.root_stmt());
+  nest.optimizeConditionals();
+  auto hash_after = hasher.hash(nest.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
 }
 
 static std::pair<std::unique_ptr<Placeholder>, Tensor*> colReduce(
@@ -4217,9 +4747,7 @@ TEST(LoopNest, VectorizeUse) {
   Tensor* b = Compute(
       "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
   Tensor* c = Compute(
-      "c",
-      {{N, "n"}},
-      [&](const VarHandle& n) { return b->load(n) + 2.0f; });
+      "c", {{N, "n"}}, [&](const VarHandle& n) { return b->load(n) + 2.0f; });
   LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
   nest.vectorize(loops[0]);
@@ -4748,15 +5276,9 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
   VarHandle j("j", kInt);
   VarHandle n("n", kInt);
   auto forJ = For::make(
-      j,
-      0,
-      100,
-      Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
+      j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
   auto forN = For::make(
-      n,
-      0,
-      100,
-      Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
+      n, 0, 100, Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
   auto forI = For::make(i, 0, 20, Block::make({forJ, forN}));
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* fused_loop;
@@ -5295,10 +5817,7 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
   VarHandle j("j", kInt);
   VarHandle n("n", kInt);
   auto forJ = For::make(
-      j,
-      0,
-      100,
-      Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
+      j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
   auto forN = For::make(
       n,
       0,
@@ -5332,9 +5851,7 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
       0,
       100,
       Store::make(
-          b_buf,
-          {k},
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, forK});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -5362,9 +5879,7 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
       0,
       100,
       Store::make(
-          b_buf,
-          {k},
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forK, forJ});

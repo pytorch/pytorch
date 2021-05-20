@@ -4,6 +4,7 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/native/LinearAlgebra.h>
 
 namespace at { namespace native {
 
@@ -20,6 +21,10 @@ void norm_kernel_cuda_impl(TensorIterator& iter, const Scalar& val) {
   } else {
      AT_ERROR("norm_kernel_cuda_impl expects norm to be integer or float");
   }
+  if (iter.numel() == 0) {
+    iter.output().fill_((p < 0) ? INFINITY : 0);
+    return;
+  }
 
   if (p == static_cast<double>(0)) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<scalar_t, acc_t>(), 0);
@@ -30,10 +35,14 @@ void norm_kernel_cuda_impl(TensorIterator& iter, const Scalar& val) {
   } else if (p == static_cast<double>(INFINITY)) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMaxOps<scalar_t, acc_t>(), 0);
   } else if (p == static_cast<double>(-INFINITY)) {
-    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMinOps<scalar_t, acc_t>(), std::numeric_limits<acc_t>::max());
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMinOps<scalar_t, acc_t>(), std::numeric_limits<acc_t>::infinity());
   } else {
     gpu_reduce_kernel<scalar_t, out_t>(iter, NormOps<scalar_t, acc_t>{ acc_t(p) }, 0);
   }
+  if (isComplexType(iter.output().scalar_type())) {
+    at::imag(iter.output()).zero_();
+  }
+
 }
 
 static void norm_kernel_cuda(TensorIterator& iter, const Scalar& p) {
@@ -54,6 +63,28 @@ static void norm_kernel_cuda(TensorIterator& iter, const Scalar& p) {
   });
 }
 
+static void linalg_vector_norm_kernel_cuda(TensorIterator& iter, Scalar ord) {
+  TORCH_CHECK(ord.isFloatingPoint(), "linalg.vector_norm expects ord to be float");
+  if (iter.output().scalar_type() == kHalf) {
+    return norm_kernel_cuda_impl<at::Half, float>(iter, ord);
+  } else if (iter.input_dtype() == kHalf && iter.output().scalar_type() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return norm_kernel_cuda_impl<at::Half, float, float>(iter, ord);
+  }
+  else if(iter.output().scalar_type() == kBFloat16) {
+    return norm_kernel_cuda_impl<at::BFloat16, float>(iter, ord);
+  } else if (iter.input_dtype() == kBFloat16 && iter.output().scalar_type() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return norm_kernel_cuda_impl<at::BFloat16, float, float>(iter, ord);
+  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.input_dtype(), "linalg_vector_norm_cuda", [&] {
+    norm_kernel_cuda_impl<scalar_t>(iter, ord);
+  });
+}
+
+
 REGISTER_DISPATCH(norm_stub, &norm_kernel_cuda);
+REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cuda);
+
 
 }} // namespace at::native

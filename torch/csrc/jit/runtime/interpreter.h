@@ -81,6 +81,7 @@ struct TORCH_API MobileCode : Code {
   explicit MobileCode(
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
+      bool emit_default_input_instructions = true,
       size_t remaining_bailout_depth = 0);
   ~MobileCode();
 };

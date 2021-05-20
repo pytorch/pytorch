@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
@@ -12,7 +13,9 @@ namespace autograd {
 using torch::autograd::AccumulateGrad;
 
 DistAutogradContext::DistAutogradContext(int64_t contextId)
-    : contextId_(contextId) {}
+    : contextId_(contextId),
+      impl_(c10::impl::VirtualGuardImpl{
+          at::hasCUDA() ? c10::DeviceType::CUDA : c10::DeviceType::CPU}) {}
 
 int64_t DistAutogradContext::contextId() const {
   return contextId_;
@@ -80,6 +83,17 @@ void DistAutogradContext::accumulateGrad(
     old_grad = it->value();
   }
 
+  // Gradients are computed using the forward streams. Local autograd
+  // engine uses AccumulateGrad function to retrieve and apply forward
+  // stream during the backward computation. In distributed autograd,
+  // we directly call AccumulateGrad::accumulateGrad, and skip the
+  // CUDA stream restoration from autograd function. Hence, we manually
+  // call it here to get the streams correct.
+  auto forward_stream =
+      torch::autograd::impl::grad_accumulator(variable)->stream(
+          grad.device().type());
+  c10::OptionalStreamGuard stream_guard(forward_stream);
+
   // No higher order gradients supported in distributed autograd.
   AutoGradMode grad_mode(false);
 
@@ -97,7 +111,9 @@ void DistAutogradContext::accumulateGrad(
       // refcount bump for the new_grad.
       num_expected_refs + 1,
       [this, &variable](at::Tensor&& grad_update) {
+        auto device = grad_update.device();
         accumulatedGrads_.insert(variable, std::move(grad_update));
+        recordGradEvent(device);
       });
 }
 
@@ -147,6 +163,22 @@ void DistAutogradContext::addOutstandingRpc(
 void DistAutogradContext::clearOutstandingRpcs() {
   std::unique_lock<std::mutex> lock(lock_);
   outStandingRpcs_.clear();
+}
+
+void DistAutogradContext::recordGradEvent(c10::Device device) {
+  if (device.is_cuda()) {
+    auto iter = gradReadyEvents_.find(device);
+    if (iter == gradReadyEvents_.end()) {
+      c10::Event event(device.type());
+      event.record(impl_.getStream(event.device()));
+      gradReadyEvents_.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(device),
+          std::forward_as_tuple(std::move(event)));
+    } else {
+      iter->second.record(impl_.getStream(device));
+    }
+  }
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> DistAutogradContext::
@@ -210,6 +242,12 @@ std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
 const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
     getGradients() const {
   std::lock_guard<std::mutex> guard(lock_);
+  // block current streams before accessing gradients to make sure that
+  // gradient computations are finished before use.
+  for (auto& entry : gradReadyEvents_) {
+    auto& event = entry.second;
+    event.block(impl_.getStream(event.device()));
+  }
   return accumulatedGrads_;
 }
 
@@ -227,8 +265,10 @@ void DistAutogradContext::runGradCallbackForVariable(
   }
   if (cb(grad)) {
     std::lock_guard<std::mutex> guard(lock_);
+    auto device = grad.device();
     // Needs to update the grad in the map.
     accumulatedGrads_.insert_or_assign(variable, std::move(grad));
+    recordGradEvent(device);
   }
 }
 

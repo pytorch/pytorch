@@ -78,8 +78,15 @@ PyObject* pyobj(const Variable& self) {
   return it == impl_to_pyobj.end() ? nullptr : it->second;
 }
 #else
-using torch::autograd::impl::pyobj;
-using torch::autograd::impl::set_pyobj;
+void set_pyobj(const Variable& self, PyObject* pyobj) {
+  TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
+  self.unsafeGetTensorImpl()->set_pyobj(pyobj);
+}
+
+PyObject* pyobj(const Variable& self) {
+  TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
+  return self.unsafeGetTensorImpl()->pyobj();
+}
 #endif
 
 // Creates a new Python object for a Variable. The Variable must not already

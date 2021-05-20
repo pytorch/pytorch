@@ -402,13 +402,9 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
   Tensor* b =
       Compute("b", {{64, "x"}}, [&](const VarHandle& x) { return a.load(x); });
   Tensor* c = Compute(
-      "c",
-      {{32, "x"}},
-      [&](const VarHandle& x) { return a.load(x + 10); });
+      "c", {{32, "x"}}, [&](const VarHandle& x) { return a.load(x + 10); });
   Tensor* d = Compute(
-      "d",
-      {{96, "x"}},
-      [&](const VarHandle& x) { return a.load(x + 2); });
+      "d", {{96, "x"}}, [&](const VarHandle& x) { return a.load(x + 2); });
   LoopNest l({b, c, d});
 
   auto bounds_info = inferBounds(l.root_stmt());
@@ -522,19 +518,15 @@ TEST(BoundsInference, CacheReads) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 3);
       });
   Tensor* C = Compute(
-      "C",
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -674,13 +666,13 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return (i + 1) * (j + 1); });
+      "B", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return (i + 1) * (j + 1);
+      });
 
   LoopNest l({A, B});
 
@@ -703,13 +695,11 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      "B",
-      {{64, "i"}, {64, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "B", {{64, "i"}, {64, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i, j) + 5;
       });
 
@@ -733,9 +723,9 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A",
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1000,9 +990,7 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
       0,
       100,
       Store::make(
-          b_buf,
-          {k},
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto par = Block::make({forJ, forK});
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
@@ -1031,9 +1019,7 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
       0,
       100,
       Store::make(
-          b_buf,
-          {k},
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto par = Block::make({forK, forJ});
 
@@ -1064,9 +1050,7 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
       10,
       100,
       Store::make(
-          b_buf,
-          {k},
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto forJ = For::make(
       j,
       10,
@@ -1104,10 +1088,7 @@ TEST(BoundsInference, IsOverlapping) {
   auto storeA2 = Store::make(a_buf, {i + 50}, i * 50);
   auto storeA3 = Store::make(a_buf, {i + 150}, i * 150);
   auto forI = For::make(
-      i,
-      0,
-      100,
-      Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
+      i, 0, 100, Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
   tensorexpr::analysis::MemDependencyChecker analyzer;
   forI->accept(&analyzer);
   ASSERT_TRUE(

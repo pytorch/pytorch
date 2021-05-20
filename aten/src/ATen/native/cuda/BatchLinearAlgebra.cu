@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
 #include <ATen/native/LinearAlgebraUtils.h>
@@ -1698,13 +1697,9 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
   }
 }
 
-// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used
-//     here. Batched cholesky is dispatched to magma.
-//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
-//     See https://github.com/pytorch/pytorch/issues/53879.
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
 #ifdef USE_CUSOLVER
-  if (batchCount(input) == 1 || !use_magma_) {
+  if (batchCount(input) == 1 || !use_magma_ || use_cusolver_potrf_batched_) {
     cholesky_helper_cusolver(input, upper, info);
   } else {
     cholesky_helper_magma(input, upper, info);
@@ -1949,13 +1944,14 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t m = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t n = magma_int_cast(A.size(-1), "A.size(-1)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
   // magma returns early if m <= 0 || n <= 0 for magmaTriangularSolveBatched
   // magmaTriangularSolve is calling cuBLAS and it prints
   // ** On entry to DTRSM  parameter number 9 had an illegal value
   // so let's use proper lda parameter here
-  magma_int_t lda = std::max<magma_int_t>(1, n);
+  magma_int_t lda = std::max<magma_int_t>(1, m);
   magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
   auto A_mat_stride = matrixStride(A);
@@ -2900,14 +2896,146 @@ static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
 #endif
 }
 
-void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
-  (void)rank;  // unused
-  (void)singular_values;  // unused
-  (void)rcond;  // unused
-  (void)driver_name;  // unused
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "linalg_lstsq_cuda", [&] {
+void gels_magma(const Tensor& a, Tensor& b, Tensor& infos) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "gels_magma", [&] {
     apply_gels<scalar_t>(a, b, infos);
   });
+}
+
+void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& infos) {
+  // The steps for using the QR decomposition for solving least squares problems
+  // are outlined here https://en.wikipedia.org/wiki/QR_decomposition#Using_for_solution_to_linear_inverse_problems
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  auto mn = std::min(m, n);
+
+  // explicitly broadcast the batch dimensions of A
+  // TODO: revisit this later to use batch_iterator_with_broadcasting in triangular_solve
+  IntArrayRef A_batch_sizes(A.sizes().data(), A.dim() - 2);
+  IntArrayRef B_batch_sizes(B.sizes().data(), B.dim() - 2);
+  std::vector<int64_t> expand_batch_portion = at::infer_size(A_batch_sizes, B_batch_sizes);
+
+  auto tau_shape = A.sizes().vec();
+  tau_shape.pop_back();
+  tau_shape.back() = mn;
+  Tensor tau = at::empty(tau_shape, A.options());
+
+  if (m >= n) {
+    // Step 1: compute QR factorization using geqrf
+    geqrf_kernel(A, tau);
+
+    // explicitly broadcast the batch dimensions of A
+    // we do it after geqrf so that we don't do redundant computations for the same input
+    auto A_expand_batch = expand_batch_portion;
+    A_expand_batch.insert(A_expand_batch.end(), {A.size(-2), A.size(-1)});
+    Tensor A_expanded = A.expand({A_expand_batch});
+    bool is_fortran_contiguous = A_expanded.transpose(-2, -1).is_contiguous();
+    Tensor A_broadcasted = is_fortran_contiguous ? A_expanded : cloneBatchedColumnMajor(A_expanded);
+    auto tau_expand_batch = expand_batch_portion;
+    tau_expand_batch.push_back(tau.size(-1));
+    Tensor tau_broadcasted = tau.expand({tau_expand_batch}).contiguous();
+
+    // Step 2: B <- Q^H B
+    ormqr_kernel(A_broadcasted, tau_broadcasted, B, /*left=*/true, /*transpose=*/true);
+
+    // Step 3: solve R X = B
+    bool upper = true;
+    bool transpose = false;
+    bool conjugate_transpose = false;
+    bool unitriangular = false;
+    triangular_solve_kernel(
+        const_cast<Tensor&>(A_broadcasted),
+        const_cast<Tensor&>(B),
+        const_cast<Tensor&>(infos),
+        upper, transpose, conjugate_transpose, unitriangular);
+  } else { // underdetermined case
+    Tensor Ah = cloneBatchedColumnMajor(A.conj().transpose(-2, -1));
+
+    // Step 1: compute QR factorization of conjugate transpose of A using geqrf
+    geqrf_kernel(Ah, tau);
+
+    // explicitly broadcast the batch dimensions of A
+    // we do it after geqrf so that we don't do redundant computations for the same input
+    auto A_expand_batch = expand_batch_portion;
+    A_expand_batch.insert(A_expand_batch.end(), {Ah.size(-2), Ah.size(-1)});
+    Tensor Ah_expanded = Ah.expand({A_expand_batch});
+    bool is_fortran_contiguous = Ah_expanded.transpose(-2, -1).is_contiguous();
+    Tensor Ah_broadcasted = is_fortran_contiguous ? Ah_expanded : cloneBatchedColumnMajor(Ah_expanded);
+
+    // Step 2: R^H Z = B
+    bool upper = true;
+    bool transpose = true;
+    bool conjugate_transpose = true;
+    bool unitriangular = false;
+    triangular_solve_kernel(
+        const_cast<Tensor&>(Ah_broadcasted),
+        const_cast<Tensor&>(B),
+        const_cast<Tensor&>(infos),
+        upper, transpose, conjugate_transpose, unitriangular);
+
+    // B matrix has the size max(m, n) x nrhs
+    // triangular_solve_kernel writes its output into the first m rows of B leaving the rest untouched
+    // we need to set the rest of the rows to zero so that the multiplication from step 3 is correct
+    B.narrow(-2, m, n - m).zero_();
+
+    auto tau_expand_batch = expand_batch_portion;
+    tau_expand_batch.push_back(tau.size(-1));
+    Tensor tau_broadcasted = tau.expand({tau_expand_batch}).contiguous();
+
+    // Step 3: X <- Q Z
+    ormqr_kernel(Ah_broadcasted, tau_broadcasted, B, /*left=*/true, /*transpose=*/false);
+  }
+}
+
+void gels_looped(const Tensor& a, Tensor& b, Tensor& infos) {
+#if defined(USE_CUSOLVER)
+  // linalg_lstsq_gels is a generic function that is implemented using
+  // geqrf_stub, ormqr_stub, and triangular_solve_stub
+  // It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
+  return linalg_lstsq_gels(a, b, infos);
+#else
+  return gels_magma(a, b, infos);
+#endif
+}
+
+void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singular_values*/, Tensor& infos, double /*rcond*/, std::string /*driver_name*/)  {
+  auto m = a.size(-2);
+  auto n = a.size(-1);
+
+  // first handle the underdetermined case (m < n)
+  // this case is not supported by MAGMA or cuBLAS
+  if (m < n) {
+#if defined(USE_CUSOLVER)
+    linalg_lstsq_gels(a, b, infos);
+#else
+    TORCH_CHECK(
+        false,
+        "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA. ",
+        "Please rebuild with cuSOLVER.");
+#endif
+  } else { // m >= n
+#ifndef USE_MAGMA
+    // MAGMA is not available we can either use cuBLAS or cuSOLVER here
+    // the batched vs looped dispatch is implemented based on the following performance results
+    // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
+    if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
+      // if CUDART_VERSION is defined then cuBLAS is available
+      #ifdef CUDART_VERSION
+      gels_batched_cublas(a, b, infos);
+      #else
+      // this would either call cuSOLVER or MAGMA,
+      // if MAGMA is called a runtime error is thrown about not finding MAGMA in compilation
+      gels_looped(a, b, infos);
+      #endif // CUDART_VERSION
+    } else {
+      gels_looped(a, b, infos);
+    }
+#else
+    // if both MAGMA and cuSOLVER are available this would call cuSOLVER
+    // MAGMA is called if cuSOLVER is not available
+    gels_looped(a, b, infos);
+#endif // USE_MAGMA
+  }
 }
 
 REGISTER_DISPATCH(lstsq_stub, &lstsq_kernel);
