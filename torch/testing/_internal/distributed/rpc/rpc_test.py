@@ -5829,6 +5829,41 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def test_owner_rref_forward_synchronization4(self):
         self._test_owner_rref_forward_synchronization("cuda:1", "cuda:1")
 
+    @staticmethod
+    def _return_tensor_view(i):
+        x = torch.ones(1000, 200).cuda(0) * i
+        torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+        # serialization of the return value will create a new tensor from the
+        # view, which is done outside of the user function.
+        return x.split(100)[0]
+
+    @skip_if_lt_x_gpu(1)
+    def test_tensor_view_as_return_value(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0 : 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        futs = []
+        for i in range(5):
+            futs.append(rpc.rpc_async(
+                dst,
+                TensorPipeAgentCudaRpcTest._return_tensor_view,
+                args=(i,)
+            ))
+
+        for i in range(5):
+            self.assertEqual(torch.ones(100, 200) * i, futs[i].wait())
+
+        rpc.shutdown()
+
     @skip_if_lt_x_gpu(1)
     def test_devices_option_mismatch(self):
         with self.assertRaisesRegex(

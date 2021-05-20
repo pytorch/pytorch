@@ -197,9 +197,31 @@ std::vector<std::vector<at::Tensor>> waitWork(
     try {
       work->wait();
     } catch (const std::exception& ex) {
-      std::cerr << "Exception received: " << ex.what() << std::endl;
+      LOG(ERROR) << "Exception received: " << ex.what() << std::endl;
     }
     outputTensors.emplace_back(work->result());
+  }
+  return copyTensors(outputTensors);
+}
+
+std::vector<std::vector<at::Tensor>> waitFuture(
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+  std::vector<std::vector<at::Tensor>> outputTensors;
+  for (auto& work : works) {
+    auto fut = work->getFuture();
+    try {
+      fut->wait();
+    } catch (const std::exception& ex) {
+      LOG(ERROR) << "Exception received: " << ex.what() << std::endl;
+    }
+    auto result = fut->value();
+    if (result.isNone()) {
+      outputTensors.emplace_back();
+    } else if (result.isTensorList()) {
+      outputTensors.emplace_back(result.toTensorVector());
+    } else {
+      throw std::runtime_error("future result should be tensor list or none");
+    }
   }
   return copyTensors(outputTensors);
 }
@@ -227,6 +249,49 @@ void checkProfiledEvents(
 }
 
 void testAllreduce(const std::string& path, const at::DeviceType b) {
+  const auto size = 4;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  // Generate inputs
+  std::vector<std::vector<at::Tensor>> inputs(size);
+  std::vector<std::vector<int64_t>> allShapes;
+  std::vector<int64_t> shapes = {16, 16};
+  for (auto i = 0; i < size; i++) {
+    auto tensor = at::ones(shapes, b) * i;
+    std::vector<int64_t> shapesVec = shapes;
+    allShapes.emplace_back(std::move(shapesVec));
+    inputs[i] = std::vector<at::Tensor>({tensor});
+  }
+
+  // Kick off work
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
+  const char* GLOO_ALLREDUCE_STR = "gloo:all_reduce";
+  enableProfilerLegacy(ProfilerConfig(
+      ProfilerState::CPU, /* report_input_shapes */ true, false));
+  for (auto i = 0; i < size; i++) {
+    work[i] = tests[i].getProcessGroup().allreduce(inputs[i]);
+  }
+  // Wait for work to complete
+  auto outputs = waitFuture(work);
+
+  auto event_lists = disableProfilerLegacy();
+  checkProfiledEvents(
+      std::move(event_lists), GLOO_ALLREDUCE_STR, size, allShapes);
+
+  // Verify outputs
+  const auto expected = (size * (size - 1)) / 2;
+  for (auto i = 0; i < size; i++) {
+    auto& tensor = outputs[i][0];
+    auto data = tensor.data_ptr<float>();
+    for (auto j = 0; j < tensor.numel(); j++) {
+      EXPECT_EQ(data[j], expected);
+    }
+  }
+}
+
+// UsingWorkAPI tests are to make sure we still properly support work API.
+// This should go away as we deprecate it.
+void testAllreduceUsingWorkAPI(const std::string& path, const at::DeviceType b) {
   const auto size = 4;
   auto tests = CollectiveTest::initialize(path, size);
 
@@ -308,7 +373,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       }
 
       // Wait for work to complete
-      auto outputs = waitWork(work);
+      auto outputs = waitFuture(work);
 
       auto event_lists = disableProfilerLegacy();
       checkProfiledEvents(
@@ -425,7 +490,7 @@ void testBarrier(const std::string& path) {
   }
 
   // Wait for work to complete
-  waitWork(work);
+  waitFuture(work);
 
   auto event_lists = disableProfilerLegacy();
   const char * GLOO_STR = "gloo:barrier";
@@ -658,6 +723,7 @@ TEST(ProcessGroupGlooTest, testAllReduceCPU) {
   {
     TemporaryFile file;
     testAllreduce(file.path, at::DeviceType::CPU);
+    testAllreduceUsingWorkAPI(file.path, at::DeviceType::CPU);
   }
 }
 
@@ -728,6 +794,7 @@ TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
   {
     TemporaryFile file;
     testAllreduce(file.path, at::DeviceType::CUDA);
+    testAllreduceUsingWorkAPI(file.path, at::DeviceType::CUDA);
   }
 }
 

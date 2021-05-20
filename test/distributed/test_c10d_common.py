@@ -691,7 +691,7 @@ class AbstractDistributedDataParallelTest(object):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
-            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
             self.assertTrue(ddp_logging_data.get("is_multi_device_module"))
         else:
             model, ddp_model, input, target = self._prepare_single_device_module(
@@ -701,7 +701,7 @@ class AbstractDistributedDataParallelTest(object):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
-            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
             self.assertFalse(ddp_logging_data.get("is_multi_device_module"))
 
         def step_model(model, input, target):

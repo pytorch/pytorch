@@ -388,6 +388,16 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
                             all_node_args_have_no_tensors(list_el, modules, cache)
                         found_one_tensor = found_one_tensor or \
                             (not this_list_el_args_have_no_tensors)
+                        # If found_one_tensor is True, there is no point in
+                        # recursing further as the end result will always
+                        # be True.
+                        # TODO(future PR): remove this entire function  and
+                        # change to dtype inference without recursion.
+                        if found_one_tensor:
+                            result = not found_one_tensor
+                            if cache:
+                                cache[node] = result
+                            return result
             elif isinstance(arg, int):
                 pass
             else:
@@ -395,6 +405,16 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
                     this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules, cache)
                     found_one_tensor = found_one_tensor or \
                         (not this_arg_args_have_no_tensors)
+                    # If found_one_tensor is True, there is no point in
+                    # recursing further as the end result will always
+                    # be True.
+                    # TODO(future PR): remove this entire function  and
+                    # change to dtype inference without recursion.
+                    if found_one_tensor:
+                        result = not found_one_tensor
+                        if cache:
+                            cache[node] = result
+                        return result
                 else:
                     found_one_tensor = True
             result = not found_one_tensor
