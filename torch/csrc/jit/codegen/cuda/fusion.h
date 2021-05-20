@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -197,7 +198,8 @@ class TORCH_CUDA_CU_API Fusion final {
   bool hasReduction();
 
   //! Run fusion segmentation algorithm to create a segmented fusion
-  std::unique_ptr<SegmentedFusion> segment();
+  std::unique_ptr<SegmentedFusion> segment(
+      const at::ArrayRef<at::IValue>& inputs);
 
   const auto& inputs() const {
     return inputs_;

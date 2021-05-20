@@ -1,3 +1,6 @@
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -264,6 +267,214 @@ class SchedulerTopologyChecker {
 };
 } // namespace
 
+SchedulerRuntimeInfo::SchedulerRuntimeInfo(
+    Fusion* complete_fusion,
+    const at::ArrayRef<IValue>& inputs,
+    bool create_expr_evaluator)
+    : complete_fusion_(complete_fusion) {
+  collectVectorizationInfo(inputs);
+  if (create_expr_evaluator) {
+    initializeExpressionEvaluator(inputs);
+  }
+}
+
+SchedulerRuntimeInfo::SchedulerRuntimeInfo(
+    const SchedulerRuntimeInfo& copy_from)
+    : complete_fusion_(copy_from.complete_fusion_),
+      alignment_map_(copy_from.alignment_map_),
+      common_alignment_size_(copy_from.common_alignment_size_) {
+  expression_evaluator_ =
+      std::make_unique<ExpressionEvaluator>(complete_fusion_);
+}
+
+size_t SchedulerRuntimeInfo::getAlignmentSize(TensorView* tv) {
+  auto alignment_entry = alignment_map_.find(tv);
+  if (alignment_entry == alignment_map_.end()) {
+    return max_alignment_size_in_byte;
+  } else {
+    return alignment_entry->second;
+  }
+}
+
+void SchedulerRuntimeInfo::initializeExpressionEvaluator(
+    const at::ArrayRef<IValue>& inputs) {
+  // TODO: refactor bindFusionInputs to better support this
+  //  use case, i.e. support construct and bind input.
+  expression_evaluator_ =
+      std::make_unique<ExpressionEvaluator>(complete_fusion_);
+  *expression_evaluator_ =
+      executor_utils::bindFusionInputs(inputs, complete_fusion_);
+}
+
+size_t SchedulerRuntimeInfo::collectAlignmentSize(
+    const at::Tensor& tensor) const {
+  const size_t address = reinterpret_cast<size_t>(tensor.data_ptr());
+  size_t alignment_size = 1;
+  size_t next_alignment_size = 2;
+
+  while (alignment_size <= max_alignment_size_in_byte &&
+         address % next_alignment_size == 0) {
+    alignment_size = next_alignment_size;
+    next_alignment_size *= 2;
+  }
+
+  return alignment_size;
+}
+
+void SchedulerRuntimeInfo::collectVectorizationInfo(
+    const at::ArrayRef<IValue>& inputs) {
+  common_alignment_size_ = max_alignment_size_in_byte;
+  size_t number_of_inputs = complete_fusion_->inputs().size();
+  std::unordered_map<TensorView*, size_t> cg_tensor_to_at_tensor_index;
+
+  for (auto input_index : c10::irange(number_of_inputs)) {
+    if (auto input_tensor = dynamic_cast<TensorView*>(
+            complete_fusion_->inputs()[input_index])) {
+      if (input_tensor->nDims() == 0) {
+        // A 0-dim tensor input would not need vectorization
+        continue;
+      }
+      if (input_tensor->domain()
+              ->domain()[input_tensor->nDims() - 1]
+              ->isBroadcast()) {
+        // skip the tensors with innermost iterdomain broadcasted,
+        //  as we will not vectorize these.
+        continue;
+      }
+
+      // Collect strides of the input tensor
+      TORCH_INTERNAL_ASSERT(inputs[input_index].isTensor());
+      const auto& at_tensor = inputs[input_index].toTensor();
+
+      cg_tensor_to_at_tensor_index.emplace(
+          std::make_pair(input_tensor, input_index));
+
+      // Collect alignment of the input tensor
+      auto alignment_size = collectAlignmentSize(at_tensor);
+      common_alignment_size_ = std::min(alignment_size, common_alignment_size_);
+      alignment_map_[input_tensor] = alignment_size;
+    }
+  }
+
+  // Compute max vector word size for each input,
+  //  tensors with inner most broadcast already
+  //  filtered out.  common_alignment_size_ is
+  //  computed up to this point.
+  for (auto it : cg_tensor_to_at_tensor_index) {
+    vectorword_map_[it.first] = collectMaxVectorizeSize(
+        inputs[it.second].toTensor(), common_alignment_size_);
+  }
+}
+
+size_t SchedulerRuntimeInfo::collectMaxVectorizeSize(
+    const at::Tensor& tensor,
+    size_t max_vector_size_in_byte) {
+  size_t vector_size = 1;
+  size_t next_vector_size = 2;
+  bool next_size_compatible = true;
+
+  while (next_size_compatible &&
+         next_vector_size * tensor.itemsize() <= max_vector_size_in_byte) {
+    // If inner most dimension size is not divisible by new word size
+    //  then we cannot vectorize with this width. But we do not
+    //  care if all dimensions of this tensor is 1, i.e.
+    //  input is actually a un-squeezed 0-dim tensor.
+    for (size_t i = tensor.ndimension(); i > 0; i--) {
+      if (tensor.size(i - 1) != 1) {
+        if (tensor.size(tensor.ndimension() - 1) % next_vector_size != 0 ||
+            tensor.stride(tensor.ndimension() - 1) != 1) {
+          next_size_compatible = false;
+        }
+        break;
+      }
+    }
+
+    if (!next_size_compatible) {
+      break;
+    }
+
+    // If any stride is not divisible by the next word size,
+    //  we cannot vectorize with this width.
+    for (auto stride : tensor.strides()) {
+      if (stride != 1 && stride % next_vector_size != 0) {
+        next_size_compatible = false;
+        break;
+      }
+    }
+
+    if (next_size_compatible) {
+      vector_size = next_vector_size;
+      next_vector_size *= 2;
+    }
+  }
+
+  return vector_size;
+}
+
+size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
+  auto recorded_size_it = vectorword_map_.find(tv);
+  if (recorded_size_it != vectorword_map_.end()) {
+    return recorded_size_it->second;
+  }
+
+  // If we don't have an record, either it is a tv with innermost
+  //  broadcast, or it is an intermediate tensor allocated by fuser
+  auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
+  auto tv_root_size = tv_root.size();
+
+  // Filter out 0-dim tensors
+  if (tv_root_size < 1) {
+    return 1;
+  }
+
+  // Filter out mismatched contiguity info
+  if (tv_root_size != tv->domain()->contiguity().size()) {
+    return 1;
+  }
+
+  // Filter out innermost broadcast tensors
+  auto inner_dimension = tv_root[tv_root_size - 1];
+  if (inner_dimension->isBroadcast()) {
+    return 1;
+  }
+
+  // Handle intermediate or output tensors that
+  //  will be allocated by fuser
+  auto maybe_data_type = tv->getDataType();
+
+  // Do not vectorize on data with unknown type
+  if (!maybe_data_type.has_value()) {
+    return 1;
+  }
+
+  size_t item_size = dataTypeSize(maybe_data_type.value());
+  // Assume we don't have non-divisible types for now.
+  TORCH_INTERNAL_ASSERT(max_alignment_size_in_byte % item_size == 0);
+  size_t max_vector_size = max_alignment_size_in_byte / item_size;
+
+  // Assuming intermediate tensors have friendly alignment, and
+  //  all contiguity true. Determine the largest power of 2 below
+  //  innermost dimension size for the word size of vectorizaiton
+  size_t vector_size = 1;
+  size_t next_vector_size = 2;
+  auto maybe_inner_dimension_size =
+      expression_evaluator_->evaluate(inner_dimension->extent());
+  TORCH_INTERNAL_ASSERT(maybe_inner_dimension_size.has_value());
+  size_t inner_dimension_size = maybe_inner_dimension_size.value();
+
+  while (next_vector_size <= max_vector_size &&
+         next_vector_size <= inner_dimension_size &&
+         inner_dimension_size % next_vector_size == 0) {
+    vector_size = next_vector_size;
+    next_vector_size *= 2;
+  }
+
+  // save output to avoid re-compute
+  vectorword_map_[tv] = vector_size;
+
+  return vector_size;
+}
+
 bool SchedulerEntry::sameAs(const SchedulerEntry* other) {
   if (has_reduction_param_ != other->has_reduction_param_) {
     return false;
@@ -303,13 +514,15 @@ std::vector<ReductionOp*> findReductionOps(Fusion* fusion) {
 
 class SingleReductionScheduler : public SchedulerEntry {
  public:
-  explicit SingleReductionScheduler(Fusion* fusion, ExpressionEvaluator& ee)
+  explicit SingleReductionScheduler(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info)
       : SchedulerEntry(ScheduleHeuristic::Reduction, true) {
-    computeHeuristics(fusion, ee);
+    computeHeuristics(fusion, runtime_info);
   }
 
   //! Check if the reduction heuristics apply in given fusion
-  static bool canSchedule(Fusion* fusion) {
+  static bool canSchedule(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
     auto red_ops = findReductionOps(fusion);
     if (red_ops.size() != 1) {
       return false;
@@ -344,8 +557,9 @@ class SingleReductionScheduler : public SchedulerEntry {
   }
 
  private:
-  void computeHeuristics(Fusion* fusion, ExpressionEvaluator& ee) {
-    auto param = getReductionHeuristics(fusion, ee);
+  void computeHeuristics(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
+    auto& expr_evaluator = runtime_info.expressionEvaluator();
+    auto param = getReductionHeuristics(fusion, expr_evaluator);
     TORCH_INTERNAL_ASSERT(param.has_value());
     rparams_ = param.value();
   }
@@ -353,12 +567,14 @@ class SingleReductionScheduler : public SchedulerEntry {
 
 class PointWiseScheduler : public SchedulerEntry {
  public:
-  explicit PointWiseScheduler(Fusion* fusion, ExpressionEvaluator& ee)
+  explicit PointWiseScheduler(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info)
       : SchedulerEntry(ScheduleHeuristic::PointWise, false) {
-    computeHeuristics(fusion, ee);
+    computeHeuristics(fusion, runtime_info.expressionEvaluator());
   }
 
-  static bool canSchedule(Fusion* fusion) {
+  static bool canSchedule(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
     auto red_ops = findReductionOps(fusion);
     return red_ops.empty();
   }
@@ -377,9 +593,11 @@ class PointWiseScheduler : public SchedulerEntry {
 
 class NormalizationScheduler : public SchedulerEntry {
  public:
-  explicit NormalizationScheduler(Fusion* fusion, ExpressionEvaluator& ee)
+  explicit NormalizationScheduler(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info)
       : SchedulerEntry(ScheduleHeuristic::Normalization, true) {
-    computeHeuristics(fusion, ee);
+    computeHeuristics(fusion, runtime_info);
   }
 
   void schedule(Fusion* fusion) override {
@@ -387,7 +605,8 @@ class NormalizationScheduler : public SchedulerEntry {
     scheduleNormalization(fusion, rparams_);
   }
 
-  static bool canSchedule(Fusion* fusion) {
+  static bool canSchedule(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
+    // auto & expr_evaluator = runtime_info.expressionEvaluator();
     std::vector<TensorView*> reduction_tv;
     for (auto tv : scheduler_utils::allTvs(fusion)) {
       if (tv->hasReduction() && !fusion->hasInput(tv)) {
@@ -445,8 +664,9 @@ class NormalizationScheduler : public SchedulerEntry {
   }
 
  private:
-  void computeHeuristics(Fusion* fusion, ExpressionEvaluator& ee) {
-    auto rparams = getNormalizationHeuristics(fusion, ee);
+  void computeHeuristics(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
+    auto& expr_evaluator = runtime_info.expressionEvaluator();
+    auto rparams = getNormalizationHeuristics(fusion, expr_evaluator);
     TORCH_INTERNAL_ASSERT(rparams.has_value());
     rparams_ = rparams.value();
   }
@@ -498,34 +718,38 @@ const std::vector<ScheduleHeuristic>& all_heuristics() {
   return hlist;
 }
 
+} // namespace
+
 // Simple dispatcher interface
-bool canSchedule(ScheduleHeuristic sh, Fusion* fusion) {
+bool SchedulerEntry::canSchedule(
+    ScheduleHeuristic sh,
+    Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info) {
   switch (sh) {
     case ScheduleHeuristic::PointWise:
-      return PointWiseScheduler::canSchedule(fusion);
+      return PointWiseScheduler::canSchedule(fusion, runtime_info);
     case ScheduleHeuristic::Reduction:
-      return SingleReductionScheduler::canSchedule(fusion);
+      return SingleReductionScheduler::canSchedule(fusion, runtime_info);
     case ScheduleHeuristic::Normalization:
-      return NormalizationScheduler::canSchedule(fusion);
+      return NormalizationScheduler::canSchedule(fusion, runtime_info);
     default:
       TORCH_INTERNAL_ASSERT(false, "unreachable");
       return false;
   }
   return false;
 }
-} // namespace
 
 std::unique_ptr<SchedulerEntry> SchedulerEntry::makeEntry(
     ScheduleHeuristic sh,
     Fusion* fusion,
-    ExpressionEvaluator& ee) {
+    SchedulerRuntimeInfo& runtime_info) {
   switch (sh) {
     case ScheduleHeuristic::PointWise:
-      return std::make_unique<PointWiseScheduler>(fusion, ee);
+      return std::make_unique<PointWiseScheduler>(fusion, runtime_info);
     case ScheduleHeuristic::Reduction:
-      return std::make_unique<SingleReductionScheduler>(fusion, ee);
+      return std::make_unique<SingleReductionScheduler>(fusion, runtime_info);
     case ScheduleHeuristic::Normalization:
-      return std::make_unique<NormalizationScheduler>(fusion, ee);
+      return std::make_unique<NormalizationScheduler>(fusion, runtime_info);
     default:
       TORCH_INTERNAL_ASSERT(false, "unreachable");
   }
@@ -534,9 +758,10 @@ std::unique_ptr<SchedulerEntry> SchedulerEntry::makeEntry(
 
 // Simply loop through the list as baseline strategy
 c10::optional<ScheduleHeuristic> SchedulerEntry::proposeHeuristics(
-    Fusion* fusion) {
+    Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info) {
   for (auto sh : all_heuristics()) {
-    if (canSchedule(sh, fusion)) {
+    if (canSchedule(sh, fusion, runtime_info)) {
       return sh;
     }
   }

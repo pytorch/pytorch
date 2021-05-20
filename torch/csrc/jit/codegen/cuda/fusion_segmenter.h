@@ -39,9 +39,11 @@ std::ostream& operator<<(std::ostream& os, const SegmentedEdge* edge);
 //! Can be used to produce fusions
 class TORCH_CUDA_CU_API SegmentedGroup {
  public:
-  SegmentedGroup() = default;
+  SegmentedGroup(SegmentedFusion* segmented_fusion)
+      : segmented_fusion_(segmented_fusion) {}
 
-  SegmentedGroup(Expr* expr) {
+  SegmentedGroup(Expr* expr, SegmentedFusion* segmented_fusion)
+      : segmented_fusion_(segmented_fusion) {
     exprs_.push_back(expr);
   }
 
@@ -83,6 +85,21 @@ class TORCH_CUDA_CU_API SegmentedGroup {
 
   //! Debug print function
   void print() const;
+
+  //! Returns the segmented fusion that this group is in
+  SegmentedFusion* segmentedFusion() const {
+    return segmented_fusion_;
+  }
+
+  //! Try to get a scheduler entry for this group with
+  //!  the given runtime info.
+  //! Returns a new scheduler with the same heuristics
+  //!  for this group if possible.
+  //!  Note that the schedule params can be different.
+  //! Returns a nullopt if this group cannot be scheduled
+  //!  with the same heuristics.
+  c10::optional<std::unique_ptr<SchedulerEntry>> getMaybeSchedulerEntry(
+      SchedulerRuntimeInfo& runtime_info);
 
  public:
   //! "Ancestor nodes", towards inputs of segmentedDAG
@@ -170,6 +187,9 @@ class TORCH_CUDA_CU_API SegmentedGroup {
     TORCH_INTERNAL_ASSERT(group_id_ == -1);
     group_id_ = id;
   }
+
+  //! SegmentedFusion this group belongs to
+  SegmentedFusion* segmented_fusion_;
 };
 
 std::ostream& operator<<(std::ostream& os, const SegmentedGroup* group);
@@ -189,9 +209,9 @@ class TORCH_CUDA_CU_API FusionHeuristics {
   //!  for the fusion owning the given expression
   explicit FusionHeuristics(
       ScheduleHeuristic schedule_heuristic,
-      ExpressionEvaluator& expr_eval) {
+      SchedulerRuntimeInfo& runtime_info) {
     heuristics_.emplace_back(SchedulerEntry::makeEntry(
-        schedule_heuristic, expr_eval.fusion(), expr_eval));
+        schedule_heuristic, runtime_info.fusion(), runtime_info));
     is_segmented_ = false;
   }
 
@@ -221,7 +241,7 @@ class TORCH_CUDA_CU_API FusionHeuristics {
 //!   this class owns the segmented groups
 class TORCH_CUDA_CU_API SegmentedFusion {
  public:
-  explicit SegmentedFusion(const Fusion* fusion);
+  explicit SegmentedFusion(std::unique_ptr<Fusion> fusion);
 
   //! Is the fusion segmented?
   bool isSegmented() const {
@@ -245,16 +265,16 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   }
 
   //! Returns the original un-segmented fusion
-  Fusion& completeFusion() {
-    return fusion_;
+  Fusion* completeFusion() {
+    return complete_fusion_.get();
   }
 
   const auto& inputs() const {
-    return fusion_.inputs();
+    return complete_fusion_->inputs();
   }
 
   const auto& outputs() const {
-    return fusion_.outputs();
+    return complete_fusion_->outputs();
   }
 
   //! Make a clone of the group and convert to fusion
@@ -283,9 +303,6 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   SegmentedEdge* newEdge(SegmentedGroup* from, SegmentedGroup* to, Val* val);
 
  protected:
-  //! Original full fusion
-  Fusion fusion_;
-
   //! Unique name for segmented fusion
   int segmented_fusion_name_;
 
@@ -312,12 +329,15 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   };
   Impl impl_;
 
+  //! A Copy of original full fusion
+  std::unique_ptr<Fusion> complete_fusion_;
+
  protected:
   friend class SegmentCandidateFinder;
   //! Make a heuristics entry for a group and parameters
   std::unique_ptr<SchedulerEntry> makeSchedulerEntry(
       SegmentedGroup* sg,
-      ExpressionEvaluator& ee);
+      SchedulerRuntimeInfo& runtime_info);
 
   //! Cleanup function to be call at the end of fusion
   //!  segment pass
@@ -375,19 +395,32 @@ struct TORCH_CUDA_CU_API SegmentCandidateFinderOptions {
 //! ffhal02306566f
 class TORCH_CUDA_CU_API SegmentCandidateFinder {
  public:
-  // Take a copy of fusion to own
-  SegmentCandidateFinder(
-      const Fusion* fusion,
-      SegmentCandidateFinderOptions options);
-
+  // Perform segmentation on a copy of the given fusion
   static std::unique_ptr<SegmentedFusion> segment(
       const Fusion* fusion,
+      const at::ArrayRef<IValue>& inputs,
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
-    SegmentCandidateFinder scf(fusion, options);
+    auto fusion_copy = std::make_unique<Fusion>(*fusion);
+    SegmentCandidateFinder scf(std::move(fusion_copy), inputs, options);
+    return std::move(scf.segmented_fusion_);
+  }
+
+  // Perform segmentation on and take ownership of the given fusion
+  static std::unique_ptr<SegmentedFusion> segment(
+      std::unique_ptr<Fusion> fusion,
+      const at::ArrayRef<IValue>& inputs,
+      SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
+    SegmentCandidateFinder scf(std::move(fusion), inputs, options);
     return std::move(scf.segmented_fusion_);
   }
 
  private:
+  // Perform segmentation on and take ownership of the given fusion
+  SegmentCandidateFinder(
+      std::unique_ptr<Fusion> fusion,
+      const at::ArrayRef<IValue>& inputs,
+      SegmentCandidateFinderOptions options);
+
   void resetTraversal();
 
   void resetLevels();
@@ -412,10 +445,18 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
     return segmented_fusion_->edges();
   }
 
-  Fusion& completeFusion() {
+  Fusion* completeFusion() {
     TORCH_INTERNAL_ASSERT(
         segmented_fusion_ != nullptr, "Segment finder not owinging any fusion");
     return segmented_fusion_->completeFusion();
+  }
+
+  SchedulerRuntimeInfo& runtimeInfo() {
+    return runtime_info_;
+  }
+
+  ExpressionEvaluator& expressionEvaluator() {
+    return runtime_info_.expressionEvaluator();
   }
 
   //! Additional merging iteration, clean up the rest of
@@ -475,6 +516,8 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   std::unique_ptr<SegmentedFusion> segmented_fusion_;
 
   std::unique_ptr<SegmenterAnalysis> group_dependency_;
+
+  SchedulerRuntimeInfo runtime_info_;
 };
 
 TORCH_CUDA_CU_API std::string toString(const SegmentedGroup* group);

@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 namespace torch {
@@ -225,7 +226,8 @@ void encodeBuffer(size_t value, std::string& buffer) {
 } // namespace
 
 InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<IValue>& inputs,
+    const SchedulerRuntimeInfo* additional_info) {
   IdLookupReturn ret;
 
   // lock mutex_ because we are touching encoding_
@@ -252,6 +254,9 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
       encoding_.push_back('s');
     }
     encoding_.push_back(';');
+  }
+  if (additional_info) {
+    encodeBuffer(additional_info->getCommonAlignmentSize(), encoding_);
   }
 
   auto& entry = encoding_lookup_[encoding_];
@@ -282,80 +287,129 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
   return ret;
 }
 
-FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion>&& fusion)
-    : fusion_(std::move(fusion)) {
-  FUSER_PERF_SCOPE("FusionExecutorCache::FusionExecutorCache");
-
-  //! Try to schedule the complete fusion
-  const auto maybe_complete_fusion_scheduler =
-      SchedulerEntry::proposeHeuristics(fusion_.get());
-
-  //! Decide if this fusion is segmented or not
-  const bool segmented = !maybe_complete_fusion_scheduler.has_value();
-
-  if (segmented) {
-    // Segment the fusion through FusionSegmenter and
-    //  initialize the caching for segmented heuristics
-    fusion_segments_ = fusion_->segment();
-    fusion_kernel_runtime_cache_.initSegmentCache(fusion_segments_.get());
-    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-      fusion_segments_->print();
-    }
-  } else {
-    // Initialize single kernel case
-    fusion_kernel_runtime_cache_.initSingleKernelCache(
-        fusion_.get(), maybe_complete_fusion_scheduler.value());
-    // In the case that the fusion isn't segmented but user
-    //  wants segmented fusion in the debug print. Will
-    //  print math of the composite fusion as placeholder
-    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-      fusion_->printMath();
-    }
-  }
-}
+FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
+    : fusion_(std::move(fusion)) {}
 
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("runFusionWithInputs");
 
-  // get unique id `unique_id` for given input set `inputs`;
-  auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs);
+  SchedulerRuntimeInfo runtime_info(fusion(), inputs);
+
+  auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs, &runtime_info);
   if (id_lookup_ret.eviction) {
     evictCache(id_lookup_ret.evict_id);
   }
 
   const size_t unique_id = id_lookup_ret.id;
+  auto kernel_runtime = getKernelRuntimeFor(inputs, unique_id);
+  most_recent_runtime_ = kernel_runtime;
+  return kernel_runtime->runWithInput(inputs, unique_id);
+}
 
-  // Manage Segmented Fusion through FusionKernelRuntimeCache
-  auto fusion_kernel_runtime =
-      fusion_kernel_runtime_cache_.getRt(inputs, unique_id);
+void FusionExecutorCache::evictCache(size_t cache_id) {
+  auto it = id_to_kernel_runtime_.find(cache_id);
+  TORCH_INTERNAL_ASSERT(it != id_to_kernel_runtime_.end());
+  it->second->evictCache(cache_id);
+  id_to_kernel_runtime_.erase(it);
+}
 
-  // Propagate the unique_id so the contained fusionExecutors in the runtime
-  //  entry will cache the buffer sizes and launch params based on this id.
-  auto&& ret = fusion_kernel_runtime->runWithInput(inputs, unique_id);
-  if (profiling_) {
-    most_recent_executor_log_ =
-        fusion_kernel_runtime->getMostRecentExecutorLog();
+FusionKernelRuntime* FusionExecutorCache::getKernelRuntimeFor(
+    const at::ArrayRef<IValue>& inputs,
+    size_t unique_id) {
+  // Check for id hit case
+  auto id_it = id_to_kernel_runtime_.find(unique_id);
+  if (id_it != id_to_kernel_runtime_.end()) {
+    return id_it->second;
   }
-  return std::move(ret);
+
+  // Access kernels associated with the common device id
+  auto dev_id = getCommonDeviceCUDA(inputs);
+  TORCH_INTERNAL_ASSERT(dev_id >= 0);
+  auto& kernel_runtimes = kernel_runtimes_[dev_id];
+
+  // Check for re-use hit case
+  //  a kernel runtime is re-usable if all the compiled
+  //  kernels have the same heuristic parameters
+  std::unique_ptr<FusionHeuristics> new_heuristics;
+
+  auto reuse_it = std::find_if(
+      kernel_runtimes.begin(),
+      kernel_runtimes.end(),
+      [&inputs, &new_heuristics](auto& kernel_runtime) {
+        auto maybe_heuristics = kernel_runtime->getMaybeHeuristicsFor(inputs);
+        if (!maybe_heuristics.has_value()) {
+          return false;
+        }
+        new_heuristics = std::move(maybe_heuristics.value());
+        return true;
+      });
+
+  FusionKernelRuntime* kernel_runtime;
+  if (reuse_it != kernel_runtimes.end()) {
+    kernel_runtime = reuse_it->get();
+    kernel_runtime->updateHeuristicsLaunchParams(new_heuristics.get());
+  } else {
+    // graph miss, need to re-build an optimized graph for this case
+    kernel_runtimes.emplace_back(
+        std::make_unique<FusionKernelRuntime>(fusion_.get(), inputs));
+    kernel_runtime = kernel_runtimes.back().get();
+    if (profiling_) {
+      kernel_runtime->profile(true);
+    }
+  }
+
+  id_to_kernel_runtime_[unique_id] = kernel_runtime;
+  return kernel_runtime;
 }
 
 FusionKernelRuntime::FusionKernelRuntime(
-    SegmentedFusion* segmented_fusion,
-    std::unique_ptr<FusionHeuristics>& heuristics,
-    size_t input_id)
-    : executors_(segmented_fusion->groups().size()),
-      heuristics_(std::move(heuristics)),
-      segmented_fusion_(segmented_fusion) {}
-
-FusionKernelRuntime::FusionKernelRuntime(
     Fusion* fusion,
-    std::unique_ptr<FusionHeuristics>& heuristics,
-    size_t input_id)
-    : executors_(1),
-      heuristics_(std::move(heuristics)),
-      is_segmented_(false),
-      complete_fusion_(fusion) {}
+    const at::ArrayRef<IValue>& inputs) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::FusionKernelRuntime");
+
+  // Make a copy of fusion and do segmentation and translation
+  //  on this copy
+  auto fusion_copy = std::make_unique<Fusion>(*fusion);
+
+  // Run segmentation on the copied fusion
+  SchedulerRuntimeInfo runtime_info(fusion_copy.get(), inputs, true);
+
+  // This is where pre-segment passes such as translateWelford will go
+
+  //! Try to schedule the complete fusion
+  const auto maybe_complete_fusion_heuristic =
+      SchedulerEntry::proposeHeuristics(fusion_copy.get(), runtime_info);
+
+  //! Decide if this fusion is segmented or not
+  const bool segmented = !maybe_complete_fusion_heuristic.has_value();
+
+  if (segmented) {
+    // Take ownership and segment transformed fusion
+    segmented_fusion_ =
+        SegmentCandidateFinder::segment(std::move(fusion_copy), inputs);
+    heuristics_ = segmented_fusion_->makeHeuristics(inputs);
+    executors_ =
+        std::vector<FusionExecutor>(segmented_fusion_->groups().size());
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      segmented_fusion_->print();
+    }
+  } else {
+    // Take ownership of the transformed fusion
+    single_kernel_fusion_ = std::move(fusion_copy);
+    heuristics_ = std::make_unique<FusionHeuristics>(
+        maybe_complete_fusion_heuristic.value(), runtime_info);
+    executors_ = std::vector<FusionExecutor>(1);
+    // In the case that the fusion isn't segmented but user
+    //  wants segmented fusion in the debug print. Will
+    //  print math of the composite fusion as placeholder
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      single_kernel_fusion_->printMath();
+    }
+  }
+
+  is_segmented_ = segmented;
+}
 
 std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     const at::ArrayRef<IValue>& inputs,
@@ -387,7 +441,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     } else {
       // Without a segmented group defaults to compiling the
       //  complete fusion
-      fusion_to_run = std::make_unique<Fusion>(*complete_fusion_);
+      fusion_to_run = std::make_unique<Fusion>(*single_kernel_fusion_);
     }
     CompileOptions options;
     options.device = c10::Device(DeviceType::CUDA, device_index);
@@ -558,185 +612,49 @@ void FusionKernelRuntime::updateHeuristicsLaunchParams(
   }
 }
 
-namespace {
-using HashType = FusionKernelRuntime::HashType;
-// Use a slightly more nontrivial combine to avoid collision
-//  (from Boost)
-inline HashType combineHash(HashType a, HashType b) {
-  return a ^
-      (b + 0x9e3779b9 + // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-       (a << 6) + // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-       (a >> 2)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-}
-} // namespace
+c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
+    getMaybeHeuristicsFor(const at::ArrayRef<IValue>& inputs) {
+  auto complete_fusion = is_segmented_ ? segmented_fusion_->completeFusion()
+                                       : single_kernel_fusion_.get();
+  SchedulerRuntimeInfo runtime_info(complete_fusion, inputs, true);
 
-FusionKernelRuntime::HashType FusionKernelRuntime::getHash(
-    FusionHeuristics* sh) {
-  HashType h = 0;
-  for (auto& se_pt : sh->heuristicsList()) {
-    h = combineHash(h, SchedulerEntryHash()(*se_pt));
-  }
-  return h;
-}
-
-FusionKernelRuntime::HeuristicTag::HeuristicTag(FusionHeuristics* sh) {
-  heuristics_ = sh;
-  hash_ = FusionKernelRuntime::getHash(sh);
-}
-
-bool FusionKernelRuntime::HeuristicTag::operator==(
-    const FusionKernelRuntime::HeuristicTag& other) const {
-  if (heuristics_->heuristicsList().size() !=
-      other.heuristics_->heuristicsList().size()) {
-    return false;
-  }
-
-  auto& heuristics = heuristics_->heuristicsList();
-  return std::equal(
-      heuristics.begin(),
-      heuristics.end(),
-      other.heuristics_->heuristicsList().begin(),
-      [](const SchedulerEntryPtr& a, const SchedulerEntryPtr& b) {
-        return a->sameAs(b.get());
-      });
-}
-
-void FusionKernelRuntimeCache::evictId(size_t input_id) {
-  TORCH_INTERNAL_ASSERT(id_to_rt_.count(input_id) != 0);
-
-  // Evict the stored input tensor meta data
-  //  corresponding to input_id
-  id_to_rt_.at(input_id)->evictCache(input_id);
-  id_to_rt_.erase(input_id);
-}
-
-FusionKernelRuntime* FusionKernelRuntimeCache::getRt(
-    const at::ArrayRef<IValue>& inputs,
-    size_t input_id) {
-  // Look up by input_id first
-  auto seg_runtime = getRtById(input_id);
-  if (seg_runtime == nullptr) {
-    // if id misses, lookup by heuristics
-    //  this will create new entry if not found
-    seg_runtime = getRtByHeuristics(inputs, input_id);
-  }
-  return seg_runtime;
-}
-
-FusionKernelRuntime* FusionKernelRuntimeCache::getRtById(size_t input_id) {
-  if (id_to_rt_.count(input_id) == 0) {
-    return nullptr;
-  }
-  return id_to_rt_.at(input_id);
-}
-
-FusionKernelRuntime* FusionKernelRuntimeCache::getRtByHeuristics(
-    const at::ArrayRef<IValue>& inputs,
-    size_t input_id) {
-  auto dev_id = getCommonDeviceCUDA(inputs);
-  std::unique_ptr<FusionHeuristics> heuristics;
+  // Segmented case, need to iterate over all segmented groups
   if (is_segmented_) {
-    heuristics = segmented_fusion_->makeHeuristics(inputs);
-  } else {
-    auto evaluator = executor_utils::bindFusionInputs(inputs, complete_fusion_);
-    heuristics = std::make_unique<FusionHeuristics>(
-        complete_fusion_heuristic_, evaluator);
-  }
+    auto heuristics = std::make_unique<FusionHeuristics>();
+    size_t total_groups = segmented_fusion_->groups().size();
+    for (size_t group_index = 0; group_index < total_groups; group_index++) {
+      auto group = segmented_fusion_->groups()[group_index];
 
-  HeuristicTag tag(heuristics.get());
-  auto rt = at(dev_id, tag);
-
-  // Heuristics miss
-  if (rt == nullptr) {
-    // Construct new runtime instance
-
-    std::unique_ptr<FusionKernelRuntime> new_rt;
-
-    if (is_segmented_) {
-      new_rt = std::make_unique<FusionKernelRuntime>(
-          segmented_fusion_, heuristics, input_id);
-    } else {
-      new_rt = std::make_unique<FusionKernelRuntime>(
-          complete_fusion_, heuristics, input_id);
-    }
-    rt = new_rt.get();
-
-    // Cache the new instance
-    insertEntry(dev_id, tag, std::move(new_rt));
-
-    // Make sure new runtime created in profiling mode is in
-    //  profiling mode.
-    if (profiling_) {
-      rt->profile(true);
+      auto maybe_scheduler_entry = group->getMaybeSchedulerEntry(runtime_info);
+      if (!maybe_scheduler_entry.has_value()) {
+        return c10::nullopt;
+      }
+      auto scheduler_entry = std::move(maybe_scheduler_entry.value());
+      if (!scheduler_entry->sameAs(
+              heuristics_->heuristicsList()[group_index].get())) {
+        return c10::nullopt;
+      }
+      heuristics->emplaceBack(std::move(scheduler_entry));
     }
 
-  } else {
-    // In the case of heuristics hit, the launch constraints still need to be
-    // updated
-    //  to match with the new input. The previously stored params if input_id
-    //  hit will directly use the launch params cached inside executor. And it
-    //  will be re-computed/updated again if evicted, so it is safe to overwrite
-    //  the launchparams here.
-    rt->updateHeuristicsLaunchParams(heuristics.get());
+    return heuristics;
   }
 
-  // Cache this new id
-  id_to_rt_[input_id] = rt;
-
-  return rt;
-}
-
-void FusionKernelRuntimeCache::initSegmentCache(
-    SegmentedFusion* segmented_fusion) {
-  is_segmented_ = true;
-  segmented_fusion_ = segmented_fusion;
-}
-
-void FusionKernelRuntimeCache::initSingleKernelCache(
-    Fusion* fusion,
-    ScheduleHeuristic schedule_heuristic) {
-  complete_fusion_ = fusion;
-  complete_fusion_heuristic_ = schedule_heuristic;
-}
-
-FusionKernelRuntime* FusionKernelRuntimeCache::at(
-    int dev_id,
-    HeuristicTag tag) {
-  // Get cache for the device id
-  auto& run_time_cache_ptr = seg_runtime_cache_group_[dev_id];
-
-  // Check empty
-  if (!run_time_cache_ptr) {
-    return nullptr;
+  // Un-segmented case, just check the complete fusion
+  auto& complete_fusion_scheduler = schedulers()[0];
+  auto complete_fusion_heuristic = complete_fusion_scheduler->heuristc();
+  if (!SchedulerEntry::canSchedule(
+          complete_fusion_heuristic, complete_fusion, runtime_info)) {
+    return c10::nullopt;
   }
 
-  // Get entry from cache
-  auto& cache_entry_ptr = run_time_cache_ptr->operator[](tag);
-
-  // Check empty
-  if (!cache_entry_ptr) {
-    return nullptr;
+  auto ret = std::make_unique<FusionHeuristics>(
+      complete_fusion_heuristic, runtime_info);
+  if (!complete_fusion_scheduler->sameAs(ret->heuristicsList()[0].get())) {
+    return c10::nullopt;
   }
 
-  // Return non-empty entry
-  return cache_entry_ptr.get();
-}
-
-void FusionKernelRuntimeCache::insertEntry(
-    int dev_id,
-    HeuristicTag tag,
-    SegRuntimePtr&& rt_pt) {
-  auto& run_time_cache_ptr = seg_runtime_cache_group_[dev_id];
-
-  if (!run_time_cache_ptr) {
-    // First time seeing this device
-    // run_time_cache_ptr is a reference so will be auto updated
-    // could have updated run_time_cache_ptr to save
-    // one hashing but too confusing to read
-    seg_runtime_cache_group_[dev_id] = std::make_unique<SegRuntimeCache>();
-  }
-
-  run_time_cache_ptr->operator[](tag) = std::move(rt_pt);
+  return ret;
 }
 
 bool GraphCache::requiresPermutation() {

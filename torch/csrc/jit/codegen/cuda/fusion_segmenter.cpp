@@ -189,9 +189,16 @@ void SegmentedGroup::finalize() {
 
 std::ostream& operator<<(std::ostream& os, const SegmentedGroup* group) {
   os << "g{";
-  for (size_t i = 0; i < group->exprs().size(); i++) {
-    os << group->exprs()[i]->name();
-    if (i + 1 != group->exprs().size())
+  auto expr_to_print = group->exprs();
+  std::sort(
+      expr_to_print.begin(),
+      expr_to_print.end(),
+      [](auto expr_a, auto expr_b) -> bool {
+        return expr_a->name() < expr_b->name();
+      });
+  for (size_t i = 0; i < expr_to_print.size(); i++) {
+    os << expr_to_print[i]->name();
+    if (i + 1 != expr_to_print.size())
       os << ", ";
   }
   os << "}\n";
@@ -226,18 +233,18 @@ std::string toString(const SegmentedEdge* edge) {
   return ss.str();
 }
 
-SegmentedFusion::SegmentedFusion(const Fusion* fusion)
-    : fusion_(*fusion), impl_(this) {
+SegmentedFusion::SegmentedFusion(std::unique_ptr<Fusion> fusion)
+    : impl_(this), complete_fusion_(std::move(fusion)) {
   segmented_fusion_name_ = segmentedFusionName();
 }
 
 SegmentedGroup* SegmentedFusion::Impl::makeGroup() {
-  groups_.emplace_back(std::make_unique<SegmentedGroup>());
+  groups_.emplace_back(std::make_unique<SegmentedGroup>(owning_fusion_));
   return groups_.back().get();
 }
 
 SegmentedGroup* SegmentedFusion::Impl::makeGroup(Expr* expr) {
-  groups_.emplace_back(std::make_unique<SegmentedGroup>(expr));
+  groups_.emplace_back(std::make_unique<SegmentedGroup>(expr, owning_fusion_));
   return groups_.back().get();
 }
 
@@ -316,7 +323,7 @@ void SegmentedFusion::draw() {
   auto filename = sstream.str();
 
   IrGraphGenerator::print(
-      &fusion_,
+      completeFusion(),
       filename.c_str(),
       IrGraphGenerator::DetailLevel::ComputeOnly,
       &expr_color_map);
@@ -532,26 +539,77 @@ std::vector<Val*> allInputsIfTrueElseOutputs(
   return merged_vals;
 }
 
+// A sorting utility used for debug printing only
+//  sorts the given vector of expressions in topological
+//  order, with equal cases respecting the original order
+//  in the vector.
+std::vector<Expr*> groupExprPrintSorting(const std::vector<Expr*>& exprs) {
+  std::vector<Expr*> exprs_to_print(exprs.begin(), exprs.end());
+  std::unordered_set<Expr*> exprs_to_print_set(exprs.begin(), exprs.end());
+  std::unordered_set<Expr*> exprs_visited;
+  std::vector<Expr*> sorted_list;
+  while (sorted_list.size() != exprs_to_print.size()) {
+    bool expr_added_to_sorted_list = false;
+    for (auto expr : exprs_to_print) {
+      if (!exprs_visited.count(expr)) {
+        bool add_this_expr = true;
+        // Check if any of the inputs of current
+        //  expression within the group
+        //  hasn't been visited
+        for (auto input : expr->inputs()) {
+          if (input->definition() &&
+              exprs_to_print_set.count(input->definition()) &&
+              !exprs_visited.count(input->definition())) {
+            add_this_expr = false;
+            break;
+          }
+        }
+
+        // Append the current group to sorted list
+        //  and mark visited
+        if (add_this_expr) {
+          expr_added_to_sorted_list = true;
+          exprs_visited.insert(expr);
+          sorted_list.push_back(expr);
+          break;
+        }
+      }
+    }
+    TORCH_INTERNAL_ASSERT(
+        expr_added_to_sorted_list,
+        "group debug print failed, exprs within given vector not a DAG");
+  }
+  return sorted_list;
+}
+
 // Utility function to list all expressions in a group
 void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
   IrPrinter irp(os);
+
+  auto sort_val_by_name = [](std::vector<Val*> vals_to_sort) {
+    std::sort(vals_to_sort.begin(), vals_to_sort.end(), [](Val* a, Val* b) {
+      return a->name() < b->name();
+    });
+    return vals_to_sort;
+  };
+
   os << "g{"
      << "(" << toString(group->heuristic()) << ")\n";
   os << "inputs: \n";
-  for (auto i : getAllInputs(group)) {
+  for (auto i : sort_val_by_name(getAllInputs(group))) {
     i->print();
   }
   os << "outputs: \n";
-  for (auto o : getAllOutputs(group)) {
+  for (auto o : sort_val_by_name(getAllOutputs(group))) {
     o->print();
   }
 
   os << "\n\n";
 
-  for (size_t i = 0; i < group->exprs().size(); i++) {
-    irp.handle(group->exprs()[i]);
-    if (i + 1 != group->exprs().size())
-      os << " , ";
+  auto expr_to_print = groupExprPrintSorting(group->exprs());
+
+  for (size_t i = 0; i < expr_to_print.size(); i++) {
+    irp.handle(expr_to_print[i]);
   }
   os << "}\n\n";
 }
@@ -577,7 +635,7 @@ class GroupDependencyAnalysis : public NonCopyable, public SegmenterAnalysis {
 
  public:
   //! Populate producers of all groups in segmented fusion
-  explicit GroupDependencyAnalysis(SegmentedFusion* segmented_fusion)
+  explicit GroupDependencyAnalysis(const SegmentedFusion* segmented_fusion)
       : segmented_fusion_(segmented_fusion) {
     computeAllProducers();
   }
@@ -707,7 +765,7 @@ class GroupDependencyAnalysis : public NonCopyable, public SegmenterAnalysis {
   }
 
  private:
-  SegmentedFusion* segmented_fusion_;
+  const SegmentedFusion* segmented_fusion_;
   DependencyMap known_producers_of_;
 };
 
@@ -825,8 +883,8 @@ void GroupDependencyAnalysis::computeAllProducers() {
   // Collect source nodes, with no producers we are guaranteed
   //  a source node on a DAG
   std::copy_if(
-      segmented_fusion_->groups().begin(),
-      segmented_fusion_->groups().end(),
+      segmented_fusion_->cgroups().begin(),
+      segmented_fusion_->cgroups().end(),
       std::inserter(visited, visited.end()),
       [](SegmentedGroup* group) { return group->producer_edges.empty(); });
 
@@ -875,17 +933,53 @@ void GroupDependencyAnalysis::computeAllProducers() {
 std::ostream& operator<<(
     std::ostream& os,
     const SegmentedFusion* segmented_fusion) {
+  // Topologically sort groups
+  GroupDependencyAnalysis dependency(segmented_fusion);
+  std::vector<SegmentedGroup*> groups_to_print(
+      segmented_fusion->cgroups().begin(), segmented_fusion->cgroups().end());
+  std::vector<SegmentedGroup*> sorted_groups_to_print;
+
+  // Sort groups topologically from producer to consumer before printing
+  while (!groups_to_print.empty()) {
+    auto group_it_to_append = groups_to_print.begin();
+    for (auto group_it_to_compare = groups_to_print.begin();
+         group_it_to_compare != groups_to_print.end();
+         group_it_to_compare++) {
+      if (dependency.isProducerOf(*group_it_to_compare, *group_it_to_append)) {
+        group_it_to_append = group_it_to_compare;
+      }
+    }
+    sorted_groups_to_print.push_back(*group_it_to_append);
+    groups_to_print.erase(group_it_to_append);
+  }
+
+  // Do a reverse look up to check the order of sorted groups
+  std::unordered_map<SegmentedGroup*, size_t> group_order;
+  for (size_t i = 0; i < sorted_groups_to_print.size(); i++) {
+    group_order[sorted_groups_to_print[i]] = i;
+  }
+
+  // Sort edges to print
+  std::vector<SegmentedEdge*> sorted_edges_to_print(
+      segmented_fusion->cedges().begin(), segmented_fusion->cedges().end());
+  std::sort(
+      sorted_edges_to_print.begin(),
+      sorted_edges_to_print.end(),
+      [&group_order](SegmentedEdge* edge_a, SegmentedEdge* edge_b) {
+        return group_order.at(edge_a->from) < group_order.at(edge_b->from);
+      });
+
   os << "Segmented_Fusion{ \n";
   os << "groups: \n";
-  for (const auto g : segmented_fusion->cgroups()) {
+  for (const auto g : sorted_groups_to_print) {
     os << g << "\n";
   }
   os << "edges: \n";
-  for (const auto e : segmented_fusion->cedges()) {
+  for (const auto e : sorted_edges_to_print) {
     os << e << "\n";
   }
   os << "group details:\n\n";
-  for (const auto g : segmented_fusion->cgroups()) {
+  for (const auto g : sorted_groups_to_print) {
     detailGroupPrint(os, g);
   }
   os << "} //Segmented_Fusion\n";
@@ -905,7 +999,8 @@ std::string toString(SegmentedFusion* segmented_fusion) {
 std::unique_ptr<Fusion> SegmentedFusion::makeFusion(SegmentedGroup* sg) {
   std::unique_ptr<Fusion> fusion_segment = std::make_unique<Fusion>();
 
-  auto complete_to_segment_map = Fusion::copy(&fusion_, fusion_segment.get());
+  auto complete_to_segment_map =
+      Fusion::copy(completeFusion(), fusion_segment.get());
 
   std::vector<Val*> input_list(
       fusion_segment->inputs().begin(), fusion_segment->inputs().end());
@@ -1244,7 +1339,6 @@ SegmentedGroup* SegmentCandidateFinder::mergeAllGivenGroups(
   joined_group->setHeuristic(deriveHeuristic(joined_group));
   return joined_group;
 }
-
 namespace {
 
 // Guard to temporarily change the inputs and outputs of a fusion. On
@@ -1312,21 +1406,23 @@ class FusionSegmentGuard : public NonCopyable {
 
 c10::optional<ScheduleHeuristic> tryMerge(
     Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info,
     SegmentedGroup* a,
     SegmentedGroup* b = nullptr) {
   FusionSegmentGuard fsg(fusion, getAllInputs(a, b), getAllOutputs(a, b));
 
-  return SchedulerEntry::proposeHeuristics(fusion);
+  return SchedulerEntry::proposeHeuristics(fusion, runtime_info);
 }
 
 c10::optional<ScheduleHeuristic> tryMerge(
     Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info,
     const std::vector<SegmentedGroup*>& segmented_groups) {
   FusionSegmentGuard fsg(
       fusion,
       allInputsIfTrueElseOutputs(segmented_groups, true),
       allInputsIfTrueElseOutputs(segmented_groups, false));
-  return SchedulerEntry::proposeHeuristics(fusion);
+  return SchedulerEntry::proposeHeuristics(fusion, runtime_info);
 }
 
 // This function is for cleanup and
@@ -1370,6 +1466,17 @@ ReductionOp* firstReductionFromGroup(SegmentedGroup* group) {
 }
 
 } // namespace
+
+c10::optional<std::unique_ptr<SchedulerEntry>> SegmentedGroup::
+    getMaybeSchedulerEntry(SchedulerRuntimeInfo& runtime_info) {
+  auto fusion = segmented_fusion_->completeFusion();
+  FusionSegmentGuard fsg(fusion, getAllInputs(this), getAllOutputs(this));
+  if (!SchedulerEntry::canSchedule(heuristic(), fusion, runtime_info)) {
+    return c10::nullopt;
+  }
+
+  return SchedulerEntry::makeEntry(heuristic(), fusion, runtime_info);
+}
 
 // Custom merge node passes:
 //  These passes are added at the beginning or the end of
@@ -1558,8 +1665,11 @@ class CombineReductions {
 
     // Final sanity check: the merged group can actually be scheduled
     Fusion* fusion =
-        &segment_candidate_finder_->segmented_fusion_->completeFusion();
-    if (!tryMerge(fusion, all_groups_to_merge_vec)) {
+        segment_candidate_finder_->segmented_fusion_->completeFusion();
+    if (!tryMerge(
+            fusion,
+            segment_candidate_finder_->runtimeInfo(),
+            all_groups_to_merge_vec)) {
       return nullptr;
     }
 
@@ -1705,8 +1815,11 @@ class CombineReductions {
           std::vector<SegmentedGroup*> groups_to_merge_vec(
               groups_to_merge_set.begin(), groups_to_merge_set.end());
           Fusion* fusion =
-              &segment_candidate_finder_->segmented_fusion_->completeFusion();
-          if (tryMerge(fusion, groups_to_merge_vec)) {
+              segment_candidate_finder_->segmented_fusion_->completeFusion();
+          if (tryMerge(
+                  fusion,
+                  segment_candidate_finder_->runtimeInfo(),
+                  groups_to_merge_vec)) {
             // Found a valid horizontal merge, want to proceed with merging here
             auto joined_group = segment_candidate_finder_->mergeAllGivenGroups(
                 groups_to_merge_vec);
@@ -1917,8 +2030,8 @@ bool CombineReductions::shouldRun(
 }
 
 bool SegmentCandidateFinder::codeGenSupportedMerge(SegmentedEdge* edge) {
-  Fusion* fusion = &segmented_fusion_->completeFusion();
-  auto h = tryMerge(fusion, edge->from, edge->to);
+  Fusion* fusion = segmented_fusion_->completeFusion();
+  auto h = tryMerge(fusion, runtime_info_, edge->from, edge->to);
   return h.has_value();
 }
 
@@ -1926,26 +2039,27 @@ bool SegmentCandidateFinder::codeGenSupportedMerge(SegmentedEdge* edge) {
 //       called twice
 ScheduleHeuristic SegmentCandidateFinder::deriveHeuristic(
     SegmentedGroup* group) {
-  Fusion* fusion = &segmented_fusion_->completeFusion();
-  auto h = tryMerge(fusion, group);
+  Fusion* fusion = segmented_fusion_->completeFusion();
+  auto h = tryMerge(fusion, runtime_info_, group);
   TORCH_INTERNAL_ASSERT(h.has_value());
   return h.value();
 }
 
 SegmentCandidateFinder::SegmentCandidateFinder(
-    const Fusion* fusion,
+    std::unique_ptr<Fusion> fusion,
+    const at::ArrayRef<IValue>& inputs,
     SegmentCandidateFinderOptions options)
-    : options_(options) {
-  segmented_fusion_ = std::make_unique<SegmentedFusion>(fusion);
+    : options_(options), runtime_info_(fusion.get(), inputs, true) {
+  segmented_fusion_ = std::make_unique<SegmentedFusion>(std::move(fusion));
   findSegments();
-  if (isDebugDumpEnabled(DebugDumpOption::FusionSegmentsDrawing)) {
-    segmented_fusion_->draw();
-  }
 }
 
 void SegmentCandidateFinder::findSegments() {
   FUSER_PERF_SCOPE("Finding valid fusion segment solutions");
   // TODO: Make traversal items local to this function.
+  if (isDebugDumpEnabled(DebugDumpOption::FusionSegmentsDrawing)) {
+    segmented_fusion_->draw();
+  }
 
   // Need this for initialization of the DAG that is process
   std::unordered_map<Expr*, SegmentedGroup*> expr2group;
@@ -1954,7 +2068,7 @@ void SegmentCandidateFinder::findSegments() {
   std::unordered_map<Val*, SegmentedGroup*> input2group;
 
   // Initialize DAG, convert each expr to a segment group
-  auto exprs = completeFusion().exprs();
+  auto exprs = completeFusion()->exprs();
   for (auto expr : exprs) {
     if (!ir_utils::isScalarOp(expr)) {
       auto new_group = segmented_fusion_->newGroup(expr);
@@ -1966,7 +2080,7 @@ void SegmentCandidateFinder::findSegments() {
   // TODO: these groups should never merged into any other groups, but are
   //       just there to support the dependency analysis. Later re-factor should
   //       avoid introducing them explicitly on the segmented fusion.
-  for (auto input : completeFusion().inputs()) {
+  for (auto input : completeFusion()->inputs()) {
     // These groups are used to represent input as a common
     //  producer in horizontal merges, and should never be
     //  seen as a candidate for vertical merge
@@ -2033,7 +2147,7 @@ void SegmentCandidateFinder::findSegments() {
   //  we can remove the input auxiliary groups. Should make the vertical
   //  merges avoid auxiliary group once we start general horizontal merges
   std::unordered_set<SegmentedGroup*> input_groups;
-  for (auto input : completeFusion().inputs()) {
+  for (auto input : completeFusion()->inputs()) {
     input_groups.insert(input2group.at(input));
   }
   eraseGroups(input_groups);
@@ -2245,48 +2359,20 @@ GroupDependencyAnalysis* SegmentCandidateFinder::getGroupDependency() {
   return group_dependency_->as<GroupDependencyAnalysis>();
 }
 
-namespace {
-inline void copyValue(
-    Val* key,
-    ExpressionEvaluator& from,
-    ExpressionEvaluator& to) {
-  auto concrete_val = from.evaluate(key);
-  TORCH_INTERNAL_ASSERT(concrete_val.has_value());
-  to.bind(key, concrete_val.value());
-}
-
-inline void inferGroupInputs(
-    SegmentedGroup* sg,
-    ExpressionEvaluator& ee,
-    ExpressionEvaluator& local_ee) {
-  for (auto v : getAllInputs(sg)) {
-    if (auto tv = dynamic_cast<TensorView*>(v)) {
-      for (auto id : tv->getRootDomain()) {
-        auto extent = id->extent();
-        copyValue(extent, ee, local_ee);
-      }
-    } else if (v != nullptr && v->isAnInt()) {
-      copyValue(v, ee, local_ee);
-    }
-  }
-}
-} // namespace
-
 FusionKernelRuntime::SchedulerEntryPtr SegmentedFusion::makeSchedulerEntry(
     SegmentedGroup* sg,
-    ExpressionEvaluator& ee) {
-  ExpressionEvaluator local_ee(&fusion_);
-  inferGroupInputs(sg, ee, local_ee);
-  FusionSegmentGuard fsg(&fusion_, getAllInputs(sg), getAllOutputs(sg));
-  return SchedulerEntry::makeEntry(sg->heuristic(), &fusion_, local_ee);
+    SchedulerRuntimeInfo& runtime_info) {
+  auto local_fusion = completeFusion();
+  FusionSegmentGuard fsg(local_fusion, getAllInputs(sg), getAllOutputs(sg));
+  return SchedulerEntry::makeEntry(sg->heuristic(), local_fusion, runtime_info);
 }
 
 std::unique_ptr<FusionHeuristics> SegmentedFusion::makeHeuristics(
     const at::ArrayRef<IValue>& inputs) {
   auto ret = std::make_unique<FusionHeuristics>();
-  auto evaluator = executor_utils::bindFusionInputs(inputs, &fusion_);
+  SchedulerRuntimeInfo runtime_info(completeFusion(), inputs, true);
   for (auto g : groups()) {
-    ret->emplaceBack(makeSchedulerEntry(g, evaluator));
+    ret->emplaceBack(makeSchedulerEntry(g, runtime_info));
   }
   return ret;
 }

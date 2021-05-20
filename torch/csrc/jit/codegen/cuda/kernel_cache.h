@@ -20,6 +20,7 @@ namespace cuda {
 
 class SegmentedGroup;
 class FusionHeuristics;
+class SchedulerRuntimeInfo;
 
 // Utilities for benchmarking and profiling
 struct ExecutorLog {
@@ -40,21 +41,13 @@ struct ExecutorLog {
 //!  single-kernel and multi-kernel caching/compiling/launching
 class TORCH_CUDA_CU_API FusionKernelRuntime {
  public:
+  explicit FusionKernelRuntime(
+      Fusion* fusion,
+      const at::ArrayRef<IValue>& inputs);
+
   //! Type notations within FusionKernelRuntime Context
   using HashType = size_t;
   using SchedulerEntryPtr = std::unique_ptr<SchedulerEntry>;
-
-  //! Create a runtime instance for segmented fusion
-  explicit FusionKernelRuntime(
-      SegmentedFusion* segmented_fusion,
-      std::unique_ptr<FusionHeuristics>& heuristics,
-      size_t input_id);
-
-  //! Create a runtime instance for complete/single-kernel fusion
-  explicit FusionKernelRuntime(
-      Fusion* fusion,
-      std::unique_ptr<FusionHeuristics>& heuristics,
-      size_t input_id);
 
   //! Evicts internally cached parameters based on input sizes.
   //!  An interface used by runtime caches.
@@ -80,6 +73,17 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
     profiling_ = to_profile;
   }
 
+  //! Returns if this runtime is segmented
+  bool isSegmented() {
+    return is_segmented_;
+  }
+
+  //! Returns the fusion segments if apply
+  SegmentedFusion* fusionSegments() {
+    TORCH_INTERNAL_ASSERT(is_segmented_);
+    return segmented_fusion_.get();
+  }
+
   //! Return the most recently used executor, corresponding to the
   //!  most recent kernel launch.
   //! TODO: have a interface for grabbing all recent logs. Need to put a buffer
@@ -90,39 +94,16 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
     return most_recent_executor_log_;
   }
 
+  // Try to compute heuristics based on the SegmentedFusion managed
+  //  in this kernel runtime, and will return a nullopt if either
+  //  any segment cannot be scheduled or the parameters don't match
+  using HeuristicsPtr = std::unique_ptr<FusionHeuristics>;
+  c10::optional<HeuristicsPtr> getMaybeHeuristicsFor(
+      const at::ArrayRef<IValue>& inputs);
+
   //! Copy the launch params given in the parameter heuristics to prepare
   //!  for kernel launch for a new input dimension but same heuristics
   void updateHeuristicsLaunchParams(FusionHeuristics* update_heuristics);
-
-  //! Cache Interface: Common utility for computing hash of scheduler entires
-  static HashType getHash(FusionHeuristics* sh);
-
-  //! Cache Interface: trivially copied and easily compared
-  //!   descriptor for a FusionKernelRuntime instance
-  class HeuristicTag {
-   public:
-    //! Computes hash upon creation
-    explicit HeuristicTag(FusionHeuristics*);
-
-    //! Tag equal abstracts the heuristics equivalence
-    bool operator==(const HeuristicTag& other) const;
-
-    //! Returns computed hash value
-    HashType hash() const {
-      return hash_;
-    }
-
-   private:
-    HashType hash_;
-    FusionHeuristics* heuristics_;
-  };
-
-  class HeuristicTagHash {
-   public:
-    HashType operator()(const HeuristicTag& et) const {
-      return et.hash();
-    }
-  };
 
  private:
   //! Interface to run a single kernel, either one kernel for single-kernel
@@ -145,7 +126,6 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   const std::vector<SchedulerEntryPtr>& schedulers();
 
  private:
-  friend class HeuristicTag;
   //! Entries indexed by groupID:
   //! Executors holding compiled kernels
   std::vector<FusionExecutor> executors_;
@@ -157,112 +137,18 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //  segmented fusion (true).
   bool is_segmented_ = true;
 
-  // Maintain the original segmented fusion that this runtime is maintaining
-  //  heuristics for. Applies only in the segmented fusion case, i.e.
-  //  is_segmented==true
-  SegmentedFusion* segmented_fusion_ = nullptr;
+  //! Multi-Kernel fusion segment when applies
+  std::unique_ptr<SegmentedFusion> segmented_fusion_ = nullptr;
 
-  // Maintain the original fusion that this runtime is maintaining
-  //  heuristics for. Applies only in the single-kernel fusion case, i.e.
-  //  is_segmented==false
-  Fusion* complete_fusion_ = nullptr;
+  //! Single-Kernel fusion when applies
+  //!  TODO: unify the segmented and un-segmented code-path
+  std::unique_ptr<Fusion> single_kernel_fusion_ = nullptr;
 
   // States for profiling support
   bool profiling_ = false;
 
   // The heuristics and executor for most recent kernel launch
   ExecutorLog most_recent_executor_log_;
-};
-
-//! Object holding cache entries for segmented fusion
-class TORCH_CUDA_CU_API FusionKernelRuntimeCache {
- public:
-  explicit FusionKernelRuntimeCache() = default;
-
-  //! Evict the cacheEntry by id.
-  //!  removes ID to RT lookup and corresponding
-  //!  input entries. Doesn't actually release any compiled
-  //!  kernel because compiling is expensive
-  void evictId(size_t input_id);
-
-  //! Interface for registering segmented fusion for caching heuristics
-  void initSegmentCache(SegmentedFusion* sf);
-
-  //! Interface for registering complete fusion for caching single kernel
-  //! heuristics
-  void initSingleKernelCache(
-      Fusion* fusion,
-      ScheduleHeuristic schedule_heuristic);
-
-  //! API for collecting FusionKernelRuntime entry from cache,
-  //!  contains a two level lookup,
-  //!  if input_id is hit -> returns cached
-  //!  if input_id miss -> lookup with heuristics -> return cached if found
-  //!  if heuristics miss -> create a new entry and return created
-  FusionKernelRuntime* getRt(
-      const at::ArrayRef<IValue>& inputs,
-      size_t input_id);
-
-  //! Turn On/Off profile mode in the executors
-  void profile(bool to_profile) {
-    profiling_ = to_profile;
-    // Heavy turning On/Off for now, turn on/off all executors' profiling modes
-    //  each time this function is called
-    for (auto& cache_group_it : seg_runtime_cache_group_) {
-      for (auto& runtime_it : *(cache_group_it.second)) {
-        runtime_it.second->profile(to_profile);
-      }
-    }
-  }
-
- private:
-  using HeuristicTag = FusionKernelRuntime::HeuristicTag;
-  using HeuristicTagHash = FusionKernelRuntime::HeuristicTagHash;
-  //! FusionKernelRuntime cache based on HeuristicTag lookup
-  using SegRuntimePtr = std::unique_ptr<FusionKernelRuntime>;
-  using SegRuntimeCache =
-      std::unordered_map<HeuristicTag, SegRuntimePtr, HeuristicTagHash>;
-  //! One cache per device id
-  using SegRuntimeCacheGroup =
-      std::unordered_map<int, std::unique_ptr<SegRuntimeCache>>;
-
-  //! internal maintenance functions
-  //!  Currently don't have releasing entry at this level since
-  //!  we would not release compiled kernels at this point
-  void insertEntry(int dev_id, HeuristicTag tag, SegRuntimePtr&& rt);
-  FusionKernelRuntime* at(int dev_id, HeuristicTag tag);
-
- private:
-  //! Checks if this cache is for segmented fusion or not
-  bool is_segmented_ = false;
-
-  //! Store the heuristic corresponding to the complete fusion if any
-  ScheduleHeuristic complete_fusion_heuristic_ = ScheduleHeuristic::PointWise;
-
-  //! Contains the complete fusion
-  Fusion* complete_fusion_ = nullptr;
-
-  //! Data structure hosting the actual caches
-  SegRuntimeCacheGroup seg_runtime_cache_group_;
-
-  //! Input_id to runtime shortcut
-  std::unordered_map<size_t, FusionKernelRuntime*> id_to_rt_;
-
-  //! Reference to the segmented fusion held in FusionExecutorCache
-  SegmentedFusion* segmented_fusion_ = nullptr;
-
-  //! In case of cache hit by input id, return pointer to that entry,
-  //!  returns nullptr if input_id miss
-  FusionKernelRuntime* getRtById(size_t input_id);
-
-  //! In case of input id miss, evaluate heuristics and find a hit by heuristics
-  //!   in case of heuristics miss, create a new entry
-  FusionKernelRuntime* getRtByHeuristics(
-      const at::ArrayRef<IValue>& inputs,
-      size_t input_id);
-
-  //! State used for profiling
-  bool profiling_ = false;
 };
 
 //! Encoding an input set to unique id, which is used to short-cut cache entry
@@ -295,7 +181,9 @@ class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
   //! within the lookup cache. This is needed because lookup shortcut is also
   //! cached in nested `GraphCache`, `FusionExecutorCache` and `FusionExecutor`.
   //! see [ Note -- 2 level cache implementation ]
-  IdLookupReturn lookupId(const at::ArrayRef<IValue>& inputs);
+  IdLookupReturn lookupId(
+      const at::ArrayRef<IValue>& inputs,
+      const SchedulerRuntimeInfo* additional_info = nullptr);
 
   //! debugging API that returns the size of lookup table
   size_t size() const {
@@ -394,7 +282,7 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
   //! create new fusion executor cache at a given device to handle kernel
   //! generation of dynamic sizes;
   //! fusion executor is taking the ownership of `fusion`;
-  explicit FusionExecutorCache(std::unique_ptr<Fusion>&& fusion);
+  explicit FusionExecutorCache(std::unique_ptr<Fusion> fusion);
 
   //! Execute fusion graph with given inputs, create `FusionExecutor` as needed;
   std::vector<at::Tensor> runFusionWithInputs(
@@ -408,31 +296,35 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
     fusion_->printMath();
   }
 
-  SegmentedFusion* fusionSegments() {
-    TORCH_INTERNAL_ASSERT(isSegmented());
-    return fusion_segments_.get();
+  FusionKernelRuntime* getMostRecentKernelRuntime() {
+    return most_recent_runtime_;
   }
 
-  bool isSegmented() {
-    return fusion_segments_ != nullptr;
-  }
-
+  // TODO: in a follow up we need a global logging structure
+  //  to capture runtime profiling info. We also need to define
+  //  a suitable profiling window / buffer size.
   ExecutorLog getMostRecentExecutorInfo() {
-    TORCH_INTERNAL_ASSERT(!isSegmented());
-    return most_recent_executor_log_;
+    TORCH_INTERNAL_ASSERT(most_recent_runtime_ != nullptr);
+    return most_recent_runtime_->getMostRecentExecutorLog();
   }
 
   void profile(bool to_profile) {
     profiling_ = to_profile;
-    fusion_kernel_runtime_cache_.profile(to_profile);
+    for (auto& it : kernel_runtimes_) {
+      for (auto& kernel_runtime : it.second) {
+        kernel_runtime->profile(to_profile);
+      }
+    }
   }
 
  private:
   //! evict cached short cut entry in `code_to_fe_lookup_` as well as cached
   //! entry in `FusionExecutor`
-  void evictCache(size_t cache_id) {
-    fusion_kernel_runtime_cache_.evictId(cache_id);
-  };
+  void evictCache(size_t cache_id);
+
+  FusionKernelRuntime* getKernelRuntimeFor(
+      const at::ArrayRef<IValue>& inputs,
+      size_t id);
 
  private:
   //! original un-scheduled `Fusion`;
@@ -441,17 +333,23 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
   //! inputs to unique_id lookup table;
   InputsIdLookup inputs_id_lookup_;
 
-  //! Multi-Kernel fusion segment when applies
-  std::unique_ptr<SegmentedFusion> fusion_segments_ = nullptr;
-
-  //! Caching for segmented fusions
-  FusionKernelRuntimeCache fusion_kernel_runtime_cache_;
+  //! Graphs after input dependent transfoms
+  std::unordered_map<size_t, std::vector<std::unique_ptr<FusionKernelRuntime>>>
+      kernel_runtimes_;
 
   //! Logging state for most recent compilation
   bool profiling_ = false;
 
   //! Logging state for most recent compilation
   ExecutorLog most_recent_executor_log_;
+
+  //! short-cut for cache hit
+  std::unordered_map<size_t, FusionKernelRuntime*> id_to_kernel_runtime_;
+
+  //! Profiling info:
+  //! TODO: this can be largely expanded to look at complete
+  //!   caching profiles. Currently it just makes it easier to test
+  FusionKernelRuntime* most_recent_runtime_ = nullptr;
 };
 
 class GraphCache {

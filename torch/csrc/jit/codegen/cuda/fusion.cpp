@@ -70,9 +70,10 @@ Fusion::Fusion(const Fusion& other) {
   Fusion::copy(&other, this);
 }
 
-std::unique_ptr<SegmentedFusion> Fusion::segment() {
+std::unique_ptr<SegmentedFusion> Fusion::segment(
+    const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("Segment Fusion");
-  return SegmentCandidateFinder::segment(this);
+  return SegmentCandidateFinder::segment(this, inputs);
 }
 
 IrCloner Fusion::copy(const Fusion* from, Fusion* to) {

@@ -12671,12 +12671,17 @@ TEST(NVFuserTest, FusionSegmentReducePointwise_CUDA) {
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
-  TORCH_CHECK(executor_cache.isSegmented(), "segmentation didn't happen");
-  TORCH_CHECK(
-      executor_cache.fusionSegments()->groups().size() == 2,
-      "segmentation didn't happen as expected");
-
   auto outputs = executor_cache.runFusionWithInputs({t0, t1, t2});
+
+  TORCH_CHECK(
+      executor_cache.getMostRecentKernelRuntime()->isSegmented(),
+      "segmentation didn't happen");
+  TORCH_CHECK(
+      executor_cache.getMostRecentKernelRuntime()
+              ->fusionSegments()
+              ->groups()
+              .size() == 2,
+      "segmentation didn't happen as expected");
 
   testValidate(
       executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
@@ -12739,9 +12744,10 @@ TEST(NVFuserTest, FusionSegmentReduceSoftmax_CUDA) {
   auto t2 = t1.sum({2});
   auto t3 = at::_softmax(t2.to(at::kDouble), -1, false);
 
-  TORCH_CHECK(executor_cache.isSegmented(), "segmentation didn't happen");
+  auto optimized_fusion = executor_cache.getMostRecentKernelRuntime();
+  TORCH_CHECK(optimized_fusion->isSegmented(), "segmentation didn't happen");
   TORCH_CHECK(
-      executor_cache.fusionSegments()->groups().size() == 2,
+      optimized_fusion->fusionSegments()->groups().size() == 2,
       "segmentation didn't happen as expected");
 
   testValidate(
@@ -14124,7 +14130,11 @@ TEST(NVFuserTest, FusionDAGMerging_CUDA) {
 
   fusion.addOutput(tv7);
 
-  auto fusion_segments = fusion.segment();
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({2, 2, 2, 2, 2}, options);
+  at::Tensor t1 = at::randn({2}, options);
+
+  auto fusion_segments = fusion.segment({t0, t1});
   TORCH_CHECK(fusion_segments->groups().size() <= 4);
 }
 
@@ -14155,11 +14165,6 @@ TEST(NVFuserTest, FusionDAGScalarMerging_CUDA) {
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
-  TORCH_CHECK(executor_cache.isSegmented(), "segmentation didn't happen");
-  TORCH_CHECK(
-      executor_cache.fusionSegments()->groups().size() == 2,
-      "segmentation didn't happen as expected");
-
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({16, 16, 16}, options);
   double s0 = 0.5;
@@ -14174,6 +14179,16 @@ TEST(NVFuserTest, FusionDAGScalarMerging_CUDA) {
   auto t5 = t4 + s0;
 
   auto outputs = executor_cache.runFusionWithInputs({t0, s0});
+
+  TORCH_CHECK(
+      executor_cache.getMostRecentKernelRuntime()->isSegmented(),
+      "segmentation didn't happen");
+  TORCH_CHECK(
+      executor_cache.getMostRecentKernelRuntime()
+              ->fusionSegments()
+              ->groups()
+              .size() == 2,
+      "segmentation didn't happen as expected");
 
   testValidate(
       executor_cache.fusion(), outputs, {t0, s0}, {t5}, __LINE__, __FILE__);
@@ -14483,8 +14498,11 @@ TEST(NVFuserTest, FusionSegmentVerticalMerge_CUDA) {
   segment_options.run_herrmann_merge = false;
   segment_options.run_final_merge = false;
 
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({2, 2, 2}, options);
+
   auto segmented_fusion =
-      SegmentCandidateFinder::segment(fusion.get(), segment_options);
+      SegmentCandidateFinder::segment(fusion.get(), {t0}, segment_options);
 
   TORCH_CHECK(segmented_fusion->groups().size() == 2);
 }
@@ -14520,8 +14538,11 @@ TEST(NVFuserTest, FusionSegmentHorizontalMerge_CUDA) {
   segment_options.run_herrmann_merge = false;
   segment_options.run_final_merge = false;
 
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({2, 2, 2}, options);
+
   auto segmented_fusion =
-      SegmentCandidateFinder::segment(fusion.get(), segment_options);
+      SegmentCandidateFinder::segment(fusion.get(), {t0, 1.0}, segment_options);
 
   TORCH_CHECK(segmented_fusion->groups().size() == 2);
 }
@@ -14556,8 +14577,11 @@ TEST(NVFuserTest, FusionSegmentMixReduction_CUDA) {
   segment_options.run_herrmann_merge = false;
   segment_options.run_final_merge = false;
 
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({2, 2, 2}, options);
+
   auto segmented_fusion =
-      SegmentCandidateFinder::segment(fusion.get(), segment_options);
+      SegmentCandidateFinder::segment(fusion.get(), {t0}, segment_options);
 
   TORCH_CHECK(segmented_fusion->groups().size() <= 2);
 }
