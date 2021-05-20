@@ -19,6 +19,9 @@ from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
 
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
+
 from textwrap import dedent
 from itertools import product, permutations
 
@@ -1803,6 +1806,18 @@ class TestTEFuser(JitTestCase):
         y = torch.rand(4, 4)
         z = 2
         script = self.checkScript(eager, (x, y, z))
+
+class TestOpInfo(JitTestCase):
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_te_compile(self, device, dtype, op):
+        allow_list = []
+        if op.name not in allow_list:
+            return
+        print(op.name)
+        5 // 0
+
+instantiate_device_type_tests(TestOpInfo, globals())
 
 if __name__ == '__main__':
     run_tests()
