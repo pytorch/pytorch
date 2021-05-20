@@ -1504,5 +1504,13 @@ void raw_delete(void* ptr) {
 
 } // namespace CUDACachingAllocator
 
+std::pair<size_t, size_t> raw_cuda_mem_get_info(int device) {
+  C10_CUDA_CHECK(cudaGetDevice(&device));
+  size_t device_free;
+  size_t device_total;
+  C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+  return {device_free, device_total};
+}
+
 } // namespace cuda
 } // namespace c10
