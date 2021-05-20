@@ -4,7 +4,7 @@ import io
 import linecache
 import pickletools
 import types
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -52,6 +52,14 @@ class _ModuleProviderAction(Enum):
 
 
 class PackagingErrorReason(Enum):
+    """Listing of different reasons a dependency may fail to package.
+
+    This enum is used to provide good error messages when
+    :class:`PackagingError` is raised.
+    """
+    def __repr__(self):
+        return '<%s.%s>' % (self.__class__.__name__, self.name)
+
     IS_EXTENSION_MODULE = "Module is a C extension module. torch.package supports Python modules only."
     NO_DUNDER_FILE = "Module had no __file__ defined."
     SOURCE_FILE_NOT_FOUND = (
@@ -97,27 +105,30 @@ class PackagingError(Exception):
 
     def __init__(self, dependency_graph: DiGraph):
         # Group errors by reason.
-        broken: Dict[PackagingErrorReason, List[str]] = {}
+        broken: Dict[PackagingErrorReason, List[str]] = defaultdict(list)
         for module_name, attrs in dependency_graph.nodes.items():
-            if "error" not in attrs:
+            error = attrs.get("error")
+            if error is None:
                 continue
-            error = attrs["error"]
             if error == PackagingErrorReason.NO_ACTION:
                 assert "action" not in attrs
-            broken.setdefault(error, []).append(module_name)
+            broken[error].append(module_name)
 
-        message = io.StringIO("Errors raised while packaging:\n")
+        message = io.StringIO()
+        message.write("\n")
 
         for reason, module_names in broken.items():
             message.write(f"* {reason.value}\n")
             for module_name in module_names:
-                message.write(f"\t{module_name}\n")
+                message.write(f"    {module_name}\n")
 
                 # Print additional context if it's provided.
                 error_context = dependency_graph.nodes[module_name].get("error_context")
                 if error_context is not None:
-                    message.write(f"\t\tContext: {error_context}\n")
+                    message.write(f"      Context: {error_context}\n")
 
+        # Save the dependency graph so that tooling can get at it.
+        self.dependency_graph = dependency_graph
         super().__init__(message.getvalue())
 
 
