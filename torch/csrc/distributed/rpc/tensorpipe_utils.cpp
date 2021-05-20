@@ -48,7 +48,7 @@ inline const c10::Stream& getStreamForDevice(
       return stream;
     }
   }
-  TORCH_INTERNAL_ASSERT(false);
+  TORCH_INTERNAL_ASSERT(false, "No stream found for device ", device);
 }
 
 } // namespace

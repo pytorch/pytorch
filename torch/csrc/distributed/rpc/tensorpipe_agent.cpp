@@ -810,7 +810,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           if (error) {
             LOG(WARNING)
                 << "RPC agent for " << workerInfo_.name_
-                << " encountered error when sendsing response to request #"
+                << " encountered error when sending response to request #"
                 << messageId << " to " << pipe->getRemoteName() << ": "
                 << error.what();
             return;
@@ -893,7 +893,8 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
             // `process***Call` methods to synchronize CUDA streams there
             // to make sure that we fetch the correct value from `to_here()`
             // call.
-            futureResponseMessage = cb_->operator()(*requestMessage, ctx);
+            futureResponseMessage =
+                cb_->operator()(*requestMessage, std::move(ctx));
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 c10::make_intrusive<JitFuture>(at::AnyClassType::get());
@@ -902,11 +903,12 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           increaseCallCount(serverActiveAsyncCalls_);
           futureResponseMessage->addCallback(
-              [this, pipe, messageId, ctx{std::move(ctx)}](
+              [this, pipe, messageId](
                   JitFuture& futureResponseMessage) mutable {
                 decreaseCallCount(serverActiveCalls_);
                 decreaseCallCount(serverActiveAsyncCalls_);
-                auto streams = getCurrentStreamsForDevices(devices_);
+                auto streams = getCurrentStreamsForDevices(
+                    futureResponseMessage.devices());
                 sendCompletedResponseMessage(
                     pipe, futureResponseMessage, messageId, std::move(streams));
               });
