@@ -1189,6 +1189,12 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ cuDNN
+if(USE_CUDNN)
+  set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
+  include_directories(${CUDNN_FRONTEND_INCLUDE_DIR})
+endif()
+
 # ---[ HIP
 if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
