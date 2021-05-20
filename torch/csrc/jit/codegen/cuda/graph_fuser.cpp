@@ -571,6 +571,10 @@ struct CudaGraphFuser {
     //  = Node* for chunk_output_idx'th output of the chunk(inputs[input_nr])
     std::vector<std::vector<Value*>> chunked_inputs;
 
+    // We have asserted single output earlier
+    auto producer_output_sizes =
+        producer_for_chunk_node->output()->type()->cast<TensorType>()->sizes();
+
     for (auto input : producer_for_chunk_node->inputs()) {
       // XXX: we only work with pointwise ops in here, so we know it is valid to
       // push the concat only through tensor arguments (and all other args can
@@ -599,9 +603,61 @@ struct CudaGraphFuser {
       // distinct from Node.
       bchunk->addInput(input);
       chunked_inputs.emplace_back(); // alas, to not be C++17
+
+      // properly compute strides for BroadcastingChunk
+      //
+      // We copy stride of each dimension from input to output for
+      // BroadcastingChunk. A note is that Chunk should not alter strides,
+      // However, broadcasted dimension should have a stride 0. We could have
+      // broadcasting happening on existing dimensions in input (case1), as well
+      // as extended dimension that does not exist in input (case2).
+      // e.g.
+      // If we look at an input tensor t0 with shape [3, 1] broadcasted to
+      // output tensor t1 with shape [4, 1, 3, 3],
+      // We set stride to zero in case of broadcast, which could happen in:
+      //   case1: t1.dim[3] (broadcasted as in the description above)
+      //   case2: t1.dim[0] (broadcasted implicitly)
+      std::vector<int64_t> strides;
+      auto input_type = input->type()->cast<TensorType>();
+      auto input_sizes = input_type->sizes();
+      auto input_strides = input_type->strides();
+      if (producer_output_sizes.isComplete() && input_sizes.isComplete() &&
+          input_strides.isComplete()) {
+        auto input_c_sizes = input_sizes.concrete_sizes().value();
+        auto input_c_strides = input_strides.concrete_sizes().value();
+        auto output_c_sizes = producer_output_sizes.concrete_sizes().value();
+        int output_index = int(output_c_sizes.size()) - 1;
+        strides.resize(output_index);
+        AT_ASSERT(output_index >= int(input_c_sizes.size()) - 1);
+        for (int input_index = int(input_c_sizes.size()) - 1; input_index >= 0;
+             input_index--, output_index--) {
+          // in braodcast case 1, we set stride to 0;
+          // otherwise, stride remain the same.
+          if (input_c_sizes[input_index] == 1 &&
+              output_c_sizes[output_index] != 1) {
+            strides[output_index] = 0;
+          } else {
+            strides[output_index] = input_c_strides[input_index];
+          }
+        }
+
+        // continue on expanding dimensions to set stride to 0 for case2
+        while (output_index >= 0) {
+          strides[output_index] =
+              output_c_sizes[output_index] == 1 ? strides[output_index + 1] : 0;
+          output_index--;
+        }
+      }
+
       for (auto chunk_sel : producer_chunk_outputs) {
         Value* input_chunk_sel = bchunk->addOutput();
-        input_chunk_sel->setType(chunk_sel->type());
+        auto chunk_sel_type = chunk_sel->type()->cast<TensorType>();
+        if (strides.empty() || !chunk_sel_type->sizes().isComplete()) {
+          input_chunk_sel->setType(chunk_sel_type);
+        } else {
+          input_chunk_sel->setType(chunk_sel_type->withSizesStrides(
+              chunk_sel_type->sizes().concrete_sizes().value(), strides));
+        }
         chunked_inputs.back().push_back(input_chunk_sel);
       }
     }

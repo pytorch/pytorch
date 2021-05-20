@@ -137,7 +137,8 @@ bool complyWith(
         if (j != 0) {
           // we use contiguity to collapse dimension, if size == 1, it is
           // always collapsible
-          if (t_sizes[sorted_index] != 1) {
+          // computeStrideProps also default to contiguous when stride == 1
+          if (t_sizes[sorted_index] != 1 && t_strides[sorted_index] != 1) {
             TORCH_INTERNAL_ASSERT(
                 stride_properties[j - 1]->stride_index_.has_value(),
                 "Counknown index is meaningless");

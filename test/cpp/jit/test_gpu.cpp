@@ -10239,10 +10239,6 @@ TEST(NVFuserTest, FusionGroupGuardSimpleTensor_CUDA) {
   auto t1 = at::randn({16, 16, 8}, options);
   TORCH_CHECK(complyWith(t1, tensor_type));
 
-  // rank failure
-  auto t5 = at::randn({16, 8, 8, 8}, options);
-  TORCH_CHECK(!complyWith(t5, tensor_type));
-
   // broadcasting semantic change failure
   auto t2 = at::randn({16, 1, 8}, options);
   TORCH_CHECK(!complyWith(t2, tensor_type));
@@ -10254,6 +10250,15 @@ TEST(NVFuserTest, FusionGroupGuardSimpleTensor_CUDA) {
   // contiguity failure via slicing
   auto t4 = t0.slice(2, 0, 8, 2);
   TORCH_CHECK(!complyWith(t4, tensor_type));
+
+  // rank failure
+  auto t5 = at::randn({16, 8, 8, 8}, options);
+  TORCH_CHECK(!complyWith(t5, tensor_type));
+
+  // contiguity on stride 1 dimension with implicit broadcasting
+  auto t = at::randn({4}, options);
+  auto t6 = t.unsqueeze(1).expand({4, 8});
+  TORCH_CHECK(complyWith(t6, TensorType::create(t6)));
 }
 
 TEST(NVFuserTest, FusionGroupGuardBroadcastTensor_CUDA) {
