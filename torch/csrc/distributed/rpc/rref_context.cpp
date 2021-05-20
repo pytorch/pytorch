@@ -665,7 +665,11 @@ void RRefContext::recordThreadLocalPendingRRefs() {
 }
 
 c10::intrusive_ptr<JitFuture> RRefContext::waitForThreadLocalPendingRRefs() {
-  auto jitFuturePtr = c10::make_intrusive<JitFuture>(BoolType::get());
+  // We need to set devices here, even if they won't be used by the value (it's
+  // a bool, it doesn't contain tensors!) because we need them to be propagated
+  // to child futures. This is silly and we should find a way to avoid this.
+  auto jitFuturePtr =
+      c10::make_intrusive<JitFuture>(BoolType::get(), agent_->getDevices());
   if (userTable_.empty()) {
     jitFuturePtr->markCompleted(true);
   } else {
