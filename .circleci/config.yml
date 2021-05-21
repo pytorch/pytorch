@@ -6710,12 +6710,6 @@ workflows:
           name: binary_windows_libtorch_3_7_cpu_debug_build
       - binary_windows_build:
           build_environment: libtorch 3.7 cpu release
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_build:
           build_environment: wheel 3.7 cu102
@@ -8335,9 +8329,6 @@ workflows:
       - binary_windows_build:
           build_environment: libtorch 3.7 cpu debug
           name: binary_windows_libtorch_3_7_cpu_debug_build
-      - binary_windows_build:
-          build_environment: libtorch 3.7 cpu release
-          name: binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_build:
           build_environment: wheel 3.7 cu102
           name: binary_windows_wheel_3_7_cu102_build

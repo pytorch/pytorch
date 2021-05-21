@@ -116,7 +116,7 @@ WORKFLOW_DATA = [
         ["libtorch", "3.7", "cpu", "release"],
         None,
         "binary_windows_libtorch_3_7_cpu_release_build",
-        is_master_only=True,
+        is_master_only=False,
     ),
     SmoketestJob(
         "binary_windows_build",
