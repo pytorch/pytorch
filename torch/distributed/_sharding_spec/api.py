@@ -91,7 +91,7 @@ class ChunkShardingSpec(ShardingSpec):
     @staticmethod
     def _verify_devices(placements):
         if placements is None or len(placements) == 0:
-            raise ValueError(f'None/Empty placement provided: {placement}')
+            raise ValueError(f'None/Empty placement provided: {placements}')
         for dev in placements:
             if not isinstance(dev, PlacementSpec) and not is_valid_device(dev):
                 raise ValueError(f'{dev} is not a valid device')

@@ -1070,6 +1070,10 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
     if (n->inputs().size() != 2) {
       return nullptr;
     }
+    // TODO: make __getitem__ work for other container types
+    if (n->input(0)->type()->castRaw<DictType>() == nullptr) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       auto dict = p_node->Input(0).toGenericDict();
       auto key = p_node->Input(1);
