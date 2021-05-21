@@ -1,6 +1,7 @@
 import operator
 import unittest
 import contextlib
+import math
 import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
@@ -15,9 +16,12 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests
+    enable_profiling_mode_for_profiling_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
+
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 
 from textwrap import dedent
 from itertools import product, permutations
@@ -1267,6 +1271,7 @@ class TestTEFuser(JitTestCase):
             torch.trunc,
             torch.frac,
             F.hardshrink,
+            F.leaky_relu,
             lambda x: torch.threshold(x, 0, -10),
             lambda x: torch.clamp(x, -10, 10),
         ]
@@ -1802,6 +1807,133 @@ class TestTEFuser(JitTestCase):
         y = torch.rand(4, 4)
         z = 2
         script = self.checkScript(eager, (x, y, z))
+
+class TestNNCOpInfo(TestCase):
+    @onlyCPU
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_te_compile(self, device, dtype, op):
+        work_list = [
+            '__radd__',
+            '__rdiv__',
+            '__rmul__',
+            'abs',
+            'acos',
+            'add',
+            'addcmul',
+            'asin',
+            'atan2',
+            'atan',
+            'ceil',
+            'clamp',
+            'clamp',
+            'cos',
+            'cosh',
+            'eq',
+            'erf',
+            'erfc',
+            'exp',
+            'expand',
+            'expm1',
+            'floor',
+            'ge',
+            'gt',
+            'le',
+            'lerp',
+            'lgamma',
+            'log10',
+            'log1p',
+            'log2',
+            'log',
+            'lt',
+            'masked_fill',
+            'mm',
+            'mul',
+            'ne',
+            'neg',
+            'nn.functional.gelu',
+            'nn.functional.hardshrink',
+            'nn.functional.hardswish',
+            'nn.functional.hardtanh',
+            'pow',
+            'reciprocal',
+            'round',
+            'rsqrt',
+            'sigmoid',
+            'sin',
+            'sinh',
+            'sqrt',
+            'sub',
+            'tan',
+            'tanh',
+            'trunc',
+            'unsqueeze',
+        ]
+        known_failures = ['matmul', 'permute', 'frac', '__rmatmul__']
+        # If adding new OpInfo tests cause this test to fail, add it into here
+        skip_ops = []
+        if op.name in skip_ops:
+            return
+        try:
+            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            for sample_input in sample_inputs_itr:
+                arg_values = [sample_input.input] + list(sample_input.args)
+                kwarg_values = sample_input.kwargs
+                param_names = []
+                param_values = []
+                fx_args = []
+                for idx, v in enumerate(arg_values):
+                    if isinstance(v, torch.Tensor):
+                        param_names.append(f"arg_{idx}")
+                        param_values.append(v)
+                        fx_args.append(param_names[-1])
+                    else:
+                        fx_args.append(f'{repr(v)}')
+
+                for k, v in kwarg_values.items():
+                    if isinstance(v, torch.Tensor):
+                        param_names.append(k)
+                        param_values.append(v)
+                        fx_args.append(f'{k} = {k}')
+                    else:
+                        fx_args.append(f'{k} = {repr(v)}')
+
+                code = f"""
+def f({', '.join(param_names)}):
+    return op.op({', '.join(fx_args)})"""
+                g = {'torch': torch, 'inf' : math.inf, 'op': op}
+                exec(code, g)
+                f = g['f']
+                f.__module__ = 'test'
+                out = f(*param_values)
+
+                # NNC currently doesn't support lowering ops with more than one
+                # output
+                if isinstance(out, tuple):
+                    continue
+
+                # NNC currently oftens segfault when asked to lower ops with 0-dim tensor outputs
+                if isinstance(out, torch.Tensor) and out.dim() == 0:
+                    continue
+                ts_g = torch.jit.trace(f, param_values)
+                kernel = torch._C._te.TensorExprKernel(ts_g.graph)
+                self.assertEqual(kernel.run(tuple(param_values)), f(*param_values))
+                self.assertEqual(kernel.fallback(tuple(param_values)), f(*param_values))
+
+        except Exception as e:
+            self.assertTrue(op.name not in work_list)
+            if "Unhandled node kind" in str(e):
+                print(e)
+                return
+            if "UNSUPPORTED DTYPE" in str(e):
+                print(e)
+                return
+            if isinstance(e, NameError):  # related to passing in input lists of tensors
+                return
+            self.assertTrue(op.name in known_failures)
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()
