@@ -23,7 +23,6 @@ class PythonTensor(object):
         return self.value
 
     def __torch_function__(self, func, types, args=(), kwargs={}):
-        import pdb; pdb.set_trace()
         namespace, func_name = func.split("::")
         func = getattr(getattr(torch.ops, namespace), func_name)
         outs = kwargs['val']
