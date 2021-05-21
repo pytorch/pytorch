@@ -47,8 +47,8 @@ def _wrap_tensor_for_grad(maybe_tensor, level):
         return maybe_tensor
     return _wrap_for_grad(maybe_tensor, level)
 
-def _wrap_all_tensors(tensor_or_tuple_of_tensors, level):
-    return tree_map(partial(_wrap_tensor_for_grad, level=level), tensor_or_tuple_of_tensors)
+def _wrap_all_tensors(tensor_pytree, level):
+    return tree_map(partial(_wrap_tensor_for_grad, level=level), tensor_pytree)
 
 def _as_tuple(val):
     if isinstance(val, tuple):
@@ -121,7 +121,7 @@ def _safe_index(args, argnum):
         raise RuntimeError(f'argnum must be int, got: {type(argnum)}')
     if argnum >= 0 and argnum < len(args):
         return args[argnum]
-    raise RuntimeError(f'Got argnum={argnum}, but only {len(args)} inputs')
+    raise RuntimeError(f'Got argnum={argnum}, but only {len(args)} positional inputs')
 
 def _slice_argnums(args, argnums):
     if isinstance(argnums, int):
@@ -132,15 +132,16 @@ def _slice_argnums(args, argnums):
 
 def grad_and_value(f, argnums=0, has_aux=False):
     @wraps(f)
-    def wrapper(*args):
+    def wrapper(*args, **kwargs):
         level = _grad_increment_nesting()
         output, aux, grad_input = None, None, None
         try:
             args = _wrap_all_tensors(args, level)
+            kwargs = _wrap_all_tensors(kwargs, level)
             diff_args = _slice_argnums(args, argnums)
             tree_map_(partial(_create_differentiable, level=level), diff_args)
 
-            output = f(*args)
+            output = f(*args, **kwargs)
             if has_aux:
                 output, aux = output
 
@@ -175,8 +176,8 @@ def grad_and_value(f, argnums=0, has_aux=False):
 
 def grad(f, argnums=0, has_aux=False):
     @wraps(f)
-    def wrapper(*args):
-        results = grad_and_value(f, argnums, has_aux=has_aux)(*args)
+    def wrapper(*args, **kwargs):
+        results = grad_and_value(f, argnums, has_aux=has_aux)(*args, **kwargs)
         if has_aux:
             grad, (value, aux) = results
             return grad, aux
