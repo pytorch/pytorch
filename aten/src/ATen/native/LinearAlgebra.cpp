@@ -768,7 +768,7 @@ static TensorIterator build_addr_iter(Tensor& result,
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_borrowed_output(result)
-    .add_borrowed_input(*self_)
+    .add_input(*self_)
     .add_input(vec1.reshape({vec1_size0, 1}))
     .add_borrowed_input(vec2)
     .allow_cpu_scalars(true)
@@ -2105,7 +2105,7 @@ static std::vector<int64_t> make_dim_list(int64_t ndim) {
 }
 
 // Checks for valid arguments to linalg_norm when type(ord) == str
-static void check_str_ord_valid(const std::string& str_ord, optional<IntArrayRef> opt_dim, int64_t ndim) {
+static void check_str_ord_valid(const c10::string_view str_ord, optional<IntArrayRef> opt_dim, int64_t ndim) {
   TORCH_CHECK((str_ord == "nuc") || (str_ord == "fro"), "Invalid norm order: ", str_ord);
   bool dims_valid = (ndim == 2 && !opt_dim.has_value()) || (opt_dim.has_value() && opt_dim.value().size() == 2);
   TORCH_CHECK(dims_valid, "order \"", str_ord,
@@ -2206,7 +2206,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
   return result;
 }
 
-static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const optional<Scalar>& opt_num_ord, optional<std::string> opt_str_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const optional<Scalar>& opt_num_ord, optional<c10::string_view> opt_str_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   // Callers must give the ord argument as either a number, a string, or neither.
   // Since the user-facing API has no direct control over how this function is called, this is an internal assert.
   TORCH_INTERNAL_ASSERT(!(opt_num_ord.has_value() && opt_str_ord.has_value()));
@@ -2380,7 +2380,7 @@ Tensor& linalg_matrix_norm_out(
 
 Tensor linalg_matrix_norm(
     const Tensor& self,
-    std::string ord,
+    c10::string_view ord,
     IntArrayRef dim,
     bool keepdim,
     optional<ScalarType> dtype) {
@@ -2390,7 +2390,7 @@ Tensor linalg_matrix_norm(
 
 Tensor& linalg_matrix_norm_out(
     const Tensor& self,
-    std::string ord,
+    c10::string_view ord,
     IntArrayRef dim,
     bool keepdim,
     optional<ScalarType> dtype,
@@ -2408,7 +2408,7 @@ Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional
 }
 
 // Frobenius and nuclear norms
-Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(
@@ -2421,12 +2421,12 @@ Tensor& linalg_norm_out(const Tensor& self, const optional<Scalar>& opt_ord, opt
 }
 
 // Frobenius and nuclear norms
-Tensor& linalg_norm_out(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+Tensor& linalg_norm_out(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
-Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string> ord_variant) {
+Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
   Tensor inverse, info;
   std::tie(inverse, info) = at::linalg_inv_ex(self);
   info.unsqueeze_(-1).unsqueeze_(-1);
@@ -2449,14 +2449,14 @@ Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
   return at::zeros(result_shape, options);
 }
 
-void _linalg_cond_check_ord(c10::variant<Scalar, std::string> ord_variant) {
+void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = c10::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
     TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg_cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
-    std::string* ord = c10::get_if<std::string>(&ord_variant);
+    c10::string_view* ord = c10::get_if<c10::string_view>(&ord_variant);
     TORCH_CHECK(*ord == "fro" || *ord == "nuc",
       "linalg_cond got an invalid norm type: ", *ord);
   } else {
@@ -2473,7 +2473,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
 
-  c10::variant<Scalar, std::string> ord_variant = ord;
+  c10::variant<Scalar, c10::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
@@ -2520,7 +2520,7 @@ Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Ten
 }
 
 // Frobenius or nuclear norms
-Tensor linalg_cond(const Tensor& self, std::string ord) {
+Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
   // the same checks as squareCheckInputs(self) but with a slightly more informative error message
   TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
     self.dim(), " dimensions.");
@@ -2528,7 +2528,7 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
               "linalg_cond with frobenius or nuclear norm types only supports square matrices or batches of square matrices "
               "but got ", self.size(-1), " by ", self.size(-2), " matrices");
 
-  c10::variant<Scalar, std::string> ord_variant = ord;
+  c10::variant<Scalar, c10::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
@@ -2548,7 +2548,7 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_cond_out(const Tensor& self, std::string ord, Tensor& result) {
+Tensor& linalg_cond_out(const Tensor& self, c10::string_view ord, Tensor& result) {
   checkSameDevice("linalg_cond", result, self);
   ScalarType real_dtype = toValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
