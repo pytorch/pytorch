@@ -41,22 +41,18 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   virtual TypePtr getScriptRemoteCallType(
       ScriptRemoteCall& scriptRemoteCall) const;
 
-  virtual void processScriptRemoteCall(
+  virtual c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
       ScriptRemoteCall& scriptRemoteCall,
-      const std::function<void(void)>& postProcessing,
-      std::vector<at::IValue>& stack,
-      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
+      std::vector<at::IValue>& stack) const;
 
   void processBaseScriptRemoteCall(
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
-  void processScriptRemoteCallOp(
+  c10::intrusive_ptr<JitFuture> processScriptRemoteCallOp(
       ScriptRemoteCall& scriptRemoteCall,
-      const std::function<void(void)>& postProcessing,
-      std::vector<at::IValue>& stack,
-      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
+      std::vector<at::IValue>& stack) const;
 
   virtual void processPythonRemoteCall(
       RpcCommandBase& rpc,

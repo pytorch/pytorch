@@ -181,14 +181,12 @@ void RequestCallbackNoPython::processPythonRemoteCall(
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::processScriptRemoteCall(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
     ScriptRemoteCall& scriptRemoteCall,
-    const std::function<void(void)>& postProcessing,
-    std::vector<at::IValue>& stack,
-    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
+    std::vector<at::IValue>& stack) const {
   TORCH_CHECK(
       scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
-  processScriptRemoteCallOp(scriptRemoteCall, postProcessing, stack, ownerRRef);
+  return processScriptRemoteCallOp(scriptRemoteCall, stack);
 }
 
 void RequestCallbackNoPython::processBaseScriptRemoteCall(
@@ -234,17 +232,9 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
   }
 
   auto& stack = scriptRemoteCall.stackRef();
-  processScriptRemoteCall(scriptRemoteCall, postProcessing, stack, ownerRRef);
-}
+  auto jitFuture = processScriptRemoteCall(scriptRemoteCall, stack);
 
-void RequestCallbackNoPython::processScriptRemoteCallOp(
-    ScriptRemoteCall& scriptRemoteCall,
-    const std::function<void(void)>& postProcessing,
-    std::vector<at::IValue>& stack,
-    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
-  TORCH_INTERNAL_ASSERT(scriptRemoteCall.hasOp());
-  auto future = runJitOperator(*scriptRemoteCall.op(), stack);
-  future->addCallback([ownerRRef, postProcessing](JitFuture& future) {
+  jitFuture->addCallback([postProcessing, ownerRRef](JitFuture& future) {
     if (future.hasError()) {
       ownerRRef->setError(future.exception_ptr());
     } else {
@@ -252,6 +242,14 @@ void RequestCallbackNoPython::processScriptRemoteCallOp(
     }
     postProcessing();
   });
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processScriptRemoteCallOp(
+        ScriptRemoteCall& scriptRemoteCall,
+        std::vector<at::IValue>& stack) const {
+  TORCH_INTERNAL_ASSERT(scriptRemoteCall.hasOp());
+  return runJitOperator(*scriptRemoteCall.op(), stack);
 }
 
 void RequestCallbackNoPython::processScriptRRefFetchCall(
