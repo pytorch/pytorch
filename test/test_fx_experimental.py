@@ -5,7 +5,7 @@ import sys
 import math
 import numbers
 from typing import Callable, Dict, Union, List, Optional
-from torch.fx.symbolic_trace import symbolic_trace
+from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.experimental import graph_manipulation
@@ -129,12 +129,13 @@ class TestFXExperimental(JitTestCase):
         q_tensor_channel = torch.quantize_per_channel(
             x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
         )
-        result = graph_manipulation.serialize_tensor_quantization(q_tensor)
-        result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
+        result, _ = graph_manipulation.serialize_tensor_quantization(q_tensor, weights={}, pcq_prefix="foo")
+        result2, per_channel_dict = graph_manipulation.serialize_tensor_quantization(q_tensor_channel, weights={}, pcq_prefix="bar")
         assert result["qscheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
         assert result2["qscheme"] == "torch.per_channel_affine"
-        assert len(result2["q_per_channel_scales"]) == 2
+        assert result2["q_per_channel_scales"] == "bar_per_channel_scales"
+        assert per_channel_dict["bar_per_channel_zero_points"]["shape"] == "[2]"
 
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
@@ -1328,7 +1329,8 @@ class TestNormalizeOperators(JitTestCase):
                    '__rsub__',
                    '__rmul__',
                    '__rdiv__',
-                   '__rpow__'}
+                   '__rpow__',
+                   '__rmatmul__'}
 
         # Unsupported input types
         if op.name in op_skip:
@@ -1402,7 +1404,7 @@ class TestNormalizeOperators(JitTestCase):
                 if isinstance(v, torch.Tensor):
                     param_names.append(k)
                     param_values.append(v)
-                    fx_args.append(k)
+                    fx_args.append(f'{k} = {k}')
                 else:
                     fx_args.append(f'{k} = {repr(v)}')
 

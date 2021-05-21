@@ -33,6 +33,7 @@ static bool te_generate_block_code = false;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_must_use_llvm_on_cpu = true;
 static bool cat_wo_conditionals = true; // NOLINT
+static bool opt_conditionals = false; // NOLINT
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -99,6 +100,10 @@ bool& getTEMustUseLLVMOnCPU() {
 
 bool& getCatWoConditionals() {
   return cat_wo_conditionals;
+}
+
+bool& getOptConditionals() {
+  return opt_conditionals;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -1461,8 +1466,11 @@ Tensor* computeMatmul(
 
   auto size_a = a.dims();
   auto size_b = b.dims();
-  const IntImm* total_size = dynamic_cast<const IntImm*>(
-      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
+  auto total_size = dynamic_cast<LongImm*>(
+      IRSimplifier::simplify(
+          cast<int64_t>(size_a[0]) * cast<int64_t>(size_a[1]) *
+          cast<int64_t>(size_b[1]))
+          .node());
 
   // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
   // loopnest. The number is not tuned very carefully, and in future we should
@@ -2737,11 +2745,21 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   // - On GPU, there's enough compute to hide the extra work, and inlining
   //   avoids synchronizing between kernels.
   l.inlineIntermediateBufs(/*allow_duplicated_work=*/true);
+  GRAPH_DEBUG("after inline", *l.root_stmt());
+
+  // Optimizing conditionals needs to be performed after inlining because
+  // inlining wouldn't work once the loops are split. Also, it has to be
+  // performed before loop fusion because loop fusion introduces cases where
+  // multiple conditionals are in the same loop and this optimization does not
+  // handle such cases yet.
+  if (getOptConditionals()) {
+    l.optimizeConditionals();
+    GRAPH_DEBUG("after optimizing conditionals: ", *l.root_stmt());
+  }
 
   // Fuse loops "horizontally".  This pass allows us to combine loops that
   // write to different output buffers, as long as they have the same bounds.
   if (backendType == kLLVMCodeGen) {
-    GRAPH_DEBUG("after inline", *l.root_stmt());
     fuseAllLoops(l.root_stmt());
     GRAPH_DEBUG("after fuse", *l.root_stmt());
   }

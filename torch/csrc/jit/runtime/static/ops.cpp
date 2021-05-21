@@ -10,6 +10,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/layer_norm.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -1069,6 +1070,10 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
     if (n->inputs().size() != 2) {
       return nullptr;
     }
+    // TODO: make __getitem__ work for other container types
+    if (n->input(0)->type()->castRaw<DictType>() == nullptr) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       auto dict = p_node->Input(0).toGenericDict();
       auto key = p_node->Input(1);
@@ -1543,6 +1548,51 @@ REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
     at::native::matmul_out(in0_t, in1_t, out_t);
   };
 });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::linear,
+    quantized_linear,
+    [](Node* n) -> SROperator {
+      if (n->inputs().size() != 4) {
+        return nullptr;
+      }
+      const auto w = toIValue(n->inputs()[1]);
+      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+      if (w) {
+        packed_weight = w->toCustomClass<LinearPackedParamsBase>();
+      }
+      return [packed_weight](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        const auto output_scale = p_node->Input(2).toDouble();
+        const auto output_zero_point = p_node->Input(3).toInt();
+
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::empty_affine_quantized(
+              {0},
+              c10::kQUInt8,
+              c10::nullopt,
+              c10::kCPU,
+              false,
+              output_scale,
+              output_zero_point,
+              c10::nullopt);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+
+        if (!packed_weight) {
+          packed_weight->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        } else {
+          // Weights could be quantized on the fly
+          auto packed_weight_tmp =
+              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+          packed_weight_tmp->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        }
+      };
+    });
 
 } // namespace jit
 } // namespace torch
