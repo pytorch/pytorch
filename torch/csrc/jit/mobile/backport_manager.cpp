@@ -6,8 +6,8 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <cstddef>
 
@@ -149,10 +149,12 @@ void writeArchiveV4(
 }
 
 bool backport_v5_to_v4(
-    PyTorchStreamReader& reader,
-    PyTorchStreamWriter& writer) {
-  PyTorchStreamWriter writer_debug("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/model_v4_debug.ptl");
+    std::istringstream& input_model_stream,
+    std::ostringstream& ouput_model_stream) {
+  PyTorchStreamWriter writer_debug(
+      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/model_v6_to_v4_debug.ptl");
   // 1) read from archive `bytecode` archive
+  PyTorchStreamReader reader(&input_model_stream);
   std::vector<IValue> bytecode_values = get_bytecode_values(reader);
   if (!check_bytecode_version(bytecode_values, kBytecodeVersionV5)) {
     TORCH_WARN("Incorrect bytecode version for input model.");
@@ -173,6 +175,14 @@ bool backport_v5_to_v4(
       "constants",
       "bytecode",
   };
+
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !ouput_model_stream ? 0 : nbytes;
+  };
+
+  PyTorchStreamWriter writer(writer_func);
+
   selective_copy(reader, writer, excluded_files, excluded_dirs);
   selective_copy(reader, writer_debug, excluded_files, excluded_dirs);
 
@@ -196,39 +206,20 @@ bool backport_v5_to_v4(
 
 namespace {
 
-void write_file(PyTorchStreamReader& reader) {
-  PyTorchStreamWriter writer("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/model_v6_debug.ptl");
-  selective_copy(reader, writer, std::unordered_set<std::string>{"version"}, std::unordered_set<std::string>());
-}
 
 bool backport_v6_to_v5(
-    PyTorchStreamReader& reader,
-    PyTorchStreamWriter& writer) {
-  // std::ostringstream out;
-  // auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-  //   out.write(static_cast<const char*>(buf), nbytes);
-  //   return !out ? 0 : nbytes;
-  // };
-  // PyTorchStreamWriter intermediate_writer(writer_func);
-  // selective_copy(reader,
-  //                intermediate_writer,
-  //                std::unordered_set<std::string>{"version"},
-  //                std::unordered_set<std::string>());
-  // intermediate_writer.finalized();
+    std::istringstream& input_model_stream,
+    std::ostringstream& output_model_stream) {
 
-  write_file(reader);
-  Module torch_script = torch::jit::load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/model_v6_debug.ptl");
-
-  ExtraFilesMap empty_map;
-  // c10::optional<at::Device> device;
-  // Module torch_script = torch::jit::load(out.str(), c10::nullopt);
+  Module torch_script = torch::jit::load(input_model_stream);
   BytecodeWriteVersion = 5;
-  ScriptModuleSerializer scriptModuleSerializer(writer);
-  scriptModuleSerializer.serialize(torch_script, empty_map, true, false);
+  torch_script._save_for_mobile(output_model_stream);
+  torch_script._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/model_v6_to_v5_debug.ptl");
   BytecodeWriteVersion = 6;
+
   return true;
 }
-}
+} // namespace
 
 // A generic contract for backport logic to the previous bytecode version.
 // Args:
@@ -236,8 +227,8 @@ bool backport_v6_to_v5(
 // * PyTorchStreamWriter has access to the output model backported to the
 // previous N-1 bytecode version. Returns true if successful, false otherwise.
 using BytecodeBackportFunction = std::function<bool(
-    caffe2::serialize::PyTorchStreamReader&,
-    caffe2::serialize::PyTorchStreamWriter&)>;
+    std::istringstream&,
+    std::ostringstream&)>;
 
 BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
@@ -247,14 +238,14 @@ BackportManager::BackportManager() {
 std::unordered_map<
     int64_t,
     std::function<bool(
-        caffe2::serialize::PyTorchStreamReader&,
-        caffe2::serialize::PyTorchStreamWriter&)>>&
+        std::istringstream&,
+        std::ostringstream&)>>&
 BackportManager::bytecodeBackportFunctions() const {
   static std::unordered_map<
       int64_t,
       std::function<bool(
-          caffe2::serialize::PyTorchStreamReader&,
-          caffe2::serialize::PyTorchStreamWriter&)>>
+          std::istringstream&,
+          std::ostringstream&)>>
       backport_functions;
   return backport_functions;
 }
@@ -273,6 +264,19 @@ void BackportManager::registerBytecodeBackportFunction(
       from_version,
       " is already registered.");
   bytecodeBackportFunctions()[from_version] = backport_function;
+}
+
+void get_model_stream(PyTorchStreamReader& reader, std::ostringstream& out) {
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    out.write(static_cast<const char*>(buf), nbytes);
+    return !out ? 0 : nbytes;
+  };
+  PyTorchStreamWriter writer(writer_func);
+  selective_copy(
+      reader,
+      writer,
+      std::unordered_set<std::string>({"version"}),
+      std::unordered_set<std::string>());
 }
 
 // The main function to run backport from version n to version i.
@@ -295,52 +299,40 @@ bool BackportManager::backport(
     return false;
   }
   int64_t bytecode_version = from_version;
-  std::ostringstream out;
-  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    out.write(static_cast<const char*>(buf), nbytes);
-    return !out ? 0 : nbytes;
-  };
-
-  std::istringstream iss;
   bool backport_success = true;
 
-  while (bytecode_version > to_version) {
-    // Read from intermediate writer result if ostream is not empty, otherwise
-    // it means that it's the first time to backport and read from the source.
-    bool in_intermediate = false;
-    if (!out.str().empty()) {
-      in_intermediate = true;
-      iss = std::istringstream(out.str());
-    }
-    out.clear();
+  // 1) Given an istream_adapter, get the model_stream
+  std::ostringstream oss;
+  get_model_stream(start_reader, oss);
+  std::istringstream input_model_stream(oss.str());
+  std::ostringstream output_model_stream;
 
-    PyTorchStreamWriter intermediate_writer(writer_func);
+  // 2) backport input and output will be stream
+  while (bytecode_version > to_version) {
+    // Swap input and output if it's not the first time and output_model_stream
+    // has value.
+    if (!output_model_stream.str().empty()) {
+      input_model_stream = std::istringstream(output_model_stream.str());
+      output_model_stream.clear();
+    }
 
     if (!hasBytecodeBackportFunction(bytecode_version)) {
       return false;
     }
 
-    // When it's the last backport process, write to the final destination
-    // otherwise, export to the intermediate ostream.
-    if (in_intermediate) {
-      PyTorchStreamReader intermediate_reader(&iss);
-      if (bytecode_version - 1 == to_version) {
-        backport_success &= bytecodeBackportFunctions()[bytecode_version--](
-            intermediate_reader, final_writer);
-      } else {
-        backport_success &= bytecodeBackportFunctions()[bytecode_version--](
-            intermediate_reader, intermediate_writer);
-      }
-    } else {
-      if (bytecode_version - 1 == to_version) {
-        backport_success &= bytecodeBackportFunctions()[bytecode_version--](
-            start_reader, final_writer);
-      } else {
-        backport_success &= bytecodeBackportFunctions()[bytecode_version--](
-            start_reader, intermediate_writer);
-      }
-    }
+    // Keep backporting till request version
+    backport_success &= bytecodeBackportFunctions()[bytecode_version--](
+        input_model_stream, output_model_stream);
   }
+
+  // 3) Write the final model_stream to final_writer
+  PyTorchStreamReader last_model_reader(&input_model_stream);
+  selective_copy(
+      last_model_reader,
+      final_writer,
+      std::unordered_set<std::string>({"version"}),
+      std::unordered_set<std::string>());
+
   return backport_success;
 }
 

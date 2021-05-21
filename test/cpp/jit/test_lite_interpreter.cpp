@@ -670,7 +670,7 @@ void backportAllVersionCheck(
 
     // Check backport model version
     std::stringstream iss(oss.str());
-    auto backport_version = _get_model_bytecode_version(iss);
+    auto backport_version = _get_model_bytecode_version(oss.str());
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect

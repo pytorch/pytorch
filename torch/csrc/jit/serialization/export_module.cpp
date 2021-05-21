@@ -376,7 +376,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*tensor_cdata_naming_scheme=*/false);
+        /*tensor_cdata_naming_scheme=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -569,9 +569,8 @@ void ScriptModuleSerializer::writeByteCode(
     const bool save_mobile_debug_info) {
   std::vector<c10::IValue> elements;
   BackendDebugHandleManager debug_handle_manager;
-  if(BytecodeWriteVersion.has_value()) {
-    elements.emplace_back(
-        static_cast<int64_t>(BytecodeWriteVersion.value()));
+  if (BytecodeWriteVersion.has_value()) {
+    elements.emplace_back(static_cast<int64_t>(BytecodeWriteVersion.value()));
   } else {
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -588,8 +587,8 @@ void ScriptModuleSerializer::writeByteCode(
       telements,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
-      /*tensor_dir=*/"bytecode/",
-      /*tensor_cdata_naming_scheme=*/false);
+      /*tensor_dir=*/"constants/",
+      /*tensor_cdata_naming_scheme=*/true);
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
