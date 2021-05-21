@@ -3617,7 +3617,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('ceil',
                          dtypes=floating_types(),
                          dtypesIfCPU=floating_types_and(torch.bfloat16),
-                         dtypesIfCUDA=floating_types_and(torch.half)),
+                         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
 
     ForeachUnaryFuncInfo('erf',
                          dtypes=floating_types(),
@@ -3637,7 +3637,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('floor',
                          dtypes=floating_types(),
                          dtypesIfCPU=floating_types_and(torch.bfloat16),
-                         dtypesIfCUDA=floating_types_and(torch.half)),
+                         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
 
     ForeachUnaryFuncInfo('log1p',
                          dtypes=floating_types(),
@@ -3647,12 +3647,12 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('round',
                          dtypes=floating_types(),
                          dtypesIfCPU=floating_types_and(torch.bfloat16),
-                         dtypesIfCUDA=floating_types_and(torch.half)),
+                         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
 
     ForeachUnaryFuncInfo('frac',
                          dtypes=floating_types(),
                          dtypesIfCPU=floating_types_and(torch.bfloat16),
-                         dtypesIfCUDA=floating_types_and(torch.half)),
+                         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
 
     ForeachUnaryFuncInfo('reciprocal',
                          dtypes=floating_types(),
@@ -3667,7 +3667,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('trunc',
                          dtypes=floating_types(),
                          dtypesIfCPU=floating_types_and(torch.bfloat16),
-                         dtypesIfCUDA=floating_types_and(torch.half)),
+                         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
 
     ForeachUnaryFuncInfo('abs',
                          dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
@@ -4143,7 +4143,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True),
     OpInfo('cholesky',
            dtypes=floating_and_complex_types(),
@@ -4415,7 +4415,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
-                   dtypesIfCUDA=floating_types_and(torch.float16),
+                   dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    # Reference for disabling extremals
                    # https://github.com/pytorch/pytorch/issues/51948
@@ -4504,7 +4504,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('floor',
                    ref=np.floor,
                    dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True),
     OpInfo('flip',
            op=torch.flip,
@@ -4945,7 +4945,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_matrix_exp,
            supports_out=False),
     OpInfo('matmul',
@@ -5240,7 +5240,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('round',
                    ref=np.round,
                    dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
@@ -5509,7 +5509,7 @@ op_db: List[OpInfo] = [
                    aliases=('fix', ),
                    ref=np.trunc,
                    dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.float16),
+                   dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True),
     UnaryUfuncInfo('exp2',
                    aliases=('special.exp2', ),
@@ -6566,7 +6566,8 @@ def method_tests():
         ('where', (), (bernoulli_scalar(), ()), 'scalar', (True,)),
         ('where', (M, 1, M), (bernoulli_scalar(), (M, M, 1)), 'scalar_broadcast_mask', (True,)),
         ('where', (), (mask_not_all_zeros((M, M)), ()), 'scalar_broadcast_non_mask', (True,)),
-        ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense())
+        ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
+        ('to_sparse', (S, S), (1,), 'dim', (), (), [], lambda x: x.to_dense())
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
