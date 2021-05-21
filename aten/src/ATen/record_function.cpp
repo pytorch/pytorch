@@ -132,10 +132,11 @@ static bool findAndRemoveCallback(
         return el.handle == handle;
       });
   if (it != cbs.end()) {
-    if (it->callback.samplingProb() > kLowProb) {
-      // try to restore pre-sampling of RecordFunction
-      at::releaseRecordAllFunctions();
-    }
+    // We do not need to try to call releaseRecordAllFunctionsHere
+    // because findAndRemoveCallback is used only as a helper in
+    // removeCallback. removeCallback calls disableCallback, which
+    // calls findAndToggleCallback, which already will do a
+    // releaseRecordAllFunctions for us.
     cbs.erase(it);
     return true;
   }
@@ -192,7 +193,8 @@ class CallbackManager {
       found = findAndToggleCallback(
           sorted_global_callbacks_, handle, false);
       if (found == ToggledCallbackResult::FoundAndToggled) {
-        TORCH_CHECK(num_enabled_global_callbacks_.fetch_sub(1, std::memory_order_relaxed) > 0);
+        const auto previousCount = num_enabled_global_callbacks_.fetch_sub(1, std::memory_order_relaxed);
+        TORCH_CHECK(previousCount > 0, previousCount);
       }
     }
     if (found == ToggledCallbackResult::NotFound) {
@@ -202,10 +204,10 @@ class CallbackManager {
 
   void reenableCallback(CallbackHandle handle) {
     auto found = findAndToggleCallback(
-        rf_tls().sorted_tls_callbacks_, handle, false);
+        rf_tls().sorted_tls_callbacks_, handle, true);
     if (found == ToggledCallbackResult::NotFound) {
       found = findAndToggleCallback(
-          sorted_global_callbacks_, handle, false);
+          sorted_global_callbacks_, handle, true);
       if (found == ToggledCallbackResult::FoundAndToggled) {
         num_enabled_global_callbacks_.fetch_add(1, std::memory_order_relaxed);
       }
