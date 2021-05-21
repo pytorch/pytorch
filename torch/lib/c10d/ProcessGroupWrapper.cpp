@@ -108,9 +108,10 @@ struct CollectiveFingerPrint {
     std::vector<at::Tensor> shape_tensors =
         c10d::getTensorShapes(input_tensors_);
     // If input_tensors_ is empty we would get no shape tensors back, but still
-    // do some sort of shape verification in case input_tensors_.empty() is
+    // do verification in case input_tensors_.empty() is
     // inconsistent across ranks. In this case, sub in a single zeros tensor and
-    // ensure all ranks agree.
+    // ensure all ranks agree, because gloo pg does not allow collectives with
+    // empty inputs.
     if (shape_tensors.size() == 0) {
       shape_tensors = {at::zeros(1)};
     }
