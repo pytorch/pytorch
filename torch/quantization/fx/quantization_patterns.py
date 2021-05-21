@@ -45,7 +45,6 @@ from .utils import (
 )
 
 from .quantization_types import QuantizerCls
-from .qconfig_utils import QConfigAny
 
 from abc import ABC, abstractmethod
 import operator
@@ -135,7 +134,7 @@ class QuantizeHandler(ABC):
 
 
     @abstractmethod
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         """ Convert the given node to a quantized node and insert
@@ -259,7 +258,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         # for x + y where x and y are scalars, we do not observe anything
         return self.num_tensor_args > 0
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
 
@@ -268,6 +267,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             return quantizer.quantized_graph.node_copy(
                 node, load_arg(quantized=None))
 
+        qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
 
         if is_reference and self.binary_op in binary_reference_op_supported_dtypes and \
@@ -365,7 +365,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
@@ -419,7 +419,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
         elif node.op == "call_function":
             self.conv = node.target
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # Supported combinations are:
@@ -432,6 +432,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
         ]
 
         # TODO: is_reference option for conv module
+        qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
@@ -571,7 +572,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         if node.op == 'call_module':
             self.linear = quantizer.modules[self.linear_node.target]
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # Supported combinations are:
@@ -587,6 +588,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             # static float16 quantization
             (torch.float16, torch.float16, None),
         ]
+        qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
@@ -763,7 +765,7 @@ class BatchNormQuantizeHandler(QuantizeHandler):
         self.bn_node = node
         self.bn = quantizer.modules[self.bn_node.target]
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if convert_custom_config_dict is None:
@@ -793,7 +795,7 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
     def input_output_observed(self) -> bool:
         return False
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # Supported combinations are:
@@ -807,6 +809,7 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
         ]
         assert node.op == 'call_module'
         emb_node = node
+        qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
@@ -839,7 +842,7 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
     def input_output_observed(self) -> bool:
         return False
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # Supported combinations are:
@@ -852,6 +855,7 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
             (torch.float32, torch.float16, None),
         ]
         assert node.op == 'call_module'
+        qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
@@ -911,7 +915,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
         elif node.op == "call_module":
             self.op = type(quantizer.modules[node.target])
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
@@ -953,6 +957,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.functional.gelu: int8_dtypes,
             torch.nn.functional.softmax: int8_dtypes,
         }
+        qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes not in supported_dtypes[self.op]:
             warnings.warn(
@@ -1033,7 +1038,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
 class ELUQuantizeHandler(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         activation_post_process = \
@@ -1094,9 +1099,10 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
             return get_default_output_activation_post_process_map().get(
                 pattern, None)
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes == (torch.float16, torch.float16, None):
             op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
@@ -1179,13 +1185,13 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
     ) -> bool:
         return True
 
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         """ Convert a float custom module to quantized custom module
@@ -1194,6 +1200,7 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         assert convert_custom_config_dict is not None
         custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
         assert custom_module_class_mapping is not None
+        qconfig = quantizer.qconfig_map[node.name]
         observed_custom_module = quantizer.modules[node.target]
         if activation_is_statically_quantized(qconfig):
             assert node.name in quantizer.activation_post_process_map
@@ -1217,10 +1224,11 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
     """ Converts an observed standalone module to quantized standalone module
     by calling convert_fx on the observed standalone module.
     """
-    def convert(self, quantizer: QuantizerCls, node: Node, qconfig: QConfigAny, load_arg: Callable,
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         assert node.op == 'call_module'
+        qconfig = quantizer.qconfig_map[node.name]
         convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = quantizer.modules[node.target]
         input_quantized_idxs = observed_standalone_module._standalone_module_input_quantized_idxs.tolist()
