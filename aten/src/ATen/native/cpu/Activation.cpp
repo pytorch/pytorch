@@ -627,7 +627,7 @@ void silu_backward_kernel(TensorIterator& iter) {
             [kOneVec](Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) {
               const Vectorized<scalar_t> sigmoid =
                   kOneVec / (kOneVec + x_vec.neg().exp());
-              return dy_vec * sigmoid * (kOneVec + x_vec * (kOneVec - sigmoid));
+              return dy_vec  * sigmoid * (kOneVec + x_vec * (kOneVec - sigmoid));
             });
       });
 }
