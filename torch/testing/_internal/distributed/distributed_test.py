@@ -4201,10 +4201,6 @@ class DistributedTest:
             self.assertEqual(
                 ddp_logging_data.get("unused_parameter_size", 0), 0
             )
-            self.assertTrue(
-                ddp_logging_data.get("unused_parameter_size") is None or
-                ddp_logging_data.get("unused_parameter_size") == 0
-            )
             self.assertEqual(ddp_logging_data.get("has_rebuilt_buckets"), 1)
             self.assertEqual(ddp_logging_data.get("rebuilt_bucket_sizes"), str(param_size))
             # It is hard to test accurate latency, but it can test whether the latency is
