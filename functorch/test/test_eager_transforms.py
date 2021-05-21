@@ -45,6 +45,16 @@ class TestGradTransform(TestCase):
         result = grad(lambda x: torch.flatten(x).sum())(x)
         self.assertEqual(result, torch.ones_like(x))
 
+    def test_fn_with_kwargs(self, device):
+        def foo(x, y):
+            return (x * y).sum()
+
+        x = torch.randn(3, device=device)
+        y = torch.randn(3, device=device)
+        expected = grad(foo)(x, y)
+        result = grad(foo)(x, y=y)
+        self.assertEqual(result, expected)
+
     def test_composite_complicated(self, device):
         x = torch.randn(3, device=device)
         y = torch.randn(3, 5, device=device)
