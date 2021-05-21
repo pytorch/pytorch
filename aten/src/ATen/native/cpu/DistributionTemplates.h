@@ -184,7 +184,7 @@ void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
       if (size >= 16 && self.is_contiguous()) {
         normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), generator);
       } else {
-        auto iter = TensorIterator::nullary_op(self);
+        auto iter = TensorIterator::borrowing_nullary_op(self);
         std::lock_guard<std::mutex> lock(generator->mutex_);
         cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
           at::normal_distribution<double> normal(mean, std);
@@ -315,8 +315,8 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     auto p_cpu = p_.to(kCPU);
     c10::MaybeOwned<Tensor> p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
-        .add_output(self)
-        .add_input(*p)
+        .add_borrowed_output(self)
+        .add_borrowed_input(*p)
         .check_all_same_dtype(false)
         .build();
     if (p_.scalar_type() == kDouble) {
@@ -341,7 +341,7 @@ void bernoulli_kernel(Tensor& self, double p, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    auto iter = TensorIterator::nullary_op(self);
+    auto iter = TensorIterator::borrowing_nullary_op(self);
     cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
       at::bernoulli_distribution<double> bernoulli(p);
       return static_cast<scalar_t>(bernoulli(generator));

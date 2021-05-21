@@ -1466,8 +1466,13 @@ Tensor* computeMatmul(
 
   auto size_a = a.dims();
   auto size_b = b.dims();
-  const IntImm* total_size = dynamic_cast<const IntImm*>(
-      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
+  // We currently only support rank 2 matmuls
+  TORCH_INTERNAL_ASSERT(size_a.size() == 2 && size_b.size() == 2);
+  auto total_size = dynamic_cast<LongImm*>(
+      IRSimplifier::simplify(
+          cast<int64_t>(size_a[0]) * cast<int64_t>(size_a[1]) *
+          cast<int64_t>(size_b[1]))
+          .node());
 
   // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
   // loopnest. The number is not tuned very carefully, and in future we should
@@ -1846,6 +1851,21 @@ Tensor* tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             auto zero = Cast::make(a.dtype(), 0);
             return CompareSelect::make(a, zero, zero, a, kLT);
+          });
+    } break;
+
+    case aten::leaky_relu: {
+      return computeTwoOperand(
+          "aten_leaky_relu",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a, const ExprHandle& negative_slope) {
+            auto neg_slope = Cast::make(a.dtype(), negative_slope);
+            auto zero = Cast::make(a.dtype(), 0);
+            auto one = Cast::make(a.dtype(), 1);
+            auto cs = CompareSelect::make(a, zero, one, neg_slope, kGT);
+            return a * cs;
           });
     } break;
 
@@ -2404,7 +2424,8 @@ Tensor* tensorexpr::computeOperandValue(
           "aten_slice",
           c10::fmap<DimArg>(outputShape),
           [&](const std::vector<VarHandle>& axes) {
-            int64_t dim = c10::get<int64_t>(inputs[1]);
+            int64_t dim =
+                at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), axes.size());
             ExprHandle start = constant(inputs[2]);
             ExprHandle stride = constant(inputs[4]);
 
@@ -2474,7 +2495,8 @@ Tensor* tensorexpr::computeOperandValue(
             std::vector<VarHandle> new_axes;
             assert(permute_dims.size() == axes.size());
             for (auto i : permute_dims) {
-              new_axes.push_back(axes[i]);
+              auto new_dim = at::maybe_wrap_dim(i, A.ndim());
+              new_axes.push_back(axes[new_dim]);
             }
             return A.load(new_axes);
           });
@@ -2558,6 +2580,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg:
     case aten::isnan:
     case aten::relu:
+    case aten::leaky_relu:
     case aten::hardswish:
     case aten::gelu:
     case aten::batch_norm:
@@ -2978,7 +3001,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     default: {
-      throw unsupported_dtype();
+      throw unsupported_dtype(t->repr_str());
       break;
     }
   }

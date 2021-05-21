@@ -36,13 +36,9 @@ TEST(LoopNest, ExprSimple01) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
 
-  l.splitWithTail(loops[0], 2, &x_inner, &x_tail);
+  l.splitWithTail(loops[0], 2);
   l.splitWithTail(loops[0], 2);
 }
 
@@ -518,12 +514,9 @@ TEST(LoopNest, ExprSplitWithTail) {
   };
   Tensor* tensor = Compute("f", {{199, "x"}}, func);
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
-  l.splitWithTail(loops[0], 17, &x_inner, &x_tail);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  l.splitWithTail(loops[0], 17);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.splitWithTail(loops[0], 7);
 
@@ -552,12 +545,8 @@ TEST(LoopNest, ExprSplitWithTailNone) {
   };
   Tensor* tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
-  l.splitWithTail(loops[0], 4, &x_inner, &x_tail);
+  l.splitWithTail(loops[0], 4);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
@@ -656,9 +645,7 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
 
   LoopNest l({tensor});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *mid, *inner;
-  l.splitWithMask(loops[0], 4, &inner);
+  l.splitWithMask(loops[0], 4);
   l.splitWithMask(loops[0], 4);
 
   Stmt* stmt1 = IRSimplifier::simplify(l.root_stmt());
