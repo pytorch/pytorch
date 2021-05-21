@@ -7415,24 +7415,6 @@ workflows:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
-      - binary_ios_build:
-          build_environment: libtorch-ios-12.0.0-nightly-x86_64-build
-          context: org-member
-          filters:
-            branches:
-              only: nightly
-          ios_arch: x86_64
-          ios_platform: SIMULATOR
-          name: pytorch_ios_12_0_0_nightly_x86_64_build
-      - binary_ios_build:
-          build_environment: libtorch-ios-12.0.0-nightly-arm64-build
-          context: org-member
-          filters:
-            branches:
-              only: nightly
-          ios_arch: arm64
-          ios_platform: OS
-          name: pytorch_ios_12_0_0_nightly_arm64_build
       - binary_ios_upload:
           build_environment: libtorch-ios-12.0.0-nightly-binary-build-upload
           context: org-member
