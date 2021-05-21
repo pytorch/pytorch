@@ -15,24 +15,17 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       std::unique_ptr<RpcCommandBase> rpc,
       const MessageType& messageType) const override;
 
-  void processPythonCall(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
+  c10::intrusive_ptr<JitFuture> processPythonCall(
+      RpcCommandBase& rpc) const override;
 
-  void processScriptCall(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
+  c10::intrusive_ptr<JitFuture> processScriptCall(
+      RpcCommandBase& rpc) const override;
 
   c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
-      ScriptRemoteCall& scriptRemoteCall,
-      std::vector<at::IValue>& stack) const override;
+      RpcCommandBase& rpc) const override;
 
-  void processPythonRemoteCall(
+  c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   void processPythonRRefFetchCall(
