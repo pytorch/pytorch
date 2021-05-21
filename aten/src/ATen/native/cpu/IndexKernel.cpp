@@ -10,7 +10,6 @@
 #include <ATen/native/cpu/AtomicAddFloat.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/cpu/vec/vec.h>
-#include <ATen/cpu/vec256/vec256.h>
 
 namespace at { namespace native {
 namespace {
