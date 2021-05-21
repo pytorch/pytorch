@@ -878,8 +878,11 @@ class TestForeach(TestCase):
             # `tensors2`: ['cuda', 'cpu']
             _cuda_tensors = self._get_test_data(device, dtype, 2)
             _cpu_tensors = self._get_test_data('cpu', dtype, 2)
-            tensors1, tensors2 = [[_cuda_tensors[i], _cpu_tensors[i]] for i in range(2)]
+            tensors1, tensors2 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
 
+            # note(mkozuki): Why handling sub with bool differently?
+            # Because the error message includes at least one special character, `^`,
+            # causing the regex match to fail in the following `try-except` block.
             if dtype == torch.bool and native_op == torch.sub:
                 with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
                     foreach_op(tensors1, tensors2)
@@ -918,8 +921,11 @@ class TestForeach(TestCase):
             # tensors3: ['cuda', 'cpu]
             _cuda_tensors = self._get_test_data(device, dtype, 3)
             _cpu_tensors = self._get_test_data('cpu', dtype, 3)
-            tensors1, tensors2, tensors3 = [[_cuda_tensors[i], _cpu_tensors[i]] for i in range(3)]
+            tensors1, tensors2, tensors3 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
 
+            # note(mkozuki): Why handling addcdiv with int and bool differently?
+            # Because the error message includes some special characters, `*`,
+            # causing the regex match to fail in the following `try-except` block.
             if native_op == torch.addcdiv:
                 if dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
                     with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv"):
