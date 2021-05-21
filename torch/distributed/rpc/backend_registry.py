@@ -190,81 +190,109 @@ def _tensorpipe_construct_rpc_backend_options_handler(
     )
 
 
-def _tensorpipe_check_local_device_maps(name, options):
-    # Check local devices in device_maps and devices are all valid.
-    local_devices = set(options.devices) if options.devices else set()
-    device_maps = options.device_maps
-    for worker_name in device_maps:
-        device_map = device_maps[worker_name]
-        key_set = set(device_map.keys())
-        val_set = set(device_map.values())
-        if not all([
-            len(key_set) == len(device_map),
-            len(val_set) == len(device_map),
-        ]):
-            raise ValueError(
-                f"Invalid device_map configuration for {worker_name}, "
-                f"not 1-to-1 mapping:\ndevice_maps = {device_map}"
-            )
-        local_devices.update(key_set)
-
-    if not all(
-        (0 <= d.index < torch.cuda.device_count() if d.type == "cuda" else True)
-        for d in local_devices
-    ):
-        raise ValueError(
-            f"Invalid device in TensorPipe options on {name}:\n"
-            f"device_maps = {options.device_maps},\n"
-            f"devices = {options.devices}"
-        )
+def _tensorpipe_validate_devices(devices, device_count):
+    return all(
+        d.type == "cpu" or (d.type == "cuda" and 0 <= d.index <= device_count)
+        for d in devices
+    )
 
 
 # detect if any worker has invalid device_map configurations, and return
-# names of failed workers
-def _tensorpipe_check_remote_device_maps(agent, options):
-    device_maps = options.device_maps
-    if device_maps is None:
-        device_maps = {}
+# reverse device maps
+def _tensorpipe_exchange_and_check_all_device_maps(
+    my_name, my_device_count, my_device_maps, my_devices, group
+):
+    gathered = [None] * group.size()
+    dist.all_gather_object(
+        gathered, (my_name, my_device_count, my_device_maps, my_devices), group
+    )
+    all_names = [name for name, _, _, _ in gathered]
+    all_device_counts = {name: count for name, count, _, _ in gathered}
+    all_device_maps = {name: map_ for name, _, map_, _ in gathered}
+    all_devices = {name: devices for name, _, _, devices in gathered}
 
-    def check_one_worker(name, device_maps, all_device_counts):
-        device_count = all_device_counts[name]
-        wrong_worker_names = set(device_maps) - set(all_device_counts)
-        if wrong_worker_names:
-            raise ValueError(f"Wrong worker names: {wrong_worker_names}")
-        for remote_name in all_device_counts:
-            remote_device_count = all_device_counts[remote_name]
-            if remote_name in device_maps:
-                device_map = device_maps[remote_name]
-                val_set = set(device_map.values())
-                if not all(
-                    (0 <= d.index < remote_device_count if d.type == "cuda" else True)
-                    for d in val_set
-                ):
+    for node in all_names:
+        devices = all_devices[node]
+        if len(set(devices)) != len(devices):
+            raise ValueError(
+                f"Node {node} has duplicated devices\n"
+                f"devices = {devices}"
+            )
+        if not _tensorpipe_validate_devices(devices, all_device_counts[node]):
+            raise ValueError(
+                f"Node {node} has devices with invalid indices\n"
+                f"devices = {devices}\n"
+                f"device count = {all_device_counts[node]}"
+            )
+
+    for source_node in all_names:
+        if not set(all_device_maps[source_node].keys()).issubset(all_names):
+            raise ValueError(
+                f"Node {source_node} has invalid target node names in its device maps\n"
+                f"device map = {map_}\n"
+                f"node names = {all_names}"
+            )
+        for target_node, map_ in all_device_maps[source_node].items():
+            if len(set(map_.values())) != len(map_):
+                raise ValueError(
+                    f"Node {source_node} has duplicated target devices "
+                    f"in its device map for {target_node}\n"
+                    f"device map = {map_}"
+                )
+            if all_devices[source_node]:
+                if not set(map_.keys()).issubset(all_devices[source_node]):
                     raise ValueError(
-                        f"Invalid device_map configuration on {name} "
-                        f"for {remote_name}, remote device out of range:\n"
-                        f"device_maps = {device_maps}"
+                        f"Node {source_node} has unexpected source devices "
+                        f"in its device map for {target_node}\n"
+                        f"device map = {map_}\n"
+                        f"devices = {all_devices[source_node]}"
                     )
-
-    gathered = api._all_gather([torch.cuda.device_count(), device_maps])
-    all_device_counts = {name: gathered[name][0] for name in gathered}
-    all_device_maps = {name: gathered[name][1] for name in gathered}
-    for worker_name in all_device_maps:
-        worker_device_maps = all_device_maps[worker_name]
-        check_one_worker(worker_name, worker_device_maps, all_device_counts)
+            elif not _tensorpipe_validate_devices(
+                map_.keys(), all_device_counts[source_node]
+            ):
+                raise ValueError(
+                    f"Node {source_node} has source devices with invalid indices "
+                    f"in its device map for {target_node}\n"
+                    f"device map = {map_}\n"
+                    f"device count = {all_device_counts[source_node]}"
+                )
+            if all_devices[target_node]:
+                if not set(map_.values()).issubset(all_devices[target_node]):
+                    raise ValueError(
+                        f"Node {source_node} has unexpected target devices "
+                        f"in its device map for {target_node}\n"
+                        f"device map = {map_}\n"
+                        f"devices = {all_devices[target_node]}"
+                    )
+            elif not _tensorpipe_validate_devices(
+                map_.values(), all_device_counts[target_node]
+            ):
+                raise ValueError(
+                    f"Node {source_node} has target devices with invalid indices "
+                    f"in its device map for {target_node}\n"
+                    f"device map = {map_}\n"
+                    f"device count = {all_device_counts[target_node]}"
+                )
 
     # passed all checked, construct reverse mapping for return values
     reverse_device_maps = {}
-    local_name = api.get_worker_info().name
-    for worker_name in all_device_maps:
-        remote_device_maps = all_device_maps[worker_name]
-        if local_name in remote_device_maps:
-            remote_device_map = remote_device_maps[local_name]
-            reverse_device_maps[worker_name] = {
-                remote_device_map[k]: k for k in remote_device_map
+    for node in all_names:
+        if my_name in all_device_maps[node]:
+            reverse_device_maps[node] = {
+                v: k for k, v in all_device_maps[node][my_name].items()
             }
 
-    agent._set_reverse_device_maps(reverse_device_maps)
+    if not my_devices:
+        devices_set = set()
+        for _, map_ in my_device_maps.items():
+            devices_set.update(map_.keys())
+        for _, map_ in reverse_device_maps.items():
+            devices_set.update(map_.keys())
+        devices_set.discard(torch.device("cpu"))
+        my_devices = list(devices_set)
+    my_devices = sorted(my_devices)
+
+    return reverse_device_maps, my_devices
 
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
@@ -283,6 +311,12 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             )
         )
 
+    # The agent's join method is required to behave like a barrier and perform
+    # collective operations, for which it relies on a process group, instead of
+    # re-implementing this on top of RPCs.
+
+    group = _init_process_group(store, rank, world_size)
+
     if torch.cuda.is_available():
         # It's necessary to initialize PyTorch CUDA states here (e.g.,
         # CUDACachingAllocator). If this is missing, we could hit errors like
@@ -290,34 +324,31 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         # CUDA-related RPC request to this process before user code in this
         # process initializes its PyTorch CUDA states.
         torch.cuda.init()
-
-        _tensorpipe_check_local_device_maps(name, rpc_backend_options)
+        device_count = torch.cuda.device_count()
     else:
-        if len(rpc_backend_options.devices) > 0:
-            raise ValueError(
-                f"CUDA is not available on {name}, but "
-                f"devices = {rpc_backend_options.devices}"
-            )
+        device_count = 0
 
-    # The agent's join method is required to behave like a barrier and perform
-    # collective operations, for which it relies on a process group, instead of
-    # re-implementing this on top of RPCs.
-
-    group = _init_process_group(store, rank, world_size)
+    reverse_device_maps, devices = _tensorpipe_exchange_and_check_all_device_maps(
+        name,
+        device_count,
+        rpc_backend_options.device_maps,
+        rpc_backend_options.devices,
+        group,
+    )
 
     # TODO: add try-except and destroy _agent in all processes if any fails.
     agent = TensorPipeAgent(
-        store, name, rank, world_size, group, rpc_backend_options
+        store,
+        name,
+        rank,
+        world_size,
+        group,
+        rpc_backend_options,
+        reverse_device_maps,
+        devices,
     )
 
     api._init_rpc_states(agent)
-
-    try:
-        _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
-        agent.join()
-    except Exception:
-        api.shutdown()
-        raise
 
     return agent
 

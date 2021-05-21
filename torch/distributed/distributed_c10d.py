@@ -295,9 +295,7 @@ def _get_group_size(group):
     if group is GroupMember.WORLD or group is None:
         default_pg = _get_default_group()
         return default_pg.size()
-    if group not in _pg_group_ranks:
-        raise RuntimeError("The given group does not exist")
-    return len(_pg_group_ranks[group])
+    return group.size()
 
 
 def _check_single_tensor(param, param_name):
@@ -1512,10 +1510,8 @@ def all_gather_object(object_list, obj, group=None):
         return
 
     input_tensor, local_size = _object_to_tensor(obj)
-    group_backend = get_backend(group)
-    is_nccl_backend = group_backend == Backend.NCCL
     current_device = torch.device("cpu")
-    if is_nccl_backend:
+    if is_nccl_available() and isinstance(group, ProcessGroupNCCL):
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
         # true.
