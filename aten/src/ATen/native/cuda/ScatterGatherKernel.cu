@@ -110,7 +110,7 @@ struct _cuda_scatter_gather_internal_kernel {
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
       int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
-      std::cout << "idx_dim: " << idx_dim << " index_size: " << index_size << std::endl;
+      printf("idx_dim: %ld index_size: %ld\n", idx_dim, index_size);
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
         && "index out of bounds");
 
