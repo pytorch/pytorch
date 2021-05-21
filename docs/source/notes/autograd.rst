@@ -68,7 +68,7 @@ fields.
 
 It is important to note that even though every tensor has this flag,
 *setting* it only makes sense for leaf tensors (tensors that do not have a
-``grad_fn``, e.g., a module's parameters).
+``grad_fn``, e.g., a ``nn.Module``'s parameters).
 Non-leaf tensors (tensors that do have ``grad_fn``) are tensors that have a
 backward graph associated with them. Thus their gradients will be needed
 as an intermediary result to compute the gradient for a leaf tensor that
@@ -159,6 +159,9 @@ mode. If you cannot avoid such use in your case, you can always switch back
 to no-grad mode.
 
 For details on inference mode please see
+`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+
+For implementation details of inference mode see
 `RFC-0011-InferenceMode <https://github.com/pytorch/rfcs/pull/17>`_.
 
 Evaluation Mode (``nn.Module.eval()``)
