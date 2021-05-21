@@ -53,7 +53,7 @@ RpcWithAutograd::RpcWithAutograd(
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
-Message RpcWithAutograd::toMessageImpl() && {
+c10::intrusive_ptr<Message> RpcWithAutograd::toMessageImpl() && {
   auto messageId = wrappedMessage_->id();
   auto wrappedMessageType = wrappedMessage_->type();
 
@@ -84,7 +84,7 @@ Message RpcWithAutograd::toMessageImpl() && {
   // encoding.
   rpc::writeWrappedPayload(payload, additionalPayload);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload), std::move(tensors_), messageType_, messageId);
 }
 
@@ -118,14 +118,14 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   }
 
   // Create new message type and build wrapped RPC.
-  Message wrappedMessage(
+  auto wrappedMessage = c10::make_intrusive<Message>(
       std::move(payload), std::move(tensors), wrappedMessageType, messageId);
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
   if (originalMessageType == MessageType::FORWARD_AUTOGRAD_REQ) {
-    wrappedRpc = deserializeRequest(wrappedMessage);
+    wrappedRpc = deserializeRequest(*wrappedMessage);
   } else {
-    wrappedRpc = deserializeResponse(wrappedMessage, wrappedMessageType);
+    wrappedRpc = deserializeResponse(*wrappedMessage, wrappedMessageType);
   }
 
   return std::make_unique<RpcWithAutograd>(
@@ -134,7 +134,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       autogradMetadata,
       std::move(wrappedRpc),
       wrappedMessageType,
-      wrappedMessage.tensors(),
+      wrappedMessage->tensors(),
       deviceMap);
 }
 
