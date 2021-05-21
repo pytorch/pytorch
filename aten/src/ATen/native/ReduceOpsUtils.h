@@ -179,9 +179,9 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 }
 
 static TensorIterator make_reduction(
-    const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType in_dtype, ScalarType out_dtype)
-{
+    const char* name, Tensor& result, const Tensor& self,
+    c10::optional<IntArrayRef> dim_opt,
+    bool keepdim, ScalarType in_dtype, ScalarType out_dtype) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
       !result.defined() || result.scalar_type() == out_dtype,
@@ -190,6 +190,8 @@ static TensorIterator make_reduction(
       " and ",
       toString(out_dtype),
       ".");
+  // dim={} performs an all-reduce, same as dim=None
+  IntArrayRef dim = dim_opt.value_or(IntArrayRef{});
   int64_t ndim = self.dim();
   auto mask = make_dim_mask(dim, ndim);
   resize_reduction_result(result, self, mask, keepdim, out_dtype);
@@ -202,9 +204,8 @@ static TensorIterator make_reduction(
 }
 
 static TensorIterator make_reduction(
-    const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType out_dtype)
-{
+    const char* name, Tensor& result, const Tensor& self,
+    c10::optional<IntArrayRef> dim, bool keepdim, ScalarType out_dtype) {
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
@@ -216,9 +217,9 @@ static TensorIterator make_reduction(
 }
 
 static TensorIterator make_reduction(
-    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType dtype1, ScalarType dtype2)
-{
+    const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
+    c10::optional<IntArrayRef> dim_opt, bool keepdim, ScalarType dtype1,
+    ScalarType dtype2) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
     (!result1.defined() || result1.scalar_type() == dtype1) && (!result2.defined() || result2.scalar_type() == dtype2),
@@ -228,6 +229,8 @@ static TensorIterator make_reduction(
     toString(dtype1), toString(dtype2),
     ".");
 
+  // dim={} performs an all-reduce, same as dim=None
+  auto dim = dim_opt.value_or(IntArrayRef{});
   int64_t ndim = self.dim();
   DimMask mask = make_dim_mask(dim, ndim);
   resize_reduction_result(result1, self, mask, keepdim, dtype1);
@@ -251,9 +254,8 @@ static TensorIterator make_reduction(
 }
 
 static TensorIterator make_reduction(
-    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType dtype)
-{
+    const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
+    c10::optional<IntArrayRef> dim, bool keepdim, ScalarType dtype) {
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
 }
 

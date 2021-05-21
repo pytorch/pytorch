@@ -47,14 +47,14 @@ class ScriptDictIterator final {
 class ScriptDict final {
  public:
   // Constructor.
-  ScriptDict(IValue data) {
+  ScriptDict(IValue data) : dict_(AnyType::get(), AnyType::get()) {
     TORCH_INTERNAL_ASSERT(data.isGenericDict());
-    dict_ = std::move(data);
+    dict_ = data.toGenericDict();
   }
 
   // Get the type of the dictionary.
   DictTypePtr type() const {
-    return dict_.type()->cast<DictType>();
+    return DictType::create(dict_.keyType(), dict_.valueType());
   }
 
   // Return a string representation that can be used
@@ -63,7 +63,7 @@ class ScriptDict final {
     std::ostringstream s;
     s << '{';
     bool f = false;
-    for (auto const& kv : dict_.toGenericDict()) {
+    for (auto const& kv : dict_) {
       if (f) {
         s << ", ";
       }
@@ -76,52 +76,52 @@ class ScriptDict final {
 
   // Return an iterator over the keys of the dictionary.
   ScriptDictKeyIterator iter() const {
-    auto begin = dict_.toGenericDict().begin();
-    auto end = dict_.toGenericDict().end();
+    auto begin = dict_.begin();
+    auto end = dict_.end();
     return ScriptDictKeyIterator(begin, end);
   }
 
   // Return an iterator over the key-value pairs of the dictionary.
   ScriptDictIterator items() const {
-    auto begin = dict_.toGenericDict().begin();
-    auto end = dict_.toGenericDict().end();
+    auto begin = dict_.begin();
+    auto end = dict_.end();
     return ScriptDictIterator(begin, end);
   }
 
   // Interpret the dictionary as a boolean; empty means false, non-empty means
   // true.
   bool toBool() const {
-    return !(dict_.toGenericDict().empty());
+    return !(dict_.empty());
   }
 
   // Get the value for the given key. Throws std::out_of_range if the key does
   // not exist.
   IValue getItem(const IValue& key) {
-    return dict_.toGenericDict().at(key);
+    return dict_.at(key);
   };
 
   // Set the value for the given key.
   void setItem(const IValue& key, const IValue& value) {
-    dict_.toGenericDict().insert_or_assign(key, value);
+    dict_.insert_or_assign(key, value);
   };
 
   // Check whether the dictionary contains the given key.
   bool contains(const IValue& key) {
-    return dict_.toGenericDict().contains(key);
+    return dict_.contains(key);
   }
 
   // Delete the given key from the dictionary.
   bool delItem(const IValue& key) {
-    return dict_.toGenericDict().erase(key);
+    return dict_.erase(key);
   }
 
   // Get the size of the dictionary.
   int64_t len() const {
-    return dict_.toGenericDict().size();
+    return dict_.size();
   }
 
   // A c10::Dict instance that holds the actual data.
-  IValue dict_;
+  c10::impl::GenericDict dict_;
 };
 
 } // namespace jit

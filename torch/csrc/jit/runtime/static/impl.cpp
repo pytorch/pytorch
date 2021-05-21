@@ -51,8 +51,8 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
     }
   }
   // check output types
-  // Static Runtime supports output types include None, Tensor and List/Tuple
-  // of Tensor
+  // Static Runtime supports output types include None, Tensor,  List/Tuple
+  // of Tensor, or Dict
   for (Value* output : graph->outputs()) {
     VLOG(1) << "output: %" << output->debugName()
             << " has type: " << output->type()->repr_str();
@@ -61,9 +61,13 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
         kind == prim::DictConstruct) {
       for (Value* input : output->node()->inputs()) {
         const auto& type = input->type();
+        const auto& type_kind = type->kind();
         TORCH_CHECK(
-            type->cast<TensorType>() != nullptr,
-            "Static Runtime expects output type as List or Tuple of Tensor, but got List or Tuple of ",
+            type_kind != TypeKind::ListType &&
+                type_kind != TypeKind::TupleType &&
+                type_kind != TypeKind::DictType,
+            "Static Runtime requires output type to not be a nested "
+            "List/Tuple/Dict, but got a List/Tuple/Dict of: ",
             type->repr_str());
       }
     }
@@ -800,9 +804,7 @@ void StaticRuntime::benchmark(
     const int warmup_runs,
     const int main_runs) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Static runtime ms per iter: "
-            << time_per_iter
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
@@ -826,13 +828,15 @@ void StaticRuntime::benchmark(
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
     const double ms = p.second;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
-              << results.instances_per_node_type[kind] << " nodes)"
-              << std::endl;
+              << results.instances_per_node_type[kind] << " nodes";
+    if (results.out_nodes.count(kind) == 0) {
+      std::cout << ")" << std::endl;
+    } else {
+      std::cout << ", out variant)" << std::endl;
+    }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
   std::cout << "StaticRuntime setup time: " << results.setup_time << " ms"
@@ -851,6 +855,12 @@ void StaticRuntime::benchmark(
       std::cout << "Total number of reused tensors: "
                 << planner_->total_reused_tensors() << std::endl;
     }
+    std::cout << "Total number of 'out' variant nodes/total number of nodes: "
+              << results.out_nodes_count << "/" << results.total_nodes_count
+              << " ("
+              << 100.0 * (results.out_nodes_count) /
+            static_cast<float>(results.total_nodes_count)
+              << "%)" << std::endl;
   }
   check_for_memory_leak();
 }
@@ -978,14 +988,18 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     results.time_per_node[i] /= static_cast<float>(main_runs);
     results.time_per_node_type[kind] += results.time_per_node[i];
     results.instances_per_node_type[kind]++;
+    if (nodes_[i].has_out_variant()) {
+      results.out_nodes.insert(kind);
+      results.out_nodes_count++;
+    }
     results.total_time += results.time_per_node[i];
   }
+  results.total_nodes_count = nodes_.size();
   results.memory_alloc_time /= static_cast<float>(main_runs);
   results.memory_dealloc_time /= static_cast<float>(main_runs);
   results.output_dealloc_time /= static_cast<float>(main_runs);
   for (const auto& p : results.time_per_node_type) {
     const std::string& kind = p.first;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     results.percent_per_node_type[kind] = p.second / results.total_time * 100;
   }
   return results;

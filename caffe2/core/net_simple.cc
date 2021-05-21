@@ -127,7 +127,6 @@ vector<float> SimpleNet::TEST_Benchmark(
     std::cout << "Main run finished. Milliseconds per iter: "
               // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
               << millis / main_runs
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               << ". Iters per second: " << 1000.0 * main_runs / millis
               << std::endl;
   }
@@ -223,10 +222,8 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
                                               : "NO_OUTPUT"));
     std::stringstream flops_str;
     if (idx < flops_per_op.size() && flops_per_op[idx]) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       flops_str << " (" << to_string(1.0e-9 * flops_per_op[idx]) << " GFLOP, "
                 << to_string(
-                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        1.0e-6 * flops_per_op[idx] / time_per_op[idx] *
                        main_runs_)
                 << " GFLOPS)";
@@ -235,7 +232,6 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
     if (idx < memory_bytes_read_per_op.size() &&
         memory_bytes_read_per_op[idx]) {
       memory_bytes_read_str << " ("
-                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                             << to_string(1.0e-6 * memory_bytes_read_per_op[idx])
                             << " MB)";
     }
@@ -243,13 +239,11 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
     if (idx < memory_bytes_written_per_op.size() &&
         memory_bytes_written_per_op[idx]) {
       memory_bytes_written_str
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           << " (" << to_string(1.0e-6 * memory_bytes_written_per_op[idx])
           << " MB)";
     }
     std::stringstream param_bytes_str;
     if (idx < param_bytes_per_op.size() && param_bytes_per_op[idx]) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       param_bytes_str << " (" << to_string(1.0e-6 * param_bytes_per_op[idx])
                       << " MB)";
     }
@@ -300,15 +294,12 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
         // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         percent = (100.0 * value * normalizer[i] / total_metric);
       }
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::cout << std::setw(15) << std::setfill(' ') << value * normalizer[i]
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 << " " << unit[i] << ". " << std::setw(10) << std::setfill(' ')
                 << percent << "%. " << op << " (" << num_ops_per_op_type_[op]
                 << " ops)" << std::endl;
     }
     if (total_metric > 0.) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::cout << std::setw(15) << std::setfill(' ') << total_metric << " "
                 << unit[i] << " in Total" << std::endl;
     }

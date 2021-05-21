@@ -179,7 +179,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             optimization is applied to the model during export. Constant-folding
             optimization will replace some of the ops that have all constant
             inputs, with pre-computed constant nodes.
-        example_outputs (tuple of Tensors, default None): Model's example outputs being exported.
+        example_outputs (tuple of Tensors, list of Tensors, Tensor, int, float, bool, default None):
+            Model's example outputs being exported. 'example_outputs' must be provided when exporting
+            a ScriptModule or TorchScript Function. If there is more than one item, it should be passed
+            in tuple format, e.g.: example_outputs = (x, y, z). Otherwise, only one item should
+            be passed as the example output, e.g. example_outputs=x.
             example_outputs must be provided when exporting a ScriptModule or TorchScript Function.
         strip_doc_string (bool, default True): if True, strips the field
             "doc_string" from the exported model, which information about the stack

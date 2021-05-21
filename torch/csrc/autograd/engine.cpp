@@ -263,7 +263,6 @@ void Engine::stop() {
 
     using namespace std::chrono_literals;
     // Set a deadline for how long it is OK to wait device threads to shutdown
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto wait_deadline = std::chrono::steady_clock::now() + wait_duration * 1.0s;
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {

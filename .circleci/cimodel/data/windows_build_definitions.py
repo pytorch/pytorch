@@ -1,5 +1,5 @@
 import cimodel.lib.miniutils as miniutils
-from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
+from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN, NON_PR_BRANCH_LIST
 from cimodel.data.simple.util.versions import CudaVersion
 
 
@@ -12,7 +12,8 @@ class WindowsJob:
         force_on_cpu=False,
         multi_gpu=False,
         master_only=False,
-        nightly_only=False
+        nightly_only=False,
+        master_and_nightly=False
     ):
         self.test_index = test_index
         self.vscode_spec = vscode_spec
@@ -21,6 +22,7 @@ class WindowsJob:
         self.multi_gpu = multi_gpu
         self.master_only = master_only
         self.nightly_only = nightly_only
+        self.master_and_nightly = master_and_nightly
 
     def gen_tree(self):
 
@@ -89,6 +91,10 @@ class WindowsJob:
             props_dict[
                 "filters"
             ] = gen_filter_dict(branches_list=["nightly"], tags_list=RC_PATTERN)
+        elif self.master_and_nightly:
+            props_dict[
+                "filters"
+            ] = gen_filter_dict(branches_list=NON_PR_BRANCH_LIST + ["nightly"], tags_list=RC_PATTERN)
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [numbered_phase]
 
@@ -134,18 +140,18 @@ class VcSpec:
     def render(self):
         return "_".join(self.get_elements())
 
-_VC2019 = VcSpec(2019, ["14", "28", "29333"], hide_version=True)
+_VC2019 = VcSpec(2019)
 
 WORKFLOW_DATA = [
     # VS2019 CUDA-10.1
     WindowsJob(None, _VC2019, CudaVersion(10, 1), master_only=True),
     WindowsJob(1, _VC2019, CudaVersion(10, 1), master_only=True),
     WindowsJob(2, _VC2019, CudaVersion(10, 1), master_only=True),
-    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(10, 1), multi_gpu=True, nightly_only=True),
     # VS2019 CUDA-11.1
     WindowsJob(None, _VC2019, CudaVersion(11, 1)),
     WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only=True),
     WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only=True),
+    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(11, 1), multi_gpu=True, master_and_nightly=True),
     # VS2019 CPU-only
     WindowsJob(None, _VC2019, None),
     WindowsJob(1, _VC2019, None),

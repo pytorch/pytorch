@@ -85,10 +85,6 @@ void initScriptDictBindings(PyObject* module) {
         auto data = toIValue(std::move(dict), type);
         return std::make_shared<ScriptDict>(data);
       }))
-      .def(py::init([](py::dict dict, const TypePtr& type) {
-        auto data = toIValue(std::move(dict), type);
-        return std::make_shared<ScriptDict>(data);
-      }))
       .def(
           "__repr__",
           [](const std::shared_ptr<ScriptDict>& self) {
