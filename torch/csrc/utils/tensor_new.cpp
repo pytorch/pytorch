@@ -619,6 +619,10 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     // See https://github.com/pytorch/pytorch/issues/58520 for more details
     auto rc = PyObject_GetAttrString(o, attr_name);
     if (!rc) {
+      if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+        throw python_error();
+      }
+      // Warning: a wrong attribute error may be suppressed here
       PyErr_Clear();
     }
     return rc;
