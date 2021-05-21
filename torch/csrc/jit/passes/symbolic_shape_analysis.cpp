@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
@@ -111,7 +112,8 @@ struct SymbolicShapeAnalyzer {
       RemoveListMutation(graph_);
       UnrollConstantLoops(graph_);
       ConstantPropagation(graph_);
-      PeepholeOptimize(graph_);
+      // TODO: separate out non-Tensor peepholes in separate pass and invoke
+      PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
       ConstantPropagation(graph_);
       EliminateCommonSubexpression(graph_);
     }
