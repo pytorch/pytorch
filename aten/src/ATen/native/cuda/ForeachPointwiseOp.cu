@@ -150,6 +150,9 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
 
 
+// Why bool tensors are pushed to slowpath?
+// Because `AT_DISPATCH_ALL_TYPES_AND` is used below.
+// TODO(mkozuki): Check whether it's possible to handle bool tensors in fastpath.
 #define FOREACH_MAXIMUM_MINIMUM_OP(NAME, OP)                                                               \
 std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList tensors2) {               \
     check_foreach_api_restrictions(tensors1, tensors2);                                                    \
