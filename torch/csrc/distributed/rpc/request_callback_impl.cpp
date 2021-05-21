@@ -87,12 +87,10 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
 
 void processPythonExecution(
     const py::object& pyFn,
-    const int64_t messageId,
     const c10::intrusive_ptr<JitFuture>& responseFuture,
     bool isAsyncExecution,
     std::function<void(
         const py::object&,
-        int64_t,
         PythonRpcHandler&,
         const c10::intrusive_ptr<JitFuture>&)> postProcessing) {
   std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
@@ -105,7 +103,7 @@ void processPythonExecution(
       // Hit exception when running the user function or there is no async
       // execution. Not releasing GIL before serialize to avoid an additional
       // context switch.
-      postProcessing(result, messageId, pythonRpcHandler, responseFuture);
+      postProcessing(result, pythonRpcHandler, responseFuture);
       return;
     }
 
@@ -124,16 +122,12 @@ void processPythonExecution(
     }
   }
 
-  pyFuture->fut->addCallback([messageId,
-                              responseFuture,
+  pyFuture->fut->addCallback([responseFuture,
                               postProcessing{std::move(postProcessing)},
                               &pythonRpcHandler](JitFuture& jitFuture) {
     py::gil_scoped_acquire acquire;
     postProcessing(
-        jit::toPyObject(jitFuture.value()),
-        messageId,
-        pythonRpcHandler,
-        responseFuture);
+        jit::toPyObject(jitFuture.value()), pythonRpcHandler, responseFuture);
   });
 }
 
@@ -150,7 +144,6 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::
 void RequestCallbackImpl::processScriptCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
-    const int64_t messageId,
     const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
   auto& stack = scriptCall.stackRef();
@@ -174,7 +167,6 @@ void RequestCallbackImpl::processScriptCall(
   }
 
   jitFuture->addCallback([responseFuture,
-                          messageId,
                           isAsyncExecution = scriptCall.isAsyncExecution(),
                           markComplete](JitFuture& jitFutureCaptured) {
     try {
@@ -183,10 +175,9 @@ void RequestCallbackImpl::processScriptCall(
           : jitFutureCaptured;
 
       // Setup response callback appropriately.
-      auto responseCb = [responseFuture, messageId](JitFuture& jitFuture) {
+      auto responseCb = [responseFuture](JitFuture& jitFuture) {
         try {
           Message m = ScriptResp(jitFuture.value()).toMessage();
-          m.setId(messageId);
           responseFuture->markCompleted(
               IValue(c10::make_intrusive<Message>(std::move(m))));
         } catch (const std::exception& /* unused */) {
@@ -206,17 +197,14 @@ void RequestCallbackImpl::processScriptCall(
 void RequestCallbackImpl::processPythonCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
-    const int64_t messageId,
     const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& upc = static_cast<UnpickledPythonCall&>(rpc);
   try {
     processPythonExecution(
         upc.pythonUdf(),
-        messageId,
         responseFuture,
         upc.isAsyncExecution(),
         [](const py::object& result,
-           const int64_t messageId,
            PythonRpcHandler& pythonRpcHandler,
            const c10::intrusive_ptr<JitFuture>& responseFuture) {
           // Check we have GIL.
@@ -226,13 +214,13 @@ void RequestCallbackImpl::processPythonCall(
           py::gil_scoped_release release;
           auto m =
               std::move(PythonResp(std::move(serializedPyObj))).toMessage();
-          m.setId(messageId);
           responseFuture->markCompleted(
               IValue(c10::make_intrusive<Message>(std::move(m))));
         });
   } catch (std::exception& e) {
-    responseFuture->markCompleted(IValue(c10::make_intrusive<Message>(
-        createExceptionResponse(e.what(), messageId))));
+    // Pass a dummy message ID since it will be overwritten anyways.
+    responseFuture->markCompleted(IValue(
+        c10::make_intrusive<Message>(createExceptionResponse(e.what(), -1))));
   }
 }
 
@@ -314,7 +302,6 @@ void RequestCallbackImpl::processScriptRemoteCall(
 void RequestCallbackImpl::processPythonRemoteCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
-    const int64_t messageId,
     const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
@@ -351,12 +338,10 @@ void RequestCallbackImpl::processPythonRemoteCall(
   try {
     processPythonExecution(
         uprc.pythonUdf(),
-        messageId,
         responseFuture,
         uprc.isAsyncExecution(),
         [ownerRRef, rrefId, forkId, markComplete, lsctx = std::move(lsctx)](
             const py::object& result,
-            const int64_t messageId,
             PythonRpcHandler& /* unused */,
             const c10::intrusive_ptr<JitFuture>& responseFuture) {
           // Check we have GIL.
@@ -368,7 +353,6 @@ void RequestCallbackImpl::processPythonRemoteCall(
           ownerRRef->recordAllStreams(lsctx);
           ownerRRef->setValue(std::move(py_ivalue));
           auto m = RemoteRet(rrefId, forkId).toMessage();
-          m.setId(messageId);
           responseFuture->markCompleted(
               IValue(c10::make_intrusive<Message>(std::move(m))));
         });
@@ -386,13 +370,11 @@ void RequestCallbackImpl::processPythonRemoteCall(
 
 void RequestCallbackImpl::processPythonRRefFetchCall(
     RpcCommandBase& rpc,
-    const int64_t messageId,
     const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   // Making this lambda mutable to allow move-capture it in callbacks
   auto postProcessing = [responseFuture, lsctx = std::move(lsctx)](
-                            const c10::intrusive_ptr<OwnerRRef>& rref,
-                            int64_t messageId) mutable {
+                            const c10::intrusive_ptr<OwnerRRef>& rref) mutable {
     auto whenValueSet = rref->getFuture();
     if (whenValueSet->hasError()) {
       responseFuture->setError(whenValueSet->exception_ptr());
@@ -410,7 +392,6 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
       }
       Message m =
           PythonRRefFetchRet(std::move(*result).toIValues()).toMessage();
-      m.setId(messageId);
       rref->blockAllStreams(lsctx);
       responseFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(m))));
@@ -434,24 +415,21 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
     auto rref = fromRRefInterface(futureOwner->constValue().toRRef());
     if (rref->hasValue()) {
       // optional fast-path, the OwnerRRef has been created
-      postProcessing(rref, messageId);
+      postProcessing(rref);
       return;
     }
   }
 
-  futureOwner->addCallback(
-      [messageId, postProcessing{std::move(postProcessing)}](
-          JitFuture& futureOwner) mutable {
-        const auto& rref = fromRRefInterface(futureOwner.constValue().toRRef());
+  futureOwner->addCallback([postProcessing{std::move(postProcessing)}](
+                               JitFuture& futureOwner) mutable {
+    const auto& rref = fromRRefInterface(futureOwner.constValue().toRRef());
 
-        // Our response is satisfied when the the rpc.remote() request
-        // finishes executing on the owner.
-        rref->getFuture()->addCallback(
-            [messageId, rref, postProcessing{std::move(postProcessing)}](
-                JitFuture& /* unused */) mutable {
-              postProcessing(rref, messageId);
-            });
-      });
+    // Our response is satisfied when the the rpc.remote() request
+    // finishes executing on the owner.
+    rref->getFuture()->addCallback(
+        [rref, postProcessing{std::move(postProcessing)}](
+            JitFuture& /* unused */) mutable { postProcessing(rref); });
+  });
 }
 
 void RequestCallbackImpl::handleRRefDelete(
@@ -465,12 +443,12 @@ void RequestCallbackImpl::handleRRefDelete(
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
-    const int64_t messageId,
     std::shared_ptr<LazyStreamContext> ctx) const {
   try {
-    return processRpc(rpc, messageType, messageId, std::move(ctx));
+    return processRpc(rpc, messageType, std::move(ctx));
   } catch (py::error_already_set& e) {
-    auto future = asFuture(handleError(e, messageType, messageId));
+    // Pass a dummy message ID since it will be overwritten anyways.
+    auto future = asFuture(handleError(e, messageType, -1));
     // There are request callback impls in Python, where Python
     // exceptions could be thrown. For releasing Python exception
     // py::objects, GIL must be held.
@@ -481,7 +459,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRpcWithErrors(
                    // recorded the exception in the response message.
     return future;
   } catch (std::exception& e) {
-    return asFuture(handleError(e, messageType, messageId));
+    // Pass a dummy message ID since it will be overwritten anyways.
+    return asFuture(handleError(e, messageType, -1));
   }
 }
 
@@ -495,7 +474,6 @@ bool RequestCallbackImpl::cudaAvailable() const {
 
 void RequestCallbackImpl::processRRefBackward(
     RpcCommandBase& rpc,
-    const int64_t messageId,
     const c10::intrusive_ptr<JitFuture>& responseFuture) const {
   auto& rrefBackwardReq = static_cast<RRefBackwardReq&>(rpc);
 
@@ -506,13 +484,12 @@ void RequestCallbackImpl::processRRefBackward(
 
   auto futureOwner = RRefContext::getInstance().getOwnerRRef(rrefId);
   futureOwner->addCallback(
-      [responseFuture, messageId, autogradContextId, retainGraph](
-          JitFuture& futureOwner) {
+      [responseFuture, autogradContextId, retainGraph](JitFuture& futureOwner) {
         const auto& rref = fromRRefInterface(futureOwner.constValue().toRRef());
         auto whenValueSet = rref->getFuture();
 
         whenValueSet->addCallback(
-            [responseFuture, messageId, rref, autogradContextId, retainGraph](
+            [responseFuture, rref, autogradContextId, retainGraph](
                 JitFuture& whenValueSet) {
               if (whenValueSet.hasError()) {
                 responseFuture->setError(whenValueSet.exception_ptr());
@@ -525,7 +502,6 @@ void RequestCallbackImpl::processRRefBackward(
 
                 // Return the response.
                 Message m = RRefBackwardResp().toMessage();
-                m.setId(messageId);
                 responseFuture->markCompleted(
                     IValue(c10::make_intrusive<Message>(std::move(m))));
               } catch (const std::exception& /* unused */) {
