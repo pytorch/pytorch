@@ -4885,6 +4885,54 @@ else:
             scalar = torch.tensor(2, device=device, dtype=dtype)
             torch.diff(scalar)
 
+    def _test_histogram_numpy(self, t, bins, weights, density):
+        # Helper for test_histogram to compare with NumPy reference implementation
+        def to_np(t):
+            if t is None:
+                return None
+            if t.dtype == torch.bfloat16:
+                return t.to(dtype=torch.float, device="cpu").numpy()
+            else:
+                return t.cpu().numpy()
+
+        np_t = to_np(t)
+        np_bins = bins if isinstance(bins, int) else to_np(bins)
+        np_weights = to_np(weights)
+
+        (actual_hist, actual_bin_edges) = torch.histogram(t, bins, weight=weights, density=density)
+
+        expected = np.histogram(np_t, np_bins, weights=np_weights, density=density)
+        expected_hist = torch.from_numpy(expected[0])
+        expected_bin_edges = torch.from_numpy(expected[1])
+
+        self.assertEqual(actual_hist, expected_hist.to(actual_hist.dtype))
+        self.assertEqual(actual_bin_edges, expected_bin_edges.to(actual_bin_edges.dtype))
+
+    @onlyCPU
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.float32, torch.float64]))
+    def test_histogram(self, device, dtype):
+        shapes = (
+            (1,),
+            (1, 5),
+            (3, 5),
+            (1, 5, 1),
+            (2, 3, 5))
+
+        for contig in [True, False]:
+            for bin_ct in range(1, 10):
+                for weighted in [False, True]:
+                    for density in [False, True]:
+                        for shape in shapes:
+                            values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous = not contig)
+                            weights = make_tensor(shape, device, torch.float64, low=0, high=9) if weighted else None
+
+                            # test passing just the bin_ct
+                            self._test_histogram_numpy(values, bin_ct, weights, density)
+
+                            # test with caller-specified bin edges
+                            bin_edges = make_tensor((bin_ct + 1), device, torch.float32, low=-9, high=9).sort()[0]
+                            self._test_histogram_numpy(values, bin_edges, weights, density)
+
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):
         return input_array if isinstance(input_array, list) else [input_array]
