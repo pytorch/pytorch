@@ -283,6 +283,7 @@ class TestFuseFx(QuantizationTestCase):
             'Expected fuse_custom_config_dict to have the following keys:'
             in str(context.exception)
         )
+        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
@@ -1046,6 +1047,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(
             'Expected qconfig_dict to have the following keys:' in str(context.exception)
         )
+        self.assertTrue('But found \'object_typo\' instead.' in str(context.exception))
 
     def test_prepare_custom_config_dict_validity(self):
         r"""
@@ -1063,6 +1065,7 @@ class TestQuantizeFx(QuantizationTestCase):
             'Expected prepare_custom_config_dict to have the following keys:'
             in str(context.exception)
         )
+        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
 
     def test_convert_custom_config_dict_validity(self):
         r"""
@@ -1081,6 +1084,7 @@ class TestQuantizeFx(QuantizationTestCase):
             'Expected convert_custom_config_dict to have the following keys:'
             in str(context.exception)
         )
+        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
 
     def test_remove_qconfig(self):
         class M(torch.nn.Module):
