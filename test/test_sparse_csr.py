@@ -394,6 +394,7 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, "mv: expected"):
                 csr.matmul(bad_vec)
 
+    @onlyCUDA
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz):
