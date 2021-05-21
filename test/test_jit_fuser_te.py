@@ -1242,6 +1242,7 @@ class TestTEFuser(JitTestCase):
             torch.reciprocal,
             torch.neg,
             torch.relu,
+            F.relu6,
             torch.log,
             torch.log10,
             torch.log1p,
