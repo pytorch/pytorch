@@ -195,23 +195,6 @@ void RequestCallbackImpl::processPythonCall(
   }
 }
 
-TypePtr RequestCallbackImpl::getScriptRemoteCallType(
-    ScriptRemoteCall& scriptRemoteCall) const {
-  TypePtr returnType;
-  if (scriptRemoteCall.hasOp()) {
-    returnType = scriptRemoteCall.op()->schema().returns()[0].type();
-  } else {
-    returnType = PythonRpcHandler::getInstance()
-                     .jitCompilationUnit()
-                     ->get_function(scriptRemoteCall.qualifiedName())
-                     .getSchema()
-                     .returns()
-                     .at(0)
-                     .type();
-  }
-  return returnType;
-}
-
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
     ScriptRemoteCall& scriptRemoteCall,
     std::vector<at::IValue>& stack) const {
