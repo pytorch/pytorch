@@ -223,7 +223,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 });
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
-    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
 });
 
@@ -234,7 +234,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 });
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
-    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
 });
 
