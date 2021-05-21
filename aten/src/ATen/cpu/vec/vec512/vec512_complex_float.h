@@ -651,14 +651,14 @@ public:
   // AVX512 doesn't have horizontal add & horizontal sub instructions.
   // TODO: hadd_pd() & hsub_pd() may have scope for improvement.
   static inline __m512 hadd_ps(__m512 a, __m512 b) {
-  __m512i idx1 = _mm512_set_epi32(30, 28, 14, 12, 26, 24, 10, 8, 22, 20, 6, 4, 18, 16, 2, 0);
-  __m512i idx2 = _mm512_set_epi32(31, 29, 15, 13, 27, 25, 11, 9, 23, 21, 7, 5, 19, 17, 3, 1);
+  __m512i idx1 = _mm512_set_epi32(30, 14, 28, 12, 26, 10, 24, 8, 22, 6, 20, 4, 18, 2, 16, 0);
+  __m512i idx2 = _mm512_set_epi32(31, 15, 29, 13, 27, 11, 25, 9, 23, 7, 21, 5, 19, 3, 17, 1);
   return _mm512_add_ps(_mm512_mask_permutex2var_ps(a, 0xffff, idx1, b),
                        _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));
   }
   static inline __m512 hsub_ps(__m512 a, __m512 b) {
-  __m512i idx1 = _mm512_set_epi32(30, 28, 14, 12, 26, 24, 10, 8, 22, 20, 6, 4, 18, 16, 2, 0);
-  __m512i idx2 = _mm512_set_epi32(31, 29, 15, 13, 27, 25, 11, 9, 23, 21, 7, 5, 19, 17, 3, 1);
+  __m512i idx1 = _mm512_set_epi32(30, 14, 28, 12, 26, 10, 24, 8, 22, 6, 20, 4, 18, 2, 16, 0);
+  __m512i idx2 = _mm512_set_epi32(31, 15, 29, 13, 27, 11, 25, 9, 23, 7, 21, 5, 19, 3, 17, 1);
   return _mm512_sub_ps(_mm512_mask_permutex2var_ps(a, 0xffff, idx1, b),
                        _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));
   }
@@ -675,7 +675,7 @@ public:
   __m512 abs_2_() const {
     auto val_2 = _mm512_mul_ps(values, values);     // a*a     b*b
     auto ret = hadd_ps(val_2, val_2);        // a*a+b*b a*a+b*b
-    return _mm512_permute_ps(ret, 0xD8);
+    return ret;
   }
   __m512 abs_() const {
     return _mm512_sqrt_ps(abs_2_());                // abs     abs
@@ -767,7 +767,6 @@ public:
 
     auto val_2 = _mm512_mul_ps(values, values);                       // a*a      b*b
     auto re = hsub_ps(val_2, _mm512_permute_ps(val_2, 0xB1));  // a*a-b*b  b*b-a*a
-    re = _mm512_permute_ps(re, 0xD8);
     re = _mm512_sub_ps(one, re);
 
     auto root = Vectorized(_mm512_mask_blend_ps(0xAAAA, re, im)).sqrt();         //sqrt(re + i*im)
@@ -926,7 +925,6 @@ template <> Vectorized<c10::complex<float>> inline operator*(const Vectorized<c1
   auto ad_bc = _mm512_mul_ps(a, d_c);       //ad      -bc
 
   auto ret = Vectorized<c10::complex<float>>::hsub_ps(ac_bd, ad_bc);  //ac - bd  ad + bc
-  ret = _mm512_permute_ps(ret, 0xD8);
   return ret;
 }
 
@@ -944,7 +942,6 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
   auto ad_bc = _mm512_mul_ps(a, d_c);       //-ad      bc
 
   auto re_im = Vectorized<c10::complex<float>>::hadd_ps(ac_bd, ad_bc);//ac + bd  bc - ad
-  re_im = _mm512_permute_ps(re_im, 0xD8);
   return _mm512_div_ps(re_im, b.abs_2_());
 }
 
