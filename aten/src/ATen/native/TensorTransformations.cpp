@@ -41,7 +41,27 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
         .add_input(self)
         .add_input(restrided_out);
   auto iter = config.build();
-  iter.flip_strides(0, 2); //flip strides of the real output using dummy output as model (dimension should be flipped where stride is 0)
+
+  auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
+  const auto sizes = iter.shape();
+  auto strides_bytes = iter.strides(0).vec();
+  const auto strides_dummy = iter.strides(2);
+
+  // To understand this transformation, think of a 3D cube.
+  //   - The data ptr points to the lower-left most vertex of the cube
+  //   - The strides tell us how to move in each dimension,
+  //     that is, data + stride[i] advances one element in the dimension i
+  // To flip a dimension:
+  //   - We move the pointer to the opposite vertex of the cube
+  //   - We iterate in the opposite direction (invert the strides)
+  for (int i=0; i<iter.ndim(); i++){
+    if (strides_dummy[i] == 0) {
+      data += strides_bytes[i] * (sizes[i]-1);
+      strides_bytes[i] = - strides_bytes[i];
+    }
+  }
+  iter.set_arg_strides(0, strides_bytes);
+  iter.set_arg_data(0, reinterpret_cast<void*>(data));
 
   flip_stub(iter.device_type(), iter);
 

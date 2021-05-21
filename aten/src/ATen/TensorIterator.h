@@ -225,7 +225,6 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// The new pointer should have the same sizes, strides and dtype as the
   /// original
   void unsafe_replace_operand(int arg, void* data);
-  void flip_strides(int arg_to_flip, int model_arg);
 
   /// Splits this TensorIterator into two iterators. Together they iterate over
   /// the entire operation. Used by `with_32bit_indexing()`.
@@ -299,6 +298,10 @@ public:
   StrideVector get_strides() const;
   StrideVector get_inner_strides() const { return get_dim_strides(0); }
   PtrVector get_base_ptrs() const;
+
+  // Helper functions for advanced stride manipulations (e.g. torch.flip)
+  void set_arg_strides(const int arg, IntArrayRef strides) { operands_[arg].stride_bytes = std::move(strides); }
+  void set_arg_data(const int arg, void* data) { operands_[arg].data = data; }
 
   /// true if the stride computation can use 32-bit arithmetic. Used by GPU kernels
   bool can_use_32bit_indexing() const;
