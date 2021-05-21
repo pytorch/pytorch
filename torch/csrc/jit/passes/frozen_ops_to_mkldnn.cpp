@@ -684,7 +684,6 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     }
 
     if (body_node->kind() == aten::relu6) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       clamp_node_creator(body_node, prim::MKLDNNHardTanh, 0., 6.);
       continue;
     }
@@ -881,9 +880,6 @@ class MKLDNNSubgraphSlicer {
       case aten::hardswish:
       case aten::tanh:
       case aten::batch_norm:
-      // TODO: max_pool on mkldnn can be slower than in eager. ideally, we'd
-      // only fuse it if we knew including max_pool lead to fewer layout
-      // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
       case aten::avg_pool2d:

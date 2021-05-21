@@ -5,13 +5,13 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/AtomicAddFloat.h>
 
 namespace at { namespace native {
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 struct Indexer {
   Indexer(int64_t num_indexers, char** indexers, const int64_t* indexer_strides,
@@ -231,11 +231,11 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   // NOTE: duplicate indices are only supported if accumulate is true.
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "index_put", [&] {
+    // See Note [Enabling Deterministic Operations]
+    // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
+    // must enable serial execution if deterministic algorithms are enabled.
+    const bool is_deterministic = at::globalContext().deterministicAlgorithms();
     if (accumulate) {
-      // See Note [Enabling Deterministic Operations]
-      // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
-      // must enable serial execution if deterministic algorithms are enabled.
-      bool is_deterministic = at::globalContext().deterministicAlgorithms();
       bool use_parallel_for = (!is_deterministic) && (
         (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
       if (use_parallel_for && iter.dtype() == ScalarType::Float) {
@@ -252,7 +252,7 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     } else {
       cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
         *(scalar_t*)(dst + offset) = *(scalar_t*)src;
-      });
+      }, /*serial_execution=*/is_deterministic);
     }
   });
 }

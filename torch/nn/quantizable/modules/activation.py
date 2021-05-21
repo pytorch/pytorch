@@ -354,8 +354,16 @@ class MultiheadAttention(nn.MultiheadAttention):
             key_padding_mask = key_padding_mask.to(torch.bool)
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
-                k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-                v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
+
+                # Explicitly assert that bias_k and bias_v are not None
+                # in a way that TorchScript can understand.
+                bias_k = self.bias_k
+                assert bias_k is not None
+                bias_v = self.bias_v
+                assert bias_v is not None
+
+                k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+                v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
                 if attn_mask is not None:
                     attn_mask = nnF.pad(attn_mask, (0, 1))
                 if key_padding_mask is not None:

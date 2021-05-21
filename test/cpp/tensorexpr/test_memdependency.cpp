@@ -481,7 +481,6 @@ TEST(MemDependency, MemDependencyCheckerOverlap) {
    */
 
   Store* aStore = Store::make(a, {0}, 3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Store* a2Store = Store::make(a, {0}, 6);
   Store* bStore = Store::make(b, {0}, Add::make(Load::make(a, {0}), 1));
 
@@ -520,7 +519,6 @@ TEST(MemDependency, MemDependencyCheckerLoop) {
    */
 
   Store* aStore = Store::make(a, {x}, x);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* loop = For::make(x, 0, 10, aStore);
   Store* bStore = Store::make(b, {0}, Add::make(Load::make(a, {4}), 1));
 
@@ -548,9 +546,7 @@ TEST(MemDependency, MemDependencyCheckerLoop) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopReduce) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
 
@@ -570,7 +566,6 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
   ExprHandle reduce =
       ExprHandle(Sum()(a.node(), ExprHandle(1), {x.node()}, {x.node()}));
   Store* aReduce = Store::make(a, {0}, reduce);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* loop = For::make(x, 0, 10, aReduce);
   Store* bStore = Store::make(b, {0}, Load::make(a, {0}));
 
@@ -611,9 +606,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
 
@@ -632,7 +625,6 @@ TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
   Store* aInit = Store::make(a, {0}, 0);
   ExprHandle aLoad = Load::make(a, {x});
   Store* aReduce = Store::make(a, {0}, Add::make(aLoad, 1));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* loop = For::make(x, 0, 10, aReduce);
   Store* bStore = Store::make(b, {0}, Load::make(a, {0}));
 
@@ -669,9 +661,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
 
@@ -687,7 +677,6 @@ TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
 
   ExprHandle aLoad = Load::make(a, {x});
   Store* bStore = Store::make(b, {x}, Max::make(aLoad, 0, true));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* loop = For::make(x, 0, 10, bStore);
 
   Stmt* stmt = Block::make({loop});
@@ -726,9 +715,7 @@ TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
 
@@ -743,7 +730,6 @@ TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
    */
 
   Store* bStore = Store::make(b, {x}, Max::make(x, 0, true));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* loop = For::make(x, 0, 10, bStore);
 
   Stmt* stmt = Block::make({loop});
@@ -769,11 +755,8 @@ TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopBounds) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {10}, kInt);
   VarHandle x("x", kInt);
   using namespace analysis;
@@ -800,17 +783,10 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
    */
 
   std::vector<Stmt*> stmts(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {For::make(x, 1, 10, Store::make(b, {x}, Load::make(a, {x}))),
        For::make(
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           x,
-           1,
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           9,
-           Store::make(b, {x}, Mul::make(Load::make(b, {x}), 2))),
+           x, 1, 9, Store::make(b, {x}, Mul::make(Load::make(b, {x}), 2))),
        For::make(x, 3, 4, Store::make(c, {x}, Load::make(a, {x}))),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        For::make(x, 0, 10, Store::make(c, {x}, Load::make(b, {x})))});
 
   Stmt* stmt = Block::make(stmts);
@@ -960,9 +936,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
 
@@ -993,31 +967,16 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
    */
 
   Stmt* stmt = Block::make(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1}))),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        For::make(x, 0, 9, Store::make(a, {x}, Load::make(a, {x + 1}))),
        For::make(
            x,
            0,
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            9,
            Store::make(
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               a,
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               {ExprHandle(9) - x},
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               Load::make(a, {ExprHandle(8) - x}))),
+               a, {ExprHandle(9) - x}, Load::make(a, {ExprHandle(8) - x}))),
        For::make(
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           x,
-           0,
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           10,
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x}))),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           x, 0, 10, Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x}))),
        For::make(x, 0, 10, Store::make(b, {x}, Load::make(a, {x})))});
 
   stmt->accept(&analyzer);
@@ -1159,9 +1118,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1187,7 +1144,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         y,
         0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Block::make({Store::make(a, {y}, Add::make(Load::make(a, {y}), 1))}));
 
@@ -1208,7 +1164,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         y,
         0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Block::make(
             {Store::make(a, {y + 1}, Add::make(Load::make(a, {y + 1}), 1))}));
@@ -1230,7 +1185,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         x,
         0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), x))}));
     stmt->accept(&analyzer);
@@ -1251,7 +1205,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         x,
         0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Block::make({Store::make(a, {0}, Add::make(Load::make(b, {0}), x))}));
     stmt->accept(&analyzer);
@@ -1271,7 +1224,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         x,
         0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Block::make({Store::make(a, {y}, Add::make(Load::make(a, {y}), x))}));
     stmt->accept(&analyzer);
@@ -1290,7 +1242,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     MemDependencyChecker analyzer;
 
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 0, 10, Store::make(a, {x}, Load::make(a, {x + 1})));
     stmt->accept(&analyzer);
 
@@ -1309,7 +1260,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     analyzer.allowLoopExecutionOrderAnalysis();
 
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 0, 10, Store::make(a, {x}, Load::make(a, {x + 1})));
     stmt->accept(&analyzer);
 
@@ -1327,7 +1277,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     MemDependencyChecker analyzer;
 
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1})));
     stmt->accept(&analyzer);
 
@@ -1344,7 +1293,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     analyzer.allowLoopExecutionOrderAnalysis();
 
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1})));
     stmt->accept(&analyzer);
 
@@ -1368,15 +1316,9 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         x,
         3,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Store::make(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            a,
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            {ExprHandle(9) - x},
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            Load::make(a, {ExprHandle(8) - x})));
+            a, {ExprHandle(9) - x}, Load::make(a, {ExprHandle(8) - x})));
     stmt->accept(&analyzer);
 
     // However here was can determine the A store is earlier in the order than
@@ -1398,15 +1340,9 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         x,
         3,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Store::make(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            a,
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            {ExprHandle(8) - x},
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            Load::make(a, {ExprHandle(9) - x})));
+            a, {ExprHandle(8) - x}, Load::make(a, {ExprHandle(9) - x})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1425,15 +1361,9 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         x,
         3,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Store::make(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            a,
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            {ExprHandle(9) - x},
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            Load::make(a, {ExprHandle(8) - x})));
+            a, {ExprHandle(9) - x}, Load::make(a, {ExprHandle(8) - x})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1451,7 +1381,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     analyzer.allowLoopExecutionOrderAnalysis();
 
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 3, 10, Store::make(a, {x - 2}, Load::make(a, {x - 1})));
     stmt->accept(&analyzer);
 
@@ -1473,7 +1402,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // distinct.
 
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2})));
     stmt->accept(&analyzer);
 
@@ -1496,12 +1424,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // distinct.
 
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 + 1})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 1})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1517,12 +1440,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        1,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 - 1})));
+        x, 1, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 - 1})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1538,12 +1456,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 + 2})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 2})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1559,12 +1472,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        1,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 - 2})));
+        x, 1, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 - 2})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1580,13 +1488,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // of stride.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 + 7})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 7})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1601,12 +1503,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Works with offsets which are multiples of the stride.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 2 + 4})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 4})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1623,13 +1520,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Store::make(a, {x * 6}, Load::make(a, {x * 6 + 5})));
+        x, 0, 10, Store::make(a, {x * 6}, Load::make(a, {x * 6 + 5})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1646,7 +1537,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 6})));
     stmt->accept(&analyzer);
 
@@ -1663,7 +1553,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 0, 10, Store::make(a, {x * 4}, Load::make(a, {x * 2})));
     stmt->accept(&analyzer);
 
@@ -1681,13 +1570,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Store::make(a, {x * 2}, Load::make(a, {x * 6 + 1})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 6 + 1})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1703,13 +1586,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Store::make(a, {x * 2}, Load::make(a, {x * 6 + 4})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 6 + 4})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1725,13 +1602,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Store::make(a, {x * 2 + 3}, Load::make(a, {x * 6})));
+        x, 0, 10, Store::make(a, {x * 2 + 3}, Load::make(a, {x * 6})));
     stmt->accept(&analyzer);
 
     ASSERT_FALSE(isSelfDependent(analyzer.getHistory()));
@@ -1746,12 +1617,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // If they have strides with no common muliple > 1, they overlap.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(a, {x * 2}, Load::make(a, {x * 3 + 1})));
+        x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 3 + 1})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1767,7 +1633,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 0, 10, Store::make(a, {x}, Load::make(a, {x + 10})));
     stmt->accept(&analyzer);
 
@@ -1783,13 +1648,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // If they have different execution orders they may overlap.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x})));
+        x, 0, 10, Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1806,9 +1665,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         x,
         0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         Store::make(a, {x * 2}, Load::make(a, {ExprHandle(19) - x * 2})));
     stmt->accept(&analyzer);
 
@@ -1825,7 +1682,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
     Stmt* stmt =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 0, 10, Store::make(a, {x / 2}, Load::make(a, {x / 2})));
     stmt->accept(&analyzer);
 
@@ -1841,12 +1697,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // If the stride is not monotonic, they overlap - even with an offset.
     MemDependencyChecker analyzer;
     Stmt* stmt = For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(a, {x / 2}, Load::make(a, {x / 2 + 1})));
+        x, 0, 10, Store::make(a, {x / 2}, Load::make(a, {x / 2 + 1})));
     stmt->accept(&analyzer);
 
     ASSERT_TRUE(isSelfDependent(analyzer.getHistory()));
@@ -1864,7 +1715,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     Stmt* stmt = For::make(
         x,
         0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         10,
         Store::make(a, {Mod::make(x, 2)}, Load::make(a, {Mod::make(x, 2)})));
     stmt->accept(&analyzer);
@@ -1907,9 +1757,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {20}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {20}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1918,13 +1766,7 @@ TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
   MemDependencyChecker analyzer({a.node()}, {b.node()});
   Stmt* stmt = Block::make(
       {For::make(
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           x,
-           0,
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           10,
-           Store::make(b, {x * 2 + 1}, Load::make(a, {x * 2 + 1}))),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+           x, 0, 10, Store::make(b, {x * 2 + 1}, Load::make(a, {x * 2 + 1}))),
        For::make(x, 0, 10, Store::make(b, {x * 2}, Load::make(a, {x * 2})))
 
       });
@@ -1973,11 +1815,8 @@ TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1999,10 +1838,8 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
 
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          Cond::make(
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(y, 5, CompareSelectOperation::kLT),
              Store::make(c, {0}, Add::make(Load::make(b, {0}), 1)),
              Store::make(c, {0}, Add::make(Load::make(b, {1}), 1)))});
@@ -2038,17 +1875,13 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
 
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          Cond::make(
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(y, 5, CompareSelectOperation::kLT),
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              For::make(x, 0, 10, Store::make(c, {x}, Load::make(b, {x}))),
              For::make(
                  x,
                  0,
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  10,
                  Store::make(c, {x}, Add::make(Load::make(b, {x}), 1))))});
 
@@ -2083,15 +1916,12 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
 
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          Cond::make(
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(y, 5, CompareSelectOperation::kLT),
              For::make(
                  x,
                  0,
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  10,
                  Store::make(c, {x}, Add::make(Load::make(b, {x}), 1))),
              nullptr)});
@@ -2124,16 +1954,13 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
 
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          Cond::make(
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              CompareSelect::make(y, 5, CompareSelectOperation::kLT),
              nullptr,
              For::make(
                  x,
                  0,
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  10,
                  Store::make(c, {x}, Add::make(Load::make(b, {x}), 1))))});
 
@@ -2164,16 +1991,10 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
     Store* initStore = Store::make(c, {x}, Load::make(a, {x}));
     ExprHandle conditionalLoad = Load::make(c, {0});
     Stmt* stmt = Block::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {For::make(x, 0, 10, initStore),
          Cond::make(
              CompareSelect::make(
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                 conditionalLoad,
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                 5,
-                 CompareSelectOperation::kLT),
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                 conditionalLoad, 5, CompareSelectOperation::kLT),
              Store::make(c, {0}, 5),
              nullptr)});
 
@@ -2191,11 +2012,8 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerIfThenElse) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -2216,12 +2034,10 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
         c,
         {0},
         IfThenElse::make(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(y, 5, CompareSelectOperation::kLT),
             Add::make(Load::make(b, {0}), 1),
             Add::make(Load::make(b, {1}), 1)));
     Stmt* stmt = Block::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          ifStore});
 
@@ -2258,13 +2074,10 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
         c,
         {0},
         IfThenElse::make(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(y, 5, CompareSelectOperation::kLT),
             Add::make(Load::make(b, {0}), 1),
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             42));
     Stmt* stmt = Block::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          ifStore});
 
@@ -2293,11 +2106,9 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
         c,
         {0},
         IfThenElse::make(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             CompareSelect::make(y, 5, CompareSelectOperation::kLT),
             Load::make(b, {x}),
             Load::make(a, {x})));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Stmt* stmt = Block::make({For::make(x, 0, 10, ifStore)});
 
     stmt->accept(&analyzer);
@@ -2312,9 +2123,7 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerCutLoop) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {10}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
 
@@ -2331,9 +2140,7 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
 
     MemDependencyChecker analyzer({a}, {b});
     Stmt* stmt = Block::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {For::make(x, 0, 10, Store::make(b, {x}, Load::make(a, {x}))),
-         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          Store::make(b, {5}, 100)});
 
     stmt->accept(&analyzer);
@@ -2364,20 +2171,15 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
 
     MemDependencyChecker analyzer({a}, {b});
     For* firstLoop =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(x, 0, 10, Store::make(b, {x}, Load::make(a, {x})));
     Store* secondStore = Store::make(b, {x}, Add::make(Load::make(b, {x}), 1));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     For* secondLoop = For::make(x, 4, 7, secondStore);
 
     Stmt* stmt = Block::make(
         {firstLoop,
          secondLoop,
-         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          Store::make(b, {4}, 100),
-         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          Store::make(b, {5}, 101),
-         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          Store::make(b, {6}, 102)});
 
     stmt->accept(&analyzer);
@@ -2403,11 +2205,8 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {100}, kInt);
   VarHandle x("x", kInt);
 
@@ -2511,12 +2310,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      */
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make({For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(c, {x}, Load::make(a, {Load::make(b, {x})})))});
+        x, 0, 10, Store::make(c, {x}, Load::make(a, {Load::make(b, {x})})))});
 
     stmt->accept(&analyzer);
 
@@ -2550,7 +2344,6 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
 
     // The load from A has bounds B[0] to B[9].
     ExprHandle loadFromB0 = Load::make(b, {0});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle loadFromB9 = Load::make(b, {9});
     ASSERT_TRUE(EQ(history[3]->bounds(), {CB(loadFromB0, loadFromB9)}));
   }
@@ -2562,12 +2355,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      */
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make({For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(c, {Load::make(b, {x})}, Load::make(a, {x})))});
+        x, 0, 10, Store::make(c, {Load::make(b, {x})}, Load::make(a, {x})))});
 
     stmt->accept(&analyzer);
 
@@ -2611,12 +2399,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      */
     MemDependencyChecker analyzer({a, b}, {c});
     Stmt* stmt = Block::make({For::make(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        x,
-        0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        10,
-        Store::make(c, {Load::make(b, {Load::make(a, {x})})}, x))});
+        x, 0, 10, Store::make(c, {Load::make(b, {Load::make(a, {x})})}, x))});
 
     stmt->accept(&analyzer);
 
@@ -2651,7 +2434,6 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
     ASSERT_TRUE(EQ(history[2]->bounds(), {CB(0, 9)}));
     // The load from B as bounds A[0] to A[9].
     ExprHandle loadFromA0 = Load::make(a, {0});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle loadFromA9 = Load::make(a, {9});
     ASSERT_TRUE(EQ(history[3]->bounds(), {CB(loadFromA0, loadFromA9)}));
 
@@ -2666,7 +2448,6 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerMultiDim) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int M = 10, N = 9, K = 12;
   BufHandle a("A", {M, N, K}, kInt);
   BufHandle b("B", {M, N, K}, kInt);
@@ -2746,17 +2527,14 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
     Stmt* stmt = Block::make({For::make(
         x,
         0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         For::make(
             y,
             0,
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             5,
             For::make(
                 z,
                 0,
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 5,
                 Store::make(b, {x, y, z}, Load::make(a, {x, y, z})))))});
 
@@ -2837,7 +2615,6 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
         For::make(
             y,
             0,
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             100,
             For::make(
                 z,
@@ -2959,20 +2736,16 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
    */
 
   // Can determine if 2 loops created by Compute are dependent.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a_buf("a", kFloat, {4, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b_buf("b", kFloat, {5, 6});
   Tensor* c = Compute(
       "broadcast_add",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{4, "m"}, {5, "n"}, {6, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
   Tensor* d = Compute(
       "d",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{4, "m"}, {5, "n"}, {6, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c->load(m, n, k) + 1;
@@ -3011,20 +2784,16 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
 
   // Check inlining affects the number of accesses returned.
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a_buf("a", kFloat, {4, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b_buf("b", kFloat, {5, 6});
   Tensor* c = Compute(
       "broadcast_add",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{4, "m"}, {5, "n"}, {6, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
   Tensor* d = Compute(
       "d",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{4, "m"}, {5, "n"}, {6, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c->load(m, n, k) + 1;
@@ -3053,13 +2822,10 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
   using namespace analysis;
   // Split an axis, so the number of loops != the number of dimensions.
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a_buf("a", kFloat, {4, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b_buf("b", kFloat, {5, 6});
   Tensor* c = Compute(
       "broadcast_add",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{4, "m"}, {5, "n"}, {6, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
@@ -3106,13 +2872,10 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
   using namespace analysis;
   // Reorder an axis, so the loop order doesn't match the indexing order.
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a_buf("a", kFloat, {4, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b_buf("b", kFloat, {5, 6});
   Tensor* c = Compute(
       "broadcast_add",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{4, "m"}, {5, "n"}, {6, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
@@ -3178,19 +2941,15 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
 
   // Can determine dependencies of a Reduction.
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {2, 3, 6}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {2, 3, 6}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{2, "l2"}, {3, "n1"}, {6, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {6, "m1"}});
   LoopNest l({d}, {c, d});
 
@@ -3216,11 +2975,8 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int M = 1024;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int N = 1024;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int K = 2048;
   using namespace analysis;
 
@@ -3252,7 +3008,6 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
     For* no;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* ni;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loop.splitWithMask(n, 16, &no, &ni);
   }
   // mo, mi, no, ni, k ->

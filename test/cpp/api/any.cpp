@@ -15,7 +15,6 @@ struct AnyModuleTest : torch::test::SeedingFixture {};
 TEST_F(AnyModuleTest, SimpleReturnType) {
   struct M : torch::nn::Module {
     int forward() {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 123;
     }
   };
@@ -87,7 +86,6 @@ TEST_F(AnyModuleTest, WrongArgumentType) {
   };
   AnyModule any(M{});
   ASSERT_THROWS_WITH(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       any.forward(5.0),
       "Expected argument #0 to be of type float, "
       "but received value of type double");
@@ -123,17 +121,14 @@ TEST_F(AnyModuleTest, WrongNumberOfArguments) {
 }
 
 struct M_default_arg_with_macro : torch::nn::Module {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double forward(int a, int b = 2, double c = 3.0) {
     return a + b + c;
   }
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   FORWARD_HAS_DEFAULT_ARGS({1, torch::nn::AnyValue(2)}, {2, torch::nn::AnyValue(3.0)})
 };
 
 struct M_default_arg_without_macro : torch::nn::Module {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double forward(int a, int b = 2, double c = 3.0) {
     return a + b + c;
   }
@@ -152,7 +147,6 @@ TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMetho
         any.forward(),
         "M_default_arg_with_macro's forward() method expects at least 1 argument(s) and at most 3 argument(s), but received 0.");
     ASSERT_THROWS_WITH(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         any.forward(1, 2, 3.0, 4),
         "M_default_arg_with_macro's forward() method expects at least 1 argument(s) and at most 3 argument(s), but received 4.");
   }
@@ -183,7 +177,6 @@ TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMetho
         "If " + module_name + "'s forward() method has default arguments, "
         "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         any.forward(1, 2, 3.0, 4),
         module_name + "'s forward() method expects 3 argument(s), but received 4.");
   }
@@ -200,7 +193,6 @@ struct M : torch::nn::Module {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, GetWithCorrectTypeSucceeds) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AnyModule any(M{5});
   ASSERT_EQ(any.get<M>().value, 5);
 }
@@ -212,14 +204,12 @@ TEST_F(AnyModuleTest, GetWithIncorrectTypeThrows) {
       return input;
     }
   };
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AnyModule any(M{5});
   ASSERT_THROWS_WITH(any.get<N>(), "Attempted to cast module");
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, PtrWithBaseClassSucceeds) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AnyModule any(M{5});
   auto ptr = any.ptr();
   ASSERT_NE(ptr, nullptr);
@@ -228,7 +218,6 @@ TEST_F(AnyModuleTest, PtrWithBaseClassSucceeds) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, PtrWithGoodDowncastSuccceeds) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AnyModule any(M{5});
   auto ptr = any.ptr<M>();
   ASSERT_NE(ptr, nullptr);
@@ -242,7 +231,6 @@ TEST_F(AnyModuleTest, PtrWithBadDowncastThrows) {
       return input;
     }
   };
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AnyModule any(M{5});
   ASSERT_THROWS_WITH(any.ptr<N>(), "Attempted to cast module");
 }
@@ -259,7 +247,6 @@ TEST_F(AnyModuleTest, DefaultStateIsEmpty) {
   };
   AnyModule any;
   ASSERT_TRUE(any.is_empty());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   any = std::make_shared<M>(5);
   ASSERT_FALSE(any.is_empty());
   ASSERT_EQ(any.get<M>().value, 5);
@@ -322,7 +309,6 @@ TEST_F(AnyModuleTest, ConstructsFromModuleHolder) {
     using torch::nn::ModuleHolder<MImpl>::get;
   };
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AnyModule any(M{5});
   ASSERT_EQ(any.get<MImpl>().value, 5);
   ASSERT_EQ(any.get<M>()->value, 5);
@@ -374,7 +360,6 @@ struct AnyValueTest : torch::test::SeedingFixture {};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, CorrectlyAccessesIntWhenCorrectType) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto value = make_value<int>(5);
   ASSERT_NE(value.try_get<int>(), nullptr);
   // const and non-const types have the same typeid(),
@@ -422,7 +407,6 @@ TEST_F(AnyValueTest, CorrectlyAccessesReferencesWhenCorrectType) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, TryGetReturnsNullptrForTheWrongType) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto value = make_value(5);
   ASSERT_NE(value.try_get<int>(), nullptr);
   ASSERT_EQ(value.try_get<float>(), nullptr);
@@ -432,7 +416,6 @@ TEST_F(AnyValueTest, TryGetReturnsNullptrForTheWrongType) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto value = make_value(5);
   ASSERT_NE(value.try_get<int>(), nullptr);
   ASSERT_THROWS_WITH(
@@ -447,7 +430,6 @@ TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, MoveConstructionIsAllowed) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto value = make_value(5);
   auto copy = make_value(std::move(value));
   ASSERT_NE(copy.try_get<int>(), nullptr);
@@ -456,9 +438,7 @@ TEST_F(AnyValueTest, MoveConstructionIsAllowed) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, MoveAssignmentIsAllowed) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto value = make_value(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto copy = make_value(10);
   copy = std::move(value);
   ASSERT_NE(copy.try_get<int>(), nullptr);
@@ -467,7 +447,6 @@ TEST_F(AnyValueTest, MoveAssignmentIsAllowed) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, TypeInfoIsCorrectForInt) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto value = make_value(5);
   ASSERT_EQ(value.type_info().hash_code(), typeid(int).hash_code());
 }

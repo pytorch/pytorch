@@ -141,7 +141,6 @@ TEST(BackendCuttingTest, skipPath) {
   op->add_input("N4");
   op->add_output("N5");
   AddConv(&net, 2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddConv(&net, 5);
   op = net.add_op();
   op->set_type("Concat");

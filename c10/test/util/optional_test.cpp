@@ -24,7 +24,6 @@ bool getSampleValue() {
 
 template <>
 uint64_t getSampleValue() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 42;
 }
 
@@ -67,7 +66,6 @@ TYPED_TEST(OptionalTest, Initialized) {
   optional moveAssign;
   moveAssign = std::move(moveFrom2);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::array<typename TestFixture::optional*, 5> opts = {
       &opt, &copy, &copyAssign, &move, &moveAssign};
   for (auto* popt : opts) {

@@ -6,6 +6,8 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/mobile/backport.h>
+#include <torch/csrc/jit/mobile/backport_manager.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -30,9 +32,7 @@ TEST(LiteInterpreterTest, UpsampleNearest2d) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(torch::rand({1, 3, 128, 128}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(at::Scalar(2.0));
   auto ref = m.forward(inputs);
 
@@ -121,9 +121,7 @@ TEST(LiteInterpreterTest, Conv) {
   std::vector<torch::jit::IValue> inputs;
 
   Module m("m");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
@@ -166,7 +164,6 @@ TEST(LiteInterpreterTest, Inline) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("foo3")(inputs);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
@@ -237,7 +234,6 @@ TEST(LiteInterpreterTest, Prim) {
   )JIT");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 3.5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.run_method("forward", minput);
@@ -266,7 +262,6 @@ TEST(LiteInterpreterTest, PrimScalar) {
   )JIT");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 3.5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.run_method("forward", minput);
@@ -313,7 +308,6 @@ TEST(LiteInterpreterTest, WrongMethodName) {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
   ASSERT_THROWS_WITH_MESSAGE(
@@ -335,7 +329,6 @@ TEST(LiteInterpreterTest, SetState) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
 
@@ -631,6 +624,110 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   AT_ASSERT(version_v4 == 4);
 }
 
+namespace {
+void runAndCheckBytecodeModel(
+    std::stringstream& input_model_stream,
+    const std::vector<IValue>& input_data,
+    const std::vector<Tensor>& expect_result_list,
+    const int64_t expect_version) {
+  auto actual_version = _get_model_bytecode_version(input_model_stream);
+  AT_ASSERT(actual_version == expect_version);
+
+  // Load and run the backport model, then compare the result with expect
+  // result
+  mobile::Module m_mobile = _load_for_mobile(input_model_stream);
+
+  auto actual_result = m_mobile.forward(input_data);
+  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+
+  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
+  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
+  AT_ASSERT(
+      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
+  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+}
+
+void backportAllVersionCheck(
+    std::stringstream& test_model_file_stream,
+    std::vector<IValue>& input_data,
+    std::vector<Tensor>& expect_result_list,
+    const int64_t expect_from_version) {
+  auto from_version = _get_model_bytecode_version(test_model_file_stream);
+  AT_ASSERT(from_version == expect_from_version);
+
+  // Backport script_module_v5.ptl to an older version
+  constexpr int64_t minimum_to_version = 4;
+  int64_t current_to_version = from_version - 1;
+
+  std::ostringstream oss;
+  // Verify all candidate to_version work as expected. All backport to version
+  // larger than minimum_to_version should success.
+  while (current_to_version >= minimum_to_version) {
+    oss.clear();
+    bool backPortSuccess =
+        _backport_for_mobile(test_model_file_stream, oss, current_to_version);
+    AT_ASSERT(backPortSuccess);
+
+    // Check backport model version
+    std::stringstream iss(oss.str());
+    auto backport_version = _get_model_bytecode_version(iss);
+    AT_ASSERT(backport_version == current_to_version);
+
+    // Load and run the backport model, then compare the result with expect
+    // result
+    runAndCheckBytecodeModel(
+        iss, input_data, expect_result_list, current_to_version);
+
+    current_to_version--;
+  }
+  //  backport to minimum version - 1 should fail
+  oss.clear();
+  bool backPortSuccess =
+      _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
+  AT_ASSERT(!backPortSuccess);
+}
+
+} // namespace
+
+TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
+  torch::jit::Module module("m");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  module.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  module.register_parameter("bias", torch::ones({20}), false);
+  module.define(R"(
+    def forward(self, input):
+      x1 = torch.zeros(2, 2)
+      x2 = torch.empty_like(torch.empty(2, 2))
+      x3 = torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
+      return (x1, x2, x3)
+  )");
+
+  torch::jit::Module module_freeze = freeze(module);
+
+  std::stringstream input_model_stream;
+  module_freeze._save_for_mobile(input_model_stream);
+  std::vector<IValue> input_data =
+      std::vector<IValue>({torch::ones({1, 1, 28, 28})});
+  std::vector<Tensor> expect_result_list;
+  expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float) * 0);
+  expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float));
+  expect_result_list.emplace_back(
+      at::ones({1, 20, 24, 24}, ScalarType::Float) * 26);
+  backportAllVersionCheck(
+      input_model_stream,
+      input_data,
+      expect_result_list,
+      caffe2::serialize::kProducedBytecodeVersion);
+}
+
+TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
+  auto runtime_ops = _get_runtime_ops_and_info();
+  // Ballpark estimate of the minimal number of ops; just used to
+  // verify API returns a reasonably large number.
+  AT_ASSERT(runtime_ops.size() > 2900);
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
@@ -867,7 +964,6 @@ TEST(LiteInterpreterTest, FindAndRunMethod) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.get_method("add_it")(inputs);
@@ -898,7 +994,6 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   )");
 
   std::vector<IValue> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inputx = 5 * torch::ones({});
   auto inputy = 4 * torch::ones({});
   auto ref = m.run_method("add_three", inputx, inputy);
@@ -974,7 +1069,6 @@ TEST(LiteInterpreterTest, ExtraFiles) {
 
   for (auto& file_name : all_files) {
     if (file_name.find("extra/") == 0) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       loaded_extra_files[file_name.substr(6)] = "";
     }
   }
@@ -987,9 +1081,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   torch::jit::Module m("m");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
@@ -1014,6 +1106,184 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   };
   EXPECT_EQ(operator_names, expected_operator_names)
       << "Expected the root operator lists to be the same";
+}
+
+TEST(LiteInterpreterTest, DefaultArgsConv) {
+  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+  if (s && strcmp(s, "1") == 0)
+    return;
+
+  std::vector<torch::jit::IValue> inputs;
+
+  Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
+  )");
+
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
+
+  auto outputref = m.forward(inputs).toTensor();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 1; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(output.equal(outputref));
+}
+
+namespace {
+void testLiteModuleCompareResultTensors(
+    Module& m,
+    const std::vector<torch::jit::IValue>& inputs) {
+  auto outputref = m.forward(inputs).toTensor();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(output.equal(outputref));
+}
+
+void testDefaultArgsPinv(int num_args) {
+  Module m("m");
+  if (num_args == 1) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input)
+    )");
+  } else if (num_args == 2) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5)
+    )");
+  } else if (num_args == 3) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, True)
+    )");
+  }
+
+  std::vector<torch::jit::IValue> inputs;
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 1; // a more stable matrix
+  input = input.view({N, N});
+  inputs.push_back(input);
+  testLiteModuleCompareResultTensors(m, inputs);
+}
+} // namespace
+
+TEST(LiteInterpreterTest, DefaultArgsPinv) {
+  // Test with different number of specified arguments.
+  // Arguments not specified take default value.
+  for (int num_args = 1; num_args <= 3; ++num_args) {
+    testDefaultArgsPinv(num_args);
+  }
+
+  //  bytecode with one specified argument:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 1),)),
+  //              ('constants', (False, 1e-15)), # default constants are not
+  //              used
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
+
+  //  bytecode with 2 specified argument:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('LOADC', 1, 0), # added LOADC for specified argument
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 2),)),
+  //              ('constants', (False, 1e-05)), # updated constant table
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
+
+  //  bytecode with 3 specified arguments:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('LOADC', 1, 0),
+  //                  ('LOADC', 0, 0),
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 3),)),
+  //              ('constants', (True, 1e-05)),
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
+}
+
+TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
+  // The second argument is specified, but the value is the same as the default
+  // value. It's treated as "not specified" since the value can be fetched from
+  // schema.
+  Module m("m");
+  m.define(R"(
+    def forward(self, input):
+      return torch.linalg_pinv(input, 1e-15)
+  )");
+  torch::jit::MobileCode code(m.get_method("forward").graph(), "forward");
+  auto arg_nums = code.op_to_num_specified_args();
+  ASSERT_EQ(arg_nums.size(), 1);
+  ASSERT_EQ(arg_nums["aten::linalg_pinv"], 1);
+  std::vector<torch::jit::IValue> inputs;
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 1; // a more stable matrix
+  input = input.view({N, N});
+  inputs.push_back(input);
+  testLiteModuleCompareResultTensors(m, inputs);
 }
 
 namespace {

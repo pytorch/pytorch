@@ -88,12 +88,28 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor vector_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return torch::linalg_vector_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor vector_norm(const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return torch::linalg_vector_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return torch::linalg_vector_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return torch::linalg_vector_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor matrix_norm(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return torch::linalg_matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return torch::linalg_matrix_norm_out(result, self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor matrix_norm(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return torch::linalg_matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return torch::linalg_matrix_norm_out(result, self, ord, dim, keepdim, dtype);
 }
 
 inline Tensor matrix_power(const Tensor& self, int64_t n) {
@@ -136,12 +152,12 @@ inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& othe
   return torch::linalg_solve_out(result, input, other);
 }
 
-inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices, bool compute_uv) {
-  return torch::linalg_svd(input, full_matrices, compute_uv);
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
+  return torch::linalg_svd(input, full_matrices);
 }
 
-inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices, bool compute_uv) {
-  return torch::linalg_svd_out(U, S, Vh, input, full_matrices, compute_uv);
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices) {
+  return torch::linalg_svd_out(U, S, Vh, input, full_matrices);
 }
 
 inline Tensor svdvals(const Tensor& input) {
@@ -315,12 +331,29 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.vector_norm
-inline Tensor vector_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return detail::vector_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor vector_norm(const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return detail::vector_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return detail::vector_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return detail::vector_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_norm
+inline Tensor matrix_norm(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return detail::matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, const Scalar& ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
+}
+
+inline Tensor matrix_norm(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  return detail::matrix_norm(self, ord, dim, keepdim, dtype);
+}
+
+inline Tensor& matrix_norm_out(const Tensor& self, std::string ord, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype, Tensor& result) {
+  return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_power
@@ -353,12 +386,10 @@ inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
 /// Computes pseudo-inverse
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.pinv
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 inline Tensor pinv(const Tensor& input, double rcond=1e-15, bool hermitian=false) {
   return detail::pinv(input, rcond, hermitian);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond=1e-15, bool hermitian=false) {
   return detail::pinv_out(result, input, rcond, hermitian);
 }
@@ -377,12 +408,12 @@ inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& othe
 /// Computes the singular values and singular vectors
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svd
-inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices, bool compute_uv) {
-  return detail::svd(input, full_matrices, compute_uv);
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
+  return detail::svd(input, full_matrices);
 }
 
-inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices, bool compute_uv) {
-  return detail::svd_out(U, S, Vh, input, full_matrices, compute_uv);
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices) {
+  return detail::svd_out(U, S, Vh, input, full_matrices);
 }
 
 /// Computes the singular values
