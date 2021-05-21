@@ -12695,6 +12695,66 @@ TEST(NVFuserTest, FusionSegmentReducePointwise_CUDA) {
       executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionMultipleVectorize_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  TensorView* tv0 = makeContigTensor(1);
+  TensorView* tv1 = makeContigTensor(1);
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  TensorView* tv3 = add(tv0, tv1);
+  fusion->addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({40960}, options);
+  at::Tensor t1 = at::randn({40960}, options);
+  auto t2 = t0 + t1;
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  executor_cache.profile(true);
+
+  auto outputs = executor_cache.runFusionWithInputs({t0, t1});
+  auto runtime1 = executor_cache.getMostRecentKernelRuntime();
+  auto log1 = executor_cache.getMostRecentExecutorInfo().pointwise_params;
+  TORCH_CHECK(log1.has_value());
+  TORCH_CHECK(log1->vectorize);
+
+  testValidate(
+      executor_cache.fusion(), outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
+
+  t0 = at::randn({40964}, options);
+  t1 = at::randn({40964}, options);
+  t2 = t0 + t1;
+
+  outputs = executor_cache.runFusionWithInputs({t0, t1});
+  auto runtime2 = executor_cache.getMostRecentKernelRuntime();
+  auto log2 = executor_cache.getMostRecentExecutorInfo().pointwise_params;
+  TORCH_CHECK(log2.has_value());
+  TORCH_CHECK(log2->vectorize);
+
+  testValidate(
+      executor_cache.fusion(), outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
+
+  t0 = at::randn({40962}, options);
+  t1 = at::randn({40962}, options);
+  t2 = t0 + t1;
+
+  outputs = executor_cache.runFusionWithInputs({t0, t1});
+  auto runtime3 = executor_cache.getMostRecentKernelRuntime();
+  auto log3 = executor_cache.getMostRecentExecutorInfo().pointwise_params;
+  TORCH_CHECK(log3.has_value());
+  TORCH_CHECK(log3->vectorize);
+
+  testValidate(
+      executor_cache.fusion(), outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
+
+  TORCH_CHECK(runtime1 == runtime2);
+  TORCH_CHECK(runtime1 != runtime3);
+}
+
 namespace {
 
 // Stolen from cpp benchmark

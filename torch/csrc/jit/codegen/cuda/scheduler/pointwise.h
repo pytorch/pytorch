@@ -11,6 +11,7 @@ namespace fuser {
 namespace cuda {
 
 class ExpressionEvaluator;
+class SchedulerRuntimeInfo;
 
 TORCH_CUDA_CU_API c10::optional<PointwiseParams> getPointwiseHeuristics(
     Fusion* fusion,
@@ -18,8 +19,7 @@ TORCH_CUDA_CU_API c10::optional<PointwiseParams> getPointwiseHeuristics(
 
 TORCH_CUDA_CU_API c10::optional<PointwiseParams> getPointwiseHeuristics(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& runtime_inputs,
-    ExpressionEvaluator& evaluator);
+    SchedulerRuntimeInfo& runtime_info);
 
 TORCH_CUDA_CU_API void schedulePointwise(
     Fusion* fusion,

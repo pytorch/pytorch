@@ -571,7 +571,7 @@ class PointWiseScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info)
       : SchedulerEntry(ScheduleHeuristic::PointWise, false) {
-    computeHeuristics(fusion, runtime_info.expressionEvaluator());
+    computeHeuristics(fusion, runtime_info);
   }
 
   static bool canSchedule(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
@@ -584,8 +584,8 @@ class PointWiseScheduler : public SchedulerEntry {
     schedulePointwise(fusion, pparams_);
   }
 
-  void computeHeuristics(Fusion* fusion, ExpressionEvaluator& ee) {
-    auto pparam = getPointwiseHeuristics(fusion, {}, ee);
+  void computeHeuristics(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
+    auto pparam = getPointwiseHeuristics(fusion, runtime_info);
     TORCH_INTERNAL_ASSERT(pparam.has_value());
     pparams_ = pparam.value();
   }

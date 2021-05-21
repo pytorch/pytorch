@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
@@ -39,9 +39,8 @@ constexpr int64_t lastPow2(int64_t n) {
 c10::optional<PointwiseParams> getPointwiseHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& runtime_inputs) {
-  auto evaluator = executor_utils::bindFusionInputs(runtime_inputs, fusion);
-
-  return getPointwiseHeuristics(fusion, runtime_inputs, evaluator);
+  SchedulerRuntimeInfo runtime_info(fusion, runtime_inputs, true);
+  return getPointwiseHeuristics(fusion, runtime_info);
 }
 
 namespace {
@@ -82,8 +81,7 @@ bool shouldVectorize(TensorView* tv, int64_t max_dims) {
 
 c10::optional<PointwiseParams> getPointwiseHeuristics(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& runtime_inputs,
-    ExpressionEvaluator& evaluator) {
+    SchedulerRuntimeInfo& runtime_info) {
   FUSER_PERF_SCOPE("getPointwiseHeuristics");
 
   FusionGuard fg(fusion);
@@ -95,8 +93,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // Will want to access this with direct indexing later, convert now.
   std::vector<TensorView*> out_tvs(out_tvs_it.begin(), out_tvs_it.end());
 
-  for (auto out : out_tvs) {
-    auto out_tv = out->as<TensorView>();
+  for (auto out_tv : out_tvs) {
     int n_dims = 0;
     for (auto id : out_tv->getMaybeRFactorDomain()) {
       if (id->isReduction() || id->isBroadcast()) {
@@ -114,7 +111,8 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
 
   int64_t n_elems = 1;
   for (auto id : largest_out->getMaybeRFactorDomain()) {
-    auto inferred_val = evaluator.evaluate(id->extent());
+    auto inferred_val =
+        runtime_info.expressionEvaluator().evaluate(id->extent());
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
         "Error inferring size for pointwise scheduler.");
@@ -161,94 +159,33 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   params.tag = "Pointwise heuristics";
 
   // Don't try to vectorize if it's not recommended
-  bool can_vectorize = max_unroll_factor > 1;
-
-  // If we don't have all runtime inputs assume we can't vectorize
-  if (runtime_inputs.size() != fusion->inputs().size()) {
-    can_vectorize = false;
-  }
-
   params.inner_factor = 1;
 
   // Vectorize as much as we can
-  while (params.inner_factor < max_unroll_factor && can_vectorize) {
-    // Factor we will actually check this iteration
-    auto next_vectorize_factor = params.inner_factor * 2;
+  size_t vectorize_factor = max_unroll_factor;
 
-    // Check we can vectorize based on inputs
-    for (size_t inp_i = 0; inp_i < fusion->inputs().size() && can_vectorize;
-         inp_i++) {
-      if (fusion->inputs()[inp_i]->isA<TensorView>()) {
-        TORCH_INTERNAL_ASSERT(
-            runtime_inputs[inp_i].isTensor(),
-            "Mismatch in inputs found for pointwise scheduler.");
-        auto tv_inp = fusion->inputs()[inp_i]->as<TensorView>();
-        auto root_dom = tv_inp->getMaybeRFactorDomain();
-
-        // If fusion ir thinks we should vectorize input, make sure we can
-        if (shouldVectorize(tv_inp, max_dims)) {
-          can_vectorize =
-              can_vectorize &&
-              // Make sure actual input supports vectorizing
-              executor_utils::canVectorize(
-                  runtime_inputs[inp_i].toTensor(), next_vectorize_factor);
-        }
-      }
-    }
-
-    // Check if we can vectorize based on outputs
-    // Check that outputs can be vectorized
-    for (size_t out_tv_i = 0; out_tv_i < out_tvs.size() && can_vectorize;
-         out_tv_i++) {
-      auto output_tv = out_tvs[out_tv_i];
-      if (!shouldVectorize(output_tv, max_dims)) {
-        continue;
-      }
-
-      // Make sure output is contiguous
-      bool is_contig = true;
-      // Grab last dimension
-      IterDomain* last_dim = nullptr;
-      auto output_root_dom =
-          TensorDomain::noReductions(output_tv->getMaybeRFactorDomain());
-
-      if (output_root_dom.size() != output_tv->domain()->contiguity().size()) {
-        can_vectorize = false;
-        break;
-      }
-
-      for (size_t dim_i = 0; dim_i < output_root_dom.size() && can_vectorize;
-           dim_i++) {
-        if (last_dim == nullptr) {
-          last_dim = output_root_dom[dim_i];
-          is_contig = output_tv->domain()->contiguity()[dim_i];
-        }
-      }
-
-      if (last_dim == nullptr || !is_contig) {
-        can_vectorize = false;
-        break;
-      }
-
-      auto inferred_val = evaluator.evaluate(last_dim->extent());
-      TORCH_INTERNAL_ASSERT(
-          inferred_val.has_value(),
-          "Error inferring size for pointwise scheduler.");
-      can_vectorize =
-          can_vectorize && (inferred_val.value() % next_vectorize_factor == 0);
-    }
-
-    if (can_vectorize) {
-      params.inner_factor = next_vectorize_factor;
-      params.vectorize = true;
-    } else {
-      break;
+  for (auto tv_inp : ir_utils::filterByType<TensorView>(fusion->inputs())) {
+    if (shouldVectorize(tv_inp, max_dims)) {
+      const auto inp_vectorize_factor =
+          runtime_info.getVectorizableWidth(tv_inp);
+      vectorize_factor = std::min(vectorize_factor, inp_vectorize_factor);
     }
   }
 
-  if (params.inner_factor == 1) {
+  for (auto output_tv : out_tvs) {
+    if (shouldVectorize(output_tv, max_dims)) {
+      const auto out_vectorize_factor =
+          runtime_info.getVectorizableWidth(output_tv);
+      vectorize_factor = std::min(vectorize_factor, out_vectorize_factor);
+    }
+  }
+
+  if (vectorize_factor == 1) {
     params.vectorize = false;
     params.inner_factor = max_unroll_factor;
+  } else {
+    params.vectorize = true;
+    params.inner_factor = vectorize_factor;
   }
 
   return params;
