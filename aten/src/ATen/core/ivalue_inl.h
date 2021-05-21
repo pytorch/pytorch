@@ -514,6 +514,30 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         });
     return childFut;
   }
+  c10::intrusive_ptr<Future> thenAsync(
+      std::function<c10::intrusive_ptr<Future>(Future&)> callback,
+      TypePtr type) {
+    auto childFut = createInstance(std::move(type));
+    addCallback([childFut, cb = std::move(callback)](Future& parentFut) {
+      c10::intrusive_ptr<Future> intermediateFut;
+      try {
+        intermediateFut = cb(parentFut);
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
+        return;
+      }
+      intermediateFut->addCallback(
+          [childFut = std::move(childFut)](Future& intermediateFut) {
+            if (intermediateFut.hasError()) {
+              childFut->setError(intermediateFut.exception_ptr());
+            } else {
+              childFut->markCompleted(
+                  intermediateFut.value(), intermediateFut.dataPtrs());
+            }
+          });
+    });
+    return childFut;
+  }
 
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() const {
