@@ -356,13 +356,13 @@ class TestSparseCSR(TestCase):
     @onlyCPU
     @unittest.skipIf(IS_MACOS or IS_WINDOWS, "MKL doesn't work on windows or mac")
     @dtypes(torch.float, torch.double)
-    def test_mkl_matmul_warnings(self, device, dtype):
+    def test_mkl_matvec_warnings(self, device, dtype):
         if torch.has_mkl:
             for index_dtype in [torch.int32, torch.int64]:
                 sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
                                              torch.tensor([0, 1, 0, 1]),
                                              torch.tensor([1, 2, 3, 4], dtype=dtype, device=device))
-                vec = torch.randn((2, 2), dtype=dtype, device=device)
+                vec = torch.randn((2, 1), dtype=dtype, device=device)
                 with warnings.catch_warnings(record=True) as w:
                     sp.matmul(vec)
                     self.assertEqual(len(w), 2)
