@@ -462,7 +462,7 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   dim = maybe_wrap_dim(dim, self.dim());
 
   TensorArg self_arg{self, "self", 1}, index_arg{index, "index", 3}, source_arg{source, "source", 4};
-  checkAllSameGPU("index_add", {self_arg, index_arg, source_arg});
+  checkAllSameGPU(__func__, {self_arg, index_arg, source_arg});
 
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_add_(): Expected dtype int32/int64 for index");
@@ -927,9 +927,9 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self)
-      .add_input(self)
-      .add_input(*b_mask)
+      .add_borrowed_output(self)
+      .add_borrowed_input(self)
+      .add_borrowed_input(*b_mask)
       .build();
 
   if (b_mask->dtype() == at::ScalarType::Byte) {

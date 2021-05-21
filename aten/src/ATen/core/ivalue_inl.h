@@ -227,10 +227,18 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
 
  public:
   ConstantString(std::string str) : str_(std::move(str)) {}
+  ConstantString(c10::string_view str) : str_(std::string(str)) {}
   static c10::intrusive_ptr<ConstantString> create(std::string str_);
+  static c10::intrusive_ptr<ConstantString> create(c10::string_view str_);
+  static c10::intrusive_ptr<ConstantString> create(const char* str_);
+
   const std::string& string() const {
     return str_;
   }
+  c10::string_view string_view() const {
+    return str_;
+  }
+
   operator const std::string&() const {
     return string();
   }
@@ -360,13 +368,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       IValue value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           data_ptrs = c10::nullopt) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(
-        !completed(),
-        "Attempting to mark a completed Future as complete again. Note that "
-        "a Future can only be marked completed once.");
-
     // Start by performing all steps that can throw, before setting any field.
+    // Do this before even acquiring the mutex, because extractDataPtrs might
+    // acquire the GIL, which could lead to a lock inversion with our mutex.
+    // See https://github.com/pytorch/pytorch/issues/58239.
     std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs;
     std::vector<c10::Device> usedDevices;
     try {
@@ -382,9 +387,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         ensureIsSubsetOfDevices(usedDevices, devices_);
       }
     } catch (const std::exception&) {
-      setErrorInternal(std::current_exception(), lock);
+      setError(std::current_exception());
       return;
     }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    TORCH_CHECK(
+        !completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
 
     // Only set value_ and completed_ flag once all checks and preparation steps
     // have returned successfully to allow for proper error propagation.
@@ -425,8 +436,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // log errors and thats why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
-          "it is already marked completed (this is not neccessarily "
-          "an error):\n", tryRetrieveErrorMessageInternal(eptr));
+          "it is already marked completed (this is not necessarily "
+          "an error):\n",
+          tryRetrieveErrorMessageInternal(eptr));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",
@@ -569,7 +581,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // This method should be called before this future's value is used, as it
   // ensures that the CUDA streams that are "current" at the callsite properly
-  // synchonize with the value.
+  // synchronize with the value.
   void synchronizeWithCurrentStreams() {
     for (c10::Event& event : events_) {
       event.block(impl_.getStream(event.device()));
@@ -985,6 +997,7 @@ DEFINE_TO(c10::impl::GenericList, toList)
 DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
+DEFINE_TO(c10::string_view, toStringView)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
 DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
@@ -1192,6 +1205,14 @@ std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
 template <typename T>
 inline T IValue::to() && {
   return generic_to(std::move(*this), _fake_type<T>{});
+}
+
+template <>
+inline c10::optional<c10::string_view> IValue::to() && {
+  // In the default implementation, the IValue is destroyed with std::move.
+  // But if the unboxed type is optional<string_view> we cannot destroy
+  // the IValue.
+  return generic_to(*this, _fake_type<c10::optional<c10::string_view>>{});
 }
 
 template <typename T>
@@ -1489,6 +1510,16 @@ inline c10::optional<std::reference_wrapper<const std::string>> IValue::
   return std::reference_wrapper<const std::string>(
       static_cast<const c10::ivalue::ConstantString*>(payload.u.as_intrusive_ptr)
           ->string());
+}
+
+inline c10::string_view IValue::toStringView() const {
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toStringView on null intrusive_ptr IValue");
+  return static_cast<const c10::ivalue::ConstantString*>(
+        payload.u.as_intrusive_ptr)
+    ->string_view();
 }
 
 inline PyObject* IValue::toPyObject() const {
