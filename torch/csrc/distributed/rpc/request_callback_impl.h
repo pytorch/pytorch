@@ -17,13 +17,11 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   void processPythonCall(
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
 
   void processScriptCall(
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
 
   TypePtr getScriptRemoteCallType(
@@ -38,13 +36,11 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   void processPythonRemoteCall(
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
       const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   void processPythonRRefFetchCall(
       RpcCommandBase& rpc,
-      const int64_t messageId,
       const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
@@ -53,14 +49,12 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      const int64_t messageId,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   bool cudaAvailable() const override;
 
   void processRRefBackward(
       RpcCommandBase& rpc,
-      const int64_t messageId,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
 };
 
