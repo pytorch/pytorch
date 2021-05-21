@@ -81,6 +81,7 @@ TESTS = [
     'test_xnnpack_integration',
     'test_vulkan',
     'test_sparse',
+    'test_sparse_csr',
     'test_quantization',
     'test_pruning_op',
     'test_spectral_ops',

@@ -1,8 +1,9 @@
 import torch
 import random
 import warnings
+import unittest
 import itertools
-from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, coalescedonoff
+from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, IS_MACOS, IS_WINDOWS, coalescedonoff
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU, onlyCUDA)
 
@@ -353,6 +354,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(coo.matmul(vec), csr.matmul(vec))
 
     @onlyCPU
+    @unittest.skipIf(IS_MACOS or IS_WINDOWS, "MKL doesn't work on windows or mac")
     @dtypes(torch.float, torch.double)
     def test_mkl_matvec_warnings(self, device, dtype):
         if torch.has_mkl:
