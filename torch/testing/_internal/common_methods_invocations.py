@@ -964,12 +964,7 @@ def sample_inputs_xlog1py(self, device, dtype, requires_grad):
 def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases_scalar = ((),)
-    cases_non_scalar = ((S, S, S),
-                        (S, S),
-                        (S, ))
-
-    cases = cases_scalar + cases_non_scalar  # type: ignore[assignment]
+    cases = ((), (S, S, S), (S, S), (S,))
 
     def generator():
         for shape in cases:
