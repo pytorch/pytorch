@@ -93,6 +93,13 @@ MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
 # ------------------------
 # Helper Functions
 # ------------------------
+def qat_swap_modules(
+        root: torch.nn.Module,
+        additional_qat_module_mapping: Dict[Callable, Callable]) -> None:
+    all_mappings = get_combined_dict(
+        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
+
 def get_standalone_module_configs(
     node: Node,
     modules: Dict[str, torch.nn.Module],
@@ -955,14 +962,6 @@ class Quantizer:
         # mapping from node name to the scope of the module which contains the node.
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
-
-    def _qat_swap_modules(
-            self, root: torch.nn.Module,
-            additional_qat_module_mapping: Dict[Callable, Callable]) -> None:
-        all_mappings = get_combined_dict(
-            get_default_qat_module_mappings(), additional_qat_module_mapping)
-        convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
-
     def _prepare(
             self,
             model: GraphModule,
@@ -1003,7 +1002,7 @@ class Quantizer:
         if model.training:
             additional_qat_module_mapping = prepare_custom_config_dict.get(
                 "additional_qat_module_mapping", {})
-            self._qat_swap_modules(model, additional_qat_module_mapping)
+            qat_swap_modules(model, additional_qat_module_mapping)
 
         self.modules = dict(model.named_modules())
 
