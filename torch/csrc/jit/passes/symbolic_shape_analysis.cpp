@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/integer_value_refinement.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
@@ -115,6 +116,7 @@ struct SymbolicShapeAnalyzer {
       ConstantPropagation(graph_);
       PeepholeOptimizeNonTensor(graph_);
       PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
+      RefineIntegerValues(graph_);
       ConstantPropagation(graph_);
       EliminateCommonSubexpression(graph_);
     }
