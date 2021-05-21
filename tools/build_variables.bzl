@@ -111,6 +111,11 @@ core_sources_common = [
 
 libtorch_sources_common = core_sources_common
 
+libtorch_profiler_sources = [
+    "torch/csrc/autograd/profiler_legacy.cpp",
+    "torch/csrc/autograd/profiler_kineto.cpp",
+]
+
 core_trainer_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
