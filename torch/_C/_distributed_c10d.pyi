@@ -346,6 +346,13 @@ class ProcessGroupGloo(ProcessGroup):
     def create_default_device() -> Device: ...
     ...
 
+class _ProcessGroupWrapper(ProcessGroup):
+    def __init__(
+        self,
+        pg: ProcessGroup,
+        gloo_pg: ProcessGroupGloo
+    ): ...
+
 class ProcessGroupNCCL(ProcessGroup):
     class Options: ...
     def __init__(
