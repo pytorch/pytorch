@@ -357,7 +357,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_fold',
 
     # jit doesn't support sparse tensors.
-    'test_to_sparse'
+    'test_to_sparse',
+    'test_to_sparse_dim',
 }
 
 # generates a script function and set of example inputs
