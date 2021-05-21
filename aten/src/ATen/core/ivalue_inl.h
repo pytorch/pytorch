@@ -314,11 +314,21 @@ struct EnumHolder;
 
 // Future
 struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
- public:
+ private:
+  // Keep this private in order to force users to go through make_intrusive and
+  // thus prevent creating a Future that's not held by an intrusive_ptr.
   explicit Future(TypePtr type, std::vector<c10::Device> devices={})
       : type_(std::move(type)),
         impl_(getTypeOfDevices(devices)),
         devices_(sortAndDeduplicateDevices(impl_, std::move(devices))) {}
+
+  friend c10::intrusive_ptr<Future>;
+
+ public:
+  Future(const Future&) = delete;
+  Future(Future&&) = delete;
+  Future& operator=(const Future&) = delete;
+  Future& operator=(Future&&) = delete;
 
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
