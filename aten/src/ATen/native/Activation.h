@@ -30,6 +30,8 @@ using elu_backward_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&, 
 using leaky_relu_fn = void (*)(TensorIteratorBase&, const Scalar&);
 using leaky_relu_backward_fn = void (*)(TensorIterator&, const Scalar&);
 using log_sigmoid_cpu_fn = void (*)(Tensor& , Tensor&, const Tensor& );
+using mish_fn = void(*)(TensorIterator&);
+using mish_backward_fn = void(*)(TensorIterator&);
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_backward_fn, elu_backward_stub);
@@ -54,8 +56,8 @@ DECLARE_DISPATCH(activation_fn, glu_stub);
 DECLARE_DISPATCH(activation_backward_fn, glu_backward_stub);
 DECLARE_DISPATCH(structured_activation_fn, silu_stub);
 DECLARE_DISPATCH(activation_backward_fn, silu_backward_stub);
-DECLARE_DISPATCH(structured_activation_fn, mish_stub);
-DECLARE_DISPATCH(activation_backward_fn, mish_backward_stub);
+DECLARE_DISPATCH(mish_fn, mish_stub);
+DECLARE_DISPATCH(mish_backward_fn, mish_backward_stub);
 
 } // namespace native
 
