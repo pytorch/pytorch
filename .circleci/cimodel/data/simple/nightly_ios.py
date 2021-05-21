@@ -59,7 +59,7 @@ BUILD_CONFIGS = [
 ]
 
 
-WORKFLOW_DATA = BUILD_CONFIGS + [
+WORKFLOW_DATA = [
     IOSNightlyJob("binary", is_upload=True),
 ]
 
