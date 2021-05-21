@@ -1,11 +1,11 @@
 import pickle
 
-import _compat_pickle  # type: ignore
+import _compat_pickle
 
 from .importer import Importer
 
 
-class PackageUnpickler(pickle._Unpickler):  # type: ignore
+class PackageUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     """Package-aware unpickler.
 
     This behaves the same as a normal unpickler, except it uses `importer` to

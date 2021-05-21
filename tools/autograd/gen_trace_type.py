@@ -1,13 +1,14 @@
 import itertools
 from typing import Optional, List, Sequence, Union
 
-from tools.codegen.api.types import *
+from tools.codegen.api.types import CppSignatureGroup, DispatcherSignature
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.utils import mapMaybe
 from tools.codegen.gen import parse_native_yaml, FileManager
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
+                                 TensorOptionsArguments)
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and
@@ -293,7 +294,7 @@ def declare_returned_variables(f: NativeFunction) -> str:
         return ''
     types = map(cpp.return_type, f.func.returns)
     names = cpp.return_names(f)
-    return '\n'.join(f'{type} {name};' for type, name in zip(types, names))
+    return '\n'.join(f'{type.cpp_type()} {name};' for type, name in zip(types, names))
 
 def tie_return_values(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
@@ -376,7 +377,7 @@ def method_definition(f: NativeFunction) -> Optional[str]:
     )
 
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns),
+        return_type=cpp.returns_type(f.func.returns).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=formals,
         type_definition_body=emit_trace_body(f),
@@ -415,7 +416,8 @@ def gen_trace_type(out: str, native_yaml_path: str, template_path: str) -> None:
     shards: List[List[NativeFunction]] = [[] for _ in range(num_shards)]
 
     # functions are assigned arbitrarily but stably to a file based on hash
-    native_functions = list(sorted(parse_native_yaml(native_yaml_path), key=lambda f: cpp.name(f.func)))
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(sorted(native_functions, key=lambda f: cpp.name(f.func)))
     for f in native_functions:
         x = sum(ord(c) for c in cpp.name(f.func)) % num_shards
         shards[x].append(f)

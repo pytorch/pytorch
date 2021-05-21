@@ -15,10 +15,10 @@
 
 #pragma once
 
-#include <c10/util/SmallVector.h>
 #include <c10/util/C++17.h>
-#include <c10/util/Exception.h>
 #include <c10/util/Deprecated.h>
+#include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
 
 #include <array>
 #include <iterator>
@@ -81,12 +81,15 @@ class ArrayRef final {
       : Data(Vec.data()), Length(Vec.size()) {}
 
   /// Construct an ArrayRef from a std::vector.
-  // The enable_if stuff here makes sure that this isn't used for std::vector<bool>,
-  // because ArrayRef can't work on a std::vector<bool> bitfield.
+  // The enable_if stuff here makes sure that this isn't used for
+  // std::vector<bool>, because ArrayRef can't work on a std::vector<bool>
+  // bitfield.
   template <typename A>
   /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {
-    static_assert(!std::is_same<T, bool>::value, "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
+    static_assert(
+        !std::is_same<T, bool>::value,
+        "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
   }
 
   /// Construct an ArrayRef from a std::array
@@ -100,7 +103,9 @@ class ArrayRef final {
 
   /// Construct an ArrayRef from a std::initializer_list.
   /* implicit */ constexpr ArrayRef(const std::initializer_list<T>& Vec)
-      : Data(std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr) : std::begin(Vec)),
+      : Data(
+            std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
+                                             : std::begin(Vec)),
         Length(Vec.size()) {}
 
   /// @}
@@ -146,7 +151,8 @@ class ArrayRef final {
 
   /// front - Get the first element.
   C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& front() const {
-    TORCH_CHECK(!empty(), "ArrayRef: attempted to access front() of empty list");
+    TORCH_CHECK(
+        !empty(), "ArrayRef: attempted to access front() of empty list");
     return Data[0];
   }
 
@@ -162,7 +168,8 @@ class ArrayRef final {
   }
 
   /// slice(n, m) - Take M elements of the array starting at element N
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N, size_t M) const {
+  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N, size_t M)
+      const {
     TORCH_CHECK(
         N + M <= size(),
         "ArrayRef: invalid slice, N = ",
@@ -224,10 +231,10 @@ class ArrayRef final {
 };
 
 template <typename T>
-std::ostream& operator<<(std::ostream & out, ArrayRef<T> list) {
+std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {
   int i = 0;
   out << "[";
-  for(auto e : list) {
+  for (auto e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;

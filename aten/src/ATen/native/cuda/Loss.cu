@@ -13,10 +13,10 @@ using namespace at;
 
 void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target) {
   at::TensorIterator iter = TensorIteratorConfig()
-      .add_output(grad_input)
-      .add_input(grad)
-      .add_input(input)
-      .add_input(target)
+      .add_borrowed_output(grad_input)
+      .add_borrowed_input(grad)
+      .add_borrowed_input(input)
+      .add_borrowed_input(target)
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_backward_out_cuda", [&]() {
     at::native::gpu_kernel(iter, [] GPU_LAMBDA (
@@ -46,9 +46,9 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
   auto grad_input = at::empty_like(input);
   if (!log_target) {
     TensorIterator iter = TensorIteratorConfig()
-        .add_output(grad_input)
-        .add_input(target)
-        .add_input(grad)
+        .add_borrowed_output(grad_input)
+        .add_borrowed_input(target)
+        .add_borrowed_input(grad)
         .build();
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "kl_div_backward_cuda", [&]() {
       scalar_t inv = (reduction == at::Reduction::Mean) ? scalar_t(1.0 / input.numel()) : scalar_t(1.0);
@@ -70,7 +70,8 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
 
 Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     Tensor loss = at::empty_like(input);
     return at::native::binary_cross_entropy_out_cuda(
@@ -79,12 +80,13 @@ Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, cons
 
 Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor& loss) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
   Tensor loss_squeezed = at::squeeze(loss);
 
   TensorIterator iter = TensorIteratorConfig()
-      .add_output(loss_squeezed)
+      .add_borrowed_output(loss_squeezed)
       .add_input(at::squeeze(input))
       .add_input(at::squeeze(target))
       .build();
@@ -126,7 +128,8 @@ Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target,
 
 Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
   Tensor grad_input = at::empty_like(input);
   return at::native::binary_cross_entropy_backward_out_cuda(
@@ -135,7 +138,8 @@ Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& inpu
 
 Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor& grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
   Tensor grad_expand = grad.expand_as(input);
   binary_cross_entropy_backward_out_kernel(grad_input, grad_expand, input, target);

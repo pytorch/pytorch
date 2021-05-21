@@ -163,9 +163,11 @@ std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
     ret = at::IntArrayRef(this->options.output_padding()).vec();
   } else {
     auto k = input.dim() - 2;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (output_size_.value().size() == k + 2) {
       output_size_ = output_size_.value().slice(2);
     }
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (output_size_.value().size() != k) {
       TORCH_CHECK(false,
         "output_size must have ", k, " or ", k + 2, " elements (got ", output_size_.value().size(), ")");

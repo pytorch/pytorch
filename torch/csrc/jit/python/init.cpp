@@ -93,6 +93,7 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
 #include <c10/macros/Export.h>
+#include <c10/util/signal_handler.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/core/function_schema.h>
@@ -207,7 +208,17 @@ void initJITBindings(PyObject* module) {
             return paramsDict;
           },
           pybind11::return_value_policy::move)
-      .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def(
+          "_jit_pass_onnx_scalar_type_analysis",
+          [](std::shared_ptr<Graph>& graph,
+             bool lowprecision_cast,
+             int opset_version) {
+            return ScalarTypeAnalysisForONNX(
+                graph, lowprecision_cast, opset_version);
+          },
+          py::arg("graph"),
+          py::arg("lowprecision_cast") = true,
+          py::arg("opset_version"))
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
@@ -631,6 +642,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
+      .def("_jit_set_texpr_parallel_cpu_enabled", &setTexprParallelCPUEnabled)
+      .def("_jit_texpr_parallel_cpu_enabled", &texprParallelCPUEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {
@@ -660,6 +673,12 @@ void initJITBindings(PyObject* module) {
           [](bool optimize_cat) {
             using namespace torch::jit::tensorexpr;
             getCatWoConditionals() = optimize_cat;
+          })
+      .def(
+          "_jit_opt_conditionals",
+          [](bool opt_conds) {
+            using namespace torch::jit::tensorexpr;
+            getOptConditionals() = opt_conds;
           })
       .def(
           "_llvm_enabled",
@@ -711,13 +730,22 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_optimize_for_mobile",
           [](script::Module& module,
              std::set<MobileOptimizerType>& optimization_blocklist,
-             std::vector<std::string>& preserved_methods,
-             std::vector<std::string>& methods_to_optimize) {
+             std::vector<std::string>& preserved_methods) {
             return optimizeForMobile(
-                module,
-                optimization_blocklist,
-                preserved_methods,
-                methods_to_optimize);
+                module, optimization_blocklist, preserved_methods);
+          })
+      .def(
+          "_hack_do_not_use_clone_module_with_class",
+          [](script::Module& module,
+             std::vector<std::string>& ignored_methods,
+             std::vector<std::string>& ignored_attributes) {
+            const bool inplace = false;
+            const std::unordered_set<std::string> ignored_methods_set(
+                ignored_methods.begin(), ignored_methods.end());
+            const std::unordered_set<std::string> ignored_attributes_set(
+                ignored_attributes.begin(), ignored_attributes.end());
+            return module.clone(
+                inplace, ignored_methods_set, ignored_attributes_set);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
@@ -1035,6 +1063,36 @@ void initJITBindings(PyObject* module) {
         return self.getAllRecords();
       });
 
+  // Used by torch.Package to coordinate deserialization of storages across
+  // ScriptModules and eager modules
+  py::class_<StorageContext, std::shared_ptr<StorageContext>>(
+      m, "StorageContext")
+      .def(py::init<>())
+      .def(
+          "get_storage",
+          [](StorageContext& self,
+             const std::string& name,
+             py::object data_type_obj) {
+            c10::Storage storage = self.getStorage(name);
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
+
+            return at::Tensor(std::move(ptr));
+          })
+      .def(
+          "add_storage",
+          [](StorageContext& self,
+             const std::string& name,
+             const at::Tensor& tensor) {
+            self.addStorage(name, tensor.storage());
+          })
+      .def("has_storage", &StorageContext::hasStorage);
+
   m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
@@ -1200,9 +1258,10 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
-      .def(py::init([]() {
+      .def(py::init([](std::vector<c10::Device> devices = {}) {
         return std::make_shared<PythonFutureWrapper>(
-            c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
+            c10::make_intrusive<c10::ivalue::Future>(
+                PyObjectType::get(), std::move(devices)));
       }))
       .def(
           "done",
@@ -1350,11 +1409,19 @@ void initJITBindings(PyObject* module) {
                 fut->wait();
               }
             });
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
     toIValue(std::move(obj), type);
   });
+
+#if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+  m.def("_set_print_stack_traces_on_fatal_signal", [](bool print) {
+    c10::FatalSignalHandler::getInstance().setPrintStackTracesOnFatalSignal(
+        print);
+  });
+#endif // defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
   initPythonCustomClassBindings(module);
   initPythonIRBindings(module);

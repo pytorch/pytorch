@@ -52,7 +52,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
     def __len__(self) -> int:
         if self.length is not None:
             return self.length
-        if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
+        if isinstance(self.datapipe, Sized):
             if self.drop_last:
                 self.length = len(self.datapipe) // self.batch_size
             else:
@@ -120,7 +120,7 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
     def __len__(self) -> int:
         if self.length is not None:
             return self.length
-        if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
+        if isinstance(self.datapipe, Sized):
             if self.drop_last:
                 self.length = len(self.datapipe) // self.batch_size
             else:
@@ -201,8 +201,8 @@ class GroupByKeyIterDataPipe(IterDataPipe[list]):
         self.max_buffer_size = max_buffer_size if max_buffer_size is not None else group_size * 10
         assert self.max_buffer_size >= self.group_size
 
-        self.group_key_fn = group_key_fn  # type: ignore
-        self.sort_data_fn = sort_data_fn  # type: ignore
+        self.group_key_fn = group_key_fn  # type: ignore[assignment]
+        self.sort_data_fn = sort_data_fn  # type: ignore[assignment]
         self.curr_buffer_size = 0
         self.stream_buffer = {}
         self.length = length

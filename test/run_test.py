@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import copy
@@ -29,6 +29,7 @@ except ImportError:
 
 
 TESTS = [
+    'test_import_time',
     'test_public_bindings',
     'test_type_hints',
     'test_autograd',
@@ -40,9 +41,12 @@ TESTS = [
     'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
-    'distributed/test_c10d',
+    'distributed/test_c10d_common',
+    'distributed/test_c10d_gloo',
+    'distributed/test_c10d_nccl',
     'distributed/test_jit_c10d',
-    'distributed/test_c10d_spawn',
+    'distributed/test_c10d_spawn_gloo',
+    'distributed/test_c10d_spawn_nccl',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
@@ -61,6 +65,8 @@ TESTS = [
     'test_linalg',
     'test_logging',
     'test_mkldnn',
+    'test_model_dump',
+    'test_module_init',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
@@ -108,10 +114,13 @@ TESTS = [
     'test_tensorexpr_pybind',
     'test_openmp',
     'test_profiler',
+    "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
     'test_futures',
     'test_fx',
@@ -142,6 +151,15 @@ TESTS = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
+    'distributed/elastic/timer/api_test',
+    'distributed/elastic/timer/local_timer_example',
+    'distributed/elastic/timer/local_timer_test',
+    'distributed/elastic/events/lib_test',
+    'distributed/elastic/metrics/api_test',
+    'distributed/elastic/utils/logging_test',
+    'distributed/elastic/utils/util_test',
+    'distributed/elastic/utils/distributed_test',
+    'distributed/elastic/multiprocessing/api_test',
 ]
 
 # Tests need to be run with pytest.
@@ -173,13 +191,16 @@ USE_PYTEST_LIST = [
     'distributions/test_utils',
     'test_typing',
     "distributed/elastic/events/lib_test",
+    "distributed/elastic/agent/server/test/api_test",
 ]
 
 WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
     'distributed/pipeline/sync/skip/test_api',
     'distributed/pipeline/sync/skip/test_gpipe',
@@ -204,13 +225,17 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
+    "distributed/elastic/agent/server/test/api_test",
+    'distributed/elastic/multiprocessing/api_test',
 ]
 
 ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
@@ -252,7 +277,7 @@ TARGET_DET_LIST = [
     'test_jit',
     'test_jit_profiling',
     'test_torch',
-    'test_binary_ufuncs'
+    'test_binary_ufuncs',
     'test_numpy_interop',
     'test_reductions',
     'test_shape_ops',
@@ -262,7 +287,9 @@ TARGET_DET_LIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/test_distributed_fork',
     'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
     'distributed/test_distributed_spawn',
     'test_cuda',
@@ -274,9 +301,12 @@ TARGET_DET_LIST = [
     'test_utils',
     'test_multiprocessing',
     'test_tensorboard',
-    'distributed/test_c10d',
+    'distributed/test_c10d_common',
+    'distributed/test_c10d_gloo',
+    'distributed/test_c10d_nccl',
     'distributed/test_jit_c10d',
-    'distributed/test_c10d_spawn',
+    'distributed/test_c10d_spawn_gloo',
+    'distributed/test_c10d_spawn_nccl',
     'test_quantization',
     'test_pruning_op',
     'test_determination',
@@ -372,7 +402,7 @@ def get_stripped_CI_job() -> str:
     return job
 
 
-def calculate_job_times(reports: List[Report]) -> Dict[str, float]:
+def calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
     # an entry will be like ("test_file_name" -> (current_avg, # values))
     jobs_to_times: Dict[str, Tuple[float, int]] = dict()
     for report in reports:
@@ -400,7 +430,7 @@ def calculate_job_times(reports: List[Report]) -> Dict[str, float]:
 def pull_job_times_from_S3() -> Dict[str, float]:
     if HAVE_BOTO3:
         ci_job_prefix = get_stripped_CI_job()
-        s3_reports: List[Report] = get_previous_reports_for_branch('origin/nightly', ci_job_prefix)
+        s3_reports: List["Report"] = get_previous_reports_for_branch('origin/nightly', ci_job_prefix)
     else:
         print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
         print('If not installed, please install boto3 for automatic sharding and test categorization.')
@@ -587,7 +617,8 @@ def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
 
 
 def test_distributed(test_module, test_directory, options):
-    mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
+    # MPI tests are broken with Python-3.9
+    mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0 and sys.version_info < (3, 9)
     if options.verbose and not mpi_available:
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')
@@ -1018,6 +1049,49 @@ def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float])
         json.dump(job_times_json, file, indent='    ', separators=(',', ': '))
         file.write('\n')
 
+
+def query_changed_test_files() -> List[str]:
+    cmd = ["git", "diff", "--name-only", "origin/master", "HEAD"]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    if proc.returncode != 0:
+        raise RuntimeError("Unable to get changed files")
+
+    lines = proc.stdout.decode().strip().split("\n")
+    lines = [line.strip() for line in lines]
+    return lines
+
+
+def reorder_tests(tests: List[str]) -> List[str]:
+    try:
+        changed_files = query_changed_test_files()
+    except Exception:
+        # If unable to get changed files from git, quit without doing any sorting
+        return tests
+
+    prefix = f"test{os.path.sep}"
+    changed_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
+    changed_tests = [f[len(prefix):] for f in changed_tests]
+    changed_tests = [f[:-len(".py")] for f in changed_tests]
+
+    bring_to_front = []
+    the_rest = []
+
+    for test in tests:
+        if test in changed_tests:
+            bring_to_front.append(test)
+        else:
+            the_rest.append(test)
+
+    sorted_tests = bring_to_front + the_rest
+
+    if len(sorted_tests) != len(tests):
+        # Something went wrong, bail out without doing any sorting
+        return tests
+
+    return sorted_tests
+
+
 def main():
     options = parse_args()
 
@@ -1055,6 +1129,9 @@ def main():
             if determine_target(TARGET_DET_LIST + slow_tests, test, touched_files, options)
         ]
         sys.path.remove('test')
+
+
+    selected_tests = reorder_tests(selected_tests)
 
     has_failed = False
     failure_messages = []

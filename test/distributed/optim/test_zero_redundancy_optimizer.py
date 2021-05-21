@@ -3,8 +3,6 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 
-# type: ignore
-
 import copy
 import os
 import sys
@@ -24,7 +22,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_utils, common_distributed
 
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO  # type: ignore
+BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 

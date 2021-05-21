@@ -328,6 +328,9 @@ class Tensor(torch._C._TensorBase):
 
     The result will never require gradient.
 
+    This method also affects forward mode AD gradients and the result will never
+    have forward mode AD gradients.
+
     .. note::
 
       Returned Tensor shares the same storage with the original one.
@@ -346,6 +349,9 @@ class Tensor(torch._C._TensorBase):
     detach_ = _C._add_docstr(_C._TensorBase.detach_, r"""
     Detaches the Tensor from the graph that created it, making it a leaf.
     Views cannot be detached in-place.
+
+    This method also affects forward mode AD gradients and the result will never
+    have forward mode AD gradients.
     """)
 
     def retain_grad(self):
@@ -532,11 +538,13 @@ class Tensor(torch._C._TensorBase):
             )
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+    @_wrap_type_error_to_not_implemented
     def __rsub__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rsub__, (self, other), self, other)
         return _C._VariableFunctions.rsub(self, other)
 
+    @_wrap_type_error_to_not_implemented
     def __rdiv__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rdiv__, (self, other), self, other)
@@ -545,7 +553,7 @@ class Tensor(torch._C._TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
 
-    __pow__ = _C._TensorBase.pow
+    __pow__ = _wrap_type_error_to_not_implemented(_C._TensorBase.pow)
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
@@ -572,6 +580,13 @@ class Tensor(torch._C._TensorBase):
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
 
+    @_wrap_type_error_to_not_implemented
+    def __rmatmul__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmatmul__, (self, other), self, other)
+        return torch.matmul(other, self)
+
+    __pos__ = _C._TensorBase.positive
     __neg__ = _C._TensorBase.neg
     __abs__ = _C._TensorBase.abs
 
@@ -580,6 +595,11 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.__len__, (self,), self)
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
+        if torch._C._get_tracing_state():
+            warnings.warn('Using len to get tensor shape might cause the trace to be incorrect. '
+                          'Recommended usage would be tensor.shape[0]. '
+                          'Passing a tensor of different shape might lead to errors or silently give '
+                          'incorrect results.', category=torch.jit.TracerWarning, stacklevel=2)
         return self.shape[0]
 
     def __iter__(self):
@@ -907,6 +927,40 @@ class Tensor(torch._C._TensorBase):
 
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
+
+    def to_sparse_csr(self):
+        """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
+
+        Examples::
+
+            >>> dense = torch.randn(5, 5)
+            >>> sparse = dense.to_sparse_csr()
+            >>> sparse._nnz()
+            25
+
+        """
+        shape = self.size()
+        fill_value = 0
+        if len(shape) != 2:
+            raise RuntimeError("Only 2D tensors can be converted to the CSR format but got shape: ", shape)
+
+        if self.is_sparse:
+            coalesced_self = self.coalesce()
+            row_indices = coalesced_self.indices()[0]
+            ro = [0]
+            i = 0
+            for irow in range(self.shape[0]):
+                while i < row_indices.size()[0] and row_indices[i] == irow:
+                    i += 1
+                ro.append(i)
+
+            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=row_indices.dtype),
+                                           coalesced_self.indices()[1], coalesced_self.values(),
+                                           size=coalesced_self.shape, dtype=coalesced_self.dtype)
+        elif self.is_sparse_csr:
+            return self
+        else:
+            return self.to_sparse().to_sparse_csr()
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):

@@ -3,7 +3,7 @@
 #include <algorithm>
 
 #include <ATen/Dispatch.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
@@ -17,7 +17,7 @@
 
 namespace at { namespace native { namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template <typename scalar_t, typename func_t>
 static inline void cpu_cum_base_kernel(Tensor& result,
@@ -41,9 +41,10 @@ static inline void cpu_cum_base_kernel(Tensor& result,
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
-    .add_output(result)
-    .add_input(self)
+    .add_borrowed_output(result)
+    .add_borrowed_input(self)
     .build();
 
   auto result_dim_stride = ensure_nonempty_stride(result, dim);
@@ -74,6 +75,7 @@ static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         auto cum_number = (at::acc_type<scalar_t, false>)init_val;
         for (int64_t i = 0; i < self_dim_size; ++i) {
           cum_number += self_data[i * self_dim_stride];
@@ -92,6 +94,7 @@ static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) 
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         auto cum_number = (at::acc_type<scalar_t, false>)init_val;
         for (int64_t i = 0; i < self_dim_size; ++i) {
           cum_number *= self_data[i * self_dim_stride];
@@ -157,13 +160,17 @@ static void mean_kernel_impl(TensorIterator& iter) {
   });
 }
 
-static void std_var_kernel_impl(TensorIterator &iter, bool unbiased, bool take_sqrt) {
+static void std_var_kernel_impl(TensorIterator& iter, int64_t correction, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
-      iter,
-      WelfordOps<scalar_t, double, int64_t, double, std::tuple<scalar_t, scalar_t>> { unbiased, take_sqrt },
-      WelfordData<double, int64_t, double>()
-    );
+        iter,
+        WelfordOps<
+            scalar_t,
+            double,
+            int64_t,
+            double,
+            std::tuple<scalar_t, scalar_t>>{correction, take_sqrt},
+        WelfordData<double, int64_t, double>());
   });
 }
 
@@ -174,14 +181,16 @@ static void prod_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t { return a && b; },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a && b; },
+      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return a && b; },
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       /*identity=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
       binary_kernel_reduce_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-        [=](Vec256 <scalar_t> a, Vec256 <scalar_t> b) { return a * b; },
+        [=](Vectorized <scalar_t> a, Vectorized <scalar_t> b) { return a * b; },
+        // NOLINTNEXTLINE(bugprone-argument-comment)
         /*identity=*/1);
       });
   }
@@ -190,10 +199,12 @@ static void prod_kernel_impl(TensorIterator& iter) {
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float val;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
   } else if (p.isFloatingPoint()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     val = p.to<double>();
   } else {
     AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
@@ -271,10 +282,10 @@ static void and_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
-        [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
-          Vec256<uint8_t> c = Vec256<uint8_t>();
+        [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
+          Vectorized<uint8_t> c = Vectorized<uint8_t>();
 
-          for (decltype(c.size()) i = 0; i != Vec256<uint8_t>::size(); i++) {
+          for (decltype(c.size()) i = 0; i != Vectorized<uint8_t>::size(); i++) {
             c[i] = (a[i] && b[i]) ? 1 : 0;
           }
           return c;
@@ -284,7 +295,7 @@ static void and_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](bool a, bool b) -> bool { return a && b; },
-        [=](Vec256<bool> a, Vec256<bool> b) {
+        [=](Vectorized<bool> a, Vectorized<bool> b) {
           // Adding the implementation here instead of in vec256_base to avoid
           // return value inconsistency. Other comparison operators in
           // vec256_base return -1/0 (all bit 1 / all bit 0) as true/false to
@@ -295,9 +306,9 @@ static void and_kernel_impl(TensorIterator& iter) {
           //
           // In this method, users would expect, e.g., all(), to return 1/0 as
           // true/false.
-          Vec256<bool> c = Vec256<bool>();
+          Vectorized<bool> c = Vectorized<bool>();
 
-          for (decltype(c.size()) i = 0; i != Vec256<bool>::size(); i++) {
+          for (decltype(c.size()) i = 0; i != Vectorized<bool>::size(); i++) {
             c[i] = a[i] && b[i];
           }
           return c;
@@ -312,10 +323,10 @@ static void or_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
-        [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
-          Vec256<uint8_t> c = Vec256<uint8_t>();
+        [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
+          Vectorized<uint8_t> c = Vectorized<uint8_t>();
 
-          for (decltype(c.size()) i = 0; i != Vec256<uint8_t>::size(); i++) {
+          for (decltype(c.size()) i = 0; i != Vectorized<uint8_t>::size(); i++) {
             c[i] = (a[i] || b[i]) ? 1 : 0;
           }
           return c;
@@ -325,10 +336,10 @@ static void or_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](bool a, bool b) -> bool { return a || b; },
-        [=](Vec256<bool> a, Vec256<bool> b) {
-          Vec256<bool> c = Vec256<bool>();
+        [=](Vectorized<bool> a, Vectorized<bool> b) {
+          Vectorized<bool> c = Vectorized<bool>();
 
-          for (decltype(c.size()) i = 0; i != Vec256<bool>::size(); i++) {
+          for (decltype(c.size()) i = 0; i != Vectorized<bool>::size(); i++) {
             c[i] = a[i] || b[i];
           }
           return c;
@@ -347,7 +358,7 @@ struct MinValuesOps: public at::native::MinOps<scalar_t> {
 
 static void min_values_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == kLong) {
-    // This case is special because of Vec256<int64_t> does not
+    // This case is special because of Vectorized<int64_t> does not
     // handle upper_bound<int64_t>().
     // See: https://github.com/pytorch/pytorch/issues/43254
     using scalar_t = int64_t;
@@ -361,7 +372,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); },
+      [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return minimum(a, b); },
       static_cast<double>(upper_bound<scalar_t>()));
   });
 }
@@ -371,7 +382,7 @@ static void max_values_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); },
+      [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return maximum(a, b); },
       lower_bound<scalar_t>());
   });
 }
@@ -396,19 +407,33 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
 }}  // namespace at::native

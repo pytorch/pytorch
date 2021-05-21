@@ -158,6 +158,7 @@ Loss functions
     cosine_embedding_loss
     cross_entropy
     ctc_loss
+    gaussian_nll_loss
     hinge_embedding_loss
     kl_div
     l1_loss

@@ -16,18 +16,21 @@ namespace metal {
 Tensor copy_to_host(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   MPSImage* X = imageFromTensor(input);
+  if (X && !X.isTemporaryImage) {
+    return input;
+  }
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   auto&& sizes = [X sizes];
   MetalTensorImplStorage mt{sizes};
   mt.texture()->setCommandBuffer(commandBuffer);
-  mt.texture()->allocateTextureStorage(sizes);
+  mt.texture()->allocateStorage(sizes);
   MPSImage* Y = mt.texture()->image();
 
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
-                                   X, @"copy", @"copy_nonarray")
+                                   X, "copy", "copy_nonarray")
                      Constants:@[
                        @(X.featureChannels),
                        @(X.height),

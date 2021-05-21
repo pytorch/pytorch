@@ -15,6 +15,8 @@ from textwrap import dedent
 import torch
 import sys
 import builtins
+import io
+import pickle
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -22,7 +24,7 @@ import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 import torch.package._mangling as package_mangling
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
+from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
@@ -93,7 +95,7 @@ def createResolutionCallbackFromEnv(lookup_base):
     return lambda expr: parseExpr(expr, lookup_base)
 
 
-def createResolutionCallbackFromFrame(frames_up=0):
+def createResolutionCallbackFromFrame(frames_up: int = 0):
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
@@ -221,7 +223,7 @@ def createResolutionCallbackFromClosure(fn):
     return createResolutionCallbackFromEnv(closure_lookup())
 
 
-def can_compile_class(cls):
+def can_compile_class(cls) -> bool:
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
     if is_ignored_fn(cls):
@@ -238,7 +240,7 @@ def can_compile_class(cls):
     return all(has_code)
 
 
-def get_callable_argument_names(fn):
+def get_callable_argument_names(fn) -> List[str]:
     """
     Gets names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
     Returns an empty list when other types of arguments are present.
@@ -280,7 +282,7 @@ def get_annotation_str(annotation):
         return '.'.join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
-        subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore
+        subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore[attr-defined]
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ','.join([get_annotation_str(elt) for elt in annotation.elts])
@@ -538,6 +540,14 @@ def unused(fn):
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
+# No op context manager from python side
+class _IgnoreContextManager(contextlib.AbstractContextManager):
+    def __init__(self, **kwargs):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
+
 def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
@@ -645,19 +655,19 @@ def module_has_exports(mod):
                     return True
     return False
 
-def should_drop(fn):
+def should_drop(fn) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:
         return False
     return attr is FunctionModifiers.UNUSED
 
 
-def is_ignored_fn(fn):
+def is_ignored_fn(fn) -> bool:
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
 
-def is_static_fn(cls, fn):
+def is_static_fn(cls, fn) -> bool:
     return isinstance(inspect.getattr_static(cls, fn, default=None), staticmethod)
 
 def get_static_fn(cls, fn):
@@ -671,7 +681,7 @@ def get_torchscript_modifier(fn):
         fn = fn.__func__
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
-def copy_torchscript_modifier(orig, new):
+def copy_torchscript_modifier(orig, new) -> None:
     attr = get_torchscript_modifier(orig)
     if attr is None:
         return
@@ -697,10 +707,10 @@ def _overload(func):
 def _get_fn_overloads(qual_name):
     return _overloaded_fns.get(qual_name)
 
-def _clear_fn_overloads(qual_name):
+def _clear_fn_overloads(qual_name) -> None:
     del _overloaded_fns[qual_name]
 
-def get_class_name_lineno(method):
+def get_class_name_lineno(method) -> Tuple[str, int]:
     current_frame = inspect.currentframe()
 
     # one for the get_class_name call, one for _overload_method call
@@ -772,7 +782,7 @@ def _get_overloaded_methods(method, mod_class):
     return overloads
 
 
-def is_tuple(ann):
+def is_tuple(ann) -> bool:
     if ann is Tuple:
         raise_error_container_parameter_missing("Tuple")
 
@@ -783,7 +793,7 @@ def is_tuple(ann):
         (getattr(ann, '__origin__', None) is Tuple or
             getattr(ann, '__origin__', None) is tuple)
 
-def is_list(ann):
+def is_list(ann) -> bool:
     if ann is List:
         raise_error_container_parameter_missing("List")
 
@@ -793,7 +803,7 @@ def is_list(ann):
         (getattr(ann, '__origin__', None) is List or
             getattr(ann, '__origin__', None) is list)
 
-def is_dict(ann):
+def is_dict(ann) -> bool:
     if ann is Dict:
         raise_error_container_parameter_missing("Dict")
 
@@ -803,7 +813,7 @@ def is_dict(ann):
         (getattr(ann, '__origin__', None) is Dict or
             getattr(ann, '__origin__', None) is dict)
 
-def is_optional(ann):
+def is_optional(ann) -> bool:
     if ann is Optional:
         raise_error_container_parameter_missing("Optional")
 
@@ -831,7 +841,7 @@ def is_optional(ann):
 
     return optional or union_optional
 
-def is_future(ann):
+def is_future(ann) -> bool:
     if ann is Future:
         raise RuntimeError(
             "Attempted to use Future without a "
@@ -843,7 +853,7 @@ def is_future(ann):
 if torch.distributed.rpc.is_available():
     from torch.distributed.rpc import RRef
 
-    def is_rref(ann):
+    def is_rref(ann) -> bool:
         if ann is RRef:
             raise RuntimeError(
                 "Attempted to use RRef without a "
@@ -852,7 +862,7 @@ if torch.distributed.rpc.is_available():
             )
         return getattr(ann, "__origin__", None) is RRef
 
-def is_final(ann):
+def is_final(ann) -> bool:
     return ann.__module__ in {'typing', 'typing_extensions'} and \
         (getattr(ann, '__origin__', None) is Final or isinstance(ann, type(Final)))
 
@@ -868,7 +878,7 @@ for i in range(2, 7):
     globals()[f"BroadcastingList{i}"] = BroadcastingList1
 
 
-def is_scripting():
+def is_scripting() -> bool:
     r"""
     Function that returns True when in compilation and False otherwise. This
     is useful especially with the @unused decorator to leave code in your
@@ -891,7 +901,7 @@ def is_scripting():
 
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj):
+def _qualified_name(obj) -> str:
     # This special case allows us to override the qualified name on a type.
     # It's currently used in conjunction with tracing, where we create a
     # fake module to filter only supported attributes. However, since this
@@ -959,6 +969,7 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
+        self.filename = filename
 
 
 def fake_range():
@@ -987,7 +998,7 @@ def _get_named_tuple_properties(obj):
 
 def _create_named_tuple(t, unqual_name: str, field_names: List[str]):
     # mypy: namedtuple() expects a string literal as the first argument
-    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore
+    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[misc]
     return TupleType(*t)
 
 
@@ -999,20 +1010,20 @@ def _disable_emit_hooks():
     torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
-def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
-    def __enter__(self):
+def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
+    def __enter__(self) -> None:
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)
 
-    def __exit__(self, *args):
+    def __exit__(self, *args) -> None:
         torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
 
-def _is_exception(obj):
+def _is_exception(obj) -> bool:
     if not inspect.isclass(obj):
         return False
     return issubclass(obj, Exception)
 
-def raise_error_container_parameter_missing(target_type):
+def raise_error_container_parameter_missing(target_type) -> None:
     if target_type == 'Dict':
         raise RuntimeError(
             "Attempted to use Dict without "
@@ -1034,7 +1045,7 @@ def get_args(target_type):
     return getattr(target_type, "__args__", None)
 
 
-def check_args_exist(target_type):
+def check_args_exist(target_type) -> None:
     if target_type is List or target_type is list:
         raise_error_container_parameter_missing("List")
     elif target_type is Tuple or target_type is tuple:
@@ -1047,7 +1058,7 @@ def check_args_exist(target_type):
 
 # supports List/Dict/Tuple and Optional types
 # TODO support future
-def container_checker(obj, target_type):
+def container_checker(obj, target_type) -> bool:
     origin_type = get_origin(target_type)
     check_args_exist(target_type)
     if origin_type is list or origin_type is List:
@@ -1119,3 +1130,29 @@ def _isinstance(obj, target_type) -> bool:
 
     # handle non-containers
     return isinstance(obj, target_type)
+
+
+class _TensorExtractor(pickle.Pickler):
+    def __init__(self, *args, tensors: List[torch.Tensor], **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tensors = tensors
+
+    def persistent_id(self, obj):
+        if isinstance(obj, torch.Tensor):
+            self.tensors.append(obj)
+            return ""
+        else:
+            return None
+
+
+def _extract_tensors(obj):
+    r"""
+    This function is exclusively called from C++.
+    See ``torch/csrc/jit/python/python_ivalue.h``.
+
+    It extracts the tensors contained in the given object, through pickling.
+    """
+    tensors: List[torch.Tensor] = []
+    extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
+    extractor.dump(obj)
+    return tensors

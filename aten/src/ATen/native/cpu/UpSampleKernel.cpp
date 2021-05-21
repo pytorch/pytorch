@@ -3,7 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
 
 namespace at {
@@ -176,6 +176,7 @@ struct CheckAlmostAllZeroStrides {
   static inline bool eval(const int64_t* strides) {
     // N is dim index: N -> dim0, N-1 -> dim1, ...
     // non_zero_stride_dim should be out_dims - dim
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     bool output;
     if (N == non_zero_stride_dim) {
       output = is_contiguous_stride<scalar_t, index_t, interp_size>(strides);
@@ -230,6 +231,7 @@ void cpu_upsample_generic(at::TensorIterator& iter)
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     // special-cases to let the compiler apply compile-time input-specific optimizations
     if ((strides[0] == sizeof(scalar_t) && (strides[1] == 0) &&
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         check_almost_all_zero_stride<out_ndims, 1, scalar_t, int64_t, interp_size>(&strides[2]))) {
       // contiguous channels-first case
       basic_loop<scalar_t, int64_t, out_ndims, interp_size>(data, strides, n);
@@ -277,7 +279,7 @@ void cpu_upsample_nearest_channels_last(
 
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   auto copy = [](scalar_t* out, scalar_t* in, int64_t size) {
     int64_t d = 0;
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -373,7 +375,7 @@ void cpu_upsample_linear_channels_last(
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
   int64_t output_slice_size = output_depth * output_height * output_width * channels;
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
     const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
         input_height, output_height, align_corners, scales[0]);
@@ -385,6 +387,7 @@ void cpu_upsample_linear_channels_last(
           h * input_width * channels + w * channels;
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ih0, ih1, iw0, iw1;
     scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (int64_t n = begin; n < end; n++) {
@@ -438,6 +441,7 @@ void cpu_upsample_linear_channels_last(
           h * input_width * channels + w * channels;
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t id0, id1, ih0, ih1, iw0, iw1;
     scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (int64_t n = begin; n < end; n++) {
@@ -673,6 +677,7 @@ struct HelperInterpCubic : public HelperInterpBase {
 
         int64_t input_index;
         int64_t zero = static_cast<int64_t>(0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         scalar_t coeffs[4];
 
         int64_t * idx_ptr;
@@ -740,6 +745,7 @@ void upsample_generic_Nd_kernel_impl(
   }
 
   for (int i=0; i<out_ndims; i++) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     indices_weights.emplace_back(
       F::compute_indices_weights(
         input_scalar_type, input.size(i + 2), oshape[i + 2],
@@ -752,12 +758,12 @@ void upsample_generic_Nd_kernel_impl(
   TensorIteratorConfig config;
   config.check_all_same_dtype(false)
     .declare_static_dtype_and_device(input.scalar_type(), input.device())
-    .add_output(output)
-    .add_input(restrided_input);
+    .add_borrowed_output(output)
+    .add_borrowed_input(restrided_input);
 
   for (auto & idx_weight: indices_weights) {
     for (auto& tensor : idx_weight) {
-      config.add_input(tensor);
+      config.add_borrowed_input(tensor);
     }
   }
 
@@ -995,17 +1001,27 @@ void upsample_nearest3d_backward_kernel_impl(
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest1d_kernel, &upsample_nearest1d_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest2d_kernel, &upsample_nearest2d_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest3d_kernel, &upsample_nearest3d_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest1d_backward_kernel, &upsample_nearest1d_backward_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest2d_backward_kernel, &upsample_nearest2d_backward_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_nearest3d_backward_kernel, &upsample_nearest3d_backward_kernel_impl);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_linear1d_kernel, &upsample_linear1d_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_bilinear2d_kernel, &upsample_bilinear2d_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_trilinear3d_kernel, &upsample_trilinear3d_kernel_impl);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl);
 } // namespace native
 } // namespace at

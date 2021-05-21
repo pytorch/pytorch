@@ -6,6 +6,7 @@
 
 using namespace at::vitals;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Vitals, Basic) {
   std::stringstream buffer;
 
@@ -35,6 +36,7 @@ TEST(Vitals, Basic) {
   ASSERT_TRUE(s.find("Testing.Attribute4\t\t  1") != std::string::npos);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Vitals, MultiString) {
   std::stringstream buffer;
 
@@ -59,6 +61,7 @@ TEST(Vitals, MultiString) {
   ASSERT_TRUE(s.find("Testing.Attribute1\t\t 1 of 2") != std::string::npos);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Vitals, OnAndOff) {
   for (auto i = 0; i < 2; ++i) {
     std::stringstream buffer;
@@ -88,4 +91,27 @@ TEST(Vitals, OnAndOff) {
       ASSERT_TRUE(f == std::string::npos);
     }
   }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Vitals, APIVitals) {
+  std::stringstream buffer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  bool rvalue;
+  std::streambuf* sbuf = std::cout.rdbuf();
+  std::cout.rdbuf(buffer.rdbuf());
+  {
+#ifdef _WIN32
+    _putenv("TORCH_VITAL=1");
+#else
+    setenv("TORCH_VITAL", "1", 1);
+#endif
+    APIVitals api_vitals;
+    rvalue = api_vitals.setVital("TestingSetVital", "TestAttr", "TestValue");
+  }
+  std::cout.rdbuf(sbuf);
+
+  auto s = buffer.str();
+  ASSERT_TRUE(rvalue);
+  ASSERT_TRUE(s.find("TestingSetVital.TestAttr\t\t TestValue") != std::string::npos);
 }
