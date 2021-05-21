@@ -962,19 +962,18 @@ def sample_inputs_xlog1py(self, device, dtype, requires_grad):
     return list(generator())
 
 def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = parital(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases_scalar = (((), ))
-    cases_non_scalar = (((S, S, S), ),
-                        ((S, S), ),
-                        ((S,), )) 
+    cases_scalar = ((),)
+    cases_non_scalar = ((S, S, S),
+                        (S, S),
+                        (S, ))
 
-    cases = cases_scalar + cases_non_scalar  # ignore: type[assignment]
+    cases = cases_scalar + cases_non_scalar  # type: ignore[assignment]
 
     def generator():
-        for shape, arg in cases:
-            if isinstance(shape, tuple)
-            yield(SampleInput(shape, args=arg))
+        for shape in cases:
+            yield(SampleInput(make_arg(shape)))
 
     return list(generator())
 
@@ -6115,7 +6114,9 @@ op_db: List[OpInfo] = [
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
     OpInfo('zero_',
-           dtypes=all_types_and_complex_types_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           supports_autograd=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_zero_),
     OpInfo('special.xlog1py',
            aten_name='special_xlog1py',
