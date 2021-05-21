@@ -152,13 +152,10 @@ void RequestCallbackNoPython::processScriptCallOp(
     const std::function<void(Message)>& markComplete,
     std::vector<at::IValue>& stack) const {
   TORCH_INTERNAL_ASSERT(scriptCall.hasOp());
-  scriptCall.op()->getOperation()(&stack);
-  TORCH_INTERNAL_ASSERT(
-      stack.size() == 1,
-      "Return value of a builtin operator or a TorchScript function should be "
-      "a single IValue, got a vector of size ",
-      stack.size());
-  markComplete(std::move(ScriptResp(std::move(stack.front()))).toMessage());
+  auto future = runJitOperator(*scriptCall.op(), stack);
+  future->addCallback([markComplete](JitFuture& future) {
+    markComplete(ScriptResp(future.value()).toMessage());
+  });
 }
 
 TypePtr RequestCallbackNoPython::getScriptRemoteCallType(
@@ -246,23 +243,15 @@ void RequestCallbackNoPython::processScriptRemoteCallOp(
     std::vector<at::IValue>& stack,
     const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
   TORCH_INTERNAL_ASSERT(scriptRemoteCall.hasOp());
-  try {
-    scriptRemoteCall.op()->getOperation()(&stack);
-  } catch (const std::exception& e) {
-    // Don't throw in this call, but rather transfer the exception
-    // to the rref.
-    ownerRRef->setError(std::current_exception());
+  auto future = runJitOperator(*scriptRemoteCall.op(), stack);
+  future->addCallback([ownerRRef, postProcessing](JitFuture& future) {
+    if (future.hasError()) {
+      ownerRRef->setError(future.exception_ptr());
+    } else {
+      ownerRRef->setValue(future.value());
+    }
     postProcessing();
-    return;
-  }
-  TORCH_INTERNAL_ASSERT(
-      stack.size() == 1,
-      "Return value of a builtin operator or a "
-      "TorchScript function should be a single IValue, got a vector of "
-      "size ",
-      stack.size());
-  ownerRRef->setValue(std::move(stack.front()));
-  postProcessing();
+  });
 }
 
 void RequestCallbackNoPython::processScriptRRefFetchCall(
@@ -658,6 +647,23 @@ bool RequestCallbackNoPython::cudaAvailable() const {
 #else
   return false;
 #endif
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
+    const jit::Operator& op,
+    std::vector<at::IValue>& stack) const {
+  try {
+    op.getOperation()(&stack);
+  } catch (const std::exception&) {
+    return asFuture(std::current_exception());
+  }
+  TORCH_INTERNAL_ASSERT(
+      stack.size() == 1,
+      "Return value of a builtin operator or a TorchScript function should be "
+      "a single IValue, got a vector of size ",
+      stack.size());
+  TypePtr type = stack.front().type();
+  return asFuture(std::move(stack.front()), std::move(type));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
