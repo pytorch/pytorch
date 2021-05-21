@@ -50,10 +50,10 @@ struct TORCH_API PythonTensorImpl : public c10::TensorImpl {
   py::object value_;
 };
 
-PythonTensorImpl* getPythonImpl(at::Tensor tensor);
+PythonTensorImpl* getPythonImpl(const at::Tensor& tensor);
 
 at::Tensor addPythonKey(const py::object& tensor);
-bool hasPythonKey(at::Tensor tensor);
+bool hasPythonKey(const at::Tensor& tensor);
 
-py::object removePythonKey(at::Tensor tensor);
+py::object removePythonKey(const at::Tensor& tensor);
 }}

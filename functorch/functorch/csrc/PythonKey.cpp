@@ -25,22 +25,22 @@ void PythonTensorImpl::set_storage_offset(int64_t storage_offset) {
   TORCH_INTERNAL_ASSERT(false, "Can't set_storage_offset for PythonTensorImpl");
 }
 
-bool isPythonTensor(at::Tensor tensor) {
+bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(
       c10::DispatchKey::FuncTorchPython);
 }
-PythonTensorImpl* getPythonImpl(at::Tensor tensor) {
+PythonTensorImpl* getPythonImpl(const at::Tensor& tensor) {
   return static_cast<PythonTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
 
 at::Tensor addPythonKey(const py::object& tensor) {
   return at::detail::make_tensor<PythonTensorImpl>(tensor);
 }
-bool hasPythonKey(at::Tensor tensor) {
+bool hasPythonKey(const at::Tensor& tensor) {
   return isPythonTensor(tensor);
 }
 
-py::object removePythonKey(at::Tensor tensor) {
+py::object removePythonKey(const at::Tensor& tensor) {
   assert(isPythonTensor(tensor));
   return getPythonImpl(tensor)->value_;
 }
