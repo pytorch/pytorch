@@ -569,8 +569,13 @@ void ScriptModuleSerializer::writeByteCode(
     const bool save_mobile_debug_info) {
   std::vector<c10::IValue> elements;
   BackendDebugHandleManager debug_handle_manager;
-  elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  if(BytecodeWriteVersion.has_value()) {
+    elements.emplace_back(
+        static_cast<int64_t>(BytecodeWriteVersion.value()));
+  } else {
+    elements.emplace_back(
+        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  }
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
   debug_info_elements.emplace_back(

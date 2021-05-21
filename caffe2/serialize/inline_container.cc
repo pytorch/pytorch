@@ -148,6 +148,9 @@ void PyTorchStreamReader::init() {
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {
   const auto err = mz_zip_get_last_error(ar_.get());
+  if(err != MZ_ZIP_NO_ERROR ) {
+    std::cout << "check here" << std::endl;
+  }
   TORCH_CHECK(
       err == MZ_ZIP_NO_ERROR,
       "PytorchStreamReader failed ",

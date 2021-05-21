@@ -70,12 +70,12 @@ int64_t _get_model_bytecode_version(const std::string& filename) {
 }
 
 int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
-  if (!check_zip_file(rai)) {
-    TORCH_WARN(
-        "The input model might not be generated from _save_for_mobile()");
-    return -1;
-  }
-  PyTorchStreamReader reader(std::move(rai));
+//  if (!check_zip_file(rai)) {
+//    TORCH_WARN(
+//        "The input model might not be generated from _save_for_mobile()");
+//    return -1;
+//  }
+  PyTorchStreamReader reader(rai);
   auto bytecode_values = get_bytecode_values(reader);
   return _get_model_bytecode_version(bytecode_values);
 }
