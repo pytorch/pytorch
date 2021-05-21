@@ -33,6 +33,14 @@ if TEST_SCIPY:
     import scipy
 
 class TestLinalg(TestCase):
+    def setUp(self):
+        super(self.__class__, self).setUp()
+        torch.backends.cuda.matmul.allow_tf32 = False
+
+    def tearDown(self):
+        torch.backends.cuda.matmul.allow_tf32 = True
+        super(self.__class__, self).tearDown()
+
     exact_dtype = True
 
     @dtypes(torch.float, torch.cfloat)
