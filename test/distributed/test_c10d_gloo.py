@@ -37,7 +37,14 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
 )
 import test_c10d_common
-from test_c10d_common import LOOPBACK, gpus_for_rank, Task, ModuleForDdpCommHook, SparseGradientModule, AbstractProcessGroupWrapperTest
+from test_c10d_common import (
+    LOOPBACK,
+    gpus_for_rank,
+    Task,
+    ModuleForDdpCommHook,
+    SparseGradientModule,
+    AbstractProcessGroupWrapperTest,
+)
 
 
 def simple_reduce_tests(rank, world_size):
