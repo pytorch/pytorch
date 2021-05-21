@@ -197,6 +197,9 @@ struct PythonArgs {
   inline std::string string(int i);
   inline std::string stringWithDefault(int i, const std::string& default_str);
   inline c10::optional<std::string> stringOptional(int i);
+  inline c10::string_view stringView(int i);
+  inline c10::string_view stringViewWithDefault(int i, const c10::string_view default_str);
+  inline c10::optional<c10::string_view> stringViewOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -590,6 +593,20 @@ inline std::string PythonArgs::stringWithDefault(int i, const std::string& defau
 inline c10::optional<std::string> PythonArgs::stringOptional(int i) {
   if (!args[i]) return c10::nullopt;
   return THPUtils_unpackString(args[i]);
+}
+
+inline c10::string_view PythonArgs::stringView(int i) {
+  return stringViewWithDefault(i, signature.params[i].default_string);
+}
+
+inline c10::string_view PythonArgs::stringViewWithDefault(int i, const c10::string_view default_str) {
+  if (!args[i]) return default_str;
+  return THPUtils_unpackStringView(args[i]);
+}
+
+inline c10::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return THPUtils_unpackStringView(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
