@@ -918,8 +918,6 @@ class DistributedDataParallel(Module):
 
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
-        for module in self._module_copies[1:]:
-            module.train(mode)
         return self
 
     # When running in join mode, schedules an allreduce to match the one in the
