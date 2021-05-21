@@ -7,13 +7,14 @@ namespace at {
 namespace native {
 namespace {
 // Check if tensor list has either a boolean tensor or a integer tensor
-bool has_int_or_bool_tensor(TensorList tensors) {
-  for (const auto & tensor : tensors) {
-    if (at::isIntegralType(tensor.scalar_type(), /* includeBool= */true)) {
-      return true;
-    }
-  }
-  return false;
+bool has_integral_tensor(TensorList tensors, const bool includeBool) {
+  return std::any_of(tensors.begin(), tensors.end(),
+    [&includeBool](const auto & t) { return at::isIntegralType(t.scalar_type(), includeBool); });
+}
+// check if tensor list has bool tensors
+bool has_bool_tensor(TensorList tensors) {
+  return std::any_of(tensors.begin(), tensors.end(),
+    [](const auto & t) -> bool { return t.scalar_type() == ScalarType::Bool; });
 }
 
 // Check foreach API restrictions

@@ -133,14 +133,14 @@ struct functor_name {                                                \
 #define OP_CUSTOM_FUNCTOR(function, op_name, functor_name)                \
 std::vector<Tensor> foreach_tensor_##op_name##_cuda(TensorList tensors) { \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors) || has_int_or_bool_tensor(tensors)) { \
+    if (!can_use_fast_route(tensors) || has_integral_tensor(tensors, /* includeBool */ true)) { \
         return at::native::foreach_tensor_##op_name##_slow(tensors);      \
     }                                                                     \
     return function<functor_name>(tensors);                               \
 }                                                                         \
 void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors) || has_int_or_bool_tensor(tensors)) { \
+    if (!can_use_fast_route(tensors) || has_integral_tensor(tensors, /* includeBool */ true)) { \
         return at::native::foreach_tensor_##op_name##_slow_(tensors);     \
     }                                                                     \
                                                                           \
