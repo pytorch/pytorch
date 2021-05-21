@@ -85,6 +85,22 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
   }
 }
 
+SerializedPyObj serializePyObject(IValue value) {
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  // Need this GIL to guard jit::toPyObj and destruct its returned
+  // py::object
+  py::gil_scoped_acquire acquire;
+  try {
+    return pythonRpcHandler.serialize(jit::toPyObject(value));
+  } catch (py::error_already_set& e) {
+    // py::error_already_set requires GIL to destruct, take special care.
+    auto err = std::runtime_error(e.what());
+    e.restore();
+    PyErr_Clear();
+    throw err;
+  }
+}
+
 } // anonymous namespace
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
@@ -166,12 +182,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
 
   return future->then(
       [](JitFuture& future) {
-        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        py::gil_scoped_acquire acquire;
-        auto serializedPyObj = pythonRpcHandler.serialize(
-            jit::toPyObject(future.value()));
         return c10::make_intrusive<Message>(
-            PythonResp(std::move(serializedPyObj)).toMessage());
+            PythonResp(serializePyObject(future.value())).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -221,27 +233,11 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
       return;
     }
     try {
-      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      std::shared_ptr<SerializedPyObj> result;
-      {
-        // Need this GIL to guard jit::toPyObj and destruct its returned
-        // py::object
-        py::gil_scoped_acquire acquire;
-        result = std::make_shared<SerializedPyObj>(
-            pythonRpcHandler.serialize(jit::toPyObject(rref->getValue())));
-      }
-      Message m =
-          PythonRRefFetchRet(std::move(*result).toIValues()).toMessage();
+      SerializedPyObj result = serializePyObject(rref->getValue());
+      Message m = PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
       rref->blockAllStreams(lsctx);
       responseFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(m))));
-    } catch (py::error_already_set& e) {
-      // py::error_already_set requires GIL to destruct, take special care.
-      responseFuture->setError(
-          std::make_exception_ptr(std::runtime_error(e.what())));
-      py::gil_scoped_acquire acquire;
-      e.restore();
-      PyErr_Clear();
     } catch (const std::exception& /* unused */) {
       responseFuture->setError(std::current_exception());
     }
