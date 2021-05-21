@@ -142,7 +142,7 @@ TEST(RunTimeTest, DelegateException) {
   inputs.emplace_back(torch::rand({13, 9}));
 
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)
+  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in FunctionName_UNKNOWN
 
