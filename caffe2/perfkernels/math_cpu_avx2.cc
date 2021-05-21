@@ -49,9 +49,7 @@ void quantize_and_compress__avx2(
       0xff,
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
       0xff,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0x0c,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0x08,
       0x04,
       0x00,
@@ -79,16 +77,13 @@ void quantize_and_compress__avx2(
       0xff,
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
       0xff,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0x0c,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0x08,
       0x04,
       0x00);
   __m256i permute_mask_v =
       _mm256_set_epi32(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   uint64_t data_per_byte = 8 / bitwidth;
   uint64_t tail = input_size % data_per_byte;
   tail = tail ? data_per_byte - tail : 0;
@@ -131,13 +126,11 @@ void quantize_and_compress__avx2(
             _mm256_min_ps(_mm256_set1_ps(max_q), rounded_v));
         __m256i qval_v = _mm256_cvtps_epi32(rounded_v);
         __m256i orval_v = _mm256_cvtepu8_epi32(_mm_lddqu_si128(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             reinterpret_cast<const __m128i*>(output_data + 10 + i)));
         orval_v =
             _mm256_or_si256(orval_v, _mm256_slli_epi32(qval_v, bit_start));
         orval_v = _mm256_shuffle_epi8(orval_v, shuffle_mask_v);
         orval_v = _mm256_permutevar8x32_epi32(orval_v, permute_mask_v);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         *reinterpret_cast<int64_t*>(output_data + 10 + i) =
             _mm256_extract_epi64(orval_v, 0);
       }
@@ -151,9 +144,7 @@ void quantize_and_compress__avx2(
         rounded = rounded > 0.0f ? rounded : 0.0f;
         uint8_t qval = rounded;
 
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         uint8_t orval = output_data[10 + i];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         output_data[10 + i] = orval | static_cast<uint8_t>(qval << bit_start);
       }
       bit_start += bitwidth;
@@ -176,13 +167,11 @@ void quantize_and_compress__avx2(
         __m256i qval_v = _mm256_cvtps_epi32(_mm256_round_ps(
             thetimes_v, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
         __m256i orval_v = _mm256_cvtepu8_epi32(_mm_lddqu_si128(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             reinterpret_cast<const __m128i*>(output_data + 10 + i)));
         orval_v =
             _mm256_or_si256(orval_v, _mm256_slli_epi32(qval_v, bit_start));
         orval_v = _mm256_shuffle_epi8(orval_v, shuffle_mask_v);
         orval_v = _mm256_permutevar8x32_epi32(orval_v, permute_mask_v);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         *reinterpret_cast<int64_t*>(output_data + 10 + i) =
             _mm256_extract_epi64(orval_v, 0);
       }
@@ -195,9 +184,7 @@ void quantize_and_compress__avx2(
         thetimes = thetimes > 0.0f ? thetimes : 0.0f;
         uint8_t qval = nearbyint(thetimes);
 
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         uint8_t orval = output_data[10 + i];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         output_data[10 + i] = orval | static_cast<uint8_t>(qval << bit_start);
       }
       bit_start += bitwidth;
@@ -236,7 +223,6 @@ void decompress_and_dequantize__avx2(
     constexpr int VLEN = 8;
     for (; i < stride / VLEN * VLEN; i += VLEN) {
       __m128i in_v = _mm_lddqu_si128(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           reinterpret_cast<const __m128i*>(input_data + 10 + i));
       __m256i out_epi32_v = _mm256_and_si256(
           _mm256_srli_epi32(_mm256_cvtepu8_epi32(in_v), bit_start),

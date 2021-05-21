@@ -86,7 +86,6 @@ template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
   return this->order_ == StorageOrder::NHWC && is_same<T, uint8_t>::value &&
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       !Acc16() && group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
       this->kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
       stride_h() == stride_w() && (stride_h() == 1 || stride_h() == 2) &&
@@ -100,7 +99,6 @@ template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
   bool ret = this->order_ == StorageOrder::NHWC && is_same<T, uint8_t>::value &&
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       !Acc16() && group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
       this->kernel_.size() == 3 && this->kernel_[0] == 3 &&
       this->kernel_[1] == 3 && this->kernel_[2] == 3 &&
@@ -159,7 +157,6 @@ fbgemm::conv_param_t<3> ConvDNNLowPOp<T, ReluFused>::GetConv3DParam_() {
        this->pads_[2],
        this->pads_[3],
        this->pads_[4],
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        this->pads_[5]});
 }
 
@@ -314,7 +311,6 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
               std::abs(
                   bias_qparams.scale -
                   in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale),
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               1e-4);
         }
         CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
@@ -331,7 +327,6 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
                 b_data[i],
                 0,
                 in_qparams_[INPUT].scale * FilterQuantizationParams(g).scale,
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 32,
                 true /* signed */);
           }
@@ -464,7 +459,6 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       if (this->template InputIsType<int8::Int8TensorCPU>(FILTER) &&
           quantize_groupwise_) {
         static int log_occurences = 0;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if (log_occurences < 32) {
           ++log_occurences;
           LOG(WARNING) << "Cannot do group-wise quantization for "
@@ -571,7 +565,6 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       }
       if (!reason.empty()) {
         static int log_occurences = 0;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if (log_occurences < 32) {
           ++log_occurences;
           LOG(WARNING) << "Conv with weight " << this->debug_def().input(FILTER)
@@ -877,7 +870,6 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
   if (!dnnlowp::HasStaticQuantization(this)) {
     if (quantize_groupwise_) {
       static int log_occurences = 0;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (log_occurences < 32) {
         ++log_occurences;
         LOG(WARNING) << "Cannot do group-wise quantization without "
@@ -1036,7 +1028,6 @@ void ConvDNNLowPOp<T, ReluFused>::PartitionGroupedNHWCConv_(
       group_end,
       i_begin,
       i_end,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       32);
 }
 
@@ -1107,7 +1098,6 @@ const T* ConvDNNLowPOp<T, ReluFused>::Im2ColNHWC_(Tensor* col_buffer) {
           this->pads_[2],
           this->pads_[3],
           this->pads_[4],
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           this->pads_[5],
           this->stride_[0],
           this->stride_[1],
@@ -1560,7 +1550,6 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
              this->pads_[2],
              this->pads_[3],
              this->pads_[4],
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              this->pads_[5]});
 
         PackAWithIm2Col<uint8_t, int32_t, 3> packA(

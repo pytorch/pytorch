@@ -139,7 +139,6 @@ struct GraphFuser {
   // limit here.
   // This limit is also applied to other devices in the fuser by default.
   // Change with setInputArgLimit
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t subgraph_arg_limit_ = 128;
 
   GraphFuser(AliasDb* aliasDb, Block* block, bool strict_fuser_check)

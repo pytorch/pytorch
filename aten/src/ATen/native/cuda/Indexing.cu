@@ -29,7 +29,7 @@ namespace {
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
   int64_t* sorted_indices, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
-  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim) {
+  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
 //numel is total number of flattened indices, not expanded to dimensions that are not indexed.
 //stride is the cumulative size of the not-indexed last dimensions
 //stride_before is the stride of the dimension immediately preceding first indexed dimension
@@ -55,6 +55,11 @@ __global__ void indexing_backward_kernel(
         && (idx == 0 || sorted_indices[idx] != sorted_indices[idx - 1])){
       do {
         int64_t start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+        // if not accumulate, we only keep the last duplicate index so skip those before it
+        if (!accumulate && (idx < numel - 1) && sorted_indices[idx] == sorted_indices[idx + 1]) {
+          idx++;
+          continue;
+        }
         const int64_t weight_row = ((int64_t) sorted_indices[idx]) * stride + z * stride_before;
         const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
         const accscalar_t scale = (accscalar_t)1.0;
@@ -68,13 +73,19 @@ __global__ void indexing_backward_kernel(
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
               gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
-              weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
+              if (accumulate) {
+                weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
+              }
             }
           }
 
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
-            weight[ii] += gradient[ii] * scale;
+            if (accumulate) {
+              weight[ii] += gradient[ii] * scale;
+            } else {
+              weight[ii] = gradient[ii] * scale;
+            }
           }
 
           #pragma unroll
@@ -183,7 +194,7 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 }
 
 
-void index_put_accum_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices);
+void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices);
 
 namespace {
 
@@ -195,7 +206,7 @@ int64_t largestIndex(const Tensor &self) {
   return result;
 }
 
-void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool unsafe) {
+void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -224,7 +235,7 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
       // this bug is fixed in CUDA 11.3
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11030
       if (num_indices < 50000) {
-        index_put_accum_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
+        index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
       } else
 #endif
       {
@@ -257,7 +268,8 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
           num_indices,
           sliceSize,
           strideBefore,
-          nElemBefore);
+          nElemBefore,
+          accumulate);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 
@@ -266,7 +278,7 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
   }
 }
 
-REGISTER_CUDA_DISPATCH(index_put_accum_stub, &index_put_accum_kernel);
+REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
 } //anonymous
 
 
@@ -450,7 +462,7 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   dim = maybe_wrap_dim(dim, self.dim());
 
   TensorArg self_arg{self, "self", 1}, index_arg{index, "index", 3}, source_arg{source, "source", 4};
-  checkAllSameGPU("index_add", {self_arg, index_arg, source_arg});
+  checkAllSameGPU(__func__, {self_arg, index_arg, source_arg});
 
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_add_(): Expected dtype int32/int64 for index");
@@ -915,9 +927,9 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self)
-      .add_input(self)
-      .add_input(*b_mask)
+      .add_borrowed_output(self)
+      .add_borrowed_input(self)
+      .add_borrowed_input(*b_mask)
       .build();
 
   if (b_mask->dtype() == at::ScalarType::Byte) {

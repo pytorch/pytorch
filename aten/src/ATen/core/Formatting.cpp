@@ -96,9 +96,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t sz;
   if(intMode) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if(expMax > 9) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sz = 11;
       stream << std::scientific << std::setprecision(4);
     } else {
@@ -107,27 +105,20 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     }
   } else {
     if(expMax-expMin > 4) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sz = 11;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if(std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
         sz = sz + 1;
       }
       stream << std::scientific << std::setprecision(4);
     } else {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if(expMax > 5 || expMax < 0) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         sz = 7;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         scale = std::pow(10, expMax-1);
         stream << std::fixed << std::setprecision(4);
       } else {
         if(expMax == 0) {
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           sz = 7;
         } else {
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           sz = expMax+6;
         }
         stream << std::fixed << std::setprecision(4);

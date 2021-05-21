@@ -13,7 +13,78 @@
 
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Scalar& value) {
+  const Tensor& result = maybe_get_output();
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(self) // other
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
+}
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+TORCH_META_FUNC(threshold_backward)(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
+  const Tensor& gradInput = maybe_get_output();
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(gradInput)
+    .add_input(self)
+    .add_input(grad)  // other
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
+}
+
+TORCH_META_FUNC(elu) (
+  const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale
+) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(silu) (const Tensor& self) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(softplus) (
+  const Tensor& self, const Scalar& beta, const Scalar& threshold
+) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(leaky_relu) (
+  const Tensor& self, const Scalar& negval
+) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(hardsigmoid) (const Tensor& self) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+static inline void softshrink_check(const Scalar& lambd) {
+  double lamb = lambd.to<double>();
+  TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
+}
+
+TORCH_META_FUNC(softshrink) (
+  const Tensor & self, const Scalar& lambd
+) {
+  softshrink_check(lambd);
+  build_unary_op(maybe_get_output(), self);
+}
+
+} // namespace meta
+
+namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
@@ -57,6 +128,42 @@ DEFINE_DISPATCH(silu_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_backward_stub);
 
+TORCH_IMPL_FUNC(elu_out) (
+  const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, const Tensor& result
+) {
+  elu_stub(device_type(), *this, alpha, scale, input_scale);
+}
+
+TORCH_IMPL_FUNC(silu_out) (
+  const Tensor& self, const Tensor& result
+) {
+  silu_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(softplus_out) (
+  const Tensor& self, const Scalar& beta, const Scalar& threshold, const Tensor& result
+) {
+  softplus_stub(device_type(), *this, beta, threshold);
+}
+
+TORCH_IMPL_FUNC(leaky_relu_out) (
+  const Tensor& self, const Scalar& negval, const Tensor& result
+) {
+  leaky_relu_stub(device_type(), *this, negval);
+}
+
+TORCH_IMPL_FUNC(hardsigmoid_out) (
+  const Tensor& self, const Tensor& result
+) {
+  hardsigmoid_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(softshrink_out) (
+  const Tensor & self, const Scalar& lambd, const Tensor& result
+) {
+  softshrink_stub(device_type(), *this, lambd);
+}
+
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return at::clamp(self, min, max);
 }
@@ -82,60 +189,11 @@ Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, const Sc
   return iter.output();
 }
 
-Tensor hardsigmoid(const Tensor& self) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  hardsigmoid_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& hardsigmoid_out(const Tensor& self, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  hardsigmoid_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor& hardsigmoid_(Tensor& self) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(self, self);
-  hardsigmoid_stub(iter.device_type(), iter);
-  return self;
-}
-
 Tensor hardsigmoid_backward(const Tensor& grad_output, const Tensor& self) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, self);
   hardsigmoid_backward_stub(iter.device_type(), iter);
   return iter.output();
-}
-
-Tensor& elu_out(const Tensor& self,
-    const Scalar& alpha,
-    const Scalar& scale,
-    const Scalar& input_scale,
-    Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
-  return result;
-}
-
-Tensor elu(
-    const Tensor& self,
-    const Scalar& alpha,
-    const Scalar& scale,
-    const Scalar& input_scale) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
-  return iter.output();
-}
-
-Tensor & elu_(
-    Tensor & self,
-    const Scalar& alpha,
-    const Scalar& scale,
-    const Scalar& input_scale) {
-  return at::elu_out(self, self, alpha, scale, input_scale);
 }
 
 Tensor elu_backward(
@@ -207,7 +265,6 @@ Tensor selu(const Tensor & self) {
 }
 
 Tensor relu6(const Tensor & self) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::hardtanh(self, /*min_val=*/0, /*max_val=*/6);
 }
 
@@ -216,7 +273,6 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor & relu6_(Tensor & self) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::hardtanh_(self, /*min_val=*/0, /*max_val=*/6);
 }
 
@@ -232,25 +288,6 @@ Tensor & celu_(Tensor & self, const Scalar& alpha) {
       "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
-}
-
-Tensor silu(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  at::silu_out(result, self);
-  return result;
-}
-
-Tensor& silu_(Tensor& self) {
-  return at::silu_out(self, self);
-}
-
-Tensor& silu_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(
-      result.dtype() == self.dtype(),
-      "Output Tensor should have the same type as in Input Tensor.")
-  auto iter = TensorIterator::unary_op(result, self);
-  silu_stub(iter.device_type(), iter);
-  return result;
 }
 
 Tensor silu_backward(
@@ -355,7 +392,6 @@ Tensor rrelu_with_noise_backward(
     bool is_result) {
   auto lower_tensor = scalar_to_tensor(lower);
   auto upper_tensor = scalar_to_tensor(upper);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
     return grad_output.mul(noise);
   } else {
@@ -371,19 +407,6 @@ Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool
 
 Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
-}
-
-Tensor & softplus_out(const Tensor& self, const Scalar& beta, const Scalar& threshold, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  softplus_stub(iter.device_type(), iter, beta, threshold);
-  return result;
-}
-
-Tensor softplus(const Tensor& self, const Scalar& beta, const Scalar& threshold) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  softplus_stub(iter.device_type(), iter, beta, threshold);
-  return iter.output();
 }
 
 Tensor & softplus_backward_out(const Tensor& grad_output,
@@ -409,45 +432,12 @@ Tensor softplus_backward(
   return iter.output();
 }
 
-// computes `result = self <= threshold ? value : other`
-// other is `self` in threshold() and `grad` in threshold_backward()
-static Tensor threshold_out(
-    optional<Tensor> opt_result,
-    const Tensor& self,
-    const Scalar& threshold,
-    const Scalar& value,
-    const Tensor& other) {
-  Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(result)
-    .add_input(self)
-    .add_input(other)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .build();
-  threshold_stub(iter.device_type(), iter, threshold, value);
-  return iter.output();
+TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
+  threshold_stub(device_type(), *this, threshold, value);
 }
 
-Tensor threshold(const Tensor& self, const Scalar& threshold, const Scalar& value) {
-  return threshold_out(nullopt, self, threshold, value, self);
-}
-
-Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
-  threshold_out(make_optional(self), self, threshold, value, self);
-  return self;
-}
-
-Tensor& threshold_out(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
-  threshold_out(make_optional(result), self, threshold, value, self);
-  return result;
-}
-
-Tensor threshold_backward(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
-  return threshold_out(nullopt, self, threshold, 0, grad);
+TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, const Scalar& threshold, const Tensor& gradInput) {
+  threshold_stub(device_type(), *this, threshold, 0);
 }
 
 // -----------------------------------
@@ -464,7 +454,6 @@ void inline prelu_cpu_kernel_share_weights(
   auto input_data = input.data_ptr<scalar_t>();
   auto weight_val = weight.data_ptr<scalar_t>()[0];
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       scalar_t input_data_val = input_data[i];
@@ -505,7 +494,6 @@ void inline prelu_cpu_kernel_multi_weights(
       }
     }
   };
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.numel() > 1000) {
     at::parallel_for(0, input_dim0_size, 0, loop);
   } else {
@@ -579,7 +567,6 @@ void inline prelu_cpu_backward_kernel_share_weights(
   auto input_grad_data = input_grad.data_ptr<scalar_t>();
   auto weight_grad_data = weight_grad.data_ptr<scalar_t>();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
     scalar_t partial_sum = ident;
@@ -634,7 +621,6 @@ void inline prelu_cpu_backward_kernel_multi_weights(
       }
     }
   };
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.numel() > 1000) {
     at::parallel_for(0, input_dim0_size, 0, loop);
   } else {
@@ -722,25 +708,6 @@ Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, const Scala
   return out_tensor;
 }
 
-static inline void softshrink_check(const Scalar& lambd) {
-  double lamb = lambd.to<double>();
-  TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
-}
-
-Tensor& softshrink_out(const Tensor & self, const Scalar& lambd, Tensor& result) {
-  softshrink_check(lambd);
-  auto iter = TensorIterator::unary_op(result, self);
-  softshrink_stub(iter.device_type(), iter, lambd);
-  return result;
-}
-
-Tensor softshrink(const Tensor & self, const Scalar& lambd) {
-  softshrink_check(lambd);
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  softshrink_stub(iter.device_type(), iter, lambd);
-  return iter.output();
-}
 
 Tensor& softshrink_backward_out(const Tensor & grad, const Tensor & self, const Scalar& lambd, Tensor& grad_input) {
   auto iter = TensorIterator::binary_op(grad_input, grad, self);
@@ -785,34 +752,9 @@ Tensor infinitely_differentiable_gelu_backward(
     const Tensor& grad,
     const Tensor& self) {
   constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor pdf = (-0.5 * self * self).exp_();
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
-}
-
-Tensor& leaky_relu_out(const Tensor& self,
-    const Scalar& negval,
-    Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  leaky_relu_stub(iter.device_type(), iter, negval);
-  return result;
-}
-
-Tensor leaky_relu(
-    const Tensor& self,
-    const Scalar& negval) {
-  Tensor result;
-  auto iter = TensorIterator::unary_op(result, self);
-  leaky_relu_stub(iter.device_type(), iter, negval);
-  return iter.output();
-}
-
-Tensor & leaky_relu_(
-    Tensor & self,
-    const Scalar& neg_val) {
-  return at::leaky_relu_out(self, self, neg_val);
 }
 
 // Note: leakyReLu backward calculation doesn't support in-place call with negative slope.

@@ -121,8 +121,10 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
   int64_t source_range_tag = tup_elems[1].toInt();
   auto source_range_it = source_range_map.find(source_range_tag);
   TORCH_CHECK(
-      source_range_it != source_range_map.end(),
-      "Source range tag must exist in deserialized source range map.");
+      source_range_tag == -1 || source_range_it != source_range_map.end(),
+      "Source range tag must exist in deserialized source range map."
+      " Not found source range tag:",
+      source_range_tag);
   auto source_range = source_range_it->second;
   auto callee = deserialize(tup_elems[2], source_range_map, cu);
   InlinedCallStackPtr cs_ptr;

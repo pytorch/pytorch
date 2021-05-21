@@ -86,7 +86,6 @@ void Tokenizer::next(char* start, char* end, TokenizedString& tokenized) {
 
 FileReader::FileReader(const std::string& path, size_t bufferSize)
     : bufferSize_(bufferSize), buffer_(new char[bufferSize]) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   fd_ = open(path.c_str(), O_RDONLY, 0777);
   if (fd_ < 0) {
     throw std::runtime_error(

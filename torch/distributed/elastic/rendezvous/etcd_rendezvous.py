@@ -76,13 +76,13 @@ CONST_RUNID_SUBROOT_TTL = 7200  # 2 hours
 
 class EtcdRendezvousHandler(RendezvousHandler):
     """
-    Implements a :py:class:`torchelastic.rendezvous.RendezvousHandler`
-    interface backed by
-    :py:class:`torchelastic.rendezvous.etcd_rendezvous.EtcdRendezvous`.
-
-    Torchelastic uses a URL to configure the type of rendezvous to use and
-    to pass implementation specific configurations to the rendezvous module.
-    The basic etcd rendezvous configuration URL looks like the following
+    Implements a
+    :py:class:`torch.distributed.elastic.rendezvous.RendezvousHandler` interface
+    backed by
+    :py:class:`torch.distributed.elastic.rendezvous.etcd_rendezvous.EtcdRendezvous`.
+    ``EtcdRendezvousHandler`` uses a URL to configure the type of rendezvous to
+    use and to pass implementation specific configurations to the rendezvous
+    module. The basic etcd rendezvous configuration URL looks like the following
     ::
 
      etcd://<etcd_address>:<port>/<job_id>?min_workers=<min_workers>&max_workers=<max_workers>  # noqa: W605
@@ -102,9 +102,9 @@ class EtcdRendezvousHandler(RendezvousHandler):
        any string (e.g. does not need to be a number) as long as it is
        unique.
     4. ``min_workers=1`` and ``max_workers=3`` specifies a range for
-       membership size - torchelastic starts running the job as long as the
-       cluster size is greater than or equal to ``min_workers`` and admits
-       up to ``max_workers`` into the cluster.
+       membership size - Torch Distributed Elastic starts running the job as
+       long as the cluster size is greater than or equal to ``min_workers``
+       and admits up to ``max_workers`` into the cluster.
 
     Below are a full list of the parameters that can be passed to etcd
     rendezvous:

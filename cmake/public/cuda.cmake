@@ -188,9 +188,14 @@ find_library(CUDA_CUDA_LIB cuda
 find_library(CUDA_NVRTC_LIB nvrtc
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 lib/x64)
-  if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
- execute_process(
-    COMMAND "${PYTHON_EXECUTABLE}" -c
+if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
+  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  execute_process(
+    COMMAND "${_python_exe}" -c
     "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)

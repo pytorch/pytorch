@@ -96,9 +96,12 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     if len(indices_list) == 0:
         return values
 
-    index = indices_list[0]
-
     if len(indices_list) > 1:
+        for idx_ in range(len(indices_list)):
+            if indices_list[idx_].type().scalarType() == 'Bool':
+                indices_list[idx_] = g.op("NonZero", indices_list[idx_])
+        index = indices_list[0]
+
         for ind in indices_list[1:]:
             index = add(g, index, ind)
         broadcast_index_shape = g.op("Shape", index)
@@ -108,7 +111,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         index = g.op("Concat", *indices_list, axis_i=-1)
     else:
         # Replace index_put node with masked_scatter or masked_fill
-        # when inputs to the index_put node contains boolean inputs
+        # when inputs to the index_put node contains a single boolean input.
         #
         # index_put -> masked_fill
         #   * input index contains single tensor of Bool type (e.g.: %24 <- %23).
@@ -145,6 +148,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   %33 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
         #               = aten::index_put(%mask, %32, %28, %38)
         #   return (%33)
+        index = indices_list[0]
         bool_inp = index
         if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
             rank = sym_help._get_tensor_rank(values)
