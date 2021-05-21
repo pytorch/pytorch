@@ -961,6 +961,22 @@ def sample_inputs_xlog1py(self, device, dtype, requires_grad):
 
     return list(generator())
 
+def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = parital(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases_scalar = (((), ))
+    cases_non_scalar = (((S, S, S), ),
+                        ((S, S), ),
+                        ((S,), )) 
+
+    cases = cases_scalar + cases_non_scalar  # ignore: type[assignment]
+
+    def generator():
+        for shape, arg in cases:
+            if isinstance(shape, tuple)
+            yield(SampleInput(shape, args=arg))
+
+    return list(generator())
 
 def sample_inputs_logsumexp(self, device, dtype, requires_grad):
     inputs = (
@@ -6098,6 +6114,9 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
+    OpInfo('zero_',
+           dtypes=all_types_and_complex_types_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_zero_),
     OpInfo('special.xlog1py',
            aten_name='special_xlog1py',
            dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -6474,8 +6493,6 @@ def method_tests():
         ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
         ('renorm', (S, S, S), (inf, 2, 0.5), 'norm_inf'),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
-        ('zero_', (S, S, S), NO_ARGS),
-        ('zero_', (), NO_ARGS, 'scalar'),
         ('norm', (S, S), (), 'default'),
         ('norm', (S, S), (2,), '2'),
         ('norm', (S, S), (0,), '0'),
