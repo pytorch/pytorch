@@ -42,14 +42,35 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         torch._C._jit_register_operator_shape_function(foo.graph.findNode("aten::mul"), broadcast.graph)
         inputs = list(foo.graph.inputs())
 
-        test_cases = [
-            ([1, 6, 5], [1, 7, 1, 5], "1, 7, 6, 5"),
-            ([1, 6, 5], [1, None, 1, 5], "1, *, 6, 5"),
-            ([None, None], [None, None, None], "*, *, *"),
-        ]
-
-        for inp0, inp1, result in test_cases:
+        def prop_shapes_on_graph(inp0, inp1):
             inputs[0].setType(inputs[0].type().with_sizes(inp0))
             inputs[1].setType(inputs[1].type().with_sizes(inp1))
             torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
-            FileCheck().check(result).run(foo.graph)
+
+        prop_shapes_on_graph([1, 6, 5], [1, 7, 1, 5])
+        FileCheck().check("1, 7, 6, 5").run(foo.graph)
+
+        # None implicitly creates a new symbolic symbol
+        prop_shapes_on_graph([None, None], [None, None, None])
+        output_shape = foo.graph.findNode("aten::mul").output().type().symbolic_sizes()
+        inp0_shape = inputs[0].type().symbolic_sizes()
+        inp1_shape = inputs[1].type().symbolic_sizes()
+
+        # output shape dim 0 should be taken from the second inp dim0
+        # other two dims we cannot infer and are given a new symbolic shape
+        self.assertEqual(output_shape[0], inp1_shape[0])
+        self.assertFalse(output_shape[1] in inp0_shape + inp1_shape)
+        self.assertFalse(output_shape[2] in inp0_shape + inp1_shape)
+
+        # XXX: symbolic shapes are represented with an increasing counter of unique
+        # values, use `_new_symbolic_shape_symbol` api instead of specifying negative
+        # dimensions directly so there is no chance of collision between manual number
+        # and current counter value.
+        sym1 = torch._C._new_symbolic_shape_symbol()
+        sym2 = torch._C._new_symbolic_shape_symbol()
+        sym3 = torch._C._new_symbolic_shape_symbol()
+        prop_shapes_on_graph([sym1, 1, sym3], [1, sym2, sym3])
+        output_shape = foo.graph.findNode("aten::mul").output().type().symbolic_sizes()
+        self.assertEqual(output_shape[1], sym2)
+        # TODO: output_shape[0] == sym1, output_shape[2] == sym3
+        # both require additional cleanup / optimization passes
