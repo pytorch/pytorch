@@ -190,8 +190,8 @@ class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
         if with_new_group:
             pg = c10d.new_group(backend="nccl", timeout=timedelta(seconds=timeout))
         else:
-            _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-            pg = c10d.create_process_group_wrapper(
+            _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
+            pg = c10d._create_process_group_wrapper(
                 _pg,
                 "unused",
                 store,

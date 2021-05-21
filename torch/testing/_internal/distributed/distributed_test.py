@@ -3383,9 +3383,8 @@ class DistributedTest:
             # Note: DETAIL debug mode logs DDP logging data to stdout and
             # thus accesses std::map, which fills in a default value for the
             # type if it didn't exist.
-            self.assertTrue(
-                ddp_logging_data.get("comm_hook") is None or
-                ddp_logging_data.get("comm_hook") == ""
+            self.assertEqual(
+                ddp_logging_data.get("comm_hook", ""), ""
             )
 
         def _test_ddp_hook_parity(self, state, hook):
@@ -4199,6 +4198,9 @@ class DistributedTest:
             # Note: DETAIL debug mode logs DDP logging data to stdout and
             # thus accesses std::map, which fills in a default value for the
             # type if it didn't exist.
+            self.assertEqual(
+                ddp_logging_data.get("unused_parameter_size", 0), 0
+            )
             self.assertTrue(
                 ddp_logging_data.get("unused_parameter_size") is None or
                 ddp_logging_data.get("unused_parameter_size") == 0

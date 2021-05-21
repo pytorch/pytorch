@@ -219,8 +219,8 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         if with_new_group:
             pg = c10d.new_group(backend="gloo")
         else:
-            _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
-            pg = c10d.create_process_group_wrapper(
+            _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(timeout=timeout))
+            pg = c10d._create_process_group_wrapper(
                 _pg,
                 "unused",
                 store,
