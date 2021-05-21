@@ -109,8 +109,10 @@ class Linear(Module):
 class _LinearWithBias(Linear):
     bias: Tensor  # type: ignore[assignment]
 
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features, out_features, bias=True)
+    def __init__(self, in_features: int, out_features: int, bias: bool = True,
+                 device=None, dtype=None) -> None:
+        super().__init__(in_features, out_features, bias=bias,
+                         device=device, dtype=dtype)
 
 
 class Bilinear(Module):
