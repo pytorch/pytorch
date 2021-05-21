@@ -217,7 +217,7 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
   return THPStorage_(New)(
           THWStorage_(newWithDataAndAllocator)(
             // TODO: Maybe we should read out the scalar_t size and use it for size
-            THMapAllocator::makeDataPtr(WITH_FD, nullptr, fd, flags, size * sizeof(scalar_t), nullptr),
+            THMapAllocator::makeDataPtr(WITH_FD, "", fd, flags, size * sizeof(scalar_t), nullptr),
             size, /* allocator */ nullptr));
   END_HANDLE_TH_ERRORS
 }
