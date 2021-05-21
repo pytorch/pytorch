@@ -207,127 +207,6 @@ struct vec_host_softmax_lastdim {
   }
 };
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER) && false
-inline void _vec_softmax(
-    BFloat16* input_data_bf16_base,
-    BFloat16* output_data_bf16_base,
-    int64_t outer_size, // for example: 32
-    int64_t inner_size, // for example: 15130
-    int64_t dim_size) { // for example: 81
-  float* input_data_base, output_data_base;
-  // todo: fully convert from bf16 to fp32
-
-  // todo: fully convert back from fp32 to bf16 for result
-
-  using Vec = vec256::Vec256<float>;
-  using Vec_bfloat16 = vec256::Vec256<BFloat16>;
-  using Vec_128 = vec128::Vec128<float>;
-
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
-  if (grain_size < 1)
-    grain_size = 1;
-
-  int64_t dim_stride = inner_size; // for example: 15130
-  int64_t outer_stride = dim_size * dim_stride; // for example: 81 * 15130
-
-  parallel_for(
-      0, outer_size * inner_size, grain_size,
-      [&](int64_t begin, int64_t end) {
-        int64_t idx = begin;
-        while( idx < end){
-
-          int64_t outer_idx = idx / inner_size;
-          int64_t inner_idx = idx % inner_size;
-
-          if( ( (inner_idx+8) <= inner_size) && ( (idx+8) <= end )){
-            float* input_data_base_inner_idx = input_data_base + outer_idx * outer_stride + inner_idx;
-            float* output_data_base_inner_idx = output_data_base + outer_idx * outer_stride + inner_idx;
-
-            // Vec version
-            // Step 1: Get max Score
-            Vec max_m256 =  Vec::loadu(input_data_base_inner_idx);
-            for(int64_t work_idx = 1; work_idx < dim_size; work_idx += 1){
-              float* input_data = input_data_base_inner_idx + work_idx * dim_stride;
-              Vec input_m256 =  Vec::loadu(input_data);
-              max_m256 = vec256::maximum(max_m256, input_m256);
-            }
-
-            // Step2: Calculate sum
-            Vec sum_m256 = Vec(0.0);
-            for(int64_t work_idx = 0; work_idx < dim_size; work_idx += 1){
-              int64_t work_idx_dim_stride = work_idx * dim_stride;
-              float* input_data = input_data_base_inner_idx + work_idx_dim_stride;
-              float* output_data = output_data_base_inner_idx + work_idx_dim_stride;
-
-              Vec input_m256 = Vec::loadu(input_data);
-              Vec output_m256 = input_m256 - max_m256;
-              output_m256 = output_m256.exp();
-              
-              output_m256.store(output_data);
-
-              sum_m256 = sum_m256 + output_m256;
-            }
-            // Step3: Unify
-            for(int64_t work_idx = 0; work_idx < dim_size; work_idx += 1){
-              float* output_data = output_data_base_inner_idx + work_idx * dim_stride;
-              Vec output_m256 = Vec::loadu(output_data);
-              output_m256 = output_m256/sum_m256;
-              output_m256.store(output_data);
-            }
-            idx += 8;
-          } else {
-            // Tail cases
-            // There are 2 tail cases: 
-            // Case 1. The final tail case of this thread when not enough numbers for parallization 
-            // Case 2. For tail case of each inner_size when not enough numbers for parallization 
-            int64_t tail_number = 0;
-            if( (idx+8) > end ){
-              // Case1
-              tail_number = end - idx;
-            } else { // (inner_idx+8) > inner_size
-              // Case2
-              tail_number = inner_size - inner_idx;
-            }
-
-            for (int64_t i=0; i < tail_number; i++) {
-
-              int64_t outer_idx = (idx + i) / inner_size;
-              int64_t inner_idx = (idx + i) % inner_size;
-
-              float* base_input_data =
-                  input_data_base + outer_idx * outer_stride + inner_idx;
-              float* base_output_data =
-                  output_data_base + outer_idx * outer_stride + inner_idx;
-
-              // Step1: Get max score
-              float max_input = base_input_data[0];
-              for(int64_t work_idx = 1; work_idx < dim_size; work_idx += 1){
-                float* input_data = base_input_data + work_idx * dim_stride;
-                max_input = std::max(max_input, input_data[0]);
-              }
-
-              // Step2: Calculate the Sum
-              float sum_data = 0;
-              for(int64_t work_idx = 0; work_idx < dim_size; work_idx += 1){
-                float* input_data = base_input_data + work_idx * dim_stride;
-                float* output_data = base_output_data + work_idx * dim_stride;
-                output_data[0] = std::exp(input_data[0] - max_input);
-                sum_data += output_data[0];
-              }
-
-              // Step3: Unify
-              for(int64_t work_idx = 0; work_idx < dim_size; work_idx += 1){
-                float* output_data = base_output_data + work_idx * dim_stride;
-                output_data[0] = output_data[0]/sum_data;
-              }
-            }
-            idx += tail_number;
-          }
-        }
-      });
-}
-#endif
-
 template <typename scalar_t>
 inline void _vec_softmax(
     scalar_t* input_data_base,
@@ -335,7 +214,7 @@ inline void _vec_softmax(
     int64_t outer_size, // for example: 32
     int64_t inner_size, // for example: 15130
     int64_t dim_size) { // for example: 81
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
@@ -347,27 +226,27 @@ inline void _vec_softmax(
       0, outer_size * inner_size, grain_size,
       [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
-        while( idx < end){
+        while (idx < end) {
 
           int64_t outer_idx = idx / inner_size;
           int64_t inner_idx = idx % inner_size;
 
-          if( ( (inner_idx+8) <= inner_size) && ( (idx+8) <= end )){
+          if (((inner_idx+8) <= inner_size) && ((idx+8) <= end)) {
             scalar_t* input_data_base_inner_idx = input_data_base + outer_idx * outer_stride + inner_idx;
             scalar_t* output_data_base_inner_idx = output_data_base + outer_idx * outer_stride + inner_idx;
 
             // Vec version
             // Step 1: Get max Score
             Vec max_m256 =  Vec::loadu(input_data_base_inner_idx);
-            for(int64_t work_idx = 1; work_idx < dim_size; work_idx += 1){
+            for (int64_t work_idx = 1; work_idx < dim_size; work_idx += 1) {
               scalar_t* input_data = input_data_base_inner_idx + work_idx * dim_stride;
               Vec input_m256 =  Vec::loadu(input_data);
-              max_m256 = vec256::maximum(max_m256, input_m256);
+              max_m256 = vec::maximum(max_m256, input_m256);
             }
 
             // Step2: Calculate sum
             Vec sum_m256 = Vec(0.0);
-            for(int64_t work_idx = 0; work_idx < dim_size; work_idx += 1){
+            for (int64_t work_idx = 0; work_idx < dim_size; work_idx += 1) {
               int64_t work_idx_dim_stride = work_idx * dim_stride;
               scalar_t* input_data = input_data_base_inner_idx + work_idx_dim_stride;
               scalar_t* output_data = output_data_base_inner_idx + work_idx_dim_stride;
@@ -381,7 +260,7 @@ inline void _vec_softmax(
               sum_m256 = sum_m256 + output_m256;
             }
             // Step3: Unify
-            for(int64_t work_idx = 0; work_idx < dim_size; work_idx += 1){
+            for (int64_t work_idx = 0; work_idx < dim_size; work_idx += 1) {
               scalar_t* output_data = output_data_base_inner_idx + work_idx * dim_stride;
               Vec output_m256 = Vec::loadu(output_data);
               output_m256 = output_m256/sum_m256;
@@ -390,11 +269,11 @@ inline void _vec_softmax(
             idx += 8;
           } else {
             // Tail cases
-            // There are 2 tail cases: 
-            // Case 1. The final tail case of this thread when not enough numbers for parallization 
-            // Case 2. For tail case of each inner_size when not enough numbers for parallization 
+            // There are 2 tail cases:
+            // Case 1. The final tail case of this thread when not enough numbers for parallization
+            // Case 2. For tail case of each inner_size when not enough numbers for parallization
             int64_t tail_number = 0;
-            if( (idx+8) > end ){
+            if ((idx+8) > end) {
               // Case1
               tail_number = end - idx;
             } else { // (inner_idx+8) > inner_size
@@ -414,14 +293,14 @@ inline void _vec_softmax(
 
               // Step1: Get max score
               scalar_t max_input = base_input_data[0];
-              for(int64_t work_idx = 1; work_idx < dim_size; work_idx += 1){
+              for (int64_t work_idx = 1; work_idx < dim_size; work_idx += 1) {
                 scalar_t* input_data = base_input_data + work_idx * dim_stride;
                 max_input = std::max(max_input, input_data[0]);
               }
 
               // Step2: Calculate the Sum
               scalar_t sum_data = 0;
-              for(int64_t work_idx = 0; work_idx < dim_size; work_idx += 1){
+              for (int64_t work_idx = 0; work_idx < dim_size; work_idx += 1) {
                 scalar_t* input_data = base_input_data + work_idx * dim_stride;
                 scalar_t* output_data = base_output_data + work_idx * dim_stride;
                 output_data[0] = std::exp(input_data[0] - max_input);
@@ -429,7 +308,7 @@ inline void _vec_softmax(
               }
 
               // Step3: Unify
-              for(int64_t work_idx = 0; work_idx < dim_size; work_idx += 1){
+              for (int64_t work_idx = 0; work_idx < dim_size; work_idx += 1) {
                 scalar_t* output_data = base_output_data + work_idx * dim_stride;
                 output_data[0] = output_data[0]/sum_data;
               }
@@ -439,6 +318,135 @@ inline void _vec_softmax(
         }
       });
 }
+
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+inline void _vec_softmax(
+    BFloat16* input_data_base,
+    BFloat16* output_data_base,
+    int64_t outer_size, // for example: 32
+    int64_t inner_size, // for example: 15130
+    int64_t dim_size) { // for example: 81
+  using Vec = vec::Vectorized<float>;
+  using Vec_bf16 = vec::Vectorized<BFloat16>;
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
+  if (grain_size < 1)
+    grain_size = 1;
+
+  int64_t dim_stride = inner_size; // for example: 15130
+  int64_t outer_stride = dim_size * dim_stride; // for example: 81 * 15130
+
+  parallel_for(
+      0, outer_size * inner_size, grain_size,
+      [&](int64_t begin, int64_t end) {
+        int64_t idx = begin;
+        while (idx < end) {
+
+          int64_t outer_idx = idx / inner_size;
+          int64_t inner_idx = idx % inner_size;
+
+          if (((inner_idx+16) <= inner_size) && ((idx+16) <= end)) {
+            BFloat16* input_data_base_inner_idx = input_data_base + outer_idx * outer_stride + inner_idx;
+            BFloat16* output_data_base_inner_idx = output_data_base + outer_idx * outer_stride + inner_idx;
+
+            Vec input_list[dim_size*2];
+            Vec output_list[dim_size*2];
+            // Vec version
+            // Step 1: Get max Score
+            Vec_bf16 max_m256_bf16 =  Vec_bf16::loadu(input_data_base_inner_idx);
+            std::tuple<vec::Vectorized<float>, vec::Vectorized<float>> convert_result = convert_bfloat16_float(max_m256_bf16);
+            Vec max_m256_o1 = std::get<0>(convert_result);
+            Vec max_m256_o2 = std::get<1>(convert_result);
+            input_list[0] = std::get<0>(convert_result);
+            input_list[1] = std::get<1>(convert_result);
+            for (int64_t work_idx = 1; work_idx < dim_size; work_idx += 1) {
+              BFloat16* input_data = input_data_base_inner_idx + work_idx * dim_stride;
+              Vec_bf16 input_m256_bf16 =  Vec_bf16::loadu(input_data);
+              convert_result = convert_bfloat16_float(input_m256_bf16);
+              max_m256_o1 = vec::maximum(max_m256_o1, std::get<0>(convert_result));
+              max_m256_o2 = vec::maximum(max_m256_o2, std::get<1>(convert_result));
+              input_list[work_idx*2] = std::get<0>(convert_result);
+              input_list[work_idx*2+1] = std::get<1>(convert_result);
+            }
+
+            // Step2: Calculate sum
+            Vec sum_m256_o1 = Vec(0.0);
+            Vec sum_m256_o2 = Vec(0.0);
+
+            for (int64_t work_idx = 0; work_idx < dim_size; work_idx += 1) {
+              Vec output_m256_o1 = input_list[work_idx*2] - max_m256_o1;
+              Vec output_m256_o2 = input_list[work_idx*2+1] - max_m256_o2;
+              output_m256_o1 = output_m256_o1.exp();
+              output_m256_o2 = output_m256_o2.exp();
+
+              output_list[work_idx*2] = output_m256_o1;
+              output_list[work_idx*2+1] = output_m256_o2;
+
+              sum_m256_o1 = sum_m256_o1 + output_m256_o1;
+              sum_m256_o2 = sum_m256_o2 + output_m256_o2;
+            }
+            // Step3: Unify
+            for (int64_t work_idx = 0; work_idx < dim_size; work_idx += 1) {
+              BFloat16* output_data = output_data_base_inner_idx + work_idx * dim_stride;
+
+              Vec output_m256_o1 = output_list[work_idx*2]/sum_m256_o1;
+              Vec output_m256_o2 = output_list[work_idx*2+1]/sum_m256_o2;
+
+              Vec_bf16 output_m256_bf16 = convert_float_bfloat16(output_m256_o1, output_m256_o2);
+              output_m256_bf16.store(output_data);
+            }
+            idx += 16;
+          } else {
+            // Tail cases
+            // There are 2 tail cases:
+            // Case 1. The final tail case of this thread when not enough numbers for parallization
+            // Case 2. For tail case of each inner_size when not enough numbers for parallization
+            int64_t tail_number = 0;
+            if ((idx+16) > end) {
+              // Case1
+              tail_number = end - idx;
+            } else { // (inner_idx+16) > inner_size
+              // Case2
+              tail_number = inner_size - inner_idx;
+            }
+
+            for (int64_t i=0; i < tail_number; i++) {
+
+              int64_t outer_idx = (idx + i) / inner_size;
+              int64_t inner_idx = (idx + i) % inner_size;
+
+              BFloat16* base_input_data =
+                  input_data_base + outer_idx * outer_stride + inner_idx;
+              BFloat16* base_output_data =
+                  output_data_base + outer_idx * outer_stride + inner_idx;
+
+              // Step1: Get max score
+              BFloat16 max_input = base_input_data[0];
+              for (int64_t work_idx = 1; work_idx < dim_size; work_idx += 1) {
+                BFloat16* input_data = base_input_data + work_idx * dim_stride;
+                max_input = std::max(max_input, input_data[0]);
+              }
+
+              // Step2: Calculate the Sum
+              BFloat16 sum_data = 0;
+              for (int64_t work_idx = 0; work_idx < dim_size; work_idx += 1) {
+                BFloat16* input_data = base_input_data + work_idx * dim_stride;
+                BFloat16* output_data = base_output_data + work_idx * dim_stride;
+                output_data[0] = std::exp(input_data[0] - max_input);
+                sum_data += output_data[0];
+              }
+
+              // Step3: Unify
+              for (int64_t work_idx = 0; work_idx < dim_size; work_idx += 1) {
+                BFloat16* output_data = base_output_data + work_idx * dim_stride;
+                output_data[0] = output_data[0]/sum_data;
+              }
+            }
+            idx += tail_number;
+          }
+        }
+      });
+}
+#endif
 
 template <typename scalar_t, bool LogSoftMax>
 struct vec_softmax {
