@@ -108,7 +108,19 @@ class SparseCsrMKLInterface {
       MKL_INT M,
       MKL_INT K,
       MKL_INT N) {
-    int stat = mkl_sparse_s_mm(
+    int stat;
+    if (N == 1) {
+      stat = mkl_sparse_s_mv(
+        SPARSE_OPERATION_NON_TRANSPOSE,
+        alpha,
+        A,
+        desc,
+        dense,
+        beta,
+        res);
+      TORCH_CHECK(stat == 0, "mkl_sparse_s_mv failed with error code: ", stat);
+    } else {
+      stat = mkl_sparse_s_mm(
         SPARSE_OPERATION_NON_TRANSPOSE,
         alpha,
         A,
@@ -120,7 +132,8 @@ class SparseCsrMKLInterface {
         beta,
         res,
         M);
-    TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", stat);
+      TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", stat);
+    }
   }
 
   inline void sparse_mm(
@@ -131,7 +144,20 @@ class SparseCsrMKLInterface {
       MKL_INT M,
       MKL_INT K,
       MKL_INT N) {
-    int stat = mkl_sparse_d_mm(
+    int stat;
+    if (N == 1) {
+      stat = mkl_sparse_d_mv(
+        SPARSE_OPERATION_NON_TRANSPOSE,
+        alpha,
+        A,
+        desc,
+        dense,
+        beta,
+        res);
+      TORCH_CHECK(stat == 0, "mkl_sparse_d_mv failed with error code: ", stat);
+    }
+    else {
+      stat = mkl_sparse_d_mm(
         SPARSE_OPERATION_NON_TRANSPOSE,
         alpha,
         A,
@@ -143,7 +169,8 @@ class SparseCsrMKLInterface {
         beta,
         res,
         M);
-    TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
+      TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
+    }
   }
 
   ~SparseCsrMKLInterface() {
