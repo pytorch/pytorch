@@ -268,14 +268,13 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::processRRefUserDelete(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefUserDelete(
+    RpcCommandBase& rpc) const {
   auto& rud = static_cast<RRefUserDelete&>(rpc);
   auto& ctx = RRefContext::getInstance();
   auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
   handleRRefDelete(deletedRRef);
-  markComplete(std::move(RRefAck()).toMessage());
+  return asFuture(RRefAck().toMessage());
 }
 
 void RequestCallbackNoPython::handleRRefDelete(
@@ -283,22 +282,20 @@ void RequestCallbackNoPython::handleRRefDelete(
   TORCH_CHECK(!rref->isPyObj(), "RRefs with python objects not supported!");
 }
 
-void RequestCallbackNoPython::processRRefChildAccept(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefChildAccept(
+    RpcCommandBase& rpc) const {
   auto& rca = static_cast<RRefChildAccept&>(rpc);
   auto& ctx = RRefContext::getInstance();
   ctx.delPendingChild(rca.forkId());
-  markComplete(std::move(RRefAck()).toMessage());
+  return asFuture(RRefAck().toMessage());
 }
 
-void RequestCallbackNoPython::processRRefForkRequest(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefForkRequest(
+    RpcCommandBase& rpc) const {
   auto& rfr = static_cast<RRefForkRequest&>(rpc);
   auto& ctx = RRefContext::getInstance();
   ctx.addForkOfOwnerIfNotPresent(rfr.rrefId(), rfr.forkId());
-  markComplete(RRefAck().toMessage());
+  return asFuture(RRefAck().toMessage());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
@@ -547,16 +544,13 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
       return processPythonRRefFetchCall(rpc, std::move(ctx));
     }
     case MessageType::RREF_USER_DELETE: {
-      processRRefUserDelete(rpc, markComplete);
-      return responseFuture;
+      return processRRefUserDelete(rpc);
     }
     case MessageType::RREF_CHILD_ACCEPT: {
-      processRRefChildAccept(rpc, markComplete);
-      return responseFuture;
+      return processRRefChildAccept(rpc);
     }
     case MessageType::RREF_FORK_REQUEST: {
-      processRRefForkRequest(rpc, markComplete);
-      return responseFuture;
+      return processRRefForkRequest(rpc);
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       return processForwardAutogradReq(rpc, std::move(ctx));
