@@ -152,20 +152,7 @@ void RequestCallbackImpl::processScriptCall(
     return;
   }
 
-  // runAsync() starts in the calling thread, but may return an uncompleted
-  // future (though for non-async code, it will typically be completed).
-  // If it was async, our callback will typically be invoked by the
-  // continuation on an at::launch() thread.
-  auto jitFuture = PythonRpcHandler::getInstance()
-                       .jitCompilationUnit()
-                       ->get_function(scriptCall.qualifiedName())
-                       .runAsync(stack);
-
-  // Fastpath: avoid callbacks if not neeeded.
-  if (jitFuture->completed() && !scriptCall.isAsyncExecution()) {
-    markComplete(std::move(ScriptResp(jitFuture->value())).toMessage());
-    return;
-  }
+  auto jitFuture = runJitFunction(scriptCall.qualifiedName(), stack);
 
   jitFuture->addCallback([responseFuture,
                           isAsyncExecution = scriptCall.isAsyncExecution(),
@@ -282,23 +269,9 @@ void RequestCallbackImpl::processScriptRemoteCall(
     }
   };
 
-  c10::intrusive_ptr<c10::ivalue::Future> jitFuture;
-  try {
-    jitFuture = PythonRpcHandler::getInstance()
-                    .jitCompilationUnit()
-                    ->get_function(scriptRemoteCall.qualifiedName())
-                    .runAsync(stack);
-    if (jitFuture->completed()) { // short-cut.
-      asyncPostProcessing(*jitFuture);
-      return;
-    }
-  } catch (const std::exception& e) {
-    asyncPostProcessing(*jitFuture);
-    return;
-  }
-  jitFuture->addCallback(
-      [asyncPostProcessing{std::move(asyncPostProcessing)}](
-          JitFuture& jitFuture) mutable { asyncPostProcessing(jitFuture); });
+  auto jitFuture = runJitFunction(scriptRemoteCall.qualifiedName(), stack);
+
+  jitFuture->addCallback(asyncPostProcessing);
 }
 
 void RequestCallbackImpl::processPythonRemoteCall(
@@ -511,6 +484,23 @@ void RequestCallbackImpl::processRRefBackward(
               }
             });
       });
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runJitFunction(
+    const c10::QualifiedName& name,
+    std::vector<at::IValue>& stack) const {
+  try {
+    // runAsync() starts in the calling thread, but may return an uncompleted
+    // future (though for non-async code, it will typically be completed).
+    // If it was async, our callback will typically be invoked by the
+    // continuation on an at::launch() thread.
+    return PythonRpcHandler::getInstance()
+        .jitCompilationUnit()
+        ->get_function(name)
+        .runAsync(stack);
+  } catch (const std::exception&) {
+    return asFuture(std::current_exception());
+  }
 }
 
 } // namespace rpc
