@@ -128,7 +128,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
-  IValue handleError(
+  c10::intrusive_ptr<Message> handleError(
       const std::exception& e,
       const MessageType messageType,
       int64_t messageId) const;
@@ -139,6 +139,17 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const int64_t messageId,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const;
+
+  // Helpers to convert various kinds of objects into already-completed futures.
+
+  c10::intrusive_ptr<JitFuture> asFuture(IValue value, TypePtr type) const;
+
+  c10::intrusive_ptr<JitFuture> asFuture(
+      c10::intrusive_ptr<Message> message) const;
+
+  c10::intrusive_ptr<JitFuture> asFuture(Message message) const;
+
+  c10::intrusive_ptr<JitFuture> asFuture(std::exception_ptr err) const;
 };
 
 } // namespace rpc
