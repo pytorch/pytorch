@@ -620,7 +620,9 @@ def _create_wrapped_func(orig_fn):
         """
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
-            return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
+            return_proxy = proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
+            return_proxy.node.meta['is_wrapped'] = True
+            return return_proxy
         return orig_fn(*args, **kwargs)
 
     return wrapped

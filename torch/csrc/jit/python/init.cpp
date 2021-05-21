@@ -1403,7 +1403,8 @@ void initJITBindings(PyObject* module) {
                 fut->wait();
               }
             });
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
     toIValue(std::move(obj), type);

@@ -5,7 +5,7 @@ import sys
 import math
 import numbers
 from typing import Callable, Dict, Union, List, Optional
-from torch.fx.symbolic_trace import symbolic_trace
+from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.experimental import graph_manipulation

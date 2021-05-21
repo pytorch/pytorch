@@ -1032,6 +1032,9 @@ aten_native_source_non_codegen_list = [
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",
     "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
+    "aten/src/ATen/nnapi/nnapi_bind.cpp",
+    "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
+    "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
 ]
 
 # 1. Files in ATen/native with a few exceptions
