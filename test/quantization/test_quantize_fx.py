@@ -2484,15 +2484,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_module(torch.quantization.PlaceholderObserver): 3 + int(use_bias)
             }
             convert_node_occurrence = {
-                # we don't support static fp16 ops, so the linear functino
+                # we don't support static fp16 ops, so the linear function
                 # is unfused
                 linear_fun: 1,
                 # activation, weight, bias and output
                 ns.call_method("to"): 3 + int(use_bias),
-                # TODO: because CopyNode is not handled properly currently, there is
-                # a dequantize that is missing, will need to fix and
-                # remove (- int(not has relu))
-                ns.call_method("dequantize"): 3 + int(use_bias) - int(not has_relu)
+                ns.call_method("dequantize"): 3 + int(use_bias)
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, linear_fun,
@@ -3960,16 +3957,17 @@ class TestQuantizeFxOps(QuantizationTestCase):
         expected_occurrence = {
             # input and weight of first and second linear, output of first and second linear
             ns.call_module(torch.quantization.MinMaxObserver): 6,
+            ns.call_module(torch.quantization.PlaceholderObserver): 1
         }
         self.checkGraphModuleNodes(
             m,
             expected_node_occurrence=expected_occurrence
         )
-        # make sure it runs
         m = convert_fx(m)
         expected_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 2,
-            ns.call_method("dequantize"): 2,
+            # dequantize after first linear, before reshape and before output
+            ns.call_method("dequantize"): 3,
             ns.call_method("to"): 1,
             ns.call_function(torch.ops.quantized.linear): 2
         }
@@ -3977,6 +3975,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence
         )
+        # make sure it runs
+        m(torch.randn(2, 4))
 
     def test_multiple_qconfigs_for_single_value(self):
         """ Test multiple qconfigs for a single value"""

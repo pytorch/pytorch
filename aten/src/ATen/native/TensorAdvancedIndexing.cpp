@@ -1029,7 +1029,7 @@ Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, const S
   return self;
 }
 
-SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
+SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
   if (reduce == "add") {
     return SCATTER_GATHER_OP::REDUCE_ADD;
   }
@@ -1043,7 +1043,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
 }
 
 Tensor& scatter_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
-                                   const Scalar& value, const std::string reduce) {
+                                   const Scalar& value, c10::string_view reduce) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
@@ -1056,7 +1056,7 @@ Tensor& scatter_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& in
 }
 
 Tensor & scatter_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
-                      const Tensor & src, const std::string reduce) {
+                      const Tensor & src, c10::string_view reduce) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index");
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
