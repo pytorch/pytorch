@@ -1385,6 +1385,11 @@ void initJitScriptBindings(PyObject* module) {
             return self.function_->getSchema();
           })
       .def_property_readonly(
+          "schema_string",
+          [](const StrongFunctionPtr& self) -> std::string {
+            return toString(self.function_->getSchema());
+          })
+      .def_property_readonly(
           "code",
           [](const StrongFunctionPtr& self) {
             std::vector<at::IValue> constants;
