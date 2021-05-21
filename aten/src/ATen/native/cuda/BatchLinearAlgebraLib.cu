@@ -1274,6 +1274,8 @@ void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& 
     if (self.is_complex()) {
       auto real = at::real(self);
       auto imag = at::imag(self);
+      std::cout << "real:: " << real << std::endl;
+      std::cout << "imag:: " << imag << std::endl;
       // TODO: Make nan_to_num_ work with complex numbers so this if-condition is unneccesary.
       at::nan_to_num_(real, 0, std::numeric_limits<double>::infinity(),
         -std::numeric_limits<double>::infinity());
