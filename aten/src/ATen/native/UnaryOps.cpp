@@ -63,6 +63,7 @@ CREATE_UNARY_FLOAT_META_FUNC(sin)
 CREATE_UNARY_FLOAT_META_FUNC(sinc)
 CREATE_UNARY_FLOAT_META_FUNC(sinh)
 CREATE_UNARY_FLOAT_META_FUNC(special_entr)
+CREATE_UNARY_FLOAT_META_FUNC(special_erfcx)
 CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
 CREATE_UNARY_FLOAT_META_FUNC(special_i1)
 CREATE_UNARY_FLOAT_META_FUNC(special_i1e)
@@ -146,6 +147,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(cosh_out, cosh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(digamma_out, digamma_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(erf_out, erf_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(erfc_out, erfc_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(erfcx_out, erfcx_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(erfinv_out, erfinv_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp_out, exp_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp2_out, exp2_stub)
@@ -438,12 +440,6 @@ Tensor special_erf(const Tensor& self) { return self.erf(); }
 // special_erfc, alias for erfc
 Tensor& special_erfc_out(const Tensor& self, Tensor& result) { return at::erfc_out(result, self); }
 Tensor special_erfc(const Tensor& self) { return self.erfc(); }
-
-// special_erfcx, alias for erfcx
-Tensor& special_erfcx_out(const Tensor& self, Tensor& result) {
-  return unary_op_impl_float_out(result, self, erfcx_stub);
-}
-Tensor special_erfcx(const Tensor& self) { return unary_op_impl_float(self, erfcx_stub); }
 
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
@@ -749,9 +745,9 @@ DEFINE_DISPATCH(cos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 DEFINE_DISPATCH(cosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(digamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_entr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_erfcx_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(erfcx_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfinv_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(exp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(exp2_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

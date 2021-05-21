@@ -9516,12 +9516,12 @@
 - func: special_erfcx(Tensor self) -> Tensor
   python_module: special
   variants: function
-  dispatch:
-    CPU: special_erfcx
+  structured_delegate: special_erfcx.out
 
 - func: special_erfcx.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
-  variants: function
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU: special_erfcx_out
 
