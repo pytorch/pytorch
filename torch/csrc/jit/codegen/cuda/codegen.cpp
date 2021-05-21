@@ -240,6 +240,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return result;
   }
 
+  void visit(const kir::Predicate* node) final {
+    TORCH_INTERNAL_ASSERT(node->hasValue());
+    code_ << gen(node->value());
+  }
+
   void visit(const kir::Bool* node) final {
     const auto def = node->definition();
     if (print_inline_ && def != nullptr) {
@@ -593,11 +598,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
       indent() << kTab << gen(node->out()) << ",\n";
       indent() << kTab << gen(node->in()) << ",\n";
       indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
-      if (node->predicate() == nullptr) {
-        indent() << kTab << "true);\n";
-      } else {
-        indent() << kTab << genInline(node->predicate()) << ");\n";
-      }
+      TORCH_INTERNAL_ASSERT(
+          node->predicate() != nullptr && node->predicate()->hasValue());
+      indent() << kTab << genInline(node->predicate()) << ");\n";
     } else {
       indent() << gen(node->out()) << "\n";
       indent() << kTab << " = " << gen(node->in()) << ";\n";
@@ -648,11 +651,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
       indent() << kTab << "threadIdx,\n";
       indent() << kTab << "blockDim,\n";
       indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
-      if (node->predicate() == nullptr) {
-        indent() << kTab << "true,\n";
-      } else {
-        indent() << kTab << genInline(node->predicate()) << ",\n";
-      }
+      TORCH_INTERNAL_ASSERT(
+          node->predicate() != nullptr && node->predicate()->hasValue());
+      indent() << kTab << genInline(node->predicate()) << ",\n";
       indent() << kTab << data_type << "(" << genInline(node->init())
                << "));\n";
     }
@@ -741,11 +742,10 @@ class CudaKernelGenerator : private kir::IrVisitor {
                << "*>(shared_mem_avg),\n";
       indent() << kTab << "reinterpret_cast<" << DataType::Int
                << "*>(shared_mem_n),\n";
-      if (node->predicate() == nullptr) {
-        indent() << kTab << "true,\n";
-      } else {
-        indent() << kTab << genInline(node->predicate()) << ",\n";
-      }
+      TORCH_INTERNAL_ASSERT(node->predicate() != nullptr);
+      TORCH_INTERNAL_ASSERT(
+          node->predicate() != nullptr && node->predicate()->hasValue());
+      indent() << kTab << genInline(node->predicate()) << ",\n";
       indent() << kTab << data_type << "(0));\n";
     }
   }
@@ -826,11 +826,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
     indent() << kTab << "&" << varName(work_buffer) << "[0],\n";
     indent() << kTab << varName(sync_buffer) << ",\n";
     indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
-    if (node->predicate() == nullptr) {
-      indent() << kTab << "true,\n";
-    } else {
-      indent() << kTab << genInline(node->predicate()) << ",\n";
-    }
+    TORCH_INTERNAL_ASSERT(
+        node->predicate() != nullptr && node->predicate()->hasValue());
+    indent() << kTab << genInline(node->predicate()) << ",\n";
     indent() << kTab << data_type << "("
              << genInline(node->reduction_op()->init()) << "));\n";
   }
@@ -889,11 +887,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
              << "*>(shared_mem_avg),\n";
     indent() << kTab << "reinterpret_cast<" << wop->outN()->dtype()
              << "*>(shared_mem_n),\n";
-    if (node->predicate() == nullptr) {
-      indent() << kTab << "true,\n";
-    } else {
-      indent() << kTab << genInline(node->predicate()) << ",\n";
-    }
+    TORCH_INTERNAL_ASSERT(
+        node->predicate() != nullptr && node->predicate()->hasValue());
+    indent() << kTab << genInline(node->predicate()) << ",\n";
     // TODO : init value support or remove.
     indent() << kTab << data_type << "(0));\n";
   }
@@ -969,12 +965,18 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::IfThenElse* node) final {
-    if (node->cond()->isConst() && node->cond()->value().value()) {
-      handleScope(node->thenBody());
+    auto conditional = node->predicate()->value();
+    if (conditional->isConst()) {
+      // If the conditional is a constant, then the IfThenElse is not required
+      if (conditional->value().value()) {
+        handleScope(node->thenBody());
+      } else {
+        handleScope(node->elseBody());
+      }
       return;
     }
 
-    indent() << "if (" << genInline(node->cond()) << ") ";
+    indent() << "if (" << genInline(conditional) << ") ";
 
     // "then" block
     startBlock(true);

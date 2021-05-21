@@ -82,6 +82,24 @@ TensorView* asTV(Val*);
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map);
 
+// expr_replacement_map maps an expression to its replacement.
+//
+// The applyReplacement function serves two purposes.
+//
+// 1. If expr is found in expr_replacement_map, return the value for expr key.
+// Otherwise, return the original expression.
+//
+// 2. If a replacement is not found and the expression is a ForLoop or an
+// IfThenElse, it modifies the expressions in its scope by running the
+// handle_scope function
+//
+// The handle_scope function iterates over the expressions in the scope.
+// For each expression, it updates the expression the value returned by
+// applyReplacement.
+kir::Expr* applyReplacements(
+    const std::unordered_map<kir::Expr*, kir::Expr*>& expr_replacement_map,
+    kir::Expr* expr);
+
 } // namespace ir_utils
 
 namespace loop_utils {

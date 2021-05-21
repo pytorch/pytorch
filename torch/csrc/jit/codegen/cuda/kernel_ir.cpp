@@ -376,7 +376,7 @@ TensorIndex::TensorIndex(
       indices_.end());
   // If indices becomes empty, just put one ZeroInt
   if (indices_.empty()) {
-    indices_.push_back(kir::IrBuilder(GpuLower::current()->kernel()).zero());
+    indices_.push_back(kir::IrBuilder(GpuLower::current()->kernel()).zeroVal());
   }
 }
 
@@ -485,7 +485,7 @@ ForLoop::ForLoop(
                       stringifyThreadSize(iter_domain->parallelType()),
                       DataType::Int);
     } else {
-      step_ = IrBuilder(GpuLower::current()->kernel()).one();
+      step_ = IrBuilder(GpuLower::current()->kernel()).oneVal();
     }
   }
 }
@@ -540,8 +540,9 @@ Val* ForLoop::step() const {
   return step_;
 }
 
-IfThenElse::IfThenElse(Passkey passkey, Bool* cond)
-    : Expr(passkey), cond_{cond}, then_body_(this), else_body_(this) {
+IfThenElse::IfThenElse(Passkey passkey, Predicate* cond)
+    : Expr(passkey), then_body_(this), else_body_(this) {
+  setPredicate(cond);
   addInput(cond);
 }
 
@@ -589,7 +590,7 @@ Allocate::Allocate(
   }
 
   if (size_ == nullptr) {
-    size_ = ir_builder.one();
+    size_ = ir_builder.oneVal();
   }
 
   addInput(size_);

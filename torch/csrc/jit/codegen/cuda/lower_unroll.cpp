@@ -73,8 +73,7 @@ kir::Bool* UnrollPass::getThreadPredicate(const kir::TensorView* tv) {
     TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorView>());
     const auto out = bop->out()->as<kir::TensorView>()->fuserTv();
     if (pred_map.getParallelBroadcastDomains(out).any()) {
-      return kir::IrBuilder(GpuLower::current()->kernel())
-          .create<kir::Bool>(true);
+      return kir::IrBuilder(GpuLower::current()->kernel()).trueVal();
     }
   }
   return pred_map.getExpr(tv->fuserTv());
@@ -83,16 +82,17 @@ kir::Bool* UnrollPass::getThreadPredicate(const kir::TensorView* tv) {
 void UnrollPass::handle(kir::Expr* expr) {
   if (ir_utils::isTVOp(expr)) {
     // If tv op, predicate it
-    const auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
+    const auto out_tv = ir_utils::getTVOutput(expr);
     const bool should_predicate = !for_loops_.empty() ||
         out_tv->memoryType() == MemoryType::Global ||
         out_tv->memoryType() == MemoryType::Shared;
     if (!should_predicate) {
       return;
     }
+
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     const auto thread_pred = isReductionInitExpr(expr)
-        ? ir_builder.create<kir::Bool>(true)
+        ? ir_builder.trueVal()
         : getThreadPredicate(out_tv);
 
     // When a predicate needs to account for ShiftOp, it is currently
@@ -103,7 +103,7 @@ void UnrollPass::handle(kir::Expr* expr) {
     }
 
     // Vectorized expressions should never use inline predicates
-    kir::Bool* vectorized_pred = nullptr;
+    kir::Predicate* vectorized_pred = nullptr;
     if (std::any_of(
             for_loops_.begin(), for_loops_.end(), [](const kir::ForLoop* fl) {
               return fl->iter_domain()->parallelType() ==
@@ -121,31 +121,29 @@ void UnrollPass::handle(kir::Expr* expr) {
       }
       TORCH_INTERNAL_ASSERT(
           vectorized_loop != nullptr, "Should be unreachable.");
-      vectorized_pred =
-          UnswitchPredicate::get(outer_loops, vectorized_loop, p2c_root_map_);
+      vectorized_pred = ir_builder.create<kir::Predicate>(vectorized_loop);
     }
 
     const auto pred = vectorized_pred == nullptr
-        ? PredicateCompute::getInlinePredicate(expr, for_loops_, thread_pred)
+        ? ir_builder.create<kir::Predicate>(
+              expr, thread_pred, PredicateType::Inline)
         : vectorized_pred;
 
     TORCH_INTERNAL_ASSERT(pred != nullptr);
 
     // If we need a predicate, put expr inside an if then else
-    if (!pred->isConst() || !(pred->isConst() && pred->value().value())) {
-      non_trivial_pred_found_ = true;
-      kir::IfThenElse* inline_ite = ir_builder.create<kir::IfThenElse>(pred);
-      if (for_loops_.empty()) {
-        // Special handling for top level output expressions that still
-        // need predicates. One motivating example is a reduction op that
-        // reduces to a scalar (issue #491)
-        loop_replacement_map_.insert({expr, inline_ite});
-      } else {
-        for_loops_.back()->body().insert_before(expr, inline_ite);
-        for_loops_.back()->body().erase(expr);
-      }
-      inline_ite->thenBody().push_back(expr);
+    non_trivial_pred_found_ = true;
+    kir::IfThenElse* inline_ite = ir_builder.create<kir::IfThenElse>(pred);
+    if (for_loops_.empty()) {
+      // Special handling for top level output expressions that still
+      // need predicates. One motivating example is a reduction op that
+      // reduces to a scalar (issue #491)
+      expr_replacement_map_.insert({expr, inline_ite});
+    } else {
+      for_loops_.back()->body().insert_before(expr, inline_ite);
+      for_loops_.back()->body().erase(expr);
     }
+    inline_ite->thenBody().push_back(expr);
   } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
     handle(for_loop);
   }
@@ -179,9 +177,9 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     return;
   }
 
-  auto unroll_pred = UnswitchPredicate::get(for_loops_, fl, p2c_root_map_);
-
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  auto unroll_pred = ir_builder.create<kir::Predicate>(fl);
+
   kir::IfThenElse* unroll_ite = ir_builder.create<kir::IfThenElse>(unroll_pred);
 
   // Get the loop nest for the unrolled path
@@ -189,7 +187,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 
   unroll_ite->thenBody().push_back(unrolled_loop_nest);
   if (fl->iter_domain()->parallelType() == ParallelType::Vectorize) {
-    loop_replacement_map_.insert({fl, unroll_ite});
+    expr_replacement_map_.insert({fl, unroll_ite});
     return;
   }
 
@@ -202,12 +200,12 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   handle(inlined_loop);
   look_for_unroll_ = true;
   if (!non_trivial_pred_found_) {
-    loop_replacement_map_.insert({fl, inlined_loop});
+    expr_replacement_map_.insert({fl, inlined_loop});
   } else {
     if (!canOmitElseClause(fl)) {
       unroll_ite->elseBody().push_back(inlined_loop);
     }
-    loop_replacement_map_.insert({fl, unroll_ite});
+    expr_replacement_map_.insert({fl, unroll_ite});
   }
 }
 
@@ -285,28 +283,6 @@ void UnrollPass::computeMap(const std::vector<kir::Expr*>& exprs) {
   }
 }
 
-// TODO(kir): incorporate this into a new Scope interface
-kir::Expr* UnrollPass::applyReplacements(kir::Expr* expr) const {
-  auto handle_scope = [this](kir::Scope& scope) {
-    for (size_t i = 0; i < scope.size(); ++i) {
-      scope[i] = applyReplacements(scope[i]);
-    }
-  };
-
-  const auto it = loop_replacement_map_.find(expr);
-  if (it != loop_replacement_map_.end()) {
-    return it->second;
-  } else {
-    if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      handle_scope(for_loop->body());
-    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-      handle_scope(ite->thenBody());
-      handle_scope(ite->elseBody());
-    }
-    return expr;
-  }
-}
-
 std::vector<kir::Expr*> UnrollPass::runPass(
     Fusion* fusion,
     const std::vector<kir::Expr*>& exprs) {
@@ -318,7 +294,8 @@ std::vector<kir::Expr*> UnrollPass::runPass(
   std::vector<kir::Expr*> mutated_exprs;
   mutated_exprs.reserve(exprs.size());
   for (auto expr : exprs) {
-    mutated_exprs.push_back(unroll_pass.applyReplacements(expr));
+    mutated_exprs.push_back(
+        ir_utils::applyReplacements(unroll_pass.replacementMap(), expr));
   }
 
   return mutated_exprs;

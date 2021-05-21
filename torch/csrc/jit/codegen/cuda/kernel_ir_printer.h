@@ -59,6 +59,7 @@ class TORCH_CUDA_CU_API IrPrinter : private kir::IrVisitor {
   void visit(const kir::Double*) final;
   void visit(const kir::Int*) final;
   void visit(const kir::NamedScalar*) final;
+  void visit(const kir::Predicate*) final;
 
   void visit(const kir::TensorIndex*) final;
   void visit(const kir::IterDomain*) final;

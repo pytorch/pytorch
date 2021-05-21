@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.h>
+#include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
@@ -184,8 +185,11 @@ void GpuLower::lower() {
 
   const auto indexed_loops = IndexLowering::getIndexedExprs(war_sync_exprs);
 
+  const auto conditional_loops =
+      generateConditionalFromPredicate(fusion_, indexed_loops);
+
   // We now have the lowered expressions, finalize the kernel IR
-  kernel_->finalize(indexed_loops);
+  kernel_->finalize(conditional_loops);
 }
 
 kir::Kernel* GpuLower::kernel() const {

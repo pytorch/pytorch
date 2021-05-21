@@ -49,7 +49,7 @@ void IndexLowering::visit(const kir::IfThenElse* ite) {
   const auto prev_scope = active_scope_;
 
   // TODO(kir): try to avoid recreating new nodes and leaving old ones around
-  auto new_ite = ir_builder_.create<kir::IfThenElse>(ite->cond());
+  auto new_ite = ir_builder_.create<kir::IfThenElse>(ite->predicate());
   pushBack(new_ite);
 
   active_scope_expr_ = new_ite;
@@ -169,11 +169,13 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
   if (is_block_reduce) {
     block_reduction_op = ir_builder_.create<kir::ReductionOp>(
         rop->operation(), rop->init(), out, in);
-    const auto pred = PredicateCompute::getInlinePredicate(
+
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    const auto pred = ir_builder.create<kir::Predicate>(
         rop,
-        scope_utils::getLoops(active_scope_expr_),
         GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()),
-        false);
+        PredicateType::InternalSync);
+
     block_reduction_op->setPredicate(pred);
     pushBack(block_reduction_op);
   }
@@ -252,8 +254,10 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
     auto grid_reduction = ir_builder_.create<kir::GridReduction>(
         grid_reduction_op, reduce_buffer, sync_buffer);
     grid_reduction->setThreadPredicate(thread_pred);
-    const auto pred = PredicateCompute::getInlinePredicate(
-        rop, scope_utils::getLoops(active_scope_expr_), nullptr, false);
+
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    const auto pred = ir_builder.create<kir::Predicate>(
+        rop, ir_builder_.trueVal(), PredicateType::InternalSync);
     grid_reduction->setPredicate(pred);
 
     pushBack(reduce_buffer);
@@ -354,11 +358,13 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
 
   if (is_block_reduce) {
     block_welford_op = welford_op;
-    const auto pred = PredicateCompute::getInlinePredicate(
+
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    const auto pred = ir_builder.create<kir::Predicate>(
         wop,
-        scope_utils::getLoops(active_scope_expr_),
         GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()),
-        false);
+        PredicateType::InternalSync);
+
     block_welford_op->setPredicate(pred);
     pushBack(block_welford_op);
   }
@@ -397,8 +403,11 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
         out_N_buffer,
         sync_buffer);
     grid_welford->setThreadPredicate(thread_pred);
-    const auto pred = PredicateCompute::getInlinePredicate(
-        wop, scope_utils::getLoops(active_scope_expr_), nullptr, false);
+
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    const auto pred = ir_builder.create<kir::Predicate>(
+        wop, ir_builder_.trueVal(), PredicateType::InternalSync);
+
     grid_welford->setPredicate(pred);
 
     pushBack(out_var_buffer);
@@ -427,11 +436,9 @@ void IndexLowering::visit(const kir::BroadcastOp* bop) {
   pushBack(indexed_expr);
 
   if (is_block_broadcast) {
-    const auto pred = PredicateCompute::getInlinePredicate(
-        bop,
-        scope_utils::getLoops(active_scope_expr_),
-        ir_builder_.create<kir::Bool>(true),
-        false);
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    const auto pred = ir_builder.create<kir::Predicate>(
+        bop, ir_builder_.trueVal(), PredicateType::InternalSync);
     indexed_expr->setPredicate(pred);
   }
 }

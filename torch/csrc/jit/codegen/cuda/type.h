@@ -31,6 +31,24 @@ enum class ValType {
   NamedScalar,
 };
 
+// Manual - The user provides the Bool value. Predicate generation is bypassed.
+// Inline corresponds with PredicateCompute::getInlinePredicate
+// Unswitch corresponds with UnswitchPredicate::get
+// Misaligned - PredicateCompute::getInlinePredicate + Misaligned flag
+// InternalSync  - PredicateCompute::getInlinePredicate
+// for GridReduction, BlockReduction, GridWelford, BlockWelford operations
+// Shift - ShiftPredicateInserter::getShiftPredicate
+// Padding - ShiftPredicateInserter::getPaddingPredicate
+enum class PredicateType {
+  Manual,
+  Inline,
+  Unswitch,
+  Misaligned,
+  InternalSync,
+  Shift,
+  Padding
+};
+
 enum class DataType { Double, Float, Half, Int, Int32, Bool, Null };
 
 // Returns if the datatype is a floating point type

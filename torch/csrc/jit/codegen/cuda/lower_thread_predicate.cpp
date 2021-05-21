@@ -39,7 +39,7 @@ kir::Bool* getPredicate(
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
   if (bits.none()) {
-    return ir_builder.create<kir::Bool>(true);
+    return ir_builder.trueVal();
   }
 
   kir::Bool* pred = nullptr;

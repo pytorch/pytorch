@@ -181,6 +181,29 @@ bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map) {
   return false;
 }
 
+kir::Expr* applyReplacements(
+    const std::unordered_map<kir::Expr*, kir::Expr*>& expr_replacement_map,
+    kir::Expr* expr) {
+  auto handle_scope = [&](kir::Scope& scope) {
+    for (size_t i = 0; i < scope.size(); ++i) {
+      scope[i] = applyReplacements(expr_replacement_map, scope[i]);
+    }
+  };
+
+  const auto it = expr_replacement_map.find(expr);
+  if (it != expr_replacement_map.end()) {
+    return it->second;
+  } else {
+    if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
+      handle_scope(for_loop->body());
+    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+      handle_scope(ite->thenBody());
+      handle_scope(ite->elseBody());
+    }
+    return expr;
+  }
+}
+
 } // namespace ir_utils
 
 namespace loop_utils {

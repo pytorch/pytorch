@@ -72,8 +72,10 @@ class TORCH_CUDA_CU_API IrBuilder {
   Val* whereExpr(Val* pred, Val* lhs, Val* rhs);
 
   // Shortcuts for frequently used vals
-  Int* zero();
-  Int* one();
+  Int* zeroVal();
+  Int* oneVal();
+  Bool* falseVal();
+  Bool* trueVal();
 
  private:
   Val* newResult(DataType dtype);
@@ -86,6 +88,8 @@ class TORCH_CUDA_CU_API IrBuilder {
   // Frequently used constant vals
   Int* zero_ = nullptr;
   Int* one_ = nullptr;
+  Bool* false_ = nullptr;
+  Bool* true_ = nullptr;
 };
 
 } // namespace kir

@@ -184,6 +184,41 @@ void IrPrinter::visit(const kir::NamedScalar* node) {
   ir_str_ << node->name();
 }
 
+void IrPrinter::visit(const kir::Predicate* node) {
+  switch (node->predicate_type()) {
+    case PredicateType::Inline: {
+      ir_str_ << "Inline";
+      break;
+    }
+    case PredicateType::InternalSync: {
+      ir_str_ << "InternalSync";
+      break;
+    }
+    case PredicateType::Misaligned: {
+      ir_str_ << "Misaligned";
+      break;
+    }
+    case PredicateType::Padding: {
+      ir_str_ << "Padding";
+      break;
+    }
+    case PredicateType::Shift: {
+      ir_str_ << "Shift";
+      break;
+    }
+    case PredicateType::Manual: {
+      ir_str_ << node->value();
+      break;
+    }
+    case PredicateType::Unswitch: {
+      ir_str_ << "Unswitch";
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 void IrPrinter::visit(const kir::TensorIndex* node) {
   ir_str_ << gen(node->view()) << "[";
   for (auto index : node->indices()) {
@@ -357,7 +392,7 @@ void IrPrinter::visit(const kir::ForLoop* node) {
 }
 
 void IrPrinter::visit(const kir::IfThenElse* node) {
-  indent() << "IF " << use(node->cond()) << ":\n";
+  indent() << "IF " << use(node->predicate()) << ":\n";
   handleBlock(node->thenBody());
   if (node->hasElse()) {
     indent() << "ELSE:\n";

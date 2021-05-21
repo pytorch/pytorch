@@ -13202,10 +13202,11 @@ TEST(NVFuserTest, FusionOmitPredicate1_CUDA) {
   GpuLower gpulw(&fusion);
 
   auto is_predicated = [&](TensorView* tv) {
-    return gpulw.lowerValue(tv)
-        ->definition()
-        ->parentScope()
-        ->isA<kir::IfThenElse>();
+    auto parent_scope = gpulw.lowerValue(tv)->definition()->parentScope();
+    if (parent_scope->isA<kir::IfThenElse>()) {
+      return !parent_scope->predicate()->value()->isConst();
+    }
+    return true;
   };
 
   TORCH_CHECK(!is_predicated(tv2));
@@ -13262,10 +13263,11 @@ TEST(NVFuserTest, FusionOmitPredicate2_CUDA) {
   GpuLower gpulw(&fusion);
 
   auto is_predicated = [&](TensorView* tv) {
-    return gpulw.lowerValue(tv)
-        ->definition()
-        ->parentScope()
-        ->isA<kir::IfThenElse>();
+    auto parent_scope = gpulw.lowerValue(tv)->definition()->parentScope();
+    if (parent_scope->isA<kir::IfThenElse>()) {
+      return !parent_scope->predicate()->value()->isConst();
+    }
+    return true;
   };
 
   TORCH_CHECK(!is_predicated(tv2));

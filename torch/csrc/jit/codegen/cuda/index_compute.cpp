@@ -1060,7 +1060,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
   auto vectorize_shift = loops.back()->vectorize_shift();
 
   // Global striding
-  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zero());
+  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
   for (size_t i = 0; i < root_dom.size(); i++) {
     // If the domain is derived from a trivial reduction, no indexing
     // to create.
@@ -1335,7 +1335,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
     }
   }
 
-  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zero());
+  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
   for (size_t i = 0; i < root_dom.size(); i++) {
     if (skip_indexing.count(root_dom[i])) {
       continue;
@@ -1456,7 +1456,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
 
   // TODO: Abstract stride logic to reuse with producer indexing
-  auto zero = ir_builder.zero();
+  auto zero = ir_builder.zeroVal();
   std::vector<kir::Val*> strides(root_dom.size(), zero);
   {
     int stride_i = 0;
@@ -1472,7 +1472,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
     }
   }
 
-  kir::Val* cur_contig_stride = ir_builder.one();
+  kir::Val* cur_contig_stride = ir_builder.oneVal();
   // if we have rfactor we can't simplify the indexing like this, we would need
   // to fix contiguity size to be rfactor size not root size
   if (root_dom.size() == consumer_tv->domain()->contiguity().size()) {
@@ -1526,7 +1526,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   auto vectorize_shift = loops.back()->vectorize_shift();
 
   // Global striding
-  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zero());
+  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
   for (size_t i = 0; i < root_dom.size(); i++) {
     // See a comment in indexing to root domains in getGlobalProducerIndex.
     if (root_dom[i]->isReduction() ||
@@ -1655,7 +1655,7 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
-  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zero());
+  std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
   for (size_t i = 0; i < root_dom.size(); i++) {
     if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
@@ -1735,7 +1735,7 @@ std::vector<kir::Val*> Index::getProducerStridedIndices(
 
   if (producer->domain()->noReductions().size() == 0) {
     return std::vector<kir::Val*>(
-        producer->getMaybeRFactorDomain().size(), ir_builder.zero());
+        producer->getMaybeRFactorDomain().size(), ir_builder.zeroVal());
   }
 
   std::vector<kir::Val*> strided_indices;
@@ -1774,7 +1774,7 @@ std::vector<kir::Val*> Index::getConsumerStridedIndices(
 
   if (consumer->domain()->noReductions().size() == 0) {
     return std::vector<kir::Val*>(
-        consumer->getMaybeRFactorDomain().size(), ir_builder.zero());
+        consumer->getMaybeRFactorDomain().size(), ir_builder.zeroVal());
   }
 
   std::vector<kir::Val*> strided_indices;

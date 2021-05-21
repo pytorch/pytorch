@@ -49,8 +49,7 @@ class PredicateCompute {
       const kir::Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
       kir::Bool* thread_pred,
-      bool ignore_internal_syncthread_ops = true,
-      bool misaligned_vectorization = false);
+      PredicateType pred_type);
 };
 
 class TORCH_CUDA_CU_API UnswitchPredicate {

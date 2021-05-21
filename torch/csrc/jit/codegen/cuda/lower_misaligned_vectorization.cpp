@@ -29,25 +29,8 @@ class MisalignedVectorizationModifier {
     }
   }
 
-  kir::Expr* applyReplacements(kir::Expr* expr) const {
-    auto handle_scope = [this](kir::Scope& scope) {
-      for (size_t i = 0; i < scope.size(); ++i) {
-        scope[i] = applyReplacements(scope[i]);
-      }
-    };
-
-    const auto it = loop_replacement_map_.find(expr);
-    if (it != loop_replacement_map_.end()) {
-      return it->second;
-    } else {
-      if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-        handle_scope(for_loop->body());
-      } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-        handle_scope(ite->thenBody());
-        handle_scope(ite->elseBody());
-      }
-      return expr;
-    }
+  const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
+    return expr_replacement_map_;
   }
 
  private:
@@ -67,7 +50,7 @@ class MisalignedVectorizationModifier {
 
     if (containsAnyDirectChildMisalignedVectorize(fl)) {
       auto new_fl = handleMisalignedVectorize(for_loops_structure_, fl);
-      loop_replacement_map_.insert({fl, new_fl});
+      expr_replacement_map_.insert({fl, new_fl});
     } else {
       for (auto expr : exprs_copy) {
         handle(expr);
@@ -135,12 +118,8 @@ class MisalignedVectorizationModifier {
     auto vec_tv = (out_tv->memoryType() != MemoryType::Global) ? out_tv : in_tv;
 
     // Get the predicate for all but last root domains
-    auto pred_except_last_root_domain = PredicateCompute::getInlinePredicate(
-        vec_expr,
-        for_loop_structure,
-        ir_builder.create<kir::Bool>(true),
-        false,
-        true);
+    auto pred_except_last_root_domain = ir_builder.create<kir::Predicate>(
+        vec_expr, ir_builder.trueVal(), PredicateType::Misaligned);
     TORCH_INTERNAL_ASSERT(pred_except_last_root_domain != nullptr);
     kir::IfThenElse* pred_ite =
         ir_builder.create<kir::IfThenElse>(pred_except_last_root_domain);
@@ -185,7 +164,7 @@ class MisalignedVectorizationModifier {
     // The number of elements until the first aligned address
     auto shift_pred = ir_builder.eqExpr(shift_init, vector_size);
     auto shift_val =
-        ir_builder.whereExpr(shift_pred, ir_builder.zero(), shift_init);
+        ir_builder.whereExpr(shift_pred, ir_builder.zeroVal(), shift_init);
     auto shift =
         createNamedScalarFromValue(pred_ite->thenBody(), shift_val, "shift");
 
@@ -231,11 +210,12 @@ class MisalignedVectorizationModifier {
 
     // Vectorize Range: [shift - (extent-remainder))
     // (last_root_domain_index + shift) < (extent - remainder)
-    kir::Val* vectorize_pred =
+    kir::Val* vectorize_cond =
         ir_builder.ltExpr(last_root_domain_index_shift, extent_minus_remainder);
-
+    kir::Predicate* vectorize_pred =
+        ir_builder.create<kir::Predicate>(vectorize_cond->as<kir::Bool>());
     kir::IfThenElse* vectorize_ite =
-        ir_builder.create<kir::IfThenElse>(vectorize_pred->as<kir::Bool>());
+        ir_builder.create<kir::IfThenElse>(vectorize_pred);
 
     for (auto cloned_loop : vectorized_child_loops) {
       vectorize_ite->thenBody().push_back(cloned_loop);
@@ -248,11 +228,12 @@ class MisalignedVectorizationModifier {
 
     // Initial Range: [0 - shift)
     // last_root_domain_index == 0
-    kir::Val* initial_pred =
-        ir_builder.eqExpr(last_root_domain_index, ir_builder.zero());
-
+    kir::Val* initial_cond =
+        ir_builder.eqExpr(last_root_domain_index, ir_builder.zeroVal());
+    kir::Predicate* initial_pred =
+        ir_builder.create<kir::Predicate>(initial_cond->as<kir::Bool>());
     kir::IfThenElse* initial_ite =
-        ir_builder.create<kir::IfThenElse>(initial_pred->as<kir::Bool>());
+        ir_builder.create<kir::IfThenElse>(initial_pred);
 
     for (auto cloned_loop : pre_child_loops) {
       initial_ite->thenBody().push_back(cloned_loop);
@@ -269,10 +250,11 @@ class MisalignedVectorizationModifier {
         ir_builder.geExpr(last_root_domain_index_shift, extent_minus_remainder);
     kir::Val* upper_bound =
         ir_builder.ltExpr(last_root_domain_index_shift, extent);
-    kir::Val* remainder_pred = ir_builder.andExpr(lower_bound, upper_bound);
-
+    kir::Val* remainder_cond = ir_builder.andExpr(lower_bound, upper_bound);
+    kir::Predicate* remainder_pred =
+        ir_builder.create<kir::Predicate>(remainder_cond->as<kir::Bool>());
     kir::IfThenElse* remainder_ite =
-        ir_builder.create<kir::IfThenElse>(remainder_pred->as<kir::Bool>());
+        ir_builder.create<kir::IfThenElse>(remainder_pred);
 
     for (auto cloned_loop : post_child_loops) {
       remainder_ite->thenBody().push_back(cloned_loop);
@@ -325,9 +307,9 @@ class MisalignedVectorizationModifier {
       const auto new_loop = ir_builder.create<kir::ForLoop>(
           fl->iter_domain(),
           fl->index(),
-          ir_builder.zero(),
+          ir_builder.zeroVal(),
           stop,
-          ir_builder.one(),
+          ir_builder.oneVal(),
           false,
           vectorize && has_vectorize_op,
           vectorize_shift);
@@ -484,7 +466,7 @@ class MisalignedVectorizationModifier {
     TORCH_INTERNAL_ASSERT(namedScalar->definition() != nullptr);
 
     auto alloc = ir_builder.create<kir::Allocate>(
-        namedScalar, MemoryType::Local, ir_builder.one());
+        namedScalar, MemoryType::Local, ir_builder.oneVal());
     body.push_back(alloc);
     body.push_back(namedScalar->definition());
     return namedScalar;
@@ -492,7 +474,7 @@ class MisalignedVectorizationModifier {
 
  private:
   // We will track which loops in the incoming IR will be replaced and by what
-  std::unordered_map<kir::Expr*, kir::Expr*> loop_replacement_map_;
+  std::unordered_map<kir::Expr*, kir::Expr*> expr_replacement_map_;
 
   // A depth-first ordering of nested for loops
   // It is used for indexing and predicate generation
@@ -512,7 +494,8 @@ std::vector<kir::Expr*> processMisalignedVectorization(
   std::vector<kir::Expr*> mutated_exprs;
   mutated_exprs.reserve(exprs.size());
   for (auto expr : exprs) {
-    mutated_exprs.push_back(mvm.applyReplacements(expr));
+    mutated_exprs.push_back(
+        ir_utils::applyReplacements(mvm.replacementMap(), expr));
   }
 
   return mutated_exprs;

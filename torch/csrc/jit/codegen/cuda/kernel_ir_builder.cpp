@@ -107,18 +107,32 @@ Val* IrBuilder::modExpr(Val* lhs, Val* rhs) {
   return newArithmeticExpr(BinaryOpType::Mod, lhs, rhs);
 }
 
-Int* IrBuilder::zero() {
+Int* IrBuilder::zeroVal() {
   if (zero_ == nullptr) {
     zero_ = create<kir::Int>(0);
   }
   return zero_;
 }
 
-Int* IrBuilder::one() {
+Int* IrBuilder::oneVal() {
   if (one_ == nullptr) {
     one_ = create<kir::Int>(1);
   }
   return one_;
+}
+
+Bool* IrBuilder::falseVal() {
+  if (false_ == nullptr) {
+    false_ = create<kir::Bool>(false);
+  }
+  return false_;
+}
+
+Bool* IrBuilder::trueVal() {
+  if (true_ == nullptr) {
+    true_ = create<kir::Bool>(true);
+  }
+  return true_;
 }
 
 } // namespace kir

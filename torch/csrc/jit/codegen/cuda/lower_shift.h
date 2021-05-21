@@ -209,16 +209,16 @@ class ShiftPredicateInserter {
       const std::vector<kir::ForLoop*>& loops,
       kir::Bool* thread_pred);
 
- private:
   //! Returns predicates for the interior and overall domains of a
   //! tensor.
   //!
-  //! The first predicate is for shifted accesses, while the second
-  //! one is for padding.
-  static std::array<kir::Bool*, 2> getPredicate(
+  //! The isShiftPredicate flag toggles between the predicate for shifted
+  //! accesses and padding.
+  static kir::Bool* getPredicate(
       const kir::Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
-      kir::TensorView* out_tv);
+      kir::TensorView* out_tv,
+      bool isShiftPredicate);
 };
 
 } // namespace cuda

@@ -62,24 +62,13 @@ void ShiftPredicateInserter::insert(
       thread_pred->isConst() && thread_pred->value().value(),
       "Thread predication is not supported for expressions with halo-extended outputs");
 
-  kir::TensorView* out_tv = nullptr;
-  for (auto out : expr->outputs()) {
-    if (out->isA<kir::TensorView>()) {
-      out_tv = out->as<kir::TensorView>();
-    }
-  }
+  kir::TensorView* out_tv = ir_utils::getTVOutput(expr);
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing kir::TensorView output");
 
-  const auto predicates = getPredicate(expr, loops, out_tv);
-  const auto shift_pred = predicates[0];
-  const auto padding_pred = predicates[1];
-
-  // If null, no specific predicate is needed.
-  if (shift_pred == nullptr) {
-    TORCH_INTERNAL_ASSERT(
-        padding_pred == nullptr,
-        "Invalid combination of shift_pred and padding_pred.",
-        " shift_pred is nullptr, but padding_pred is not.");
+  TensorView* out_fuser_tv = out_tv->fuserTv();
+  const bool needs_shift_predicate =
+      gpu_lower->haloInfo().needsShiftPredicate(out_fuser_tv->definition());
+  if (!needs_shift_predicate) {
     return;
   }
 
@@ -93,6 +82,8 @@ void ShiftPredicateInserter::insert(
   //   }
   // }
 
+  kir::Predicate* shift_pred =
+      ir_builder.create<kir::Predicate>(expr, PredicateType::Shift);
   auto shift_ite = ir_builder.create<kir::IfThenElse>(shift_pred);
 
   auto& scope = loops.back()->body();
@@ -107,6 +98,8 @@ void ShiftPredicateInserter::insert(
   shift_ite->thenBody().push_back(expr);
 
   // Pading by zero
+  kir::Predicate* padding_pred =
+      ir_builder.create<kir::Predicate>(expr, PredicateType::Padding);
   auto bounds_ite = ir_builder.create<kir::IfThenElse>(padding_pred);
   const int pad_value = 0;
   auto pad_expr = ir_builder.create<kir::UnaryOp>(
@@ -116,10 +109,11 @@ void ShiftPredicateInserter::insert(
   shift_ite->elseBody().push_back(bounds_ite);
 }
 
-std::array<kir::Bool*, 2> ShiftPredicateInserter::getPredicate(
+kir::Bool* ShiftPredicateInserter::getPredicate(
     const kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
-    kir::TensorView* out_tv) {
+    kir::TensorView* out_tv,
+    bool isShiftPredicate) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -127,10 +121,7 @@ std::array<kir::Bool*, 2> ShiftPredicateInserter::getPredicate(
 
   const bool needs_shift_predicate =
       gpu_lower->haloInfo().needsShiftPredicate(out_fuser_tv->definition());
-
-  if (!needs_shift_predicate) {
-    return {nullptr, nullptr};
-  }
+  TORCH_INTERNAL_ASSERT(needs_shift_predicate);
 
   const auto& root_domain = out_fuser_tv->getRootDomain();
 
@@ -147,66 +138,67 @@ std::array<kir::Bool*, 2> ShiftPredicateInserter::getPredicate(
       Index::getConsumerRootPredIndices(out_tv, loops, pred_contiguity).first;
   TORCH_INTERNAL_ASSERT(indices.size() == root_domain.size());
 
-  kir::Bool* shift_pred = nullptr;
-  kir::Bool* padding_pred = nullptr;
+  kir::Bool* predicate = nullptr;
 
   for (size_t i = 0; i < root_domain.size(); ++i) {
     auto root_id = root_domain[i];
 
     const auto halo_info = gpu_lower->haloInfo().getRootAxisInfo(root_id);
 
-    const int shift_offset =
-        (shift_expr != nullptr) ? shift_expr->offset(i) : 0;
+    if (isShiftPredicate) {
+      const int shift_offset =
+          (shift_expr != nullptr) ? shift_expr->offset(i) : 0;
 
-    // "left" means halo at offset zero.
-    // shifted accesses when idx >= left_limit. padding if idx <
-    // left_limit.
+      // "left" means halo at offset zero.
+      // shifted accesses when idx >= left_limit. padding if idx <
+      // left_limit.
 
-    // The elements at the left halo region are just set by the
-    // padding value.
-    unsigned left_limit = halo_info.width(0);
+      // The elements at the left halo region are just set by the
+      // padding value.
+      unsigned left_limit = halo_info.width(0);
 
-    // If the defining expr is ShiftOp and its offset is positive,
-    // consumer access at 0 to the offset corresponds to
-    // out-of-bound producer access unless the producer has halo as
-    // well. For now, always add predication assuming no halo on the
-    // producer. This should be reivisted for performance
-    // optimization (#877).
-    if (shift_offset > 0) {
-      left_limit += (unsigned)shift_offset;
+      // If the defining expr is ShiftOp and its offset is positive,
+      // consumer access at 0 to the offset corresponds to
+      // out-of-bound producer access unless the producer has halo as
+      // well. For now, always add predication assuming no halo on the
+      // producer. This should be reivisted for performance
+      // optimization (#877).
+      if (shift_offset > 0) {
+        left_limit += (unsigned)shift_offset;
+      }
+
+      // any access < left_limit must be just padding
+      if (left_limit > 0) {
+        predicate = makeAndExpr(
+            predicate,
+            ir_builder.geExpr(
+                indices[i], ir_builder.create<kir::Int>(left_limit)));
+      }
+
+      auto shift_max_offset = makeAddExpr(
+          out_tv->domain()->rootDomain()[i]->extent(), halo_info.width(0));
+
+      // If the shift offset is negative, the maximum index is extent -
+      // abs(shift_offset). Instead of subtracting shift_offset from
+      // extent, which can result in wrap around, add the absolute value
+      // of the shift offset to the index
+      auto shift_max_pred_idx = indices[i];
+      if (shift_offset < 0) {
+        shift_max_pred_idx = makeAddExpr(shift_max_pred_idx, -shift_offset);
+      }
+
+      predicate = makeAndExpr(
+          predicate, ir_builder.ltExpr(shift_max_pred_idx, shift_max_offset));
+    } else {
+      auto padding_max_offset = makeAddExpr(
+          out_tv->domain()->rootDomain()[i]->extent(), halo_info.width());
+
+      predicate = makeAndExpr(
+          predicate, ir_builder.ltExpr(indices[i], padding_max_offset));
     }
-
-    // any access < left_limit must be just padding
-    if (left_limit > 0) {
-      shift_pred = makeAndExpr(
-          shift_pred,
-          ir_builder.geExpr(
-              indices[i], ir_builder.create<kir::Int>(left_limit)));
-    }
-
-    auto shift_max_offset = makeAddExpr(
-        out_tv->domain()->rootDomain()[i]->extent(), halo_info.width(0));
-
-    // If the shift offset is negative, the maximum index is extent -
-    // abs(shift_offset). Instead of subtracting shift_offset from
-    // extent, which can result in wrap around, add the absolute value
-    // of the shift offset to the index
-    auto shift_max_pred_idx = indices[i];
-    if (shift_offset < 0) {
-      shift_max_pred_idx = makeAddExpr(shift_max_pred_idx, -shift_offset);
-    }
-
-    shift_pred = makeAndExpr(
-        shift_pred, ir_builder.ltExpr(shift_max_pred_idx, shift_max_offset));
-
-    auto padding_max_offset = makeAddExpr(
-        out_tv->domain()->rootDomain()[i]->extent(), halo_info.width());
-
-    padding_pred = makeAndExpr(
-        padding_pred, ir_builder.ltExpr(indices[i], padding_max_offset));
   }
 
-  return {shift_pred, padding_pred};
+  return predicate;
 }
 
 const AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) const {

@@ -33,6 +33,7 @@ class Expr;
 
 // Values
 class NamedScalar;
+class Predicate;
 class Bool;
 class Double;
 class Int;
@@ -90,6 +91,9 @@ class TORCH_CUDA_CU_API IrVisitor : public PolymorphicBase {
   // Values
   virtual void visit(const NamedScalar* named_scalar) {
     unhandled(named_scalar);
+  }
+  virtual void visit(const Predicate* value) {
+    unhandled(value);
   }
   virtual void visit(const Bool* value) {
     unhandled(value);
@@ -163,6 +167,9 @@ class TORCH_CUDA_CU_API MutableIrVisitor : public PolymorphicBase {
   // Values
   virtual void visit(NamedScalar* named_scalar) {
     unhandled(named_scalar);
+  }
+  virtual void visit(Predicate* value) {
+    unhandled(value);
   }
   virtual void visit(Bool* value) {
     unhandled(value);
@@ -338,11 +345,11 @@ class TORCH_CUDA_CU_API Expr : public Node {
 
   Expr* parentScope() const;
 
-  Bool* predicate() const {
+  Predicate* predicate() const {
     return predicate_;
   }
 
-  void setPredicate(Bool* predicate) {
+  void setPredicate(Predicate* predicate) {
     predicate_ = predicate;
   }
 
@@ -365,7 +372,7 @@ class TORCH_CUDA_CU_API Expr : public Node {
   // TODO(kir): revisit scope/nesting data structures
   Scope* scope_ = nullptr;
 
-  Bool* predicate_ = nullptr;
+  Predicate* predicate_ = nullptr;
 };
 
 class TORCH_CUDA_CU_API NamedScalar final : public Val {
@@ -412,6 +419,108 @@ class TORCH_CUDA_CU_API NamedScalar final : public Val {
 
  private:
   std::string name_;
+};
+
+class TORCH_CUDA_CU_API Predicate final : public Val {
+ public:
+  explicit Predicate(
+      Passkey passkey,
+      const Expr* expr,
+      Bool* thread_pred,
+      PredicateType ptype)
+      : Val(passkey, DataType::Bool),
+        expr_(expr),
+        thread_pred_(thread_pred),
+        ptype_(ptype) {
+    TORCH_INTERNAL_ASSERT(expr != nullptr);
+    TORCH_INTERNAL_ASSERT(thread_pred != nullptr);
+    TORCH_INTERNAL_ASSERT(ptype != PredicateType::Unswitch);
+  }
+
+  explicit Predicate(Passkey passkey, const Expr* expr, PredicateType ptype)
+      : Val(passkey, DataType::Bool), expr_(expr), ptype_(ptype) {
+    TORCH_INTERNAL_ASSERT(expr != nullptr);
+    TORCH_INTERNAL_ASSERT(
+        ptype == PredicateType::Shift || ptype == PredicateType::Padding);
+  }
+
+  explicit Predicate(Passkey passkey, ForLoop* unrolled_loop)
+      : Val(passkey, DataType::Bool),
+        unrolled_loop_(unrolled_loop),
+        ptype_(PredicateType::Unswitch) {
+    TORCH_INTERNAL_ASSERT(unrolled_loop != nullptr);
+  }
+
+  explicit Predicate(Passkey passkey, Bool* value)
+      : Val(passkey, DataType::Bool),
+        ptype_(PredicateType::Manual),
+        value_(value) {
+    TORCH_INTERNAL_ASSERT(value != nullptr);
+  }
+
+  void accept(IrVisitor* visitor) const override {
+    visitor->visit(this);
+  }
+
+  void accept(MutableIrVisitor* visitor) override {
+    visitor->visit(this);
+  }
+
+  PredicateType predicate_type() const {
+    return ptype_;
+  }
+
+  const Expr* expr() const {
+    TORCH_INTERNAL_ASSERT(
+        ptype_ != PredicateType::Unswitch && ptype_ != PredicateType::Manual);
+    return expr_;
+  }
+
+  Bool* thread_pred() {
+    TORCH_INTERNAL_ASSERT(
+        ptype_ == PredicateType::Inline ||
+        ptype_ == PredicateType::Misaligned ||
+        ptype_ == PredicateType::InternalSync);
+    return thread_pred_;
+  }
+
+  ForLoop* unrolled_loop() const {
+    TORCH_INTERNAL_ASSERT(ptype_ == PredicateType::Unswitch);
+    return unrolled_loop_;
+  }
+
+  bool hasValue() const {
+    return value_ != nullptr;
+  }
+
+  Bool* value() const {
+    TORCH_INTERNAL_ASSERT(
+        value_ != nullptr,
+        "The conditional expression for this Predicate is invalid.");
+    return value_;
+  }
+
+  void setValue(Bool* value) {
+    TORCH_INTERNAL_ASSERT(value != nullptr, "The Bool expression is invalid.");
+    value_ = value;
+  }
+
+ private:
+  // For PredicateCompute::getInlinePredicate,
+  // ShiftPredicateInserter::getShiftPredicate and getPaddingPredicate
+  const Expr* expr_ = nullptr;
+
+  // For PredicateCompute::getInlinePredicate
+  Bool* thread_pred_ = nullptr;
+
+  // For ParallelType::Unswitch - UnswitchPredicate::get
+  ForLoop* unrolled_loop_ = nullptr;
+
+  PredicateType ptype_ = PredicateType::Manual;
+
+  // The Bool conditional value
+  // The value is nullptr until lower_predicate pass
+  Bool* value_ = nullptr;
 };
 
 class TORCH_CUDA_CU_API Bool final : public Val {
@@ -1009,8 +1118,10 @@ class TORCH_CUDA_CU_API TensorIndex final : public Val {
     return indices_;
   }
 
-  const TensorView* view() const {
-    return view_;
+  TensorView* view() const {
+    TORCH_INTERNAL_ASSERT(view_ != nullptr);
+    // TODO(kir): remove the need for const_cast
+    return const_cast<fuser::cuda::kir::TensorView*>(view_); // NOLINT
   }
 
  private:
@@ -1319,7 +1430,7 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 //!
 class TORCH_CUDA_CU_API IfThenElse final : public Expr {
  public:
-  explicit IfThenElse(Passkey passkey, Bool* cond);
+  explicit IfThenElse(Passkey passkey, Predicate* cond);
 
   void accept(IrVisitor* visitor) const override {
     visitor->visit(this);
@@ -1327,10 +1438,6 @@ class TORCH_CUDA_CU_API IfThenElse final : public Expr {
 
   void accept(MutableIrVisitor* visitor) override {
     visitor->visit(this);
-  }
-
-  Bool* cond() const {
-    return cond_;
   }
 
   Scope& thenBody() {
@@ -1353,7 +1460,6 @@ class TORCH_CUDA_CU_API IfThenElse final : public Expr {
   }
 
  private:
-  Bool* const cond_ = nullptr;
   Scope then_body_;
   Scope else_body_;
 };

@@ -23,14 +23,21 @@ namespace {
 // TODO(kir): same question as ir_utils::getTvOutput():
 //    why do we assume a single TV output?
 //
-kir::TensorView* firstTvOutput(const kir::Expr* expr) {
+kir::TensorView* firstTensorViewOutput(const kir::Expr* expr) {
   TORCH_INTERNAL_ASSERT(expr != nullptr);
   for (auto out : expr->outputs()) {
     if (out->isA<kir::TensorView>()) {
       return out->as<kir::TensorView>();
+    } else if (out->isA<kir::TensorIndex>()) {
+      return out->as<kir::TensorIndex>()->view();
     }
   }
   TORCH_INTERNAL_ASSERT(false, "Missing kir::TensorView output");
+}
+
+bool isTensorIndexOp(kir::Expr* expr) {
+  const auto& outputs = expr->outputs();
+  return outputs.size() >= 1 && outputs[0]->isA<kir::TensorIndex>();
 }
 
 kir::IterDomain* getTermIterDomainInMap(
@@ -69,7 +76,7 @@ std::vector<kir::Bool*> PredicateCompute::computePredicates(
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  auto true_bool = ir_builder.create<kir::Bool>(true);
+  auto true_bool = ir_builder.trueVal();
   std::vector<kir::Bool*> preds(root.size(), true_bool);
 
   if (no_pred_needed) {
@@ -200,22 +207,22 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     const kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
     kir::Bool* thread_pred,
-    bool ignore_internal_syncthread_ops,
-    bool misaligned_vectorization) {
+    PredicateType pred_type) {
   FUSER_PERF_SCOPE("getInlinePredicate");
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
   if (loops.empty()) {
+    TORCH_INTERNAL_ASSERT(thread_pred != nullptr);
     return thread_pred;
   }
 
   // Handle these elsewhere
-  if (ignore_internal_syncthread_ops &&
+  if (pred_type == PredicateType::Inline &&
       ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
-    return ir_builder.create<kir::Bool>(true);
+    return kir::IrBuilder(GpuLower::current()->kernel()).trueVal();
   }
 
-  auto out_tv = firstTvOutput(expr);
+  auto out_tv = firstTensorViewOutput(expr);
 
   // For the case of generating predicates, it's safe to assume all
   // axes are contiguous and saves some redundant predicates.
@@ -230,12 +237,13 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   // If we are indexing a buffer init expr, and the buffer is local
   // memory, predicate is not needed as we allocate enough local memory.
   if (out_tv->memoryType() == MemoryType::Local && buffer_init) {
-    return ir_builder.create<kir::Bool>(true);
+    return ir_builder.trueVal();
   }
 
   // Don't generate predicates unless needed. This is just for
   // potential performance benefit.
   if (IterationDomainAnalysis::canOmitPredicate(out_tv)) {
+    TORCH_INTERNAL_ASSERT(thread_pred != nullptr);
     return thread_pred;
   }
 
@@ -254,10 +262,11 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     }
   }
 
-  const auto extent =
-      (misaligned_vectorization) ? preds.size() - 1 : preds.size();
+  const auto extent = (pred_type == PredicateType::Misaligned)
+      ? preds.size() - 1
+      : preds.size();
   if (preds.empty() || extent == 0) {
-    return ir_builder.create<kir::Bool>(true);
+    return ir_builder.trueVal();
   }
 
   kir::Val* cond = preds[0];
@@ -284,7 +293,7 @@ kir::Bool* UnswitchPredicate::get(
   }
 
   if (up.predicates_.empty()) {
-    return ir_builder.create<kir::Bool>(true);
+    return ir_builder.trueVal();
   }
 
   kir::Val* unroll_pred = nullptr;
@@ -308,7 +317,7 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     return;
   }
 
-  auto out_tv = firstTvOutput(tv_expr);
+  auto out_tv = firstTensorViewOutput(tv_expr);
 
   // For the case of generating predicates, it's safe to assume all
   // axes are contiguous and saves some redundant predicates.
@@ -347,7 +356,7 @@ void UnswitchPredicate::openLoop(kir::ForLoop* fl) {
   for_loops_.push_back(fl);
 
   for (auto expr : fl->body().exprs()) {
-    if (ir_utils::isTVOp(expr)) {
+    if (ir_utils::isTVOp(expr) || isTensorIndexOp(expr)) {
       predicateOn(expr);
     } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       openLoop(for_loop);
