@@ -197,52 +197,14 @@ void RequestCallbackImpl::processPythonRemoteCall(
     const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
-
-  const auto& rrefId = uprc.rrefId();
-  const auto& forkId = uprc.forkId();
-  auto& ctx = RRefContext::getInstance();
-
-  c10::intrusive_ptr<OwnerRRef> ownerRRef;
-  if (rrefId == forkId) {
-    // Creating an owner RRef on self, should already exist in owners map
-    ownerRRef =
-        fromRRefInterface(ctx.getOwnerRRef(rrefId, /* forceCreated */ true)
-                              ->constValue()
-                              .toRRef());
-  } else {
-    ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
-  }
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-
-  if (rrefId != forkId) {
-    // Caller is a user and callee is the owner, add fork
-    //
-    // NB: rrefId == forkId is true if and only if calling remote to self.
-    // In that case both the caller and the callee will access the
-    // OwnerRRef. Hence, on the callee side (here), it should not call
-    // addForkOfOwner as it is not a fork. To allow callee to distinguish
-    // when this request is sent to self, the caller will set forkId using
-    // rrefId (OwnerRRef does not have a forkId anyway).
-    ctx.addForkOfOwner(rrefId, forkId);
-  }
-
   auto future = runPythonFunction(uprc.pythonUdf(), uprc.isAsyncExecution());
 
-  future->addCallback(
-      [ownerRRef, rrefId, forkId, responseFuture, lsctx = std::move(lsctx)](
-          JitFuture& future) {
-        if (future.hasError()) {
-          ownerRRef->setError(future.exception_ptr());
-        } else {
-          ownerRRef->recordAllStreams(lsctx);
-          ownerRRef->setValue(future.value());
-        }
-
-        auto m = RemoteRet(rrefId, forkId).toMessage();
-        responseFuture->markCompleted(
-            IValue(c10::make_intrusive<Message>(std::move(m))));
-      });
+  assignOwnerRRef(
+      uprc.rrefId(),
+      uprc.forkId(),
+      std::move(future),
+      responseFuture,
+      std::move(lsctx));
 }
 
 void RequestCallbackImpl::processPythonRRefFetchCall(
