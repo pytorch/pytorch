@@ -9,7 +9,7 @@ class TrainerBase(ABC):
 
     BATCH_LEVEL_METRIC = "batch_level_metric"
     BATCH_ALL = "batch_all"
-    FORWARD_METRIC = "foward_metric"
+    FORWARD_METRIC = "forward_metric"
     FORWARD_PASS = "forward_pass"
     BACKWARD_METRIC = "backward_metric"
     BACKWARD = "backward"
