@@ -488,8 +488,7 @@ struct SourceImporterImpl : public Resolver,
           auto def_name = def.name().name();
           if (pre_hook_names.find(def_name) != pre_hook_names.end()) {
             pre_hook_def_map.emplace(def_name, def);
-            pre_hook_resolver_map.emplace(
-                def_name, shared_from_this());
+            pre_hook_resolver_map.emplace(def_name, shared_from_this());
           } else if (hook_names.find(def_name) != hook_names.end()) {
             hook_def_map.emplace(def_name, def);
             hook_resolver_map.emplace(def_name, shared_from_this());
@@ -653,13 +652,14 @@ struct SourceImporterImpl : public Resolver,
       auto name = Var(Assign(statement).lhs()).name().name();
       auto default_val = IValue();
       if (assign.rhs().present()) {
-        std::vector<IValue> parsed = type_parser.evaluateDefaults(assign.range(), {assign.rhs().get()}, {assign.type().get()});
+        std::vector<IValue> parsed = type_parser.evaluateDefaults(
+            assign.range(), {assign.rhs().get()}, {assign.type().get()});
         TORCH_INTERNAL_ASSERT(parsed.size() == 1);
         default_val = parsed[0];
       }
 
-      fields.emplace_back(
-          std::pair<std::string, IValue>(std::move(name), std::move(default_val)));
+      fields.emplace_back(std::pair<std::string, IValue>(
+          std::move(name), std::move(default_val)));
 
       auto type = type_parser.parseTypeFromExpr(assign.type().get());
 

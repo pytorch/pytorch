@@ -724,26 +724,25 @@ inline py::object toPyObject(IValue ivalue) {
         tuple->type()->schema()->name() != "") {
       auto unqualName = tuple->type()->name()->name();
 
-      const std::vector<Argument>& tuple_args = tuple->type()->schema()->arguments();
+      const std::vector<Argument>& tuple_args =
+          tuple->type()->schema()->arguments();
 
       std::vector<IValue> defaults;
-      auto it = std::find_if(tuple_args.begin(), tuple_args.end(),
-                [](const Argument& arg) {
-                  if (arg.default_value()) {
-                    return true;
-                  }
-                  return false;
-                });
-      std::transform(it, tuple_args.end(),
-                     std::back_inserter(defaults),
-                     [](const Argument& arg) {
-                       return *arg.default_value();
-                     });
+      auto it = std::find_if(
+          tuple_args.begin(), tuple_args.end(), [](const Argument& arg) {
+            if (arg.default_value()) {
+              return true;
+            }
+            return false;
+          });
+      std::transform(
+          it,
+          tuple_args.end(),
+          std::back_inserter(defaults),
+          [](const Argument& arg) { return *arg.default_value(); });
 
-      std::vector<std::string> fieldNames = fmap(tuple_args,
-                                            [](const Argument& arg) {
-                                              return arg.name();
-                                            });
+      std::vector<std::string> fieldNames =
+          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
 
       return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(t, unqualName, fieldNames, defaults);
