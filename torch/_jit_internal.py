@@ -1004,7 +1004,7 @@ def _create_named_tuple(t, unqual_name: str, field_names: List[str], defaults: L
     if sys.version_info < (3,7,0):
         TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[misc]
     else:
-        TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[misc]
+        TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore
     return TupleType(*t)
 
 @contextlib.contextmanager
