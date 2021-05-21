@@ -53,6 +53,7 @@ else:
 
 DEFAULT_HOSTNAME = "localhost"
 
+torch.backends.cuda.matmul.allow_tf32 = False
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
@@ -637,12 +638,9 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         for w in works:
             w.wait()
 
-        return
-
         # Simulate mismatch: allreduce vs reduce.
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Mismatch between collective operation types"
+            RuntimeError, "Mismatch between collective operation types"
         ):
             if self.rank == 0:
                 wrapper_pg.allreduce([tensor])
@@ -652,8 +650,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         # Check additional mismatches
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Mismatch between collective operation types"
+            RuntimeError, "Mismatch between collective operation types"
         ):
             if self.rank == 0:
                 wrapper_pg.reduce([tensor])
@@ -661,8 +658,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 wrapper_pg.barrier()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Mismatch between collective operation types"
+            RuntimeError, "Mismatch between collective operation types"
         ):
             scatter_result = [torch.ones(4) * i for i in range(self.world_size)]
             scattered_tensor = torch.empty(4)
@@ -672,13 +668,14 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 wrapper_pg.reduce_scatter(scattered_tensor, scatter_result)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Mismatch between collective operation types"
+            RuntimeError, "Mismatch between collective operation types"
         ):
             if self.rank == 0:
                 wrapper_pg.broadcast(tensor, 0)
             else:
-                output_tensors = [torch.zeros_like(tensor) for _ in range(self.world_size)]
+                output_tensors = [
+                    torch.zeros_like(tensor) for _ in range(self.world_size)
+                ]
                 wrapper_pg.allgather([output_tensors], [tensor])
 
     def _test_collective_shape_mismatch(self, wrapper_pg, use_cuda=False):
@@ -697,8 +694,20 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             wrapper_pg.allreduce([tensor])
 
         # Check shape errors with scatter
-        input = [torch.tensor([self.rank] if self.rank == 0 else [self.rank, self.rank], device=self.rank if use_cuda else "cpu") for _ in range(self.world_size)]
-        outputs = [torch.tensor([-1] if self.rank == 0 else [-1, -1], device=self.rank if use_cuda else "cpu") for _ in range(self.world_size)]
+        input = [
+            torch.tensor(
+                [self.rank] if self.rank == 0 else [self.rank, self.rank],
+                device=self.rank if use_cuda else "cpu",
+            )
+            for _ in range(self.world_size)
+        ]
+        outputs = [
+            torch.tensor(
+                [-1] if self.rank == 0 else [-1, -1],
+                device=self.rank if use_cuda else "cpu",
+            )
+            for _ in range(self.world_size)
+        ]
         root_rank = 0
         opts = c10d.ScatterOptions()
         opts.rootRank = root_rank
