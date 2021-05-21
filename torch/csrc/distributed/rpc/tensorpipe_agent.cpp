@@ -1388,10 +1388,8 @@ void TensorPipeAgent::markFutureAsComplete(
                      message{std::move(message)},
                      ctx{std::move(ctx)}]() mutable {
       c10::MultiStreamGuard guard(ctx->getReservedStreams());
-      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
-      for (const auto& tensor : message->tensors()) {
-        data_ptrs.emplace_back(tensor.storage().data_ptr());
-      }
+      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs =
+          message->getDataPtrs();
       atomicFuture->jitFuture->markCompleted(
           std::move(message), std::move(data_ptrs));
       // The future's callbacks may schedule further RPCs, increasing the count.
