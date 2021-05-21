@@ -77,9 +77,8 @@ from .utils import (
 
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
+    generate_qconfig_map,
     get_flattened_qconfig_dict,
-    get_object_type_qconfig,
-    get_qconfig,
     QConfigAny,
 )
 
@@ -94,6 +93,12 @@ MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
 # ------------------------
 # Helper Functions
 # ------------------------
+def qat_swap_modules(
+        root: torch.nn.Module,
+        additional_qat_module_mapping: Dict[Callable, Callable]) -> None:
+    all_mappings = get_combined_dict(
+        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
 def get_standalone_module_configs(
     node: Node,
@@ -957,54 +962,6 @@ class Quantizer:
         # mapping from node name to the scope of the module which contains the node.
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
-
-    def _qat_swap_modules(
-            self, root: torch.nn.Module,
-            additional_qat_module_mapping: Dict[Callable, Callable]) -> None:
-        all_mappings = get_combined_dict(
-            get_default_qat_module_mappings(), additional_qat_module_mapping)
-        convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
-
-    def _generate_qconfig_map(
-            self,
-            root: torch.nn.Module,
-            input_graph: Graph,
-            qconfig_dict: Any,
-            node_name_to_scope: Dict[str, Tuple[str, type]]) -> None:
-        global_qconfig = qconfig_dict.get("", None)
-        self.node_name_to_scope = node_name_to_scope
-        self.qconfig_map = dict()
-        for node in input_graph.nodes:
-            if node.op == "get_attr":
-                module_name, _ = _parent_name(node.target)
-                self.qconfig_map[node.name] = get_qconfig(
-                    qconfig_dict, type(self.modules[module_name]), module_name, global_qconfig)
-            elif node.op == "call_function":
-                # precedence: [TODO] module_name_qconfig (need scope support
-                # from fx)
-                # > function_qconfig > global_qconfig
-                # module_name takes precedence over function qconfig
-                function_qconfig = get_object_type_qconfig(
-                    qconfig_dict, node.target, global_qconfig)
-                module_path, module_type = node_name_to_scope[node.name]
-                qconfig = get_qconfig(
-                    qconfig_dict, module_type, module_path, function_qconfig)
-                self.qconfig_map[node.name] = qconfig
-            elif node.op == "call_method":
-                module_path, module_type = node_name_to_scope[node.name]
-                # use the qconfig of the module that the node belongs to
-                qconfig = get_qconfig(
-                    qconfig_dict, module_type, module_path, global_qconfig)
-                self.qconfig_map[node.name] = qconfig
-            elif node.op == 'call_module':
-                module_qconfig = get_qconfig(
-                    qconfig_dict, type(self.modules[node.target]), node.target, global_qconfig)
-                # regex is not supported eager mode propagate_qconfig_, we'll
-                # need to set the qconfig explicitly here in case regex
-                # is used
-                self.modules[node.target].qconfig = module_qconfig
-                self.qconfig_map[node.name] = module_qconfig
-
     def _prepare(
             self,
             model: GraphModule,
@@ -1045,12 +1002,13 @@ class Quantizer:
         if model.training:
             additional_qat_module_mapping = prepare_custom_config_dict.get(
                 "additional_qat_module_mapping", {})
-            self._qat_swap_modules(model, additional_qat_module_mapping)
+            qat_swap_modules(model, additional_qat_module_mapping)
 
         self.modules = dict(model.named_modules())
 
+        self.node_name_to_scope = node_name_to_scope
         # fill self.qconfig_map, a map from node name to qconfig, used in _find_matches
-        self._generate_qconfig_map(model, model.graph, qconfig_dict, node_name_to_scope)
+        self.qconfig_map = generate_qconfig_map(model, self.modules, model.graph, qconfig_dict, node_name_to_scope)
 
         # match the patterns that will get quantized
         standalone_module_name_configs = prepare_custom_config_dict.get(
@@ -1302,9 +1260,8 @@ class Quantizer:
                 quantized = node_arg_is_quantized(node.args[0])
 
             # the output is unquantized if the node is not a CopyNode
-            # and activation is fp16 (since we will output fp32 currently for fp16
-            # converter
-            if not activation_is_int8_quantized(qconfig) or \
+            # or the activation is not statically quantized
+            if not activation_is_statically_quantized(qconfig) or \
                not obj.input_output_observed():
                 quantized = False
             if node_return_type_is_int(node):

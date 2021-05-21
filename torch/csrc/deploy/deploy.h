@@ -222,14 +222,6 @@ struct TORCH_API Package {
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
-  std::string load_text(const std::string& module, const std::string& file) {
-    TORCH_DEPLOY_TRY
-    auto I = acquire_session();
-    auto loaded = I.self.attr("load_text")({module, file});
-    return loaded.toIValue().toStringRef();
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
-  }
-
   InterpreterSession acquire_session() {
     TORCH_DEPLOY_TRY
     auto I = manager_->acquire_one();
