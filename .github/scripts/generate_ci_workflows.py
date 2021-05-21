@@ -23,11 +23,13 @@ def PyTorchWindowsWorkflow(
     *,
     build_environment: str,
     test_runner_type: str,
+    cuda_version: str,
     on_pull_request: bool = False
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
         "test_runner_type": test_runner_type,
+        "cuda_version": cuda_version,
         "on_pull_request": on_pull_request,
     }
 
@@ -70,7 +72,13 @@ def generate_workflow_file(
 WINDOWS_WORKFLOWS = [
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cpu-py3",
+        cuda_version="cpu",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
+    ),
+    PyTorchWindowsWorkflow(
+        build_environment="pytorch-win-vs2019-cuda10-cudnn7-py3",
+        cuda_version="10.1",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
     )
 ]
 

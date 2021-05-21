@@ -1,11 +1,9 @@
+# @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/windows_ci_workflow.yml
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Windows CI (!{{ build_environment }})
+name: Windows CI (pytorch-win-vs2019-cuda10-cudnn7-py3)
 
 on:
-{%- if on_pull_request %}
-  pull_request:
-{%- endif %}
   push:
     branches:
       - master
@@ -13,9 +11,9 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: !{{ build_environment }}
+  BUILD_ENVIRONMENT: pytorch-win-vs2019-cuda10-cudnn7-py3
   BUILD_WHEEL: 1
-  CUDA_VERSION: "!{{ cuda_version }}"
+  CUDA_VERSION: "10.1"
   IN_CI: 1
   JOB_BASE_NAME: test
   PYTHON_VERSION: "3.6"
@@ -40,7 +38,6 @@ jobs:
         shell: powershell
         run: |
           .\.github\scripts\install_windows_sdk.ps1
-{%- if cuda_version != "cpu" %}
       - name: Install Cuda
         shell: bash
         run: |
@@ -49,7 +46,6 @@ jobs:
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
-{%- endif %}
       - name: Build
         shell: bash
         run: |
@@ -75,9 +71,9 @@ jobs:
           path: C:\w\build-results
 
   test:
-    runs-on: !{{ test_runner_type }}
+    runs-on: windows.8xlarge.nvidia.gpu
     env:
-      JOB_BASE_NAME: !{{ build_environment }}-test
+      JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-test
     needs:
       - build
     steps:
@@ -92,7 +88,6 @@ jobs:
         shell: powershell
         run: |
           .\.github\scripts\install_windows_sdk.ps1
-{%- if cuda_version != "cpu" %}
       - name: Install Cuda
         shell: bash
         run: |
@@ -101,7 +96,6 @@ jobs:
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
-{%- endif %}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -176,7 +170,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_JOB: !{{ build_environment }}
+          CIRCLE_JOB: pytorch-win-vs2019-cuda10-cudnn7-py3
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
