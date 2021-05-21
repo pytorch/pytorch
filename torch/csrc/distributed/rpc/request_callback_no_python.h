@@ -38,6 +38,13 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const std::function<void(Message)>& markComplete,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
+  void assignOwnerRRef(
+      const RRefId& rrefId,
+      const RRefId& forkId,
+      c10::intrusive_ptr<JitFuture> valueFuture,
+      const c10::intrusive_ptr<JitFuture>& responseFuture,
+      std::shared_ptr<LazyStreamContext> lsctx) const;
+
   virtual c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
       ScriptRemoteCall& scriptRemoteCall,
       std::vector<at::IValue>& stack) const;
