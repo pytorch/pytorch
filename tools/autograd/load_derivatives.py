@@ -11,7 +11,8 @@ from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
                                      intArrayRefT, tensorOptionsT, typeAndSizeT, intT,
-                                     tensorGeometryT, scalarTypeT, SpecialArgName)
+                                     tensorGeometryT, scalarTypeT, SpecialArgName,
+                                     OptionalCType, stringT)
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
@@ -515,6 +516,15 @@ def saved_variables(
                 return name + suffix
 
             formula = re.sub(regex.format(name), repl, formula)
+
+        # c10::optional<std::string> types stored in Backward nodes must be
+        # converted to c10::optional<c10::string_view> before being passed into
+        # the backward function
+        if nctype.type == OptionalCType(BaseCType(stringT)):
+            formula = re.sub(
+                rf'\b{name}\b',
+                f'{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : c10::nullopt',
+                formula)
 
         # Find any variables which remain in the formula and save them
         if re.search(IDENT_REGEX.format(name), formula):
