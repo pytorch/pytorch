@@ -226,7 +226,7 @@ class TestAdagrad(serial.SerializedTestCase):
         ),
         **hu.gcs
     )
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_row_wise_sparse_adagrad_empty(self, inputs, lr, epsilon, gc, dc):
         param, momentum = inputs
         grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
