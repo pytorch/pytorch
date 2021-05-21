@@ -464,6 +464,65 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template<typename scalar_t, class func_t>
+__global__ void transform_vals(scalar_t * a, scalar_t * b, scalar_t * out, func_t binary_op){
+   *out = binary_op(*a, *b);
+}
+
+template<typename scalar_t, typename BinaryFunction>
+void scan_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
+  int64_t size = self.numel();
+  // non synchronizing cub call
+  // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+  // so split at int_max/2
+  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
+  for (int64_t i = 0; i < size; i += max_cub_size) {
+    int size_cub = std::min<int64_t>(size - i, max_cub_size);
+    Tensor first_elem; // need to save it for all iterations other than first
+    if (i > 0) {
+      // need to temporarily transform first element of the range we are
+      // operating on; self might be multi-d, but we need to index a single
+      // element
+      auto self_view = at::_unsafe_view(self, -1);
+      first_elem = self_view[i].clone();
+      transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+          self.data_ptr<scalar_t>() + i,
+          result.data_ptr<scalar_t>() + i - 1,
+          self.data_ptr<scalar_t>() + i,
+          binary_op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+    size_t temp_storage_bytes = 0;
+    AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(
+        nullptr,
+        temp_storage_bytes,
+        self.data_ptr<scalar_t>() + i,
+        result.data_ptr<scalar_t>() + i,
+        binary_op,
+        size_cub,
+        at::cuda::getCurrentCUDAStream()));
+    auto temp_storage = at::native::empty_cuda(
+        {static_cast<int64_t>(temp_storage_bytes)},
+        kByte, self.options().layout_opt(), self.options().device_opt(),
+        self.options().pinned_memory_opt());
+    AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(
+        temp_storage.data_ptr(),
+        temp_storage_bytes,
+        self.data_ptr<scalar_t>() + i,
+        result.data_ptr<scalar_t>() + i,
+        binary_op,
+        size_cub,
+        at::cuda::getCurrentCUDAStream()));
+    if (i > 0) {
+      if (self.data_ptr<scalar_t>() != result.data_ptr<scalar_t>()) {
+        // restore modified first element only if it's not an inplace operation
+        auto self_view = at::_unsafe_view(self, -1);
+        self_view[i].copy_(first_elem, /*non_blocking=*/true);
+      }
+    }
+  }
+}
+
 template<typename scalar_t, typename BinaryFunction>
 void scan_dim(const Tensor& self, Tensor& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
@@ -473,7 +532,7 @@ void scan_dim(const Tensor& self, Tensor& result,
   Tensor result_ = result.contiguous();
 
   if (self.numel() == self.size(dim)) {
-    cuda::cub::inclusive_scan(self_.data_ptr<scalar_t>(), result_.data_ptr<scalar_t>(), binary_op, self.numel());
+    scan_cub<scalar_t>(self_, result_, init, binary_op);
   } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(self_, result_, init, binary_op);
   } else {
