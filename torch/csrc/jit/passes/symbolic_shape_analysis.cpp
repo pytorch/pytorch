@@ -191,16 +191,6 @@ struct SymbolicShapeAnalyzer {
     }
   }
 
-  bool isDominatedBy(Node* node, Node* dominator) {
-    while (node) {
-      if (node->owningBlock() == dominator->owningBlock()) {
-        return dominator->isBefore(node);
-      }
-      node = node->owningBlock()->owningNode();
-    }
-    return false;
-  }
-
   void mergeSymbolicShapeSets(const std::vector<Value*>& symbolic_set) {
     // `symbolic_set` represents a set of Value * which are all equal
     // to each other. Here, we optimize the graph by replacing values
@@ -223,7 +213,7 @@ struct SymbolicShapeAnalyzer {
       Value* v = symbolic_set[i];
       Value* dominating_value = v;
       for (size_t j = 0; j < symbolic_set.size(); ++j) {
-        if (isDominatedBy(dominating_value->node(), symbolic_set[j]->node())) {
+        if (dominating_value->node()->isDominatedBy(symbolic_set[j]->node())) {
           dominating_value = symbolic_set[j];
         }
       }
