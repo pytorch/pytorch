@@ -22,12 +22,13 @@ categories = [
     'profiler',
     'performance_as_product',
     'package',
-    'dispatcher',
+    'composability',
     'releng',
     'fx',
     'code_coverage',
     'vulkan',
     'skip',
+    'nn_frontend',
     'cpp_frontend',
     'python_frontend',
     'complex_frontend',
@@ -36,7 +37,10 @@ categories = [
     'build_frontend',
     'memory_format_frontend',
     'foreach_frontend',
-    'dataloader_frontend'
+    'dataloader_frontend',
+    'linalg_frontend',
+    'structured_frontend',
+    'sparse_frontend'
 ]
 
 topics = [
