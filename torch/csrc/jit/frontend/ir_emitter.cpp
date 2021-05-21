@@ -1325,7 +1325,7 @@ struct to_ir {
       // Make sure that any element types are subtypes of the annotated
       // type
       std::stringstream ss;
-      if (type_hint && !out->type()->isSubtypeOfExt(type_hint, &ss)) {
+      if (type_hint && !out->type()->isSubtypeOfExt(type_hint->expect<ListType>()->getElementType(), &ss)) {
         throw ErrorReport(loc) << ss.str() << "List type annotation did"
                                << " not match the types of the actual "
                                << "list items";
@@ -3597,7 +3597,7 @@ struct to_ir {
       auto types = fmap(values, [](const Value* v) { return v->type(); });
       c10::optional<TypePtr> rhs_type = unifyTypeList(types, ss, /*default_to_any=*/true);
 
-      TORCH_INTERNAL_ASSERT(!type_set || elem_type != *rhs_type, "List "
+      TORCH_INTERNAL_ASSERT(!type_set || elem_type == *rhs_type, "List "
                             "annotation ", type_hint->repr_str(),
                             " did not match the types of the given "
                             "list elements (", (*rhs_type)->repr_str(),
