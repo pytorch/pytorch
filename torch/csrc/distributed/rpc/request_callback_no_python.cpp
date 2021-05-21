@@ -660,7 +660,7 @@ void RequestCallbackNoPython::processRpc(
   }
 }
 
-IValue RequestCallbackNoPython::handleError(
+c10::intrusive_ptr<Message> RequestCallbackNoPython::handleError(
     const std::exception& e,
     const MessageType messageType,
     int64_t messageId) const {
@@ -673,8 +673,8 @@ IValue RequestCallbackNoPython::handleError(
       DistAutogradContainer::getInstance().getWorkerId(),
       ": ",
       e.what());
-  return IValue(c10::make_intrusive<Message>(
-      createExceptionResponse(errorMsg, messageId)));
+  return c10::make_intrusive<Message>(
+      createExceptionResponse(errorMsg, messageId));
 }
 
 bool RequestCallbackNoPython::cudaAvailable() const {
@@ -683,6 +683,33 @@ bool RequestCallbackNoPython::cudaAvailable() const {
 #else
   return false;
 #endif
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    IValue value,
+    TypePtr type) const {
+  auto future = c10::make_intrusive<JitFuture>(std::move(type));
+  future->markCompleted(std::move(value));
+  return future;
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    c10::intrusive_ptr<Message> message) const {
+  return asFuture(
+      std::move(message),
+      at::getCustomClassType<c10::intrusive_ptr<Message>>());
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    Message message) const {
+  return asFuture(c10::make_intrusive<Message>(std::move(message)));
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    std::exception_ptr err) const {
+  auto future = c10::make_intrusive<JitFuture>(at::NoneType::get());
+  future->setError(err);
+  return future;
 }
 
 } // namespace rpc
