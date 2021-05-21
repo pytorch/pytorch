@@ -50,11 +50,10 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
 
   void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const override;
 
-  void processRpcWithErrors(
+  c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   bool cudaAvailable() const override;
