@@ -552,7 +552,15 @@ void Reducer::autograd_hook(size_t index) {
     }
   }
 
-  // If it is static graph, after 1st iteration, check a avariable
+  // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
+  // static_graph_ is true or find_unused_parameters_ is false,
+  // 3) this backward pass needs to run allreduce.
+  // Here, we just dump tensors and their parameter indices into
+  // rebuilt_params_ and rebuilt_param_indices_ based on gradient arriving
+  // order, and then at the end of finalize_backward(), buckets will be
+  // rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and then
+  // will be broadcasted and initialized.
+  // If it is static graph, after 1st iteration, check if a variable
   // is ready for communication based on numGradHooksTriggeredMap_.
   if (static_graph_after_first_iteration()) {
     TORCH_CHECK(
@@ -707,15 +715,6 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
 }
 
 void Reducer::mark_variable_ready(size_t variable_index) {
-  // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
-  // static_graph_ is true or find_unused_parameters_ is false,
-  // 3) this backward pass needs to run allreduce.
-  // Here, we just dump tensors and their parameter indices into
-  // rebuilt_params_ and rebuilt_param_indices_ based on gradient arriving
-  // order, and then at the end of finalize_backward(), buckets will be
-  // rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and then
-  // will be broadcasted and initialized. Also we only need to dump tensors
-  // and parameter indices of one replica.
   TORCH_CHECK(
       variable_index < variable_locators_.size(),
       "Out of range variable index.");
