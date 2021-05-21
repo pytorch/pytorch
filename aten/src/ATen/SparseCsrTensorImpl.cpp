@@ -81,15 +81,6 @@ void SparseCsrTensorImpl::set_member_tensors(
     IntArrayRef size) {
 
   // CSR Type Invariants
-  auto crow_indices_type = crow_indices.scalar_type();
-  auto col_indices_type = col_indices.scalar_type();
-  TORCH_CHECK(
-      crow_indices_type == col_indices_type,
-      "both crow_indices and col_indices should have the same type.");
-  TORCH_CHECK(
-      crow_indices_type == kInt || crow_indices_type == kLong,
-      "crow_indices and col_indices must be an int32 or int64 type, but got: ",
-      crow_indices_type);
   TORCH_CHECK(
       values.scalar_type() == typeMetaToScalarType(dtype()),
       "dtype of values (",
@@ -97,29 +88,6 @@ void SparseCsrTensorImpl::set_member_tensors(
       ") must match dtype of sparse tensor (",
       typeMetaToScalarType(dtype()),
       ")");
-
-  // CSR Device Invariants
-  TORCH_CHECK(
-      values.device().type() == device().type(),
-      "device type of values (",
-      values.device().type(),
-      ") must match device type of device().type()",
-      device().type(),
-      ")");
-  TORCH_CHECK(
-      col_indices.get_device() == crow_indices.get_device(),
-      "crow_indices and col_indices devices (",
-      crow_indices.get_device(),
-      ", ",
-      col_indices.get_device(),
-      ") must match");
-  TORCH_CHECK(
-        crow_indices.get_device() == values.get_device(),
-        "device of crow_indices (",
-        crow_indices.get_device(),
-        ") must match device of values (",
-        values.get_device(),
-        ")");
 
   crow_indices_ = crow_indices;
   col_indices_ = col_indices;
