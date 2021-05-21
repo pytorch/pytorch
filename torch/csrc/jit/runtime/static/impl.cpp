@@ -830,8 +830,12 @@ void StaticRuntime::benchmark(
     const double ms = p.second;
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
-              << results.instances_per_node_type[kind] << " nodes)"
-              << std::endl;
+              << results.instances_per_node_type[kind] << " nodes";
+    if (results.out_nodes.count(kind) == 0) {
+      std::cout << ")" << std::endl;
+    } else {
+      std::cout << ", out variant)" << std::endl;
+    }
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
@@ -851,6 +855,12 @@ void StaticRuntime::benchmark(
       std::cout << "Total number of reused tensors: "
                 << planner_->total_reused_tensors() << std::endl;
     }
+    std::cout << "Total number of 'out' variant nodes/total number of nodes: "
+              << results.out_nodes_count << "/" << results.total_nodes_count
+              << " ("
+              << 100.0 * (results.out_nodes_count) /
+            static_cast<float>(results.total_nodes_count)
+              << "%)" << std::endl;
   }
   check_for_memory_leak();
 }
@@ -978,8 +988,13 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     results.time_per_node[i] /= static_cast<float>(main_runs);
     results.time_per_node_type[kind] += results.time_per_node[i];
     results.instances_per_node_type[kind]++;
+    if (nodes_[i].has_out_variant()) {
+      results.out_nodes.insert(kind);
+      results.out_nodes_count++;
+    }
     results.total_time += results.time_per_node[i];
   }
+  results.total_nodes_count = nodes_.size();
   results.memory_alloc_time /= static_cast<float>(main_runs);
   results.memory_dealloc_time /= static_cast<float>(main_runs);
   results.output_dealloc_time /= static_cast<float>(main_runs);

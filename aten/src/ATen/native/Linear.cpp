@@ -164,7 +164,7 @@ int einsum_label_to_index(char label) {
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
 // 3. Compute result by multiplying input operands and summing contraction
 //    dimensions We do the last part by reducing to bmm.
-Tensor einsum(std::string equation, TensorList operands) {
+Tensor einsum(c10::string_view equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
   checkDeviceType("einsum():", operands, operands[0].device().type());
 
