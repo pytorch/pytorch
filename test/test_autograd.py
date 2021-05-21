@@ -5421,6 +5421,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
     'test_to_sparse',
+    'test_to_sparse_dim',
 ])
 
 def add_test(
@@ -8269,7 +8270,7 @@ class TestAutogradDeviceType(TestCase):
             a = torch.randn(3, 3, device=device, requires_grad=True)
             b = a + a
             s1, s2, s3 = f(b)
-            error_msg = 'This view is an output of a function that returns multiple views.'
+            error_msg = 'This view is the output of a function that returns multiple views.'
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 s1.mul_(s2)
 
