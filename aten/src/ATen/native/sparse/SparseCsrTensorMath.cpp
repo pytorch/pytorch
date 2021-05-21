@@ -29,8 +29,11 @@ static constexpr bool is_msvc() {
 #endif
 }
 
-bool is_square(int64_t dim_i, int64_t dim_j,int64_t dim_k) {
-  return (dim_i == dim_k  && dim_k == dim_j);
+// Only accept squares sparse matrices or dense input as a vector
+// TODO: Check what happens with MKL, the output error reported with non square matrices tends to be high
+// See: https://github.com/pytorch/pytorch/pull/58622
+bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
+  return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
 template <typename scalar_t>
@@ -143,7 +146,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   int64_t nnz        = sparse._nnz();
 
   // r = beta * t + alpha * sparse * dense
-  if (at::hasMKL() && !is_msvc() && is_square(dim_i, dim_j, dim_k)) {
+  if (at::hasMKL() && !is_msvc() && is_square_or_vec(dim_i, dim_j, dim_k)) {
     AT_DISPATCH_FLOATING_TYPES(values.type(), "addmm_sparse_dense", [&] {
         scalar_t cast_beta = beta.to<scalar_t>();
         if (cast_beta == 0) {
