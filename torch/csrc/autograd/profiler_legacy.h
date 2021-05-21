@@ -67,6 +67,7 @@ private:
 };
 
 TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
+TORCH_API const CUDAStubs* cudaStubs();
 
 constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
@@ -91,7 +92,6 @@ inline int64_t getTime(bool allow_monotonic = false) {
     mode = CLOCK_MONOTONIC;
   }
   clock_gettime(mode, &t);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
 #endif
 }
@@ -202,12 +202,10 @@ struct TORCH_API LegacyEvent {
   }
 
   void setCpuUs(int64_t cpu_us) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     cpu_ns_ = cpu_us * 1000.0;
   }
 
   double cpuUs() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return cpu_ns_ / (1000.0);
   }
 
@@ -400,6 +398,7 @@ enum class C10_API_ENUM ProfilerState {
   CUDA, // CPU + CUDA events
   NVTX,  // only emit NVTX markers
   KINETO, // use libkineto
+  KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   NUM_PROFILER_STATES, // must be the last one
 };
 

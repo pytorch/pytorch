@@ -931,7 +931,6 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
   const auto window_envelop_lowest = window_envelop.abs().min().item().toDouble();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (window_envelop_lowest < 1e-11) {
     std::ostringstream ss;
     REPR(ss) << "window overlap add min: " << window_envelop_lowest;

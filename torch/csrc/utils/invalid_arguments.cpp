@@ -131,7 +131,6 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
   } else if (type_name == "int") {
     result = torch::make_unique<MultiType>(MultiType{"int", "long"});
   } else if (type_name.find("tuple[") == 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto type_list = type_name.substr(6);
     type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
@@ -139,7 +138,6 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
       types.emplace_back(_buildType(type, false));
     result = torch::make_unique<TupleType>(std::move(types));
   } else if (type_name.find("sequence[") == 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto subtype = type_name.substr(9);
     subtype.pop_back();
     result = torch::make_unique<SequenceType>(_buildType(subtype, false));
@@ -327,7 +325,6 @@ std::string format_invalid_args(
   std::vector<PyObject *> args;
   std::unordered_map<std::string, PyObject *> kwargs;
   std::string error_msg;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   error_msg.reserve(2000);
   error_msg += function_name;
   error_msg += " received an invalid combination of arguments - ";

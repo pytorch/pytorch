@@ -32,7 +32,8 @@ static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_must_use_llvm_on_cpu = true;
-static bool cat_wo_conditionals = false; // NOLINT
+static bool cat_wo_conditionals = true; // NOLINT
+static bool opt_conditionals = false; // NOLINT
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -99,6 +100,10 @@ bool& getTEMustUseLLVMOnCPU() {
 
 bool& getCatWoConditionals() {
   return cat_wo_conditionals;
+}
+
+bool& getOptConditionals() {
+  return opt_conditionals;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -220,9 +225,7 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
   auto const& bias = getTensorInfoJit(node->input(2));
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto const& dilation = toIValue(node->input(5));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto const& groups = toIValue(node->input(6));
 
   // Everything should be statically known.
@@ -541,6 +544,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::gelu:
     case aten::batch_norm:
     case aten::isnan:
     case aten::log:
@@ -1154,8 +1158,9 @@ Tensor* computeCatWoConditionals(
 
 Tensor* computeCat(
     const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape) {
-  if (getCatWoConditionals()) {
+    const std::vector<ExprHandle>& outputShape,
+    at::Device device) {
+  if (device == at::kCPU && getCatWoConditionals()) {
     return computeCatWoConditionals(inputs, outputShape);
   }
   auto inputList = c10::get<BufList>(inputs[0]);
@@ -1456,11 +1461,11 @@ Tensor* computeMatmul(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("matmul", outputShape, dtype);
-  const Buf* a = c10::get<BufHandle>(inputs[0]).node();
-  const Buf* b = c10::get<BufHandle>(inputs[1]).node();
+  const BufHandle a = c10::get<BufHandle>(inputs[0]);
+  const BufHandle b = c10::get<BufHandle>(inputs[1]);
 
-  auto size_a = ExprVectorToExprHandleVector(a->dims());
-  auto size_b = ExprVectorToExprHandleVector(b->dims());
+  auto size_a = a.dims();
+  auto size_b = b.dims();
   const IntImm* total_size = dynamic_cast<const IntImm*>(
       IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
 
@@ -1471,23 +1476,19 @@ Tensor* computeMatmul(
   // an aten::matmul.
   // Native, even naive, lowering is beneficial when the sizes are small because
   // it allows to eliminate dispatch overhead.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (total_size && total_size->value() < 1000) {
     return Reduce(
         "nnc_matmul",
         {{size_a[0], "M"}, {size_b[1], "N"}},
         Sum(),
         [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
-          BufHandle ah(a);
-          BufHandle bh(b);
-          return Load::make(ah, {m, k}) * Load::make(bh, {k, n});
+          return Load::make(a, {m, k}) * Load::make(b, {k, n});
         },
         {{size_a[1], "K"}});
   } else {
     return new Tensor(
         ResultBuf.node(),
-        ExternalCall::make(
-            ResultBuf, "nnc_aten_matmul", {BufHandle(a), BufHandle(b)}, {}));
+        ExternalCall::make(ResultBuf, "nnc_aten_matmul", {a, b}, {}));
   }
 }
 
@@ -1509,7 +1510,6 @@ Tensor* computeConv2d(
   auto padding = _pair_int(inputs[4]);
   auto dilation = _pair_int(inputs[5]);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int groups = c10::get<int64_t>(inputs[6]);
 
   auto inpInfo = getTensorInfo(inp);
@@ -1517,7 +1517,7 @@ Tensor* computeConv2d(
   auto bInfo = getTensorInfo(b);
   // Generate TE for depthwise convolutions.
   if (inpInfo && wInfo && bInfo &&
-      !conv2dIsSupported(
+      conv2dIsSupported(
           *inpInfo, *wInfo, *bInfo, strides, padding, dilation, groups)) {
     return conv2d_depthwise(inp, w, b, strides[0], padding[0], groups);
   }
@@ -1542,7 +1542,8 @@ Tensor* tensorexpr::computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   switch (op) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -1847,6 +1848,20 @@ Tensor* tensorexpr::computeOperandValue(
             return CompareSelect::make(a, zero, zero, a, kLT);
           });
     } break;
+
+    case aten::gelu: {
+      return computeOneOperand(
+          "aten_gelu",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+            auto one = Cast::make(a.dtype(), 1.);
+            auto point_five = Cast::make(a.dtype(), .5);
+            return a * point_five * (one + erf(a * m_sqrt1_2));
+          });
+    } break;
     case aten::batch_norm: {
       bool hasWeight = true;
       bool hasBias = true;
@@ -1875,7 +1890,6 @@ Tensor* tensorexpr::computeOperandValue(
                 tensorOrConstant(inputs[0], indices), // input
                 tensorOrConstant(inputs[3], {c}), // mean
                 tensorOrConstant(inputs[4], {c}), // var
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 constant(inputs[7]) // eps
             };
 
@@ -1899,7 +1913,6 @@ Tensor* tensorexpr::computeOperandValue(
             }
             // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
             if (hasBias) {
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               bias = exprInputs[5];
             }
 
@@ -2208,7 +2221,6 @@ Tensor* tensorexpr::computeOperandValue(
             return CompareSelect::make(mm, max_val, max_val, mm, kGT);
           });
     } break;
-
     case aten::hardswish: {
       return computeOneOperand(
           "aten_hardswish",
@@ -2224,7 +2236,21 @@ Tensor* tensorexpr::computeOperandValue(
             return a * clamp(zero, six, a + three) / six;
           });
     } break;
-
+    case aten::hardshrink: {
+      return computeTwoOperand(
+          "aten_hardshrink",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a, const ExprHandle& lambd) {
+            auto pos_clambd = Cast::make(a.dtype(), lambd);
+            auto neg_clambd =
+                Cast::make(a.dtype(), ExprHandle(-0)) - pos_clambd;
+            auto zero = Cast::make(a.dtype(), 0);
+            auto mm = CompareSelect::make(a, neg_clambd, a, zero, kLT);
+            return CompareSelect::make(a, pos_clambd, a, mm, kGT);
+          });
+    } break;
     case aten::sqrt: {
       return computeOneOperand(
           "aten_sqrt",
@@ -2308,7 +2334,7 @@ Tensor* tensorexpr::computeOperandValue(
       // need to handle the first input
       return computeOneOperand(
           "aten_to",
-          inputs,
+          {inputs[0]},
           outputShape,
           outputType,
           [outputType](const ExprHandle& a) {
@@ -2411,14 +2437,65 @@ Tensor* tensorexpr::computeOperandValue(
               }
             }
 
-            return tensorOrConstant(inputs[0], indices);
+            return broadcast(c10::get<BufHandle>(inputs[0]), indices);
           });
     }
+    case aten::t: {
+      auto shape = valueShape(inputs[0]);
+      if (shape.size() == 1) {
+        return new Tensor(c10::get<BufHandle>(inputs[0]).node(), nullptr);
+      }
+      return computeOperandValue(
+          aten::transpose,
+          {inputs[0], (int64_t)1, (int64_t)0},
+          outputShape,
+          outputType);
+    }
+    case aten::transpose: {
+      auto A = c10::get<BufHandle>(inputs[0]);
+      auto start_dim =
+          at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
+      auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
+      return Compute(
+          "aten_transpose",
+          c10::fmap<DimArg>(outputShape),
+          [&](std::vector<VarHandle> axes) {
+            std::swap(axes[start_dim], axes[to_dim]);
+            return A.load(axes);
+          });
+    }
+    case aten::permute: {
+      auto A = c10::get<BufHandle>(inputs[0]);
+      auto permute_dims = c10::get<IntList>(inputs[1]);
+      return Compute(
+          "aten_permute",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<VarHandle> new_axes;
+            assert(permute_dims.size() == axes.size());
+            for (auto i : permute_dims) {
+              new_axes.push_back(axes[i]);
+            }
+            return A.load(new_axes);
+          });
+    }
+    case aten::expand: {
+      auto A = c10::get<BufHandle>(inputs[0]);
+      return Compute(
+          "aten_expand",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            return broadcast(A, indices);
+          });
+    }
+    case aten::mm: // aten::mm is a subset of aten::matmul where both inputs are
+                   // rank 2
     case aten::matmul: {
       return computeMatmul(inputs, outputShape, outputType);
     }
     case aten::cat: {
-      return computeCat(inputs, outputShape);
+      return computeCat(inputs, outputShape, device);
     }
     case aten::sum: {
       return computeSum(inputs, outputType);
@@ -2482,6 +2559,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::isnan:
     case aten::relu:
     case aten::hardswish:
+    case aten::gelu:
     case aten::batch_norm:
     case aten::log:
     case aten::log10:
@@ -2507,6 +2585,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::atan2:
     case aten::tanh:
     case aten::hardtanh:
+    case aten::hardshrink:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -2515,13 +2594,17 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::round:
     case aten::trunc:
     case aten::_cast_Float:
-    case aten::to:
     case aten::threshold:
     case aten::where:
     case aten::frac:
     case aten::lgamma:
     case aten::slice:
     case aten::unsqueeze:
+    case aten::t:
+    case aten::transpose:
+    case aten::expand:
+    case aten::permute:
+    case aten::mm:
     case aten::matmul:
     case aten::cat:
     case aten::sum:
@@ -2539,7 +2622,20 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
         outputShape = sizesForValue(v);
       }
       return computeOperandValue(
-          v->node()->kind(), argInputs, outputShape, outputType);
+          v->node()->kind(), argInputs, outputShape, outputType, device_);
+    } break;
+
+    case aten::to: {
+      std::vector<ArgValue> argInputs;
+      argInputs.push_back(toArg(inputs[0]));
+      auto outputType = findDtypeForValue(v->node()->output());
+      std::vector<ExprHandle> outputShape = {};
+      // shape inference not implemented for sum
+      if (v->node()->kind() != aten::sum) {
+        outputShape = sizesForValue(v);
+      }
+      return computeOperandValue(
+          v->node()->kind(), argInputs, outputShape, outputType, device_);
     } break;
 
     case prim::ConstantChunk: {
@@ -2646,11 +2742,21 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   // - On GPU, there's enough compute to hide the extra work, and inlining
   //   avoids synchronizing between kernels.
   l.inlineIntermediateBufs(/*allow_duplicated_work=*/true);
+  GRAPH_DEBUG("after inline", *l.root_stmt());
+
+  // Optimizing conditionals needs to be performed after inlining because
+  // inlining wouldn't work once the loops are split. Also, it has to be
+  // performed before loop fusion because loop fusion introduces cases where
+  // multiple conditionals are in the same loop and this optimization does not
+  // handle such cases yet.
+  if (getOptConditionals()) {
+    l.optimizeConditionals();
+    GRAPH_DEBUG("after optimizing conditionals: ", *l.root_stmt());
+  }
 
   // Fuse loops "horizontally".  This pass allows us to combine loops that
   // write to different output buffers, as long as they have the same bounds.
   if (backendType == kLLVMCodeGen) {
-    GRAPH_DEBUG("after inline", *l.root_stmt());
     fuseAllLoops(l.root_stmt());
     GRAPH_DEBUG("after fuse", *l.root_stmt());
   }
@@ -2966,9 +3072,12 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
         std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
         for (size_t stride_index : sorted_stride_indices) {
           auto stride = strides[stride_index];
+          auto size = sizes[stride_index];
           auto index = Div::make(absolute_position, IntImm::make(stride));
-          absolute_position =
-              Mod::make(absolute_position, IntImm::make(stride));
+          if (size != 1) {
+            absolute_position =
+                Mod::make(absolute_position, IntImm::make(stride));
+          }
           new_axes[stride_index] = index;
         }
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -3010,6 +3119,8 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
+  device_ = *pickDeviceType(graph_->inputs());
+
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});
 
@@ -3044,8 +3155,6 @@ void TensorExprKernel::compile() {
           "Cannot support broadcast and random within one kernel");
     }
   }
-
-  device_ = *pickDeviceType(graph_->inputs());
 
   // Move output operands from `bufs_` to `bufOutputs_`
   for (const auto& output : graph_->outputs()) {

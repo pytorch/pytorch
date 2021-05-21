@@ -17,8 +17,6 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
-namespace {
-
 c10::IValue readArchive(
     const std::string& archive_name,
     PyTorchStreamReader& stream_reader) {
@@ -37,9 +35,17 @@ c10::IValue readArchive(
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
     return objLoaderMobile(type, input, mobile_compilation_unit);
   };
-
+  bool bytecode_tensor_in_constants_archive =
+      (archive_name == "bytecode" && !isTensorInBytecodeArchive(stream_reader));
   auto ivalues = torch::jit::readArchiveAndTensors(
-      archive_name, type_resolver, obj_loader, device, stream_reader);
+      archive_name,
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/
+      bytecode_tensor_in_constants_archive ? "constants/" : "",
+      type_resolver,
+      obj_loader,
+      device,
+      stream_reader);
   return ivalues;
 }
 
@@ -49,10 +55,9 @@ std::vector<IValue> get_bytecode_values(PyTorchStreamReader& reader) {
   return bytecode_values;
 }
 
-} // namespace
-
 // Forward declare
-int64_t _get_model_bytecode_version(std::vector<IValue> bytecode_ivalues);
+int64_t _get_model_bytecode_version(
+    const std::vector<IValue>& bytecode_ivalues);
 
 int64_t _get_model_bytecode_version(std::istream& in) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
@@ -75,7 +80,8 @@ int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   return _get_model_bytecode_version(bytecode_values);
 }
 
-int64_t _get_model_bytecode_version(std::vector<IValue> bytecode_ivalues) {
+int64_t _get_model_bytecode_version(
+    const std::vector<IValue>& bytecode_ivalues) {
   if (!bytecode_ivalues.empty() && bytecode_ivalues[0].isInt()) {
     int64_t model_version = bytecode_ivalues[0].toInt();
     return model_version;

@@ -10,18 +10,15 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
   auto packed_weight = packed_w;
   at::Tensor weight_origin;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (bit_rate_ == 8 || bit_rate_ == 4) {
     const auto input_rows = packed_weight.size(0);
     const auto input_columns = packed_weight.size(1);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int scale_bias_bytes;
     const auto num_elem_per_byte = 8 / bit_rate_;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (bit_rate_ == 8) {
       // The last 2 values are used to store the FP32 scale and zero_point
       // values per row.
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       scale_bias_bytes = 8;
     } else {
       scale_bias_bytes = 4;
@@ -45,7 +42,6 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
     uint8_t* output_data;
 
     // Allocate output weight tensor based on the bit_width
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (bit_rate_ == 8) {
       weight_origin = at::_empty_per_channel_affine_quantized(
           output_shape,
@@ -161,7 +157,6 @@ Tensor _qembeddingbag_nbit_unpack_helper(
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
   const auto* input_data = packed_weight.data_ptr<uint8_t>();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.

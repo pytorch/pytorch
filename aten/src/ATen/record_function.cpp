@@ -154,7 +154,7 @@ class CallbackManager {
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
-    rf_tls().sorted_tls_callbacks_.emplace_back(cb, handle);
+    rf_tls().sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
 
@@ -187,7 +187,7 @@ class CallbackManager {
 
   void disableCallback(CallbackHandle handle) {
     auto found = findAndToggleCallback(
-        rf_tls_.sorted_tls_callbacks_, handle, false);
+        rf_tls().sorted_tls_callbacks_, handle, false);
     if (found == ToggledCallbackResult::NotFound) {
       found = findAndToggleCallback(
           sorted_global_callbacks_, handle, false);
@@ -202,7 +202,7 @@ class CallbackManager {
 
   void reenableCallback(CallbackHandle handle) {
     auto found = findAndToggleCallback(
-        rf_tls_.sorted_tls_callbacks_, handle, false);
+        rf_tls().sorted_tls_callbacks_, handle, false);
     if (found == ToggledCallbackResult::NotFound) {
       found = findAndToggleCallback(
           sorted_global_callbacks_, handle, false);

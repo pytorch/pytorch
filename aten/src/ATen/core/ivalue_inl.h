@@ -360,13 +360,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       IValue value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           data_ptrs = c10::nullopt) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(
-        !completed(),
-        "Attempting to mark a completed Future as complete again. Note that "
-        "a Future can only be marked completed once.");
-
     // Start by performing all steps that can throw, before setting any field.
+    // Do this before even acquiring the mutex, because extractDataPtrs might
+    // acquire the GIL, which could lead to a lock inversion with our mutex.
+    // See https://github.com/pytorch/pytorch/issues/58239.
     std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs;
     std::vector<c10::Device> usedDevices;
     try {
@@ -382,9 +379,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         ensureIsSubsetOfDevices(usedDevices, devices_);
       }
     } catch (const std::exception&) {
-      setErrorInternal(std::current_exception(), lock);
+      setError(std::current_exception());
       return;
     }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    TORCH_CHECK(
+        !completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
 
     // Only set value_ and completed_ flag once all checks and preparation steps
     // have returned successfully to allow for proper error propagation.
@@ -399,7 +402,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       events_.push_back(std::move(event));
     }
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
@@ -425,8 +428,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // log errors and thats why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
-          "it is already marked completed (this is not neccessarily "
-          "an error):\n", tryRetrieveErrorMessageInternal(eptr));
+          "it is already marked completed (this is not necessarily "
+          "an error):\n",
+          tryRetrieveErrorMessageInternal(eptr));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",
@@ -473,7 +477,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(void)> callback) {
+  void addCallback(std::function<void(Future&)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
@@ -489,18 +493,18 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * to know for sure when the callback has finished.
    */
   c10::intrusive_ptr<Future> then(
-      std::function<IValue(void)> callback,
+      std::function<IValue(Future&)> callback,
       TypePtr type) {
-    auto fut = createInstance(std::move(type));
+    auto childFut = createInstance(std::move(type));
     addCallback(
-        [fut, cb = std::move(callback)]() {
+        [childFut, cb = std::move(callback)](Future& parentFut) {
           try {
-            fut->markCompleted(cb());
+            childFut->markCompleted(cb(parentFut));
           } catch (std::exception&) {
-            fut->setError(std::current_exception());
+            childFut->setError(std::current_exception());
           }
         });
-    return fut;
+    return childFut;
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
@@ -554,7 +558,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // how/when that happens) as it will ensure that the proper "environment" is
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
-  void invokeCallback(std::function<void(void)> callback) {
+  void invokeCallback(std::function<void(Future&)> callback) {
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
@@ -564,12 +568,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     c10::MultiStreamGuard streamGuard(streams);
     synchronizeWithCurrentStreams();
 
-    callback();
+    callback(*this);
   }
 
   // This method should be called before this future's value is used, as it
   // ensures that the CUDA streams that are "current" at the callsite properly
-  // synchonize with the value.
+  // synchronize with the value.
   void synchronizeWithCurrentStreams() {
     for (c10::Event& event : events_) {
       event.block(impl_.getStream(event.device()));
@@ -596,7 +600,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     eptr_ = std::move(eptr);
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
@@ -738,7 +742,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks_;
+  std::vector<std::function<void(Future&)>> callbacks_;
   std::exception_ptr eptr_;
 
   // An upcast pointer to a virtual class which allows us to manipulate events,

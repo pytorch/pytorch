@@ -69,7 +69,6 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   auto model = p.load_pickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::ones({10, 20});
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
@@ -85,6 +84,19 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   for (size_t i = 0; i < ninterp; i++) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+
+  // test kwargs api with args
+  std::vector<c10::IValue> args;
+  args.emplace_back(input);
+  std::unordered_map<std::string, c10::IValue> kwargs_empty;
+  auto jit_output_args = model.call_kwargs(args, kwargs_empty).toTensor();
+  ASSERT_TRUE(ref_output.equal(jit_output_args));
+
+  // and with kwargs only
+  std::unordered_map<std::string, c10::IValue> kwargs;
+  kwargs["input"] = input;
+  auto jit_output_kwargs = model.call_kwargs(kwargs).toTensor();
+  ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
 }
 
 TEST(TorchpyTest, ThreadedSimpleModel) {
@@ -95,7 +107,6 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   auto model = p.load_pickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::ones({10, 20});
 
   std::vector<at::Tensor> outputs;
@@ -103,9 +114,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<std::future<at::Tensor>> futures;
   for (size_t i = 0; i < nthreads; i++) {
     futures.push_back(std::async(std::launch::async, [&model]() {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto input = torch::ones({10, 20});
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (int i = 0; i < 100; ++i) {
         model({input}).toTensor();
       }
@@ -124,4 +133,36 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   for (size_t i = 0; i < nthreads; i++) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+}
+
+TEST(TorchpyTest, ThrowsSafely) {
+  // See explanation in deploy.h
+  torch::deploy::InterpreterManager manager(3);
+  EXPECT_THROW(manager.load_package("some garbage path"), c10::Error);
+
+  torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
+  EXPECT_THROW(p.load_pickle("some other", "garbage path"), c10::Error);
+
+  auto model = p.load_pickle("model", "model.pkl");
+  EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
+}
+
+TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
+  torch::deploy::InterpreterManager m(1);
+
+  torch::deploy::Package p = m.load_package(path("SIMPLE", simple));
+  auto I = p.acquire_session();
+
+  auto I1 = p.acquire_session();
+}
+
+TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
+  torch::deploy::InterpreterManager m(1);
+
+  torch::deploy::Package p = m.load_package(path("SIMPLE", simple));
+  auto I = p.acquire_session();
+
+  torch::deploy::Package p1 = m.load_package(
+      path("RESNET", "torch/csrc/deploy/example/generated/resnet"));
+  auto I1 = p1.acquire_session();
 }
