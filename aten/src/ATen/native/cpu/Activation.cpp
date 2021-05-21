@@ -627,11 +627,10 @@ void silu_backward_kernel(TensorIterator& iter) {
             [kOneVec](Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) {
               const Vectorized<scalar_t> sigmoid =
                   kOneVec / (kOneVec + x_vec.neg().exp());
-              return dy_vec  * sigmoid * (kOneVec + x_vec * (kOneVec - sigmoid));
+              return dy_vec * sigmoid * (kOneVec + x_vec * (kOneVec - sigmoid));
             });
       });
 }
-
 
 void mish_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
@@ -656,8 +655,7 @@ void mish_backward_kernel(TensorIterator& iter) {
             [](scalar_t dy, scalar_t x) -> scalar_t {
               const scalar_t sigmoid =
                   scalar_t(1) / (scalar_t(1) + std::exp(-x));
-              const scalar_t tanh_softplus =
-                  std::tanh(std::log1p(std::exp(x)));
+              const scalar_t tanh_softplus = std::tanh(std::log1p(std::exp(x)));
               return dy * (tanh_softplus + x * sigmoid * (scalar_t(1) - tanh_softplus * tanh_softplus));
             },
             [kOneVec](Vec dy_vec, Vec x_vec) -> Vec {

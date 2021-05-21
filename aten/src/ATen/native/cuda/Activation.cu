@@ -527,9 +527,9 @@ void mish_backward_kernel(TensorIterator& iter) {
           const T_ACC dy_acc = static_cast<T_ACC>(dy);
           const T_ACC x_acc = static_cast<T_ACC>(x);
           const T_ACC s_acc =
-          T_ACC(1) / (T_ACC(1) + c10::cuda::compat::exp(-x_acc));
+              T_ACC(1) / (T_ACC(1) + c10::cuda::compat::exp(-x_acc));
           const T_ACC t_acc =
-          c10::cuda::compat::tanh(c10::cuda::compat::exp(x_acc));
+              c10::cuda::compat::tanh(c10::cuda::compat::log1p(c10::cuda::compat::exp(x_acc)));
           return dy_acc * (t_acc + x_acc * s_acc * (T_ACC(1) - t_acc * t_acc));
       });
       });
