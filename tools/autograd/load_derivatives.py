@@ -11,7 +11,8 @@ from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
                                      intArrayRefT, tensorOptionsT, typeAndSizeT, intT,
-                                     tensorGeometryT, scalarTypeT, SpecialArgName)
+                                     tensorGeometryT, scalarTypeT, SpecialArgName,
+                                     OptionalCType, stringT)
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
@@ -28,7 +29,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
     with open(derivatives_yaml_path, 'r') as f:
         definitions = yaml.load(f, Loader=Loader)
 
-    functions = parse_native_yaml(native_yaml_path)
+    functions = parse_native_yaml(native_yaml_path).native_functions
 
     # What's the difference between function schema v.s. signature?
     # function schema is the complete declaration including mutability annotation / default value and etc.
@@ -169,7 +170,8 @@ def postprocess_forward_derivatives(
                                    "forward definition of gradient as element_wise but it does not "
                                    "defines the gradient formula for its argument which is required.")
             # This transformation is based on the observation that for element-wise functions, the Jacobian
-            # matrix is diagonal and thus doing J * v or v * J.conj() or (v.conj() J).conj() gives the same result.
+            # matrix is diagonal and thus doing J * v is the same as (v^T J)^T (in practice, we ignore the transpositions)
+            # For the complex case, we use hermitian transpose and get (v.conj() J).conj()
             # So here we are going to re-use the backward formula and replace two things:
             # 1) all occurrences of "grad" with "foo_t.conj()", where foo is the name of the unique differentiable input.
             # 2) all usage of an original input "foo" with its primal value "foo_p".
@@ -177,7 +179,7 @@ def postprocess_forward_derivatives(
             # For example, for abs, the backward formula is:
             #   grad * self.sgn()
             # And this function generates a forward formula that is:
-            #   self_t * self_p.sgn()
+            #   (self_t.conj() * self_p.sgn()).conj()
 
             backward_formula = derivatives[0].original_formula
             input_name = args_with_derivatives[0].name
@@ -519,6 +521,15 @@ def saved_variables(
                 return name + suffix
 
             formula = re.sub(regex.format(name), repl, formula)
+
+        # c10::optional<std::string> types stored in Backward nodes must be
+        # converted to c10::optional<c10::string_view> before being passed into
+        # the backward function
+        if nctype.type == OptionalCType(BaseCType(stringT)):
+            formula = re.sub(
+                rf'\b{name}\b',
+                f'{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : c10::nullopt',
+                formula)
 
         # Find any variables which remain in the formula and save them
         if re.search(IDENT_REGEX.format(name), formula):
