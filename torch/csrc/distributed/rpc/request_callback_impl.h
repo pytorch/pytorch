@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback_no_python.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
+#include <torch/csrc/jit/python/pybind.h>
 
 namespace torch {
 namespace distributed {
@@ -57,6 +58,10 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   c10::intrusive_ptr<JitFuture> runJitFunction(
       const c10::QualifiedName& name,
       std::vector<at::IValue>& stack,
+      bool isAsyncExecution) const;
+
+  c10::intrusive_ptr<JitFuture> runPythonFunction(
+      const py::object& function,
       bool isAsyncExecution) const;
 };
 
