@@ -169,7 +169,7 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // ScriptRRefFetchCall message always carries autograd context id even if
   // the message itself does not contain any tensor, because the response would
   // potentially contain tensors.
-  Message msgToSend;
+  c10::intrusive_ptr<Message> msgToSend;
 
   if (isPyObj()) {
     msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
@@ -306,7 +306,7 @@ void OwnerRRef::recordAllStreams(
   }
 }
 
-void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
+void OwnerRRef::blockAllStreams(const std::shared_ptr<LazyStreamContext>& ctx) {
   if (ctx) {
     for (c10::Event& event : events_) {
       event.block(ctx->getStream(event.device()));
