@@ -124,6 +124,12 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const c10::intrusive_ptr<JitFuture>& responseFuture) const;
 
+  // Helpers to run user-defined functions, operators and other computations.
+
+  c10::intrusive_ptr<JitFuture> runJitOperator(
+      const jit::Operator& op,
+      std::vector<at::IValue>& stack) const;
+
   // Helpers to convert various kinds of objects into already-completed futures.
 
   c10::intrusive_ptr<JitFuture> asFuture(IValue value, TypePtr type) const;
