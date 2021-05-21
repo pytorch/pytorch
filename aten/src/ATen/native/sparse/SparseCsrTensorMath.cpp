@@ -31,7 +31,7 @@ static constexpr bool is_msvc() {
 
 // Only accept squares sparse matrices or dense input as a vector
 // TODO: Check what happens with MKL, the output error reported with non square matrices tends to be high
-// See: https://github.com/pytorch/pytorch/pull/58622
+// See: https://github.com/pytorch/pytorch/issues/58770
 bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
