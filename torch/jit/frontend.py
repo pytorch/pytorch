@@ -902,7 +902,10 @@ class ExprBuilder(Builder):
                 # XXX: Indexing using a list is **different**! It triggers advanced indexing.
                 indices = [build_expr(ctx, index_expr) for index_expr in expr.slice.value.elts]
                 if not indices:
-                    r = ctx.make_range(expr.lineno, expr.slice.value.col_offset, expr.slice.value.end_col_offset)
+                    # `col_offset` is an int, but `end_col_offset` is
+                    # `Optional[int]`. The magic number is here to make
+                    # sure we can parse `()` on any machine
+                    r = ctx.make_range(expr.lineno, expr.slice.value.col_offset, expr.slice.value.col_offset+2)
                     tup = TupleLiteral(r, [])
                     indices.append(tup)
                 return Subscript(base, indices)
