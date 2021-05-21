@@ -105,35 +105,22 @@ class SparseCsrMKLInterface {
       float* dense,
       float alpha,
       float beta,
-      MKL_INT M,
-      MKL_INT K,
-      MKL_INT N) {
-    int stat;
-    if (N == 1) {
-      stat = mkl_sparse_s_mv(
-        SPARSE_OPERATION_NON_TRANSPOSE,
-        alpha,
-        A,
-        desc,
-        dense,
-        beta,
-        res);
-      TORCH_CHECK(stat == 0, "mkl_sparse_s_mv failed with error code: ", stat);
-    } else {
-      stat = mkl_sparse_s_mm(
+      MKL_INT nrows,
+      MKL_INT ncols,
+      MKL_INT dense_ncols) {
+    int stat = mkl_sparse_s_mm(
         SPARSE_OPERATION_NON_TRANSPOSE,
         alpha,
         A,
         desc,
         SPARSE_LAYOUT_ROW_MAJOR,
         dense,
-        N,
-        K,
+        dense_ncols,
+        dense_ncols,
         beta,
         res,
-        M);
-      TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", stat);
-    }
+        dense_ncols);
+    TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", stat);
   }
 
   inline void sparse_mm(
@@ -141,36 +128,22 @@ class SparseCsrMKLInterface {
       double* dense,
       double alpha,
       double beta,
-      MKL_INT M,
-      MKL_INT K,
-      MKL_INT N) {
-    int stat;
-    if (N == 1) {
-      stat = mkl_sparse_d_mv(
-        SPARSE_OPERATION_NON_TRANSPOSE,
-        alpha,
-        A,
-        desc,
-        dense,
-        beta,
-        res);
-      TORCH_CHECK(stat == 0, "mkl_sparse_d_mv failed with error code: ", stat);
-    }
-    else {
-      stat = mkl_sparse_d_mm(
+      MKL_INT nrows,
+      MKL_INT ncols,
+      MKL_INT dense_ncols) {
+    int stat = mkl_sparse_d_mm(
         SPARSE_OPERATION_NON_TRANSPOSE,
         alpha,
         A,
         desc,
         SPARSE_LAYOUT_ROW_MAJOR,
         dense,
-        N,
-        K,
+        dense_ncols,
+        dense_ncols,
         beta,
         res,
-        M);
-      TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
-    }
+        dense_ncols);
+    TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
   }
 
   ~SparseCsrMKLInterface() {
@@ -178,7 +151,6 @@ class SparseCsrMKLInterface {
   }
 };
 
- // res(M, N) = (sparse(M * K) @ dense(K x N))
 template <typename scalar_t>
 static inline void sparse_mm_mkl_template(
     Tensor& res,
