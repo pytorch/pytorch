@@ -89,8 +89,8 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
-    "torch/csrc/autograd/profiler_legacy.cpp",
-    "torch/csrc/autograd/profiler_kineto.cpp",
+    # "torch/csrc/autograd/profiler_legacy.cpp",
+    # "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/autograd/profiler_utils.cpp",
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
