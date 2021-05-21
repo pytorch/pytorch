@@ -69,6 +69,33 @@ py::tuple vectorToPyTuple(
   return py::cast<py::tuple>(tuple);
 }
 
+void processIValue(IValue ivalue, std::vector<py::object> &pyArgs, c10::optional<py::object> &torchFunctionTensor, std::vector<IValue> &unwrappedArgs) {
+  if (ivalue.isTensor() && isPythonTensor(ivalue.toTensor())) {
+    auto pyTensor = getPythonImpl(ivalue.toTensor());
+    pyArgs.push_back(pyTensor->value_);
+    torchFunctionTensor.emplace(pyTensor->value_);
+    unwrappedArgs.push_back(getValueFromPyTensor(pyTensor->value_));
+  } else if(ivalue.isList()) {
+    auto l = ivalue.toList();
+    std::vector<IValue> unwrappedL;
+    std::vector<py::object> pyL;
+
+    for (unsigned jdx = 0; jdx < l.size(); jdx++) {
+      auto nv = l.get(jdx);
+      processIValue(nv, pyL, torchFunctionTensor, unwrappedL);
+    }
+    pyArgs.push_back(py::cast(pyL));
+    auto ivlist = c10::impl::GenericList(ivalue.toList().elementType());
+    for (auto v: unwrappedL) {
+      ivlist.push_back(v);
+    }
+    unwrappedArgs.push_back(ivlist);
+  } else {
+    pyArgs.push_back(torch::jit::toPyObject(ivalue));
+    unwrappedArgs.push_back(ivalue);
+  }
+}
+
 void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
@@ -77,49 +104,16 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto arguments = torch::jit::last(stack, num_arguments);
   py::gil_scoped_acquire g;
   std::vector<py::object> pyArgs;
-  std::vector<py::object> pyTensorArgs;
-  std::vector<torch::jit::IValue> unwrappedArgs;
+  c10::optional<py::object> torchFunctionTensor = nullopt;
+  std::vector<IValue> unwrappedArgs;
 
   for (unsigned idx = 0; idx < arguments.size(); idx++) {
     const auto ivalue = arguments[idx];
-    if (ivalue.isTensor() && isPythonTensor(ivalue.toTensor())) {
-      auto pyTensor = getPythonImpl(ivalue.toTensor());
-      pyArgs.push_back(pyTensor->value_);
-      pyTensorArgs.push_back(pyTensor->value_);
-      unwrappedArgs.push_back(getValueFromPyTensor(pyTensor->value_));
-    } else {
-      if (ivalue.isList()) {
-        auto l = ivalue.toList();
-        auto unwrappedL =
-            c10::impl::GenericList(op.schema()
-                                       .arguments()[idx]
-                                       .type()
-                                       ->expectRef<torch::jit::ListType>()
-                                       .getElementType());
-        py::list pyL;
-
-        for (unsigned jdx = 0; jdx < l.size(); jdx++) {
-          auto nv = l.get(jdx);
-          if (nv.isTensor() && isPythonTensor(nv.toTensor())) {
-            auto pyTensor = getPythonImpl(nv.toTensor());
-            pyTensorArgs.push_back(pyTensor->value_);
-            unwrappedL.push_back(getValueFromPyTensor(pyTensor->value_));
-            pyL.append(pyTensor->value_);
-          } else {
-            unwrappedL.push_back(l.get(jdx));
-            pyL.append(torch::jit::toPyObject(l.get(jdx)));
-          }
-        }
-        pyArgs.push_back(pyL);
-        unwrappedArgs.push_back(unwrappedL);
-      } else {
-        pyArgs.push_back(torch::jit::toPyObject(ivalue));
-        unwrappedArgs.push_back(ivalue);
-      }
-    }
+    processIValue(ivalue, pyArgs, torchFunctionTensor, unwrappedArgs);
   }
+  TORCH_INTERNAL_ASSERT(torchFunctionTensor.has_value());
   py::object torch_function =
-      PyObject_FastGetAttrString(pyTensorArgs[0].ptr(), (char *)"__torch_function__");
+      PyObject_FastGetAttrString(torchFunctionTensor->ptr(), (char *)"__torch_function__");
   for (auto v : unwrappedArgs) {
     torch::jit::push(stack, v);
   }
@@ -141,10 +135,7 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   std::string delimiter = "aten::";
   func_name = func_name.substr(func_name.find(delimiter) + delimiter.size());
 
-  py::object torch_api_function =
-      PyObject_FastGetAttrString(THPVariableClass, (char*)func_name.c_str());
-
-  torch_api_function = py::str(op.operator_name().name);
+ py::object torch_api_function = py::str(op.operator_name().name);
   auto pyTupleArgs = vectorToPyTuple<py::object>(pyArgs, pyIdentity);
 
   auto out = PyObject_CallFunctionObjArgs(
