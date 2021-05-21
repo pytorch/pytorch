@@ -4,7 +4,6 @@ from typing import (
 
 import torch
 import torch.nn.functional as F
-from torch.types import _size
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
@@ -154,33 +153,6 @@ def split(tensor, split_size_or_sections, dim=0):
     # split_size_or_sections. The branching code is in _tensor.py, which we
     # call here.
     return tensor.split(split_size_or_sections, dim)
-
-
-if TYPE_CHECKING:
-    _Indices = _size
-else:
-    _Indices = List[int]
-
-
-# equivalent to itertools.product(indices)
-def _indices_product(indices: _Indices) -> List[List[int]]:
-    empty_list = torch.jit.annotate(List[int], [])
-    result = [empty_list]
-    for idx in indices:
-        result_temp = torch.jit.annotate(List[List[int]], [])
-        for res in result:
-            for i in range(idx):
-                result_temp.append(res + [i])
-        result = result_temp
-    return result
-
-
-def _index_tensor_with_indices_list(tensor, indices):
-    # type: (Tensor, List[int]) -> Tensor
-    out = tensor
-    for index in indices:
-        out = out[index]
-    return out
 
 
 def einsum(equation, *operands):
