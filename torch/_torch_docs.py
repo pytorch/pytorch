@@ -4185,6 +4185,15 @@ is_inference_mode_enabled() -> (bool)
 Returns True if inference mode is currently enabled.
 """.format(**common_args))
 
+add_docstr(torch.is_inference, r"""
+is_inference(input) -> (bool)
+
+Returns True if :attr:`input` is an inference tensor
+
+Args:
+    {input}
+""".format(**common_args))
+
 add_docstr(torch.is_nonzero, r"""
 is_nonzero(input) -> (bool)
 
