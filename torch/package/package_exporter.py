@@ -57,10 +57,13 @@ class PackagingErrorReason(Enum):
     This enum is used to provide good error messages when
     :class:`PackagingError` is raised.
     """
-    def __repr__(self):
-        return '<%s.%s>' % (self.__class__.__name__, self.name)
 
-    IS_EXTENSION_MODULE = "Module is a C extension module. torch.package supports Python modules only."
+    def __repr__(self):
+        return "<%s.%s>" % (self.__class__.__name__, self.name)
+
+    IS_EXTENSION_MODULE = (
+        "Module is a C extension module. torch.package supports Python modules only."
+    )
     NO_DUNDER_FILE = "Module had no __file__ defined."
     SOURCE_FILE_NOT_FOUND = (
         "Module had a __file__, but we could not find it in your filesystem."
@@ -722,7 +725,11 @@ node [shape=box];
                     "`torch.package.package_exporter._gate_torchscript_serialization` to `False`."
                 )
             if self.serialized_reduces.get(id(obj)) is None:
-                self.serialized_reduces[id(obj)] = ("reduce_package", id(obj), *obj.__reduce_package__(self))
+                self.serialized_reduces[id(obj)] = (
+                    "reduce_package",
+                    id(obj),
+                    *obj.__reduce_package__(self),
+                )
 
             return self.serialized_reduces[id(obj)]
 
