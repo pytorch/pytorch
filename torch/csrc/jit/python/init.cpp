@@ -175,7 +175,10 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_new_symbolic_shape_symbol",
-          []() { return ShapeSymbol::newSymbol().value(); })
+          []() { return c10::ShapeSymbol::newSymbol().value(); })
+      .def(
+          "_jit_register_operator_shape_function",
+          RegisterOperatorShapeFunction)
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
