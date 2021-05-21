@@ -1001,7 +1001,7 @@ def _get_named_tuple_properties(obj):
 
 def _create_named_tuple(t, unqual_name: str, field_names: List[str], defaults: List[Any]):
     # mypy: namedtuple() expects a string literal as the first argument
-    if sys.version_info > (3,6,0):
+    if sys.version_info < (3,7,0):
         TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[misc]
     else:
         TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[misc]
