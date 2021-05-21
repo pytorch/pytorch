@@ -35,7 +35,7 @@ from .gen_inplace_or_view_type import (
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
                                      tensorT, tensorListT, MutRefCType, OptionalCType,
-                                     ListCType, SpecialArgName, scalarT)
+                                     ListCType, SpecialArgName, scalarT, stringT)
 from tools.codegen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
@@ -610,6 +610,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 name += '_'
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
+            elif type == BaseCType(stringT):
+                expr = f'std::string({expr})'
+            elif type == OptionalCType(BaseCType(stringT)):
+                expr = f'{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt'
             guard = guard_for(arg)
             if guard is None:
                 stmts.append(f'grad_fn->{name} = {expr};')

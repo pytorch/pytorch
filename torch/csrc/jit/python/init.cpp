@@ -31,6 +31,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/integer_value_refinement.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
@@ -55,6 +56,7 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
 #include <torch/csrc/jit/passes/quantization/finalize.h>
 #include <torch/csrc/jit/passes/quantization/fusion_passes.h>
@@ -68,6 +70,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
@@ -161,7 +164,15 @@ void initJITBindings(PyObject* module) {
             ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
           })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
+      .def(
+          "_new_symbolic_shape_symbol",
+          []() { return c10::ShapeSymbol::newSymbol().value(); })
+      .def(
+          "_jit_register_operator_shape_function",
+          RegisterOperatorShapeFunction)
+      .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
+      .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
       .def(
           "_jit_pass_onnx_fold_if",
           [](std::shared_ptr<Graph>& graph) {
@@ -398,6 +409,16 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("graph"),
           py::arg("addmm_fusion_enabled") = false)
+      .def(
+          "_jit_pass_peephole_list_idioms",
+          [](const std::shared_ptr<Graph>& g, bool refine_list_len) {
+            return PeepholeOptimizeListIdioms(g, refine_list_len);
+          },
+          py::arg("graph"),
+          py::arg("refine_list_len") = false)
+      .def(
+          "_jit_pass_refine_integer_values",
+          [](std::shared_ptr<Graph>& g) { return RefineIntegerValues(g); })
       .def(
           "_jit_pass_fuse_addmm",
           [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
@@ -673,6 +694,12 @@ void initJITBindings(PyObject* module) {
           [](bool optimize_cat) {
             using namespace torch::jit::tensorexpr;
             getCatWoConditionals() = optimize_cat;
+          })
+      .def(
+          "_jit_opt_conditionals",
+          [](bool opt_conds) {
+            using namespace torch::jit::tensorexpr;
+            getOptConditionals() = opt_conds;
           })
       .def(
           "_llvm_enabled",
@@ -1057,6 +1084,36 @@ void initJITBindings(PyObject* module) {
         return self.getAllRecords();
       });
 
+  // Used by torch.Package to coordinate deserialization of storages across
+  // ScriptModules and eager modules
+  py::class_<StorageContext, std::shared_ptr<StorageContext>>(
+      m, "StorageContext")
+      .def(py::init<>())
+      .def(
+          "get_storage",
+          [](StorageContext& self,
+             const std::string& name,
+             py::object data_type_obj) {
+            c10::Storage storage = self.getStorage(name);
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
+
+            return at::Tensor(std::move(ptr));
+          })
+      .def(
+          "add_storage",
+          [](StorageContext& self,
+             const std::string& name,
+             const at::Tensor& tensor) {
+            self.addStorage(name, tensor.storage());
+          })
+      .def("has_storage", &StorageContext::hasStorage);
+
   m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
@@ -1373,7 +1430,8 @@ void initJITBindings(PyObject* module) {
                 fut->wait();
               }
             });
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
     toIValue(std::move(obj), type);
