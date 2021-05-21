@@ -3272,12 +3272,12 @@ new_module_tests = [
         module_name='Mish',
         input_size=(),
         desc='scalar',
-        reference_fn=lambda x, *_: x * torch.tanh(torch.softplus(x)),
+        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
     ),
     dict(
         module_name='Mish',
         input_size=(5, 6, 7),
-        reference_fn=lambda x, *_: x * torch.tanh(torch.softplus(x)),
+        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=-1),

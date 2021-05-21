@@ -1025,7 +1025,7 @@ class TestUnaryUfuncs(TestCase):
         special_input = [[-1000, -1, -0.1, 0, 0.5, 1, 2, 1000]]
         input_np = np.concatenate((input_np, special_input), axis=0).astype(
             torch_to_numpy_dtype_dict[dtype])
-        expected_output_np = input_np * scipy.special.expit(input_np)
+        expected_output_np = input_np * np.tanh(np.log10(np.exp(input_np)))
 
         expected_output = torch.from_numpy(expected_output_np).to(device)
         expected_output_noncontig = expected_output.transpose(0, 1)
