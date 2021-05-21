@@ -26,28 +26,6 @@ constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
-// Locates a specific variable by replica index and variable index.
-struct VariableIndex {
-  size_t replica_index;
-  size_t variable_index;
-
-  VariableIndex() = default;
-
-  VariableIndex(size_t replica_index_, size_t variable_index_) {
-    replica_index = replica_index_;
-    variable_index = variable_index_;
-  }
-
-  static size_t hash(const VariableIndex& key) {
-    return c10::get_hash(key.replica_index, key.variable_index);
-  }
-};
-
-inline bool operator==(const VariableIndex& lhs, const VariableIndex& rhs) {
-  return lhs.replica_index == rhs.replica_index
-    && lhs.variable_index == rhs.variable_index;
-}
-
 class Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
@@ -157,7 +135,7 @@ class Reducer {
   // Forward declaration.
   struct Bucket;
 
-  void push_rebuilt_params(const VariableIndex& index);
+  void push_rebuilt_params(const size_t& index);
 
   mutable std::mutex mutex_;
   const std::vector<std::vector<at::Tensor>> replicas_;
@@ -166,7 +144,7 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, VariableIndex>
+  std::unordered_map<torch::autograd::Node*, size_t>
       gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
@@ -178,7 +156,7 @@ class Reducer {
   bool has_marked_unused_parameters_;
   const bool find_unused_parameters_;
   const bool gradient_as_bucket_view_;
-  std::vector<VariableIndex> unused_parameters_;
+  std::vector<size_t> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
   // tensor for each model replica and each tensor is one-dim int32 tensor of
@@ -197,13 +175,13 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
-  void mark_variable_ready_dense(VariableIndex index);
+  void mark_variable_ready_dense(size_t variable_index);
 
-  void mark_variable_ready_sparse(VariableIndex index);
+  void mark_variable_ready_sparse(size_t variable_index);
 
-  void mark_variable_ready(VariableIndex index);
+  void mark_variable_ready(size_t variable_index);
 
-  void autograd_hook(VariableIndex index);
+  void autograd_hook(size_t index);
 
   void mark_bucket_ready(size_t bucket_index);
 
@@ -437,14 +415,14 @@ class Reducer {
 
   bool static_graph_;
 
-  // Key: VariableIndex, Value: the number of times that a variable's autograd_hook()
+  // Key: size_t (index), Value: the number of times that a variable's autograd_hook()
   // should be triggered before marking this variable's grad as ready for communication.
   // Map will not change after 1st iteration.
-  std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMap_;
-  // Key: VariableIndex, Value: the number of times that a variable's autograd_hook()
+  std::unordered_map<size_t, int> numGradHooksTriggeredMap_;
+  // Key: size_t (index), Value: the number of times that a variable's autograd_hook()
   // are left to be triggered before marking this variable's grad as ready for communication.
   // Map will change after 1st iteration to track a grad is ready for communication or not.
-  std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMapPerIteration_;
+  std::unordered_map<size_t, int> numGradHooksTriggeredMapPerIteration_;
 
  private:
   // reset counting for buckets before backward starts
@@ -487,7 +465,7 @@ class Reducer {
   // variable twice, which is unexpected.
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
   // Retrieves parameter corresponding to the given VariableIndex.
-  at::Tensor& get_param_from_index(VariableIndex index);
+  at::Tensor& get_param_from_index(size_t index);
 
   friend class Logger;
 };
