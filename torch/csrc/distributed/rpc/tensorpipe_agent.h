@@ -243,7 +243,7 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       c10::intrusive_ptr<Message> message,
       std::vector<c10::Device>&& devices,
-      std::shared_ptr<LazyStreamContext> ctx,
+      std::vector<c10::Stream> streams,
       std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
@@ -258,7 +258,7 @@ class TensorPipeAgent : public RpcAgent {
       std::shared_ptr<tensorpipe::Pipe>& pipe,
       JitFuture& futureResponseMessage,
       uint64_t messageId,
-      std::shared_ptr<LazyStreamContext> ctx);
+      std::vector<c10::Stream> stream);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(
