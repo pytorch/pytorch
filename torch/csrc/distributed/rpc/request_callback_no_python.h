@@ -23,45 +23,23 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       std::unique_ptr<RpcCommandBase> rpc,
       const MessageType& messageType) const;
 
-  virtual void processScriptCall(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
+  virtual c10::intrusive_ptr<JitFuture> processScriptCall(
+      RpcCommandBase& rpc) const;
 
-  void processScriptCallOp(
-      ScriptCall& scriptCall,
-      const std::function<void(Message)>& markComplete,
-      std::vector<at::IValue>& stack) const;
+  virtual c10::intrusive_ptr<JitFuture> processPythonCall(
+      RpcCommandBase& rpc) const;
 
-  virtual void processPythonCall(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
-
-  void assignOwnerRRef(
+  c10::intrusive_ptr<JitFuture> assignOwnerRRef(
       const RRefId& rrefId,
       const RRefId& forkId,
       c10::intrusive_ptr<JitFuture> valueFuture,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> lsctx) const;
 
   virtual c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
-      ScriptRemoteCall& scriptRemoteCall,
-      std::vector<at::IValue>& stack) const;
+      RpcCommandBase& rpc) const;
 
-  void processBaseScriptRemoteCall(
+  virtual c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
-
-  c10::intrusive_ptr<JitFuture> processScriptRemoteCallOp(
-      ScriptRemoteCall& scriptRemoteCall,
-      std::vector<at::IValue>& stack) const;
-
-  virtual void processPythonRemoteCall(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
   void processScriptRRefFetchCall(

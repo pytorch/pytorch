@@ -136,48 +136,37 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpcWithErrors(
   }
 }
 
-void RequestCallbackNoPython::processScriptCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const c10::intrusive_ptr<JitFuture>& /* unused */) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
+    RpcCommandBase& rpc) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
-  auto& stack = scriptCall.stackRef();
+
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
-  processScriptCallOp(scriptCall, markComplete, stack);
+  auto future = runJitOperator(*scriptCall.op(), scriptCall.stackRef());
+
+  return future->then(
+      [](JitFuture& future) {
+        return c10::make_intrusive<Message>(
+            ScriptResp(future.value()).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
-void RequestCallbackNoPython::processScriptCallOp(
-    ScriptCall& scriptCall,
-    const std::function<void(Message)>& markComplete,
-    std::vector<at::IValue>& stack) const {
-  TORCH_INTERNAL_ASSERT(scriptCall.hasOp());
-  auto future = runJitOperator(*scriptCall.op(), stack);
-  future->addCallback([markComplete](JitFuture& future) {
-    markComplete(ScriptResp(future.value()).toMessage());
-  });
-}
-
-void RequestCallbackNoPython::processPythonCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const c10::intrusive_ptr<JitFuture>& /* unused */) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonCall(
+    RpcCommandBase& rpc) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::processPythonRemoteCall(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonRemoteCall(
     RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const c10::intrusive_ptr<JitFuture>& /* unused */,
     std::shared_ptr<LazyStreamContext> /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::assignOwnerRRef(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
     const RRefId& rrefId,
     const RRefId& forkId,
     c10::intrusive_ptr<JitFuture> valueFuture,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& ctx = RRefContext::getInstance();
 
@@ -201,50 +190,34 @@ void RequestCallbackNoPython::assignOwnerRRef(
     ctx.addForkOfOwner(rrefId, forkId);
   }
 
-  valueFuture->addCallback(
-      [ownerRRef, rrefId, forkId, responseFuture, lsctx = std::move(lsctx)](
-          JitFuture& future) {
+  return valueFuture->then(
+      [ownerRRef, rrefId, forkId, lsctx = std::move(lsctx)](JitFuture& future) {
         if (future.hasError()) {
           ownerRRef->setError(future.exception_ptr());
         } else {
           ownerRRef->recordAllStreams(lsctx);
           ownerRRef->setValue(future.value());
         }
-        responseFuture->markCompleted(c10::make_intrusive<Message>(
-            RemoteRet(rrefId, forkId).toMessage()));
-      });
+        return c10::make_intrusive<Message>(
+            RemoteRet(rrefId, forkId).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
-    ScriptRemoteCall& scriptRemoteCall,
-    std::vector<at::IValue>& stack) const {
+    RpcCommandBase& rpc) const {
+  auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
+
   TORCH_CHECK(
       scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
-  return processScriptRemoteCallOp(scriptRemoteCall, stack);
-}
+  auto future =
+      runJitOperator(*scriptRemoteCall.op(), scriptRemoteCall.stackRef());
 
-void RequestCallbackNoPython::processBaseScriptRemoteCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
-  auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
-  auto& stack = scriptRemoteCall.stackRef();
-  auto jitFuture = processScriptRemoteCall(scriptRemoteCall, stack);
-
-  assignOwnerRRef(
+  return assignOwnerRRef(
       scriptRemoteCall.retRRefId(),
       scriptRemoteCall.retForkId(),
-      std::move(jitFuture),
-      responseFuture,
+      std::move(future),
       /*lsctx=*/nullptr);
-}
-
-c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
-    processScriptRemoteCallOp(
-        ScriptRemoteCall& scriptRemoteCall,
-        std::vector<at::IValue>& stack) const {
-  TORCH_INTERNAL_ASSERT(scriptRemoteCall.hasOp());
-  return runJitOperator(*scriptRemoteCall.op(), stack);
 }
 
 void RequestCallbackNoPython::processScriptRRefFetchCall(
@@ -556,21 +529,16 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
   // to a python object.
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
-      processScriptCall(rpc, markComplete, responseFuture);
-      return responseFuture;
+      return processScriptCall(rpc);
     }
     case MessageType::PYTHON_CALL: {
-      processPythonCall(rpc, markComplete, responseFuture);
-      return responseFuture;
+      return processPythonCall(rpc);
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
-      processBaseScriptRemoteCall(rpc, markComplete, responseFuture);
-      return responseFuture;
+      return processScriptRemoteCall(rpc);
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      processPythonRemoteCall(
-          rpc, markComplete, responseFuture, std::move(ctx));
-      return responseFuture;
+      return processPythonRemoteCall(rpc, std::move(ctx));
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       processScriptRRefFetchCall(rpc, markComplete, responseFuture);
