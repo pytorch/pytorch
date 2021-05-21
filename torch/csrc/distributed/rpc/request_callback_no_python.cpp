@@ -147,22 +147,18 @@ void RequestCallbackNoPython::processScriptCall(
   processScriptCallOp(scriptCall, markComplete, stack);
 }
 
-bool RequestCallbackNoPython::processScriptCallOp(
+void RequestCallbackNoPython::processScriptCallOp(
     ScriptCall& scriptCall,
     const std::function<void(Message)>& markComplete,
     std::vector<at::IValue>& stack) const {
-  if (scriptCall.hasOp()) {
-    scriptCall.op()->getOperation()(&stack);
-    TORCH_INTERNAL_ASSERT(
-        stack.size() == 1,
-        "Return value of a builtin operator or a "
-        "TorchScript function should be a single IValue, got a vector of "
-        "size ",
-        stack.size());
-    markComplete(std::move(ScriptResp(std::move(stack.front()))).toMessage());
-    return true;
-  }
-  return false;
+  TORCH_INTERNAL_ASSERT(scriptCall.hasOp());
+  scriptCall.op()->getOperation()(&stack);
+  TORCH_INTERNAL_ASSERT(
+      stack.size() == 1,
+      "Return value of a builtin operator or a TorchScript function should be "
+      "a single IValue, got a vector of size ",
+      stack.size());
+  markComplete(std::move(ScriptResp(std::move(stack.front()))).toMessage());
 }
 
 TypePtr RequestCallbackNoPython::getScriptRemoteCallType(
@@ -244,32 +240,29 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
   processScriptRemoteCall(scriptRemoteCall, postProcessing, stack, ownerRRef);
 }
 
-bool RequestCallbackNoPython::processScriptRemoteCallOp(
+void RequestCallbackNoPython::processScriptRemoteCallOp(
     ScriptRemoteCall& scriptRemoteCall,
     const std::function<void(void)>& postProcessing,
     std::vector<at::IValue>& stack,
     const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
-  if (scriptRemoteCall.hasOp()) {
-    try {
-      scriptRemoteCall.op()->getOperation()(&stack);
-    } catch (const std::exception& e) {
-      // Don't throw in this call, but rather transfer the exception
-      // to the rref.
-      ownerRRef->setError(std::current_exception());
-      postProcessing();
-      return true;
-    }
-    TORCH_INTERNAL_ASSERT(
-        stack.size() == 1,
-        "Return value of a builtin operator or a "
-        "TorchScript function should be a single IValue, got a vector of "
-        "size ",
-        stack.size());
-    ownerRRef->setValue(std::move(stack.front()));
+  TORCH_INTERNAL_ASSERT(scriptRemoteCall.hasOp());
+  try {
+    scriptRemoteCall.op()->getOperation()(&stack);
+  } catch (const std::exception& e) {
+    // Don't throw in this call, but rather transfer the exception
+    // to the rref.
+    ownerRRef->setError(std::current_exception());
     postProcessing();
-    return true;
+    return;
   }
-  return false;
+  TORCH_INTERNAL_ASSERT(
+      stack.size() == 1,
+      "Return value of a builtin operator or a "
+      "TorchScript function should be a single IValue, got a vector of "
+      "size ",
+      stack.size());
+  ownerRRef->setValue(std::move(stack.front()));
+  postProcessing();
 }
 
 void RequestCallbackNoPython::processScriptRRefFetchCall(
