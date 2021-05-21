@@ -653,14 +653,14 @@ public:
   static inline __m512 hadd_ps(__m512 a, __m512 b) {
   __m512i idx1 = _mm512_set_epi32(30, 14, 28, 12, 26, 10, 24, 8, 22, 6, 20, 4, 18, 2, 16, 0);
   __m512i idx2 = _mm512_set_epi32(31, 15, 29, 13, 27, 11, 25, 9, 23, 7, 21, 5, 19, 3, 17, 1);
-  return _mm512_add_ps(_mm512_mask_permutex2var_ps(a, 0xff, idx1, b),
-                       _mm512_mask_permutex2var_ps(a, 0xff, idx2, b));
+  return _mm512_add_ps(_mm512_mask_permutex2var_ps(a, 0xffff, idx1, b),
+                       _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));
   }
   static inline __m512 hsub_ps(__m512 a, __m512 b) {
   __m512i idx1 = _mm512_set_epi32(30, 14, 28, 12, 26, 10, 24, 8, 22, 6, 20, 4, 18, 2, 16, 0);
   __m512i idx2 = _mm512_set_epi32(31, 15, 29, 13, 27, 11, 25, 9, 23, 7, 21, 5, 19, 3, 17, 1);
-  return _mm512_sub_ps(_mm512_mask_permutex2var_ps(a, 0xff, idx1, b),
-                       _mm512_mask_permutex2var_ps(a, 0xff, idx2, b));
+  return _mm512_sub_ps(_mm512_mask_permutex2var_ps(a, 0xffff, idx1, b),
+                       _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));
   }
   const c10::complex<float>& operator[](int idx) const  = delete;
   c10::complex<float>& operator[](int idx) = delete;
