@@ -65,30 +65,18 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 // - All tensors must be non-overlapping and dense
 // - Resulting tensor must have the same dtype as the input one
 
+// TODO(mkozuki): Consider whether we really need this function or not.
+// Note that, there is a possibility that foreach fastpath supports type promotion in the future,
+// which might complicate the functionality this function should provides.
+// However, as of now, the check of division op with integer inputs is duplicated.
+// `check_fast_path_restrictions` does the same thing in it before calling this function.
 bool will_promote_tensor(const Tensor& tensor, const Scalar& scalar, bool does_op_promote_integer_inputs_to_float = false) {
-  // complex scalar + float/int/bool tensor will result in complex tensor
-  if (scalar.isComplex() && (at::isIntegralType(tensor.scalar_type(), /* includeBool= */true) || at::isFloatingType(tensor.scalar_type())) ) {
-    return true;
-  }
-
-  // float scalar + int/bool tensor will result in float tensor
-  if (scalar.isFloatingPoint() && at::isIntegralType(tensor.scalar_type(), /* includeBool= */true)) {
-    return true;
-  }
-
-  // int scalar + bool tensor will result in int tensor
-  if (scalar.isIntegral(/* includeBool= */false) && tensor.dtype() == at::kBool) {
-    return true;
-  }
-
   // In case of division, integer inputs will result in float
-  if (does_op_promote_integer_inputs_to_float) {
-    if (at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
-      return true;
-    }
+  if (does_op_promote_integer_inputs_to_float &&
+      at::isIntegralType(tensor.scalar_type(), /* includeBool */ true)) {
+    return true;
   }
-  auto result_dtype = at::result_type(tensor, scalar);
-  return result_dtype != tensor.scalar_type();
+  return tensor.scalar_type() != at::native::result_type(scalar, tensor);
 }
 
 // Please, make sure to call check_foreach_api_restrictions before calling this method.
@@ -124,9 +112,11 @@ bool check_fast_path_restrictions(
       }
     }
 
-    // For all j, tensorList[j][0] have the same shape and dtype. (this was a precondition
-    // checked by `check_foreach_api_restrictions`). This means we only need to check if
-    // {tensorList[0][0], tensorList[0][1], tensorList[0][2], ...} do type promotion with scalarLIst.
+    // This function has already checked that `tensorList[j][i]` for all j, i has the same dtype
+    // using `is_tensor_okay` function above.
+    // checked by `check_foreach_api_restrictions`).
+    // This means we only need to check if {tensorList[0][0], tensorList[0][1], tensorList[0][2], ...}
+    // do type promotion with scalarLIst.
     for (int i=0; i < tensorLists[0].size(); i++) {
       if (does_op_promote_integer_inputs_to_float) {
         if (at::isIntegralType(tensorLists[0][i].scalar_type(), /*includeBool*/ true)) {
