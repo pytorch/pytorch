@@ -28,9 +28,8 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       RpcCommandBase& rpc,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
-  void processPythonRRefFetchCall(
+  c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
       RpcCommandBase& rpc,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const override;
@@ -42,9 +41,8 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
 
   bool cudaAvailable() const override;
 
-  void processRRefBackward(
-      RpcCommandBase& rpc,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
+  c10::intrusive_ptr<JitFuture> processRRefBackward(
+      RpcCommandBase& rpc) const override;
 
   // Helpers to run user-defined functions, operators and other computations.
 
