@@ -22,31 +22,6 @@ Message::Message(
       type_(type),
       id_(id) {}
 
-Message::Message(const Message& other) = default;
-
-Message::Message(Message&& other) noexcept = default;
-
-Message& Message::operator=(Message const& rhs) & {
-  auto payload = rhs.payload_;
-  auto tensors = rhs.tensors_;
-  Message(std::move(payload), std::move(tensors), rhs.type_, rhs.id_)
-      .swap(*this);
-  return *this;
-}
-
-Message& Message::operator=(Message&& rhs) & {
-  Message(std::move(rhs.payload_), std::move(rhs.tensors_), rhs.type_, rhs.id_)
-      .swap(*this);
-  return *this;
-}
-
-void Message::swap(Message& rhs) noexcept {
-  std::swap(payload_, rhs.payload_);
-  std::swap(tensors_, rhs.tensors_);
-  std::swap(type_, rhs.type_);
-  std::swap(id_, rhs.id_);
-}
-
 std::vector<char>&& Message::movePayload() && {
   return std::move(payload_);
 }
