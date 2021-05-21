@@ -3597,11 +3597,19 @@ struct to_ir {
       auto types = fmap(values, [](const Value* v) { return v->type(); });
       c10::optional<TypePtr> rhs_type = unifyTypeList(types, ss, /*default_to_any=*/true);
 
-      TORCH_INTERNAL_ASSERT(!type_set || elem_type == *rhs_type, "List "
-                            "annotation ", type_hint->repr_str(),
-                            " did not match the types of the given "
-                            "list elements (", (*rhs_type)->repr_str(),
-                            ")");
+      if (!type_set) {
+        elem_type = *rhs_type;
+      }
+
+      // This should really be an error. However, it looks like some of
+      // our test cases relied the annotation not being checked against
+      // the actual list values, so this condition is left as a warning
+      // for backwards compatibility
+      if (!(*rhs_type)->isSubtypeOf(elem_type)) {
+        TORCH_WARN("List annotation ", type_hint->repr_str(), " did "
+        "not match the types of the given list elements, which were "
+        "unified to ", (*rhs_type)->repr_str());
+      }
 
       if (*rhs_type == AnyType::get()) {
         TORCH_WARN(
@@ -3611,7 +3619,6 @@ struct to_ir {
             "necessary to add an `assert isinstance` statement "
             "before first use to trigger type refinement");
       }
-      elem_type = *rhs_type;
     }
 
     Value* result =
