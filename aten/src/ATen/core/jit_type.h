@@ -1677,6 +1677,12 @@ struct getTypePtr_<std::string> final {
   }
 };
 template <>
+struct getTypePtr_<c10::string_view> final {
+  static TypePtr call() {
+    return StringType::get();
+  }
+};
+template <>
 struct getTypePtr_<at::Dimname> final {
   static TypePtr call() {
     return StringType::get();
