@@ -61,7 +61,8 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
 
   c10::intrusive_ptr<JitFuture> runJitFunction(
       const c10::QualifiedName& name,
-      std::vector<at::IValue>& stack) const;
+      std::vector<at::IValue>& stack,
+      bool isAsyncExecution) const;
 };
 
 } // namespace rpc
