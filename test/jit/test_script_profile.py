@@ -23,10 +23,10 @@ class Sequence(nn.Module):
 
     def forward(self, input):
         outputs = []
-        h_t = torch.zeros(input.size(0), 51, dtype=torch.double)
-        c_t = torch.zeros(input.size(0), 51, dtype=torch.double)
-        h_t2 = torch.zeros(input.size(0), 51, dtype=torch.double)
-        c_t2 = torch.zeros(input.size(0), 51, dtype=torch.double)
+        h_t = torch.zeros(input.size(0), 51)
+        c_t = torch.zeros(input.size(0), 51)
+        h_t2 = torch.zeros(input.size(0), 51)
+        c_t2 = torch.zeros(input.size(0), 51)
 
         for input_t in input.split(1, dim=1):
             h_t, c_t = self.lstm1(input_t, (h_t, c_t))
