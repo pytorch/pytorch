@@ -77,7 +77,7 @@ __device__ void blockReduce(
   } else {
     shared_mem[linear_tid] = init_val;
   }
-  __barrier_sync(0);
+  block_sync::sync();
   // Reduce down to nearest power of 2:
   int np2 = 1 << (31 - __clz(reduction_size));
 
@@ -88,7 +88,7 @@ __device__ void blockReduce(
           shared_mem[linear_tid + np2 * reduction_stride]);
     }
   }
-  __barrier_sync(0);
+  block_sync::sync();
   // loop peel the final iteration to save one syncthread for the end
   for (int factor = np2 / 2; factor > 1; factor >>= 1) {
     if (reduction_tid < factor) {
@@ -96,7 +96,7 @@ __device__ void blockReduce(
           shared_mem[linear_tid],
           shared_mem[linear_tid + factor * reduction_stride]);
     }
-    __barrier_sync(0);
+    block_sync::sync();
   }
 
   if (should_write && read_write_pred) {
@@ -107,5 +107,5 @@ __device__ void blockReduce(
     }
     out = result;
   }
-  __barrier_sync(0);
+  block_sync::sync();
 }

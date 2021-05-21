@@ -1117,6 +1117,12 @@ TEST(NVFuserTest, FusionDependency_CUDA) {
 }
 
 TEST(NVFuserTest, FusionParser_CUDA) {
+  // This test may not pass if using a custom block sync as there may
+  // be additional calls. Skip the test as it's not specifically
+  // relevant with block synchronizatin.
+  if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
+    return;
+  }
   auto g = std::make_shared<Graph>();
   const auto graph0_string = R"IR(
     graph(%0 : Float(2, strides=[1]),
@@ -11576,6 +11582,7 @@ __global__ void kernel1(
     float tmp_M2=0;
     float tmp_avg=0;
     long tmp_N=0;
+    block_sync::init();
     blockWelford<false,true,true>(
         tmp_M2,
         tmp_avg,
@@ -11643,6 +11650,7 @@ __global__ void kernel1(
                     blockIdx.y  * inp.stride[1]+
                     threadIdx.x * inp.stride[2]];
     bool T_pred;
+    block_sync::init();
     T_pred=welford::gridWelford<
         true,true,false,
         true,false,false

@@ -88,7 +88,7 @@ __inline__ __device__ void blockWelford(
     shared_mem_avg[linear_tid] = init_val;
     shared_mem_N[linear_tid] = 0;
   }
-  __barrier_sync(0);
+  block_sync::sync();
   // Reduce down to nearest power of 2:
   int np2 = 1 << (31 - __clz(reduction_size));
   if (reduction_tid < np2) {
@@ -102,7 +102,7 @@ __inline__ __device__ void blockWelford(
           shared_mem_N[linear_tid + np2 * reduction_stride]);
     }
   }
-  __barrier_sync(0);
+  block_sync::sync();
 
   // loop peel the final iteration to save one syncthread for the end
   for (int factor = np2 / 2; factor > 1; factor >>= 1) {
@@ -115,7 +115,7 @@ __inline__ __device__ void blockWelford(
           shared_mem_avg[linear_tid + factor * reduction_stride],
           shared_mem_N[linear_tid + factor * reduction_stride]);
     }
-    __barrier_sync(0);
+    block_sync::sync();
   }
   if (should_write && read_write_pred) {
     T res_M2 = out_M2;
@@ -141,7 +141,7 @@ __inline__ __device__ void blockWelford(
     out_avg = res_avg;
     out_N = res_N;
   }
-  __barrier_sync(0);
+  block_sync::sync();
 }
 // -----------------------------------------------------------------------------------------------
 //  Grid Welford Prototype
@@ -317,13 +317,13 @@ __device__ void gridWelfordLastBlock(
         shared_buf_N,
         true,
         init_val);
-    __barrier_sync(0);
+    block_sync::sync();
     if (tid < rblock_size) {
       shared_buf_M2[tid] = inp_M2_tmp;
       shared_buf_avg[tid] = inp_avg_tmp;
       shared_buf_N[tid] = inp_N_tmp;
     }
-    __barrier_sync(0);
+    block_sync::sync();
     if (should_write) {
       size_t offset_write =
           offset_in_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(
@@ -400,7 +400,7 @@ __device__ bool gridWelford(
       work_buf_N[work_buf_offset] = 0;
     }
   }
-  __barrier_sync(0);
+  block_sync::sync();
 
   __shared__ bool last_block;
   if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
@@ -408,7 +408,7 @@ __device__ bool gridWelford(
     auto old = (int64_t)atomicAdd((unsigned long long*)&sync_flags[seg_idx], 1);
     last_block = old + 1 == seg_size;
   }
-  __barrier_sync(0);
+  block_sync::sync();
 
   if (last_block) {
     // final reduction

@@ -26,6 +26,8 @@ GENERATED_CPP = [
 # NVFuser runtime library
 libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/block_sync_default.cu",
     "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
     "torch/csrc/jit/codegen/cuda/runtime/fp16_support.cu",
     "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",

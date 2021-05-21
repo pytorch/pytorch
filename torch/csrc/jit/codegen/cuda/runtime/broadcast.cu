@@ -39,13 +39,13 @@ __device__ void blockBroadcast(
     shared_mem[shared_offset] = inp_val;
   }
 
-  __barrier_sync(0);
+  block_sync::sync();
 
   if (read_write_pred) {
     out = shared_mem[shared_offset];
   }
 
-  __barrier_sync(0);
+  block_sync::sync();
 }
 
 } // namespace broadcast

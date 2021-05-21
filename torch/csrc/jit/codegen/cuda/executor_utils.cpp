@@ -14,6 +14,8 @@
 
 #include <nvfuser_resources/PhiloxCudaStateRaw.h>
 #include <nvfuser_resources/block_reduction.h>
+#include <nvfuser_resources/block_sync_atomic.h>
+#include <nvfuser_resources/block_sync_default.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/grid_reduction.h>
@@ -40,6 +42,11 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
+  if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
+    ss << nvfuser_resources::block_sync_atomic_cu;
+  } else {
+    ss << nvfuser_resources::block_sync_default_cu;
+  }
   ss << nvfuser_resources::block_reduction_cu;
   ss << nvfuser_resources::grid_reduction_cu;
   ss << nvfuser_resources::broadcast_cu;

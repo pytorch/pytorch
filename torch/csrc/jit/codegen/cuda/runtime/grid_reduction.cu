@@ -231,12 +231,12 @@ __device__ void gridReduceLastBlock(
         shared_buf,
         true,
         init_val);
-    __barrier_sync(0);
+    block_sync::sync();
     inp = inp_tmp;
     if (tid < rblock_size) {
       shared_buf[tid] = inp;
     }
-    __barrier_sync(0);
+    block_sync::sync();
     if (should_write) {
       inp = shared_buf[offset_in_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(
           threadIdx, blockDim)];
@@ -345,7 +345,7 @@ __device__ bool gridReduce(
       work_buf[work_buf_offset] = init_val;
     }
   }
-  __barrier_sync(0);
+  block_sync::sync();
 
   __shared__ bool last_block;
   if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
@@ -355,7 +355,7 @@ __device__ bool gridReduce(
     last_block = old + 1 == seg_size;
     // printf("Last_block = %d + 1 == %d\n", (int)old, (int)seg_size);
   }
-  __barrier_sync(0);
+  block_sync::sync();
 
   if (last_block) {
     // printf("Last block %d %d %d %d\n", blockIdx.x, blockIdx.y, blockIdx.z);

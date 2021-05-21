@@ -166,6 +166,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
         }
       }
     }
+
+    // Call the initialization function if using a custom block sync
+    if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
+      indent() << "block_sync::init();\n";
+    }
   }
 
   void genBody() {
@@ -1040,7 +1045,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::Sync* node) final {
-    indent() << "__barrier_sync(0);\n";
+    // Use a custom synchronization method if enabled
+    if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
+      indent() << "block_sync::sync();\n";
+    } else {
+      indent() << "__barrier_sync(0);\n";
+    }
   }
 
  private:
