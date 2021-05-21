@@ -1776,7 +1776,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 
-    if exlude_zero:
+    if exclude_zero:
         if dtype in integral_types() or dtype is torch.bool:
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in floating_types_and(torch.half, torch.bfloat16):

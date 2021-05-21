@@ -2775,7 +2775,7 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autod
     def generator():
         for shape, arg_other, broadcasts_input in samples:
             if isinstance(arg_other, tuple):
-                arg = make_arg(arg_other, requires_grad=False, exclude_values=[0])
+                arg = make_arg(arg_other, requires_grad=False, exclude_zero=True)
             else:
                 # shape_other is scalar or torch.tensor
                 arg = arg_other
