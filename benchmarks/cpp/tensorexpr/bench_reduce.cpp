@@ -266,9 +266,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(BT);
     te::For* m = loops[1];
-    te::For* mi;
-    te::For* tail;
-    loop.splitWithTail(m, kChunkSize, &mi, &tail);
+    loop.splitWithTail(m, kChunkSize);
   }
 
   loop.prepareForCodegen();
@@ -309,8 +307,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(BT);
     te::For* m = loops[1];
-    te::For* mi;
-    loop.splitWithMask(m, kChunkSize, &mi);
+    loop.splitWithMask(m, kChunkSize);
   }
 
   loop.prepareForCodegen();

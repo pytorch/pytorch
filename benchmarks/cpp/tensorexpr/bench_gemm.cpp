@@ -81,14 +81,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     te::For* m = loops[0];
-    te::For* mi;
-    loop.splitWithMask(m, 32, &mi);
+    loop.splitWithMask(m, 32);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     te::For* n = loops[2];
-    te::For* ni;
-    loop.splitWithMask(n, 32, &ni);
+    loop.splitWithMask(n, 32);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
@@ -143,14 +141,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     te::For* m = loops[0];
-    te::For* mi;
-    loop.splitWithMask(m, 4, &mi);
+    loop.splitWithMask(m, 4);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     te::For* n = loops[2];
-    te::For* ni;
-    loop.splitWithMask(n, 16, &ni);
+    loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
@@ -205,14 +201,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     te::For* m = loops[0];
-    te::For* mi;
-    loop.splitWithMask(m, 4, &mi);
+    loop.splitWithMask(m, 4);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     te::For* n = loops[2];
-    te::For* ni;
-    loop.splitWithMask(n, 16, &ni);
+    loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
@@ -275,14 +269,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16Cache)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     te::For* m = loops[0];
-    te::For* mi;
-    loop.splitWithMask(m, 4, &mi);
+    loop.splitWithMask(m, 4);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     te::For* n = loops[2];
-    te::For* ni;
-    loop.splitWithMask(n, 16, &ni);
+    loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
