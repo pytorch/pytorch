@@ -129,6 +129,8 @@ bool check_fast_path_restrictions(
           return false;
         }
       } else if (scalarList.size() > 1) {
+        // FIXME(mkozuki): Consider specializing `TensorListScalarListMetadata` for complex dtypes
+        // to access the following comment.
         // Complex scalar list is not supported due to the limit for kernel launch argument (4KB)
         if (scalarList[i].isComplex()) {
           return false;
