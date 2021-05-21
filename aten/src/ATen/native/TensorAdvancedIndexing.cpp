@@ -1176,7 +1176,7 @@ TORCH_IMPL_FUNC(scatter_add)
  const Tensor& out) {
   auto mut_out = const_cast<Tensor&>(out);
 
-  if (&self != &mut_out) {
+  if (!self.is_same(mut_out)) {
     mut_out.copy_(self);
   }
 
