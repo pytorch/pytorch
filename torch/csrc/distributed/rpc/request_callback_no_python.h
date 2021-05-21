@@ -42,14 +42,15 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
-  void processScriptRRefFetchCall(
-      RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
+  c10::intrusive_ptr<JitFuture> retrieveOwnerRRef(
+      const RRefId& rrefId,
+      std::shared_ptr<LazyStreamContext> lsctx) const;
 
-  virtual void processPythonRRefFetchCall(
+  c10::intrusive_ptr<JitFuture> processScriptRRefFetchCall(
+      RpcCommandBase& rpc) const;
+
+  virtual c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
       RpcCommandBase& rpc,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
   void processRRefUserDelete(
@@ -98,9 +99,8 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
 
   virtual bool cudaAvailable() const;
 
-  virtual void processRRefBackward(
-      RpcCommandBase& rpc,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const;
+  virtual c10::intrusive_ptr<JitFuture> processRRefBackward(
+      RpcCommandBase& rpc) const;
 
   // Helpers to run user-defined functions, operators and other computations.
 
