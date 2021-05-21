@@ -14,7 +14,6 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
-#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -24,7 +23,6 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
-#include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -2083,53 +2081,6 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
-
-  torch::class_<SourceRef>("profiling", "SourceRef")
-      .def(
-          "starting_lineno",
-          [](const c10::intrusive_ptr<SourceRef>& self) {
-            return static_cast<int64_t>((*self)->starting_line_no());
-          })
-      .def("text", [](const c10::intrusive_ptr<SourceRef>& self) {
-        return (*self)->text();
-      });
-
-  torch::class_<InstructionStats>("profiling", "InstructionStats")
-      .def(
-          "count",
-          [](const c10::intrusive_ptr<InstructionStats>& self) {
-            return self->count;
-          })
-      .def("duration_ns", [](const c10::intrusive_ptr<InstructionStats>& self) {
-        return self->duration.count();
-      });
-
-  torch::class_<SourceStats>("profiling", "SourceStats")
-      .def(
-          "source",
-          [](const c10::intrusive_ptr<SourceStats>& self) {
-            return c10::make_intrusive<SourceRef>(self->getSourceRef());
-          })
-      .def("line_map", &SourceStats::getLineMap);
-
-  torch::class_<ScriptProfile>("profiling", "_ScriptProfile")
-      .def(torch::init<>())
-      .def("enable", &ScriptProfile::enable)
-      .def("disable", &ScriptProfile::disable)
-      .def("_dump_stats", [](const c10::intrusive_ptr<ScriptProfile>& self) {
-        const auto& stats = self->dumpStats();
-        c10::List<c10::intrusive_ptr<SourceStats>> ret;
-        for (const auto& source : stats) {
-          SourceStats::LineMap lineMap;
-          for (const auto& line : source.second) {
-            lineMap.insert(
-                line.first, c10::make_intrusive<InstructionStats>(line.second));
-          }
-          ret.push_back(c10::make_intrusive<SourceStats>(
-              source.first, std::move(lineMap)));
-        }
-        return ret;
-      });
 }
 } // namespace jit
 } // namespace torch
