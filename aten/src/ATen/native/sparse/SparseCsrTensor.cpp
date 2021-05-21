@@ -84,6 +84,38 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
       TORCH_CHECK(size[1] > col_indices.max().item<index_t>(), "size(1) should be greater than col_indices.max()");
     }
   });
+
+  // CSR Type Invariants
+  auto crow_indices_type = crow_indices.scalar_type();
+  auto col_indices_type = col_indices.scalar_type();
+  TORCH_CHECK(
+      crow_indices_type == col_indices_type,
+      "both crow_indices and col_indices should have the same type.");
+  TORCH_CHECK(
+      crow_indices_type == kInt || crow_indices_type == kLong,
+      "crow_indices and col_indices must be an int32 or int64 type, but got: ",
+      crow_indices_type);
+
+  // CSR Device Invariants
+  TORCH_CHECK(
+      col_indices.get_device() == crow_indices.get_device(),
+      "crow_indices and col_indices devices (",
+      crow_indices.get_device(),
+      ", ",
+      col_indices.get_device(),
+      ") must match");
+  TORCH_CHECK(
+      crow_indices.get_device() == values.get_device(),
+      "device of crow_indices (",
+      crow_indices.get_device(),
+      ") must match device of values (",
+      values.get_device(),
+      ")");
+  TORCH_CHECK(
+      values.device().type() == kCPU || values.device().type() == kCUDA,
+      "device type of values (",
+      values.device().type(),
+      ") must be CPU or CUDA");
 }
 
 // Construction of CSR tensors.
