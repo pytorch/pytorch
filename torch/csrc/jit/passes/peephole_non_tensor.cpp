@@ -114,6 +114,26 @@ struct PeepholeOptimizeNonTensorImpl {
           node->output()->replaceAllUsesWith(node->input());
           changed = true;
         }
+      } else if (node->kind() == aten::ne || node->kind() == aten::eq) {
+        if (node->inputs().size() != 2 ||
+            node->inputs().at(0) != node->inputs().at(1)) {
+          continue;
+        }
+        auto inp_kind = node->inputs().at(0)->type()->kind();
+        // only handling common immutable types here because other types like
+        // Tensor or list of Tensor might throw on aten::eq
+        switch (inp_kind) {
+          case TypeKind::BoolType:
+          case TypeKind::IntType:
+          case TypeKind::FloatType: {
+            WithInsertPoint guard(node);
+            node->output()->replaceAllUsesWith(
+                graph_->insertConstant(node->kind() == aten::eq));
+            changed = true;
+          }
+          default:
+            break;
+        }
       }
     }
     return changed;
