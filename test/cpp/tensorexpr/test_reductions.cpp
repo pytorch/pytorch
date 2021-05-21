@@ -624,19 +624,9 @@ TEST(Reductions, SplitNonReduceAxis) {
   std::vector<float> out(16, -1.f);
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[0], 2, &x_inner, &x_tail);
-  For* x_outer = loops[0];
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_1;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail_2;
-  l.splitWithTail(x_outer, 2, &x_1, &x_tail_2);
+  l.splitWithTail(loops[0], 2);
+  l.splitWithTail(loops[0], 2);
 
   l.prepareForCodegen();
 
