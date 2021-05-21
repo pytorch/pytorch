@@ -79,6 +79,7 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   std::vector<py::object> pyArgs;
   std::vector<py::object> pyTensorArgs;
   std::vector<torch::jit::IValue> unwrappedArgs;
+
   for (unsigned idx = 0; idx < arguments.size(); idx++) {
     const auto ivalue = arguments[idx];
     if (ivalue.isTensor() && isPythonTensor(ivalue.toTensor())) {
