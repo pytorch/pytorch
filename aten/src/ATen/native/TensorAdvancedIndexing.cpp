@@ -95,13 +95,15 @@ void scatter_meta_impl(
   at::native::scatter_gather_dtype_check("scatter", self, index, src);
   at::native::scatter_shape_check(self, wrapped_dim, index, src);
 
-  if (src.has_value()) {
-    at::assert_no_overlap(self, src.value());
-  }
-
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
   meta.set_output(self.sizes(), self.options());
+
+  auto output = meta.maybe_get_output(0);
+  at::assert_no_internal_overlap(output);
+  at::assert_no_overlap(output, index);
+
+  if (src.has_value()) {
+    at::assert_no_overlap(output, src.value());
+  }
 
   if (reduce.has_value()) {
     auto op = get_operator_enum(reduce.value());
@@ -1106,7 +1108,7 @@ void scatter_impl(
     const c10::optional<c10::string_view> reduce = nullopt) {
   auto mut_out = const_cast<Tensor&>(out);
 
-  if (&self != &mut_out) {
+  if (!self.is_same(mut_out)) {
     mut_out.copy_(self);
   }
 
