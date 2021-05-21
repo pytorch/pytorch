@@ -241,8 +241,7 @@ void Logger::set_runtime_stats_and_log() {
   // unused_parameters_ is calculated in forward call of
   // each iteration.
   for (const auto& unused_index : reducer_->unused_parameters_) {
-    const auto& v = reducer_->replicas_[unused_index.replica_index]
-                                       [unused_index.variable_index];
+    const auto& v = reducer_->replicas_[0][unused_index];
     ddp_logging_data_->ints_map["unused_parameter_size"] +=
         v.numel() * v.element_size();
   }
