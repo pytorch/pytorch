@@ -216,7 +216,7 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
         _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(timeout=timeout))
-        pg = c10d.create_process_group_wrapper(
+        pg = c10d._create_process_group_wrapper(
             _pg,
             "unused",
             store,

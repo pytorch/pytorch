@@ -187,7 +187,7 @@ class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
             timeout=timedelta(seconds=timeout)
         )
         _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
-        pg = c10d.create_process_group_wrapper(
+        pg = c10d._create_process_group_wrapper(
             _pg,
             "unused",
             store,

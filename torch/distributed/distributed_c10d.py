@@ -50,7 +50,7 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupGloo
-    from torch._C._distributed_c10d import ProcessGroupWrapper
+    from torch._C._distributed_c10d import _ProcessGroupWrapper
 except ImportError:
     _GLOO_AVAILABLE = False
 
@@ -2602,7 +2602,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
 
-def create_process_group_wrapper(
+def _create_process_group_wrapper(
     wrapped_pg: ProcessGroup,
     store_prefix: str,
     store: Store,
@@ -2620,7 +2620,7 @@ def create_process_group_wrapper(
         timeout=timeout
     )
     # Wrap the underlying pg with ProcessGroupWrapper.
-    wrapped_pg = ProcessGroupWrapper(wrapped_pg, helper_pg)
+    wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):

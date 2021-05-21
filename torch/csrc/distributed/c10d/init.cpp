@@ -1308,7 +1308,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
     // checking the op type and input tensor shapes.
     auto processGroupWrapper =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
-          module, "ProcessGroupWrapper", processGroup)
+          module, "_ProcessGroupWrapper", processGroup)
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                           const c10::intrusive_ptr<::c10d::ProcessGroupGloo>&
