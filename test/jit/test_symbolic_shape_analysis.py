@@ -72,8 +72,8 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         prop_shapes_on_graph([sym1, 1, sym3], [1, sym2, sym3])
         output_shape = foo.graph.findNode("aten::mul").output().type().symbolic_sizes()
         self.assertEqual(output_shape[1], sym2)
-        # TODO: output_shape[0] == sym1, output_shape[2] == sym3
-        # both require additional cleanup / optimization passes
+        self.assertEqual(output_shape[2], sym3)
+        # TODO: output_shape[0] == sym1,
 
     def test_sharing_of_list_len(self):
         # testing generic sharing of logic, a la _convolution and conv2s

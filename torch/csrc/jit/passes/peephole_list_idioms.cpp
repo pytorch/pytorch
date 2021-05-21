@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
+#include <torch/csrc/jit/passes/value_refinement_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -22,126 +23,7 @@ c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   }
 }
 
-// Refine from Value of type List -> len of list
-// If a refinement mapping of List Value * -> len is present in a block
-// the list is guaranteed to be that length
-// TODO: vector may be faster
-using ListRefinement = std::unordered_map<Value*, int64_t>;
-
-// The intersection of the refinements is the Value* which are in both
-// refinements and are refined to the same length
-// in an example like:
-// if cond:
-//    x = len(a) == 4 and len(b) == 5
-// else:
-//    x = len(a) == 4
-// For the x output of the node we take the intersection between
-// the refinements stored on each block output, which will result
-// in only the refinement of len(a) == 4
-
-ListRefinement intersectRefinements(
-    const ListRefinement& ref1,
-    const ListRefinement& ref2) {
-  ListRefinement out;
-  for (const auto& pair : ref1) {
-    auto val2 = ref2.find(pair.first);
-    if (val2 != ref2.end() && val2->second == pair.second) {
-      out[pair.first] = pair.second;
-    }
-  }
-  return out;
-}
-
-// To union, just take all refinements from both inputs. We do not need to worry
-// about len refinements disagreeing because a path like `if len(x) == 4 and
-// len(x) == 5` will never be taken
-// in an example like:
-// if len(a) == 5:
-//     x = len(b) == 4
-// else:
-//     x = False
-// For the output x Value, if is true then the refinements present in the true
-// block must also be true, so we take the union of `len(a) == 5` and len(b) ==
-// 4` and assign them to true refinements of the output x value. This is a very
-// common pattern in desugaring of `and` or `or` boolean expressions
-
-ListRefinement unionRefinements(
-    const ListRefinement& ref1,
-    const ListRefinement& ref2) {
-  ListRefinement out = ref1;
-  out.insert(ref2.begin(), ref2.end());
-  return out;
-}
-
-// Represents the refinement information that can be carried on a boolean
-struct BooleanRefinementMapping {
-  BooleanRefinementMapping(
-      ListRefinement true_refine,
-      ListRefinement false_refine)
-      : true_refine_(std::move(true_refine)),
-        false_refine_(std::move(false_refine)){};
-  BooleanRefinementMapping() = default; // empty
-
-  static BooleanRefinementMapping FalseRefinements(
-      ListRefinement false_refine) {
-    return BooleanRefinementMapping({}, std::move(false_refine));
-  }
-
-  static BooleanRefinementMapping TrueRefinements(ListRefinement true_refine) {
-    return BooleanRefinementMapping(std::move(true_refine), {});
-  }
-
-  BooleanRefinementMapping intersectBooleanRefinementMapping(
-      BooleanRefinementMapping& other) {
-    return BooleanRefinementMapping(
-        intersectRefinements(true_refine_, other.true_refine()),
-        intersectRefinements(false_refine_, other.false_refine()));
-  }
-
-  ListRefinement& true_refine() {
-    return true_refine_;
-  }
-
-  ListRefinement& false_refine() {
-    return false_refine_;
-  }
-
- private:
-  ListRefinement true_refine_;
-  ListRefinement false_refine_;
-};
-
-// When a comparison like `cond = len(x) == 4` or `cond = len(x) != 4` is made,
-// `cond` value carries information (refinements) about the len of `x`.
-// When `cond` is used as the conditional of an if statement, the information
-// it carries for its true value can be inserted into the true block
-// and the same for its false value.
-// For something like `y = len(x) if len(x) == 1 else 1`, in the true branch
-// we can replace len(x) with 1 because the true refinements from `len(x) == 1`
-// will be present in the true block.
-// Additionally, we can optimize something like:
-// if len(x) != 4:
-//    raise Exception(...)
-// return len(x)
-// Because the true block always throws, whatever refinements exist in the false
-// block become present in the owning block of the if node. We can also merge
-// refinements carried by two different booleans across an if node join by
-// taking the intersections of their refinements.
-// if cond:
-//    z = len(x) == 4 and len(y) == 5
-// else:
-//    z = len(x) == 4
-// Here, z's true value will refine the len(x) to 4, but not len(y).
-// If the code was written as:
-// if cond:
-//    z = len(x) == 4 and len(y) == 5
-// else:
-//    z = False
-//
-// Then z's true value would refine x and y, because if z is true it had to have
-// come from the true block. Code that is written with `and` or `or` will
-// desugar to something similar. Additionally, any True refinements that were
-// present on `cond` can also be associated with the if node True output value.
+// see [value refinement algorithm]
 
 struct ListLenRefiner {
   ListLenRefiner(
@@ -208,53 +90,14 @@ struct ListLenRefiner {
               ? BooleanRefinementMapping::TrueRefinements(std::move(refine))
               : BooleanRefinementMapping::FalseRefinements(std::move(refine));
         }
-      }
-      if (n->kind() == prim::RaiseException) {
-        throwing_blocks_.insert(b);
-      }
-      if (n->kind() == aten::len) {
+      } else if (n->kind() == aten::len) {
         if (auto maybe_len = tryFindRefinement(n->input(0))) {
           changed_ = true;
           WithInsertPoint guard(n);
           n->output()->replaceAllUsesWith(
               graph_->insertConstant(static_cast<int64_t>(*maybe_len)));
         }
-      }
-      if (n->kind() == aten::__not__ &&
-          n->inputs().at(0)->type()->cast<BoolType>()) {
-        // __not__(inp) -> reverse refinements
-        if (boolean_value_refinements_.count(n->input())) {
-          auto& input_ref = boolean_value_refinements_[n->input()];
-          boolean_value_refinements_[n->output()] = BooleanRefinementMapping(
-              input_ref.false_refine(), input_ref.true_refine());
-        }
-      }
-      if (n->matches("aten::eq(bool a, bool b) -> bool") ||
-          (n->matches("aten::ne(bool a, bool b) -> bool"))) {
-        for (size_t const_index : {0, 1}) {
-          if (n->input(const_index)->node()->kind() != prim::Constant) {
-            continue;
-          }
-          auto const_input = constant_as<bool>(n->input(const_index)).value();
-          auto non_const_input = n->input(1 - const_index);
-          if (!boolean_value_refinements_.count(non_const_input)) {
-            continue;
-          }
-          // value == False / value != True -> equivalent to __not__ value
-          // value == True / value != False -> equivalent to value
-          auto& input_ref = boolean_value_refinements_[non_const_input];
-          if ((!const_input && n->kind() == aten::eq) ||
-              (const_input && n->kind() == aten::ne)) {
-            boolean_value_refinements_[n->output()] = BooleanRefinementMapping(
-                input_ref.false_refine(), input_ref.true_refine());
-          } else {
-            boolean_value_refinements_[n->output()] = BooleanRefinementMapping(
-                input_ref.true_refine(), input_ref.false_refine());
-          }
-        }
-      }
-
-      if (n->kind() == prim::If) {
+      } else if (n->kind() == prim::If) {
         IfView if_n(n);
         bool has_cond_ref = boolean_value_refinements_.count(if_n.cond()) != 0;
         ListRefinement empty;
@@ -267,106 +110,17 @@ struct ListLenRefiner {
             has_cond_ref
                 ? boolean_value_refinements_[if_n.cond()].false_refine()
                 : empty);
-        bool true_block_throws = throwing_blocks_.count(if_n.thenBlock());
-        bool false_block_throws = throwing_blocks_.count(if_n.elseBlock());
 
-        // if one block throws, the refinements for the other block
-        // become present in the current block, and all bool outputs
-        // of the if node take their refinements from non throwing block
-        // output
-
-        if (true_block_throws || false_block_throws) {
-          if (true_block_throws && false_block_throws) {
-            throwing_blocks_.insert(b);
-            continue;
-          }
-          if (true_block_throws) {
-            block_refinements.insert(
-                false_block_refinements.begin(), false_block_refinements.end());
-          } else {
-            block_refinements.insert(
-                true_block_refinements.begin(), true_block_refinements.end());
-          }
-          Block* non_throwing_block =
-              true_block_throws ? n->blocks().at(1) : n->blocks().at(0);
-          for (size_t i = 0; i < if_n.outputs().size(); ++i) {
-            if (boolean_value_refinements_.count(
-                    non_throwing_block->outputs().at(i))) {
-              boolean_value_refinements_[n->outputs().at(i)] =
-                  boolean_value_refinements_[non_throwing_block->outputs().at(
-                      i)];
-            }
-          }
-          continue;
-        }
-
-        for (size_t i = 0; i < if_n.outputs().size(); ++i) {
-          if (!(if_n.outputs().at(i)->type() == BoolType::get())) {
-            continue;
-          }
-          Value* true_v = if_n.thenOutputs().at(i);
-          Value* false_v = if_n.elseOutputs().at(i);
-
-          if (!boolean_value_refinements_.count(true_v) &&
-              !boolean_value_refinements_.count(false_v) &&
-              !constant_as<bool>(true_v) && !constant_as<bool>(false_v)) {
-            continue;
-          }
-
-          // if either block has a constant bool output, e.g. `true` on the
-          // true block, then for the `false` value we can take the false
-          // refinements present on the false block and from the other block
-          // output value bc if the output is false it had to have come from the
-          // false block. if len(a) == 5:
-          //     x = len(b) == 4
-          // else:
-          //     x = False
-          // if x is true, then we know both len(a) == 5 and len(b) == 4
-          //
-          // if neither block has a constant bool value, we just take the
-          // intersection of the refinements from boolean outputs.
-          // if cond:
-          //    x = len(a) == 4 and len(b) == 5
-          // else:
-          //    x = len(a) == 4
-          // here, we know if x is true, then len(a) == 4, but not len(b)
-          // == 5, because that refinement is not present in the true block.
-          // TODO: could also take intersection of refinements present in
-          // both blocks, but it's not a real use case.
-
-          // boolean_value_refinements_[value] is safe to access because
-          // BooleanRefinementMapping has a default constructor
-
-          BooleanRefinementMapping out;
-          if (auto maybe_bool = constant_as<bool>(true_v)) {
-            if (*maybe_bool) {
-              out = BooleanRefinementMapping::FalseRefinements(unionRefinements(
-                  boolean_value_refinements_[false_v].false_refine(),
-                  false_block_refinements));
-            } else {
-              out = BooleanRefinementMapping::TrueRefinements(unionRefinements(
-                  boolean_value_refinements_[false_v].true_refine(),
-                  false_block_refinements));
-            }
-          } else if (auto maybe_bool = constant_as<bool>(false_v)) {
-            if (*maybe_bool) {
-              out = BooleanRefinementMapping::FalseRefinements(unionRefinements(
-                  boolean_value_refinements_[true_v].false_refine(),
-                  true_block_refinements));
-            } else {
-              out = BooleanRefinementMapping::TrueRefinements(unionRefinements(
-                  boolean_value_refinements_[true_v].true_refine(),
-                  true_block_refinements));
-            }
-          } else if (
-              boolean_value_refinements_.count(true_v) &&
-              boolean_value_refinements_.count(false_v)) {
-            out = boolean_value_refinements_[true_v]
-                      .intersectBooleanRefinementMapping(
-                          boolean_value_refinements_[false_v]);
-          }
-          boolean_value_refinements_[if_n.outputs().at(i)] = out;
-        }
+        joinIfRefinements(
+            n,
+            throwing_blocks_,
+            block_refinements,
+            true_block_refinements,
+            false_block_refinements,
+            boolean_value_refinements_);
+      } else {
+        handleCommonRefinentOperators(
+            n, throwing_blocks_, boolean_value_refinements_);
       }
     }
     active_refinements_.pop_back();
