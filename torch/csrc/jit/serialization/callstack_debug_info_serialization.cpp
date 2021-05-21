@@ -208,7 +208,7 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
     const auto tup_elems = val.toTuple()->elements();
     TORCH_CHECK(
         tup_elems.size() == 4,
-        "Pickled map must have three elements: "
+        "Pickled map must have four elements: "
         "debug_handle, source_range_tag, op name, IValue(inlined_call_stack)");
     int64_t debug_handle = tup_elems[0].toInt();
     int64_t source_range_tag = tup_elems[1].toInt();
