@@ -207,9 +207,11 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/normalize_ops.cpp",
     "torch/csrc/jit/passes/peephole_list_idioms.cpp",
+    "torch/csrc/jit/passes/value_refinement_utils.cpp",
     "torch/csrc/jit/passes/peephole_alias_sensitive.cpp",
     "torch/csrc/jit/passes/pass_manager.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
+    "torch/csrc/jit/passes/peephole_non_tensor.cpp",
     "torch/csrc/jit/passes/create_functional_graphs.cpp",
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
@@ -222,6 +224,8 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/remove_dropout.cpp",
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
+    "torch/csrc/jit/passes/integer_value_refinement.cpp",
+    "torch/csrc/jit/passes/symbolic_shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
     "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
     "torch/csrc/jit/passes/subgraph_rewrite.cpp",
@@ -248,7 +252,6 @@ core_sources_full_mobile = [
     "torch/csrc/jit/runtime/logging.cpp",
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_record.cpp",
-    "torch/csrc/jit/runtime/script_profile.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
@@ -783,7 +786,7 @@ aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
 ]
 
-# When buliding lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
+# When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
 # codegen process. The codegen version of this file, like Activation.cpp.DEFAULT.cpp, will be included
 # in ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt. As a result, in aten/src/ATen/CMakeLists.txt,
 # only aten_cpu_source_non_codegen_list need to be added to ${all_cpu_cpp}.

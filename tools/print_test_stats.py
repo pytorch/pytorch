@@ -951,4 +951,7 @@ if __name__ == '__main__':
         head_json = obj
         if args.use_json:
             head_json = json.loads(Path(args.use_json).read_text())
-        print_regressions(head_json, num_prev_commits=args.num_prev_commits)
+        try:
+            print_regressions(head_json, num_prev_commits=args.num_prev_commits)
+        except Exception as e:
+            print(f"ERROR ENCOUNTERED WHEN COMPARING AGAINST S3: {e}")
