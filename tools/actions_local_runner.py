@@ -100,7 +100,7 @@ async def shell_cmd(
     redirect: bool = True,
 ) -> Tuple[bool, str, str]:
     if isinstance(cmd, list):
-        cmd_str = shlex.join(cmd)  # type: ignore[attr-defined]
+        cmd_str = ' '.join(shlex.quote(arg) for arg in cmd)
     else:
         cmd_str = cmd
 
@@ -346,11 +346,8 @@ def main() -> None:
         relevant_steps = grab_specific_steps(args.step, job)
         future = run_steps(relevant_steps, args.job, relevant_files, quiet)
 
-    if sys.version_info >= (3, 8):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(future)
-    else:
-        raise RuntimeError("Only Python >=3.8 is supported")
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(future)
 
 
 # These are run differently locally in order to enable quicklint, so dispatch
