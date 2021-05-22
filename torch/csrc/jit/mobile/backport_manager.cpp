@@ -314,22 +314,31 @@ bool BackportManager::backport(
       return false;
     }
 
-    auto input_model_stream_version = _get_model_bytecode_version(input_model_stream);
+    auto input_model_stream_version =
+        _get_model_bytecode_version(input_model_stream);
 
-    if(input_model_stream_version != bytecode_version){
-      TORCH_WARN("The bytecode version of input model stream is supposed to be ", bytecode_version, ", but it gets ", input_model_stream_version);
+    if (input_model_stream_version != bytecode_version) {
+      TORCH_WARN(
+          "The bytecode version of input model stream is supposed to be ",
+          bytecode_version,
+          ", but it gets ",
+          input_model_stream_version);
     }
 
     // Keep backporting till request version
     backport_success &= bytecodeBackportFunctions()[bytecode_version--](
         input_model_stream, output_model_stream);
 
-    auto output_model_stream_version = _get_model_bytecode_version(output_model_stream);
+    auto output_model_stream_version =
+        _get_model_bytecode_version(output_model_stream);
 
-    if(output_model_stream_version != bytecode_version){
-      TORCH_WARN("The bytecode version of output model stream is supposed to be ", bytecode_version, ", but it gets ", output_model_stream_version);
+    if (output_model_stream_version != bytecode_version) {
+      TORCH_WARN(
+          "The bytecode version of output model stream is supposed to be ",
+          bytecode_version,
+          ", but it gets ",
+          output_model_stream_version);
     }
-
   }
 
   // 3) Write the final output_model_stream to final_writer, final_writer has
