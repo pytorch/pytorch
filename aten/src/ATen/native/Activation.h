@@ -11,6 +11,7 @@ struct TensorIterator;
 namespace native {
 
 using structured_activation_fn = void (*)(TensorIteratorBase&);
+using structured_activation_backward_fn = void (*)(TensorIteratorBase&);
 
 using activation_fn = void (*)(TensorIterator&);
 using activation_backward_fn = void (*)(TensorIterator&);
