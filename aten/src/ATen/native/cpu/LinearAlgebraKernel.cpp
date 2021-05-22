@@ -39,7 +39,7 @@ void addr_kernel(TensorIterator &iter,
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf,
     iter.dtype(), "addr_cpu", [&]() {
-      using Vec = Vec256<scalar_t>;
+      using Vec = Vectorized<scalar_t>;
 
       auto beta_val = beta.to<scalar_t>();
       auto alpha_val = alpha.to<scalar_t>();
