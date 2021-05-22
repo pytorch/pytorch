@@ -31,8 +31,8 @@ class BackportManager final {
   std::unordered_map<
       int64_t,
       std::function<bool(
-          std::istringstream&,
-          std::ostringstream&)>>&
+          std::stringstream&,
+          std::stringstream&)>>&
   bytecodeBackportFunctions() const;
 
   bool backport(
@@ -50,8 +50,8 @@ class BackportManager final {
   void registerBytecodeBackportFunction(
       const int64_t from_version,
       const std::function<bool(
-          std::istringstream&,
-          std::ostringstream&)>& backport_function);
+          std::stringstream&,
+          std::stringstream&)>& backport_function);
 };
 
 } // namespace jit

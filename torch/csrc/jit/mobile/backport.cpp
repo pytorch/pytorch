@@ -39,6 +39,19 @@ bool _backport_for_mobile(
 }
 
 bool _backport_for_mobile(
+    std::stringstream& in,
+    std::stringstream& out,
+    const int64_t to_version) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    out.write(static_cast<const char*>(buf), nbytes);
+    return !out ? 0 : nbytes;
+  };
+  PyTorchStreamWriter writer(writer_func);
+  return _backport_for_mobile_impl(std::move(rai), writer, to_version);
+}
+
+bool _backport_for_mobile(
     std::istream& in,
     const std::string& output_filename,
     const int64_t to_version) {

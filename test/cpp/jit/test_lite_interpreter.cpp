@@ -647,6 +647,67 @@ void runAndCheckBytecodeModel(
   AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
 }
 
+// Copy files from source to destination except the files and dirs
+void selective_copy(
+    caffe2::serialize::PyTorchStreamReader& reader,
+    caffe2::serialize::PyTorchStreamWriter& writer,
+    const std::unordered_set<std::string>& excluded_files,
+    const std::unordered_set<std::string>& excluded_dirs) {
+  auto records = reader.getAllRecords();
+  for (const auto& record : records) {
+    // Don't copy archive in excluded_files, usually archive `version` and
+    // `bytecode`. Archvie `version` will be written when PyTorchStreamWriter is
+    // going to finalize and run writeEndOfFile()
+
+    // records is the list of all files names in the zip file, and each record
+    // is one file with path to parent folder, the example records is:
+    // data.pkl
+    // code/__torch__/___torch_mangle_5.py
+    // code/__torch__/___torch_mangle_5.py.debug_pkl
+    // constants/140245072983168.storage
+    // constants.pkl
+    // bytecode.pkl
+    // version
+    bool skip = false;
+
+    // Skip files (exaxt path)
+    for (const auto& excluded_file : excluded_files) {
+      if (record == excluded_file) {
+        skip = true;
+        break;
+      }
+    }
+
+    // Skip dirs, find the last '/' and compare it with record
+    for (const auto& excluded_dir : excluded_dirs) {
+      std::size_t found = record.find_last_of("/\\");
+      auto path = record.substr(0, found);
+      if (excluded_dir == path) {
+        skip = true;
+        break;
+      }
+    }
+    if (!skip) {
+      auto data_ptr = reader.getRecord(record);
+      auto data = std::get<0>(data_ptr).get();
+      auto size = std::get<1>(data_ptr);
+      writer.writeRecord(record, data, size);
+    }
+  }
+}
+
+void write_model_to_file(std::stringstream& model_stream, std::string& file_name) {
+  caffe2::serialize::PyTorchStreamReader reader(&model_stream);
+  caffe2::serialize::PyTorchStreamWriter last_model_writer_debug(file_name);
+
+  selective_copy(
+      reader,
+      last_model_writer_debug,
+      std::unordered_set<std::string>({"version"}),
+      std::unordered_set<std::string>());
+
+}
+
 void backportAllVersionCheck(
     std::stringstream& test_model_file_stream,
     std::vector<IValue>& input_data,
@@ -659,29 +720,31 @@ void backportAllVersionCheck(
   constexpr int64_t minimum_to_version = 4;
   int64_t current_to_version = from_version - 1;
 
-  std::ostringstream oss;
   // Verify all candidate to_version work as expected. All backport to version
   // larger than minimum_to_version should success.
   while (current_to_version >= minimum_to_version) {
-    oss.clear();
+    std::stringstream oss;
     bool backPortSuccess =
         _backport_for_mobile(test_model_file_stream, oss, current_to_version);
     AT_ASSERT(backPortSuccess);
 
+    std::stringstream oss_copy(oss.str());
+    std::string file_name = "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/model_v6_while_" + str(current_to_version)  + "_debug.ptl";
+    write_model_to_file(oss_copy, file_name);
     // Check backport model version
-    std::stringstream iss(oss.str());
-    auto backport_version = _get_model_bytecode_version(oss.str());
+    // std::stringstream iss(oss.str());
+    auto backport_version = _get_model_bytecode_version(oss);
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
-        iss, input_data, expect_result_list, current_to_version);
+        oss, input_data, expect_result_list, current_to_version);
 
     current_to_version--;
   }
   //  backport to minimum version - 1 should fail
-  oss.clear();
+  std::stringstream oss;
   bool backPortSuccess =
       _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
   AT_ASSERT(!backPortSuccess);
@@ -1056,7 +1119,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   extra_files["mobile_info.json"] = "{\"key\": 23}";
   module->_save_for_mobile(oss, extra_files);
 
-  std::istringstream iss(oss.str());
+  std::stringstream iss(oss.str());
   caffe2::serialize::IStreamAdapter adapter{&iss};
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";

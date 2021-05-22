@@ -64,6 +64,11 @@ int64_t _get_model_bytecode_version(std::istream& in) {
   return _get_model_bytecode_version(std::move(rai));
 }
 
+int64_t _get_model_bytecode_version(std::stringstream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _get_model_bytecode_version(std::move(rai));
+}
+
 int64_t _get_model_bytecode_version(const std::string& filename) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   return _get_model_bytecode_version(std::move(rai));

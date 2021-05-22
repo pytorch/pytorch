@@ -19,6 +19,11 @@ TORCH_API bool _backport_for_mobile(
     const int64_t to_version);
 
 TORCH_API bool _backport_for_mobile(
+    std::stringstream& in,
+    std::stringstream& out,
+    const int64_t to_version);
+
+TORCH_API bool _backport_for_mobile(
     std::istream& in,
     const std::string& output_filename,
     const int64_t to_version);
