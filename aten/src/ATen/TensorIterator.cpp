@@ -655,7 +655,7 @@ StrideVector TensorIteratorBase::get_strides() const {
   StrideVector strides;
   for (int dim = 0; dim < ndim(); dim++) {
     for (int arg = 0; arg < ntensors(); arg++) {
-      strides.push_back(operands_[arg].stride_bytes[dim]);
+      strides.emplace_back(operands_[arg].stride_bytes[dim]);
     }
   }
   return strides;
@@ -666,14 +666,15 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
     return;
   }
   auto strides = get_strides();
-  while (strides.size() < 2U * ntensors()) {
-    strides.push_back(0);
-  }
 
   auto base_ptrs = get_base_ptrs();
   if (ndim() <= 1) {
-    auto ptrs = get_data_ptrs(base_ptrs, { range.begin });
-    loop(ptrs.data(), strides.data(), range.size(), 1);
+    if (range.begin > 0) {
+      auto ptrs = get_data_ptrs(base_ptrs, {range.begin});
+      loop(ptrs.data(), strides.data(), range.size(), 1);
+    } else {
+      loop(base_ptrs.data(), strides.data(), range.size(), 1);
+    }
   } else {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
@@ -1012,7 +1013,9 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
     assert_no_internal_overlap(*output);
     for (int j = num_outputs_; j < ntensors(); j++) {
       const auto& input = operands_[j].tensor;
-      assert_no_partial_overlap(*output, *input);
+      if (input->unsafeGetTensorImpl()!=output->unsafeGetTensorImpl()) {
+        assert_no_partial_overlap(*output, *input);
+      }
     }
   }
 }
