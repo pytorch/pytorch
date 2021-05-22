@@ -24,10 +24,10 @@ int main(int argc, char** argv) {
     std::cerr << FLAGS_model <<  ":Model file is not provided\n";
     return -1;
   }
-  
+
   // TODO: avoid having to set this guard for custom mobile build with mobile
   // interpreter.
-  torch::AutoNonVariableTypeMode non_var_guard{true};
+  c10::InferenceMode mode;
   torch::jit::mobile::Module bc = torch::jit::_load_for_mobile(FLAGS_model);
   return 0;
 }

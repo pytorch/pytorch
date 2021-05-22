@@ -62,10 +62,12 @@ void BatchDenseToSparseOp<float, CPUContext>::FillInSparseValues(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchSparseToDense,
     BatchSparseToDenseOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchSparseToDense)
     .NumInputs(3, 4)
     .NumOutputs(1)
@@ -113,6 +115,32 @@ after running this operator.
         "2-D dense tensor, with 1st dim = len(lengths), 2nd dim = dense_last_dim"
         "in the arg list, the tensor is of the same data type as `values`."
         "Missing values are filled with default_value")
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      ArgumentHelper helper(def);
+      vector<long> output_dims;
+      if (in.size() == 4) {
+        const auto& inference_dims = GetDimsVector(in[3]);
+        output_dims.insert(output_dims.end(), inference_dims.begin(), inference_dims.end());
+        const int dense_last_dim = helper.GetSingleArgument<int>("dense_last_dim", 0);
+        if(dense_last_dim > 0) {
+          CAFFE_ENFORCE(
+              output_dims.back() == dense_last_dim,
+              "The last dim of output_shape_inference should be consistent with dense_last_dim");
+        }
+      } else {
+        const int dense_last_dim = helper.GetSingleArgument<int>("dense_last_dim", 0);
+        CAFFE_ENFORCE(
+          dense_last_dim > 0,
+          "dense_last_dim must be set when output shape inference is unavailable");
+        const auto& lens_dims = GetDimsVector(in[0]);
+        output_dims.insert(output_dims.end(), lens_dims[0]);
+        output_dims.insert(output_dims.end(), dense_last_dim);
+      }
+      vector<TensorShape> out(1);
+      out[0] = CreateTensorShape(output_dims, in[2].data_type());
+      return out;
+    })
     .Arg(
         "dense_last_dim",
         "Optional, output dense last dimension. "
@@ -123,10 +151,12 @@ after running this operator.
         "Optional, missing values are filled with this value."
         "default_value = 0 when not set");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchDenseToSparse,
     BatchDenseToSparseOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchDenseToSparse)
     .NumInputs(3)
     .NumOutputs(1)
@@ -197,7 +227,9 @@ class GetBatchDenseToSparseGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchSparseToDense, GetBatchSparseToDenseGradient);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchDenseToSparse, GetBatchDenseToSparseGradient);
 
 } // namespace

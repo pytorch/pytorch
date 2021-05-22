@@ -57,6 +57,7 @@ VmaAllocationCreateInfo create_allocation_create_info(
     0u,
     VK_NULL_HANDLE,
     nullptr,
+    0.5f,
   };
 }
 

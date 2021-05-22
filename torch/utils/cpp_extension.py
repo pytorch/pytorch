@@ -1,6 +1,6 @@
 import copy
 import glob
-import imp
+import importlib
 import os
 import re
 import shlex
@@ -20,7 +20,7 @@ from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
 from typing import List, Optional, Union
 
 from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging  # type: ignore
+from pkg_resources import packaging  # type: ignore[attr-defined]
 
 IS_WINDOWS = sys.platform == 'win32'
 LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
@@ -86,10 +86,11 @@ def _find_rocm_home() -> Optional[str]:
     if rocm_home is None:
         # Guess #2
         try:
-            hipcc = subprocess.check_output(
-                ['which', 'hipcc'], stderr=subprocess.DEVNULL).decode().rstrip('\r\n')
+            pipe_hipcc = subprocess.Popen(
+                ["which hipcc | xargs readlink -f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+            hipcc, _ = pipe_hipcc.communicate()
             # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
-            rocm_home = os.path.dirname(os.path.dirname(hipcc))
+            rocm_home = os.path.dirname(os.path.dirname(hipcc.decode().rstrip('\r\n')))
             if os.path.basename(rocm_home) == 'hip':
                 rocm_home = os.path.dirname(rocm_home)
         except Exception:
@@ -349,7 +350,7 @@ class BuildExtension(build_ext, object):
         Returns a subclass with alternative constructor that extends any original keyword
         arguments to the original constructor with the given options.
         '''
-        class cls_with_options(cls):  # type: ignore
+        class cls_with_options(cls):  # type: ignore[misc, valid-type]
             def __init__(self, *args, **kwargs):
                 kwargs.update(options)
                 super().__init__(*args, **kwargs)
@@ -1114,7 +1115,7 @@ def load_inline(name,
     identical to :func:`load`.
 
     See `the
-    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions.py>`_
+    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions_jit.py>`_
     for good examples of using this function.
 
     Sources may omit two required parts of a typical non-inline C++ extension:
@@ -1588,14 +1589,13 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         for flag in cflags:
             if 'amdgpu-target' in flag:
                 return ['-fno-gpu-rdc']
-    return [
-        '--amdgpu-target=gfx803',
-        '--amdgpu-target=gfx900',
-        '--amdgpu-target=gfx906',
-        '--amdgpu-target=gfx908',
-        '-fno-gpu-rdc'
-    ]
-
+    # Use same defaults from file cmake/public/LoadHIP.cmake.
+    # Must keep in sync if defaults change.
+    # Allow env var to override, just like during initial cmake build.
+    archs = os.environ.get('PYTORCH_ROCM_ARCH', 'gfx803;gfx900;gfx906;gfx908')
+    flags = ['--amdgpu-target=%s' % arch for arch in archs.split(';')]
+    flags += ['-fno-gpu-rdc']
+    return flags
 
 def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
@@ -1635,13 +1635,12 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
-        from distutils.util import get_platform
-        from distutils._msvccompiler import _get_vc_env
+        from setuptools import distutils
 
-        plat_name = get_platform()
+        plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
 
-        vc_env = _get_vc_env(plat_spec)
+        vc_env = distutils._msvccompiler._get_vc_env(plat_spec)
         vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
             uk = k.upper()
@@ -1678,8 +1677,8 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         message = error_prefix
         # `error` is a CalledProcessError (which has an `ouput`) attribute, but
         # mypy thinks it's Optional[BaseException] and doesn't narrow
-        if hasattr(error, 'output') and error.output:  # type: ignore
-            message += f": {error.output.decode()}"  # type: ignore
+        if hasattr(error, 'output') and error.output:  # type: ignore[union-attr]
+            message += f": {error.output.decode()}"  # type: ignore[union-attr]
         raise RuntimeError(message) from e
 
 
@@ -1695,14 +1694,16 @@ def _get_exec_path(module_name, path):
 
 
 def _import_module_from_library(module_name, path, is_python_module):
-    # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
-    file, path, description = imp.find_module(module_name, [path])
-    # Close the .so file after load.
-    with file:
-        if is_python_module:
-            return imp.load_module(module_name, file, path, description)  # type: ignore
-        else:
-            torch.ops.load_library(path)
+    filepath = os.path.join(path, f"{module_name}{LIB_EXT}")
+    if is_python_module:
+        # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
+        spec = importlib.util.spec_from_file_location(module_name, filepath)
+        module = importlib.util.module_from_spec(spec)
+        assert isinstance(spec.loader, importlib.abc.Loader)
+        spec.loader.exec_module(module)
+        return module
+    else:
+        torch.ops.load_library(filepath)
 
 
 def _write_ninja_file_to_build_library(path,
@@ -1925,7 +1926,8 @@ def _write_ninja_file(path,
             # Note: non-system deps with nvcc are only supported
             # on Linux so use --generate-dependencies-with-compile
             # to make this work on Windows too.
-            nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
+            if IS_WINDOWS:
+                nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
         cuda_compile_rule.append(
             f'  command = $nvcc {nvcc_gendeps} $cuda_cflags -c $in -o $out $cuda_post_cflags')
 

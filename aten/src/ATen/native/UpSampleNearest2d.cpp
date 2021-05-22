@@ -17,7 +17,7 @@ TORCH_META_FUNC(upsample_nearest2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(upsample_nearest2d_backward) (
@@ -93,7 +93,9 @@ Tensor upsample_nearest2d_backward(
   return at::upsample_nearest2d_backward(grad_output, osize, input_size, scale_h, scale_w);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_nearest2d_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_nearest2d_backward_kernel);
 
 } // namespace native

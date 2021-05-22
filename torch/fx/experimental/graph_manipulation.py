@@ -1,11 +1,11 @@
-from typing import Dict, List, NamedTuple, Any
+from typing import Dict, List, NamedTuple, Any, Optional, Tuple
 
 import torch
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
-from torch.fx.node import _get_qualified_name
-from torch.fx.graph_module import GraphModule
 from torch.fx.graph import Graph
-from torch.fx.node import Node, Target, Argument, map_arg
+from torch.fx.graph_module import GraphModule
+from torch.fx.node import Node, Target, Argument, map_arg, map_aggregate
+from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import ShapeProp
 
 
@@ -39,12 +39,15 @@ class size_bytes(NamedTuple):
     total_size: int
 
 
-def get_size_of_all_nodes(fx_module: GraphModule, args: List[torch.Tensor]) -> None:
+def get_size_of_all_nodes(
+    fx_module: GraphModule, args: Optional[List[torch.Tensor]] = None
+) -> None:
     """Given a fx graph module, update each node with its total size (weights + bias + output)
     and its output_size(output). For a non-module node, the total size is the output size.
     return total size"""
-    # Mark shape and dtype for each node (node.shape and node.dtype)
-    ShapeProp(fx_module).propagate(*args)
+    if args is not None:
+        # Mark shape and dtype for each node (node.shape and node.dtype)
+        ShapeProp(fx_module).propagate(*args)
     # Calculate the total size of the whole fx graph
     total_size_of_graph = 0.0
     for node in fx_module.graph.nodes:
@@ -54,16 +57,16 @@ def get_size_of_all_nodes(fx_module: GraphModule, args: List[torch.Tensor]) -> N
     return
 
 
-def get_shape_and_dtype(node: Node) -> Any:
-    shape = getattr(node, "shape", None)
-    if not shape:
-        raise RuntimeError("Node has no shape attr")
+def get_tensor_meta(node: Node) -> Any:
+    tensor_meta = node.meta.get("tensor_meta")
 
-    dtype = getattr(node, "dtype", None)
-    if not dtype:
-        raise RuntimeError("Node has no dtype attr")
+    if not tensor_meta:
+        raise RuntimeError(
+            f"Node {node} has no tensor metadata associated with it! "
+            f"Check that shape propagation has run."
+        )
 
-    return shape, dtype
+    return tensor_meta
 
 
 def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
@@ -82,10 +85,14 @@ def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
             total_num_of_elems += p.numel()
     # Don't forget the output size
     # node.shape is the shape of this node's output
-    shape, dtype = get_shape_and_dtype(node)
-    output_elem = shape.numel()
+    tensor_meta = get_tensor_meta(node)
+    output_elem = tensor_meta.shape.numel()
     total_num_of_elems += output_elem
-    size_per_elem_bytes = torch.tensor([], dtype=dtype).element_size()
+    # Assume for now if it's quantized then it's qint8 or quint8
+    if tensor_meta.is_quantized:
+        size_per_elem_bytes = torch._empty_affine_quantized([], dtype=tensor_meta.dtype).element_size()
+    else:
+        size_per_elem_bytes = torch.tensor([], dtype=tensor_meta.dtype).element_size()
     total_size = size_per_elem_bytes * total_num_of_elems
     output_size = size_per_elem_bytes * output_elem
     return size_bytes(output_size, total_size)
@@ -95,35 +102,110 @@ def serialize_shape(shape: torch.Size) -> str:
     return str(list(shape))
 
 
-def serialize_tensor_quantization(tensor: torch.Tensor) -> Dict[str, Any]:
+def serialize_stride(stride: Tuple[int]) -> str:
+    return str(list(stride))
+
+
+def serialize_tensor_quantization(tensor: torch.Tensor, weights: Dict, pcq_prefix: str) -> Tuple[Dict, Dict]:
+    """
+    Args:
+        tensor: The tensor from which we try to extract quantization information.
+        weights: A dict that contains mapping from name to a tensor value.
+        pcq_prefix: A string that we would use later on as prefix for per channel quantization information. This
+            usually would be the key that we use to store info of `tensor`.
+
+    Returns:
+        scheme: Dict that stores the quantization information of `tensor`.
+        per_channel_dict: Dict that stores the information of per_channel_scales and
+            per_channel_zero_points of `tensor`. This Will be empty if `tensor` is not
+            per channel quantized.
+
+    `tensor` is per tensor quantized:
+        scheme: {
+            "qscheme": str(tensor.qscheme()),
+            "q_scale": tensor.q_scale(),
+            "q_zero_point": tensor.q_zero_point(),
+        }
+
+    `tensor` is per channel quantized:
+        scheme: {
+            "qscheme": str(tensor.qscheme()),
+            "q_per_channel_scales": {pcq_prefix}_per_channel_scales,
+            "q_per_channel_zero_points": {pcq_prefix}_per_channel_zero_points,
+            "q_per_channel_axis": tensor.q_per_channel_axis()
+        }
+        per_channel_dict: {
+            {pcq_prefix}_per_channel_scales: {
+                "dtype": dtype,
+                "shape": shape,
+                "is_quantized": is_quantized,
+                "stride": stride,
+            }
+            {pcq_prefix}_per_channel_zero_points: {
+                "dtype": dtype,
+                "shape": shape,
+                "is_quantized": is_quantized,
+                "stride": stride,
+            }
+        }
+        weights would be updated with {
+            {pcq_prefix}_per_channel_scales: tensor.q_per_channel_scales().float()
+            {pcq_prefix}_per_channel_zero_points: tensor.q_per_channel_zero_points().int()
+        }
+    """
     scheme: Dict[str, Any] = {}
+    per_channel_dict: Dict[str, Dict] = {}
+
+    if not tensor.is_quantized:
+        return scheme, per_channel_dict
+
+    scheme["qscheme"] = str(tensor.qscheme())
+
+    # For per tensor scheme, we stores scale and zero_point.
+    if tensor.qscheme() in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+        scheme["q_scale"] = tensor.q_scale()
+        scheme["q_zero_point"] = tensor.q_zero_point()
+
+    # For per channel scheme, per_channel_scales and per_channel_zero_points are tensors.
+    # We store their tensor value into `weights` and store the name into `scheme`.
+    if tensor.qscheme() in {
+        torch.per_channel_affine,
+        torch.per_channel_affine_float_qparams,
+        torch.per_channel_symmetric,
+    }:
+        # per_channel_scales is float64. Here we save it as float32.
+        weights[f"{pcq_prefix}_per_channel_scales"] = tensor.q_per_channel_scales().float()
+        scheme["q_per_channel_scales"] = f"{pcq_prefix}_per_channel_scales"
+        per_channel_dict.update(
+            serialize_weight(weights[f"{pcq_prefix}_per_channel_scales"], weights, f"{pcq_prefix}_per_channel_scales")
+        )
+
+        # per_channel_zero_point is int64. Here we save it as int32.
+        weights[f"{pcq_prefix}_per_channel_zero_points"] = tensor.q_per_channel_zero_points().int()
+        scheme[
+            "q_per_channel_zero_points"
+        ] = f"{pcq_prefix}_per_channel_zero_points"
+        per_channel_dict.update(
+            serialize_weight(weights[f"{pcq_prefix}_per_channel_zero_points"], weights, f"{pcq_prefix}_per_channel_zero_points")
+        )
+
+        scheme["q_per_channel_axis"] = tensor.q_per_channel_axis()
+    return scheme, per_channel_dict
+
+
+def serialize_weight(tensor: torch.Tensor, weights: Dict, name: str) -> Dict:
+    weight_dict: Dict[str, Dict] = {name: {}}
+    weight_dict[name]["dtype"] = str(tensor.dtype)
+    weight_dict[name]["shape"] = serialize_shape(tensor.shape)
+    weight_dict[name]["is_quantized"] = tensor.is_quantized
+    weight_dict[name]["stride"] = serialize_stride(tensor.stride())
+
     if tensor.is_quantized:
-        scheme["q_scheme"] = str(tensor.qscheme())
-        if tensor.qscheme() in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
-            scheme["q_scale"] = tensor.q_scale()
-            scheme["q_zero_pont"] = tensor.q_zero_point()
-        if tensor.qscheme() in {
-            torch.per_channel_affine,
-            torch.per_channel_affine_float_qparams,
-            torch.per_channel_symmetric,
-        }:
-            scheme["q_per_channel_scales"] = tensor.q_per_channel_scales().tolist()
-            scheme[
-                "q_per_channel_zero_points"
-            ] = tensor.q_per_channel_zero_points().tolist()
-            scheme["q_per_channel_axis"] = tensor.q_per_channel_axis()
+        quantization_info, per_channel_dict = serialize_tensor_quantization(tensor, weights, name)
+        weight_dict[name].update(quantization_info)
+        weight_dict.update(per_channel_dict)
 
-    return scheme
-
-
-def serialize_weight(tensor: torch.Tensor) -> Dict:
-    weight: Dict[str, Any] = {}
-    weight["dtype"] = str(tensor.dtype)
-    weight["is_quantized"] = tensor.is_quantized
-    if tensor.is_quantized:
-        weight["quantized_type"] = serialize_tensor_quantization(tensor)
-    weight["shape"] = serialize_shape(tensor.shape)
-    return weight
+    return weight_dict
 
 
 def serialize_leaf_module(
@@ -131,9 +213,9 @@ def serialize_leaf_module(
 ) -> Dict:
     parameters: Dict[str, Any] = {}
 
-    for p_name, p_value in node.attrs_for_lowering.items():  # type: ignore
+    for p_name, p_value in node.attrs_for_lowering.items():  # type: ignore[attr-defined]
         if isinstance(p_value, torch.Tensor):
-            weights_metadata[f"{name_prefix}.{p_name}"] = serialize_weight(p_value)
+            weights_metadata.update(serialize_weight(p_value, weights, f"{name_prefix}.{p_name}"))
             weights[f"{name_prefix}.{p_name}"] = p_value
         else:
             parameters[p_name] = str(p_value)
@@ -154,7 +236,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
     NODE
     {
         shape: [],
+        stride: [],
         dtype: dtype,
+        is_quantized: bool,
         target: target,
         op_code: op_code,
         name: name,
@@ -166,7 +250,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         dtype: dtype,
         is_quantized: bool,
         shape: [],
-        quantization_info: QUANTIZATION
+        QUANTIZATION,
     }
     QUANTIZATION
     {
@@ -182,14 +266,41 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
     serialized_dict["modules"] = {}
     serialized_dict["weights"] = {}
     serialized_dict["nodes"] = []
-    parameters = fx_module.named_parameters()
-    prefix = f"{name_prefix}." if name_prefix else ""
     submodules = dict(fx_module.named_modules())
-    for name, p in parameters:
-        if isinstance(p, torch.Tensor):
-            weight = serialize_weight(p)
-            serialized_dict["weights"][prefix + name] = weight
+    prefix = f"{name_prefix}." if name_prefix else ""
+
+    def add_weight_tensors(named_tensors):
+        for name, p in named_tensors:
+            if name.startswith("parent.") or not isinstance(p, torch.Tensor):
+                continue
+            weight_dict = serialize_weight(p, weights, prefix + name)
+            serialized_dict["weights"].update(weight_dict)
             weights[prefix + name] = p
+
+    add_weight_tensors(fx_module.named_parameters())
+    add_weight_tensors(fx_module.named_buffers())
+
+    def get_node_info(node):
+        tensor_meta = get_tensor_meta(node)
+        node_rep = {
+            "shape": serialize_shape(tensor_meta.shape),
+            "dtype": str(tensor_meta.dtype),
+            "stride": serialize_stride(tensor_meta.stride),
+            "is_quantized": tensor_meta.is_quantized,
+        }
+
+        if tensor_meta.is_quantized:
+            node_rep["qscheme"] = str(tensor_meta.qscheme)
+
+            if tensor_meta.qscheme in {
+                torch.per_tensor_affine,
+                torch.per_tensor_symmetric,
+            }:
+                node_rep["q_scale"] = tensor_meta.q_scale
+                node_rep["q_zero_point"] = tensor_meta.q_zero_point
+
+        return node_rep
+
     # Note: lift_lowering_attrs_to_nodes is only used to support leaf modules
     # that cannot currently be symbolically traced into, e.g. batch norm.
     lift_lowering_attrs_to_nodes(fx_module)
@@ -197,12 +308,14 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         node_rep: Dict[str, Any] = {}
         # Get shape/type info, currently not needed for call_module node
         # whose target is a GraphModule and output node.
-        if not (node.op == "call_module" and isinstance(
-            submodules[node.target], GraphModule
-        )) and node.op != "output":
-            shape, dtype = get_shape_and_dtype(node)
-            node_rep["shape"] = serialize_shape(shape)
-            node_rep["dtype"] = str(dtype)
+        if (
+            not (
+                node.op == "call_module"
+                and isinstance(submodules[node.target], GraphModule)
+            )
+            and node.op != "output"
+        ):
+            node_rep.update(get_node_info(node))
 
         # Recurse down into any submodules we are calling.
         if node.op == "call_module":
@@ -228,41 +341,47 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         if node.op == "get_attr":
             # If we are targeting a parent constant we update the target.
             if node.target.startswith("parent."):
-                node.name = node.name[len("parent."):]
-                node_rep["target"] = str(node.target[len("parent."):])
-                weight = serialize_weight(weights[node.target[len("parent."):]])
-                serialized_dict["weights"][node.target[len("parent."):]] = weight
+                stripped_name = node.target[len("parent."):]
+                node.name = stripped_name
+                node_rep["target"] = stripped_name
+                weight = serialize_weight(weights[stripped_name], weights, node.target[len("parent."):])
+                serialized_dict["weights"].update(weight)
             else:
-                # Iterate through the module hierarchy to find the attr.
-                target = fx_module
-                split = node.target.split(".")
-                assert len(split)
-                while len(split):
-                    target = getattr(target, split.pop(0))
-
+                # Find the actual target parameter/buffer from the fx_module.
+                submod_path, _, target_name = node.target.rpartition(".")
+                submod: Optional[torch.nn.Module] = (
+                    fx_module.get_submodule(submod_path) if submod_path else fx_module
+                )
+                assert submod is not None, f"submod {submod_path} not found"
+                target = getattr(submod, target_name, None)
+                assert target is not None, f"{target_name} not an attr of {submod_path}"
                 qualname = prefix + node.target
                 # Check that the target is a tensor, and that we haven't added it already from a leaf module.
                 if isinstance(target, torch.Tensor) and qualname not in weights:
-                    weight = serialize_weight(target)
-                    serialized_dict["weights"][prefix + node.target] = weight
-                    weights[prefix + node.target] = target
+                    weight = serialize_weight(target, weights, qualname)
+                    serialized_dict["weights"].update(weight)
+                    weights[qualname] = target
 
         node_rep["op_code"] = node.op
         node_rep["name"] = node.name
 
-        if node.op == "output":
-            def get_output_info(arg: Node) -> Argument:
-                shape, dtype = get_shape_and_dtype(arg)
-                return {
-                    "is_node": True,
-                    "name": str(arg),
-                    "shape": serialize_shape(shape),
-                    "dtype": str(dtype),
-                }
+        def get_arg_info(arg: Argument) -> Any:
+            if isinstance(arg, torch.fx.Node):
+                return {"is_node": True, "name": str(arg)}
+            elif isinstance(arg, torch.dtype):
+                return str(arg)
+            else:
+                return arg
 
+        def get_output_arg_info(arg: Node) -> Dict[str, Any]:
+            node_rep: Dict[str, Any] = get_arg_info(arg)
+            node_rep.update(get_node_info(arg))
+            return node_rep
+
+        if node.op == "output":
             node_rep["args"] = map_arg(
                 node.args,
-                get_output_info,
+                get_output_arg_info,
             )
 
             # If there're multiple outputs then node_rep["args"][0] will be a tuple.
@@ -270,13 +389,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
             if isinstance(node_rep["args"][0], tuple):
                 node_rep["args"] = node_rep["args"][0]
         else:
-            node_rep["args"] = map_arg(
-                node.args, lambda arg: {"is_node": True, "name": str(arg)}
-            )
+            node_rep["args"] = map_aggregate(node.args, get_arg_info)
 
-        node_rep["kwargs"] = map_arg(
-            node.kwargs, lambda arg: {"is_node": True, "name": str(arg)}
-        )
+        node_rep["kwargs"] = map_aggregate(node.kwargs, get_arg_info)
         serialized_dict["nodes"] += [node_rep]
 
     return serialized_dict

@@ -23,7 +23,6 @@ skip = unittest.skip
 
 class TestUtilityFuns(TestCase):
     opset_version = 9
-    use_new_jit_passes = False
 
     def setUp(self):
         torch.manual_seed(0)
@@ -41,8 +40,7 @@ class TestUtilityFuns(TestCase):
                                      _disable_torch_constant_prop=True,
                                      operator_export_type=operator_export_type,
                                      training=training,
-                                     example_outputs=example_outputs,
-                                     use_new_jit_passes=self.use_new_jit_passes)
+                                     example_outputs=example_outputs)
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -88,6 +86,26 @@ class TestUtilityFuns(TestCase):
         graph, _, _ = utils._model_to_graph(SplitModule(), (x, y, t))
         for node in graph.nodes():
             assert node.kind() != "onnx::SplitToSequence"
+
+    def test_output_list(self):
+        class PaddingLayer(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input_t):
+                # type: (Tensor) -> Tensor
+                for i in range(2):
+                    input_t = input_t * 2
+                return input_t
+
+        input_t = torch.ones(size=[10], dtype=torch.long)
+        model = torch.jit.script(PaddingLayer())
+        example_output = model(input_t)
+
+        with self.assertRaises(RuntimeError):
+            torch.onnx.export(model,
+                              (input_t, ),
+                              "test.onnx",
+                              opset_version=self.opset_version,
+                              example_outputs=[example_output])
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
@@ -242,7 +260,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        x = torch.randn(2, 3, 4, 5, 8, 7) 
+        x = torch.randn(2, 3, 4, 5, 8, 7)
         graph, _, __ = self._model_to_graph(PReluModel(), x)
 
         for node in graph.nodes():
@@ -859,20 +877,17 @@ TestUtilityFuns_opset13 = type(str("TestUtilityFuns_opset13"),
 # opset 11 tests
 TestUtilityFuns_opset11_new_jit_API = type(str("TestUtilityFuns_opset11_new_jit_API"),
                                            (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=11,
-                                           use_new_jit_passes=True))
+                                           dict(TestUtilityFuns.__dict__, opset_version=11))
 
 # opset 12 tests
 TestUtilityFuns_opset12_new_jit_API = type(str("TestUtilityFuns_opset12_new_jit_API"),
                                            (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=12,
-                                           use_new_jit_passes=True))
+                                           dict(TestUtilityFuns.__dict__, opset_version=12))
 
 # opset 13 tests
 TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_API"),
                                            (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=13,
-                                           use_new_jit_passes=True))
+                                           dict(TestUtilityFuns.__dict__, opset_version=13))
 
 
 if __name__ == '__main__':

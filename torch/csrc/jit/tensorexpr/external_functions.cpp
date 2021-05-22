@@ -2,13 +2,13 @@
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-// A helper function to construct a vector of tensors from raw buffer arguments
 std::vector<at::Tensor> constructTensors(
     int64_t bufs_num,
     void** buf_data,
@@ -19,10 +19,11 @@ std::vector<at::Tensor> constructTensors(
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<c10::ScalarType> buf_dtypes_vec;
   int64_t buf_dims_idx = 0;
-  for (int64_t i = 0; i < bufs_num; i++) {
+  for (const auto i : c10::irange(bufs_num)) {
     buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
-    for (int64_t dim = 0; dim < buf_ranks[i]; dim++) {
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
+    for (const auto dim : c10::irange(buf_ranks[i])) {
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
     }
     buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
@@ -40,6 +41,10 @@ std::vector<at::Tensor> constructTensors(
   }
   return tensors;
 }
+
+#ifdef C10_MOBILE
+extern "C" {
+#endif
 
 void nnc_aten_conv2d(
     int64_t bufs_num,
@@ -70,7 +75,7 @@ void nnc_aten_conv2d(
     int64_t groups = extra_args[6];
 
     try {
-      r = at::native::conv2d(
+      r = at::conv2d(
           x,
           w,
           b,
@@ -82,7 +87,7 @@ void nnc_aten_conv2d(
     }
   } else {
     try {
-      r = at::native::conv2d(x, w);
+      r = at::conv2d(x, w);
     } catch (...) {
     }
   }
@@ -91,7 +96,7 @@ void nnc_aten_conv2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-void nnc_aten_matmul(
+void nnc_aten_adaptive_avg_pool2d(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -104,19 +109,75 @@ void nnc_aten_matmul(
 
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
-  const at::Tensor& w = tensors[2];
+  int64_t H = extra_args[0];
+  int64_t W = extra_args[1];
   try {
-    at::matmul_out(r, x, w);
+    at::adaptive_avg_pool2d_out(r, x, {H, W});
   } catch (...) {
   }
 }
 
-static RegisterNNCExternalFunction nnc_conv2d(
+void nnc_aten_mean(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  int64_t dim = extra_args[0];
+  try {
+    at::mean_out(r, x, {dim});
+  } catch (...) {
+  }
+}
+
+void nnc_aten_addmm(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+
+  at::Tensor& r = tensors[0];
+  const at::Tensor& x = tensors[1];
+  const at::Tensor& y = tensors[2];
+  const at::Tensor& z = tensors[3];
+  try {
+    at::addmm_out(r, x, y, z, extra_args[0], extra_args[1]);
+  } catch (...) {
+  }
+}
+
+#ifndef C10_MOBILE
+
+const static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
-static RegisterNNCExternalFunction nnc_matmul(
-    "nnc_aten_matmul",
-    nnc_aten_matmul);
+const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
+    "nnc_aten_adaptive_avg_pool2d",
+    nnc_aten_adaptive_avg_pool2d);
+const static RegisterNNCExternalFunction nnc_mean(
+    "nnc_aten_mean",
+    nnc_aten_mean);
+const static RegisterNNCExternalFunction nnc_addmm(
+    "nnc_aten_addmm",
+    nnc_aten_addmm);
+
+#endif
+
+#ifdef C10_MOBILE
+} // extern "C"
+#endif
 
 } // namespace tensorexpr
 } // namespace jit

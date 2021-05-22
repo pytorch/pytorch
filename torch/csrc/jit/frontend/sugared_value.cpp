@@ -37,6 +37,8 @@ builtin_cast_method_to_scalar_type() {
       {"char", at::kChar},
       {"double", at::kDouble},
       {"float", at::kFloat},
+      {"cfloat", at::kComplexFloat},
+      {"cdouble", at::kComplexDouble},
       {"int", at::kInt},
       {"long", at::kLong},
       {"short", at::kShort},
@@ -99,27 +101,23 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       std::unordered_map<std::string, std::string>,
       EnumClassHash>;
   static const PropertiesLookup builtin_properties = {
+      {TypeKind::OptionalType,
+       {
+           {"unchecked_unwrap_optional", "prim"},
+       }},
       {TypeKind::TensorType,
        {
-           {"dtype", "prim"},
-           {"device", "prim"},
-           {"grad", "prim"},
-           {"data", "prim"},
-           {"shape", "prim"},
-           {"is_cuda", "prim"},
-           {"is_xpu", "prim"},
-           {"is_sparse", "prim"},
-           {"is_mkldnn", "prim"},
-           {"is_mlc", "prim"},
-           {"is_quantized", "prim"},
-           {"is_vulkan", "prim"},
-           {"is_meta", "prim"},
-           {"is_leaf", "aten"},
-           {"requires_grad", "prim"},
-           {"layout", "prim"},
-           {"T", "prim"},
-           {"ndim", "prim"},
-           {"name", "prim"},
+           {"dtype", "prim"},         {"device", "prim"},
+           {"grad", "prim"},          {"data", "prim"},
+           {"shape", "prim"},         {"is_cuda", "prim"},
+           {"is_xpu", "prim"},        {"is_sparse", "prim"},
+           {"is_sparse_csr", "prim"}, {"is_mkldnn", "prim"},
+           {"is_mlc", "prim"},        {"is_quantized", "prim"},
+           {"is_vulkan", "prim"},     {"is_meta", "prim"},
+           {"is_leaf", "aten"},       {"requires_grad", "prim"},
+           {"layout", "prim"},        {"T", "prim"},
+           {"ndim", "prim"},          {"name", "prim"},
+           {"real", "aten"},          {"imag", "aten"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
@@ -207,10 +205,17 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   ErrorReport report(loc);
-  report << "Tried to access nonexistent attribute or method '" << field
-         << "' of type '" << value_->type()->repr_str() << "'.";
-  if (value_->type()->kind() == ClassType::Kind) {
-    report << " Did you forget to initialize an attribute in __init__()?";
+  report << "'" << value_->type()->repr_str()
+         << "' object has no attribute or method '" << field << "'.";
+  if (auto classType = value_->type()->cast<ClassType>()) {
+    if (classType->isUnresolvedClassAttribute(field)) {
+      report
+          << " '" << field
+          << "' is defined as a class attribute which currently is not"
+             " supported. Consider converting this to an instance attribute.";
+    } else {
+      report << " Did you forget to initialize an attribute in __init__()?";
+    }
   }
   throw report;
 }
@@ -236,6 +241,9 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     Node* unpack =
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
+  } else if (value_->type()->kind() == TypeKind::AnyTupleType) {
+    throw ErrorReport(loc)
+        << "Provided tuple is not fully defined/refined including its element types, please provide a value of type like Tuple[int, int]";
   }
   throw ErrorReport(loc) << value_->type()->repr_str()
                          << " cannot be used as a tuple";
@@ -308,6 +316,10 @@ void SimpleValue::setAttr(
         MethodValue(value_, prop->setter->name())
             .call(loc, m, {newValue}, {}, /*n_binders=*/1);
         return;
+      }
+
+      if (prop && !prop->setter) {
+        throw ErrorReport(loc) << "Tried to set read-only attribute: " << field;
       }
 
       throw ErrorReport(loc)
@@ -394,6 +406,7 @@ SugaredValuePtr SimpleValue::getitem(
   Graph& g = *m.graph();
 
   // if it's a List/String/Dict, emit a regular __getitem__ op
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::__getitem__, {val, idx}, {}, loc));
@@ -409,7 +422,7 @@ SugaredValuePtr SimpleValue::getitem(
     // sure its contents implement the module interface referred to by
     // type_hint.
     if (class_type->is_module() && type_hint) {
-      auto res = g.insert(prim::ModuleDictIndex, {val, idx}, {}, loc);
+      auto res = g.insert(prim::ModuleContainerIndex, {val, idx}, {}, loc);
       res->setType(type_hint);
       return std::make_shared<SimpleValue>(res);
     }
@@ -521,6 +534,7 @@ SugaredValuePtr RangeValue::getitem(
 std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   std::vector<SugaredValuePtr> base_iters{};
 
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (SugaredValuePtr sv : children_) {
     if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
       std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();

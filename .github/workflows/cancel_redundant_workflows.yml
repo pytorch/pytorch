@@ -1,0 +1,24 @@
+name: Cancel redundant workflows
+on:
+  workflow_run:
+    types:
+    - requested
+    # NOTE: Make sure to add to this list as you add more workflows running on 'pull_request'
+    workflows:
+    - Lint
+    - Linux CI (pytorch-linux-xenial-py3.6-gcc5.4)
+    - Test tools
+    - TorchBench CI (pytorch-linux-py3.7-cu102)
+    - clang-format
+jobs:
+  cancel:
+    # We do not want to cancel reruns on master
+    if: github.event.workflow_run.head_branch != 'master'
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Cancel duplicate workflow runs
+      uses: potiuk/cancel-workflow-runs@a81b3c4d59c61e27484cfacdc13897dd908419c9
+      with:
+        cancelMode: duplicates
+        token: ${{ secrets.GITHUB_TOKEN }}
+        sourceRunId: ${{ github.event.workflow_run.id }}

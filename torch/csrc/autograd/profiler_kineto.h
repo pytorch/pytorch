@@ -3,8 +3,15 @@
 #include <torch/csrc/autograd/profiler_legacy.h>
 
 #ifdef USE_KINETO
+// skip Kineto dependency on mobile
+#ifdef C10_MOBILE
+#undef USE_KINETO
+#endif
+#endif
+
+#ifdef USE_KINETO
 namespace libkineto {
-class TraceActivity;
+struct TraceActivity;
 class ActivityTraceInterface;
 }
 #endif
@@ -21,23 +28,25 @@ enum class C10_API_ENUM ActivityType {
 
 #ifdef USE_KINETO
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct KinetoObserverContext : public at::ObserverContext {
   int64_t startUs;
   uint64_t correlationId;
   uint64_t startThreadId;
   uint64_t endThreadId;
   c10::optional<std::vector<std::vector<int64_t>>> shapes;
+  c10::optional<std::vector<std::string>> dtypes;
   int64_t sequenceNr;
   uint64_t fwdThreadId;
   uint8_t recFunScope;
   c10::optional<std::vector<std::string>> stack;
   // Extra arguments for computing op flops
   c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
+  CUDAEventStub cuda_event_start_ = nullptr;
+  CUDAEventStub cuda_event_end_ = nullptr;
 };
 
 struct TORCH_API KinetoEvent {
-  KinetoEvent();
-
   uint64_t startThreadId() const {
     return start_thread_id_;
   }
@@ -60,6 +69,14 @@ struct TORCH_API KinetoEvent {
 
   const std::vector<std::vector<int64_t>>& shapes() const {
     return *shapes_;
+  }
+
+  bool hasTypes() const {
+    return dtypes_ != c10::nullopt;
+  }
+
+  const std::vector<std::string>& dtypes() const {
+    return *dtypes_;
   }
 
   uint64_t flops() const {
@@ -102,6 +119,11 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  KinetoEvent& dtypes(const std::vector<std::string>& dtypes) {
+    dtypes_ = dtypes;
+    return *this;
+  }
+
   KinetoEvent& flops(uint64_t flops) {
     flops_ = flops;
     return *this;
@@ -122,12 +144,21 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  KinetoEvent& setAsync(bool is_async) {
+    is_async_ = is_async;
+    return *this;
+  }
+
   // Kineto fields
 
   KinetoEvent& activity(const libkineto::TraceActivity& activity);
 
   std::string name() const {
     return name_;
+  }
+
+  bool isAsync() const {
+    return is_async_;
   }
 
   uint64_t deviceIndex() const {
@@ -161,15 +192,18 @@ struct TORCH_API KinetoEvent {
 
   c10::DeviceType deviceType() const;
 
+  int64_t cudaElapsedUs() const;
+
   uint64_t start_thread_id_ = 0;
   uint64_t end_thread_id_ = 0;
   uint64_t fwd_thread_id_ = 0;
   int64_t sequence_nr_ = -1;
   uint8_t scope_ = 0;
 
-  uint8_t activity_type_;
+  uint8_t activity_type_ = 0;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
+  c10::optional<std::vector<std::string>> dtypes_;
   uint64_t flops_ = 0;
 
   std::string name_;
@@ -179,6 +213,10 @@ struct TORCH_API KinetoEvent {
   uint64_t correlation_id_ = 0;
   uint64_t linked_correlation_id_ = 0;
   int64_t device_resource_id_ = 0;
+  bool is_async_{false};
+
+  CUDAEventStub cuda_event_start_ = nullptr;
+  CUDAEventStub cuda_event_end_ = nullptr;
 };
 
 // Consolidating events returned directly from Kineto
@@ -217,15 +255,10 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
-#endif // USE_KINETO
 
-TORCH_API constexpr bool kinetoAvailable() {
-#ifdef USE_KINETO
-  return true;
-#else
-  return false;
+TORCH_API void addMetadataJson(
+    const std::string& key, const std::string& value);
 #endif // USE_KINETO
-}
 
 } // namespace profiler
 }} // namespace torch::autograd

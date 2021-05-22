@@ -5,6 +5,12 @@ from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 try:
     import dill
+
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
     DILL_AVAILABLE = True
 except ImportError:
     DILL_AVAILABLE = False
@@ -17,6 +23,7 @@ T_co = TypeVar('T_co', covariant=True)
 # of python lambda function
 def default_fn(data):
     return data
+
 
 @functional_datapipe('map')
 class MapIterDataPipe(IterDataPipe[T_co]):
@@ -46,7 +53,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         if hasattr(fn, '__name__') and fn.__name__ == '<lambda>' and not DILL_AVAILABLE:
             warnings.warn("Lambda function is not supported for pickle, please use "
                           "regular python function or functools.partial instead.")
-        self.fn = fn  # type: ignore
+        self.fn = fn  # type: ignore[assignment]
         self.args = () if fn_args is None else fn_args
         self.kwargs = {} if fn_kwargs is None else fn_kwargs
 
@@ -55,7 +62,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             yield self.fn(data, *self.args, **self.kwargs)
 
     def __len__(self) -> int:
-        if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
+        if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise NotImplementedError
 
@@ -70,11 +77,12 @@ class MapIterDataPipe(IterDataPipe[T_co]):
     def __setstate__(self, state):
         (self.datapipe, dill_function, self.args, self.kwargs) = state
         if DILL_AVAILABLE:
-            self.fn = dill.loads(dill_function)  # type: ignore
+            self.fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:
-            self.fn = dill_function  # type: ignore
+            self.fn = dill_function  # type: ignore[assignment]
 
 
+@functional_datapipe('collate')
 class CollateIterDataPipe(MapIterDataPipe):
     r""" :class:`CollateIterDataPipe`.
 
@@ -121,6 +129,7 @@ class CollateIterDataPipe(MapIterDataPipe):
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
 
+@functional_datapipe('transforms')
 class TransformsIterDataPipe(MapIterDataPipe):
     r""" :class:`TransformsIterDataPipe`.
 

@@ -18,44 +18,33 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
   return indices.at(0)->dtype();
 }
 
-Load::Load(
-    Dtype dtype,
-    const Buf* buf,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {}
-
-Load::Load(
-    const Buf* buf,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : Load(
-          ChooseDtype(buf->dtype(), dtypeOfIndices(indices)),
-          buf,
-          indices,
-          mask) {}
-
-ExprHandle Load::make(
-    Dtype dtype,
-    const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return ExprHandle(new Load(
-      dtype, buf.node(), ExprHandleVectorToExprVector(indices), mask.node()));
+void castIndicesToInts(std::vector<const Expr*>& indices) {
+  // Cast all indices to Int
+  // TODO: Should we use int64 here?
+  auto index_dtype = ScalarType::Int;
+  for (auto& index : indices) {
+    const Dtype& dt = index->dtype();
+    if (c10::isIntegralType(dt.scalar_type(), true) &&
+        dt.scalar_type() != index_dtype) {
+      index = new Cast(Dtype(index_dtype, dt.lanes()), index);
+    }
+  }
 }
 
-ExprHandle Load::make(
-    const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return Load::make(buf.dtype(), buf, indices, mask);
+Load::Load(Dtype dtype, const Buf* buf, std::vector<const Expr*> indices)
+    : ExprNodeBase(dtype), buf_(buf), indices_(std::move(indices)) {
+  castIndicesToInts(indices_);
 }
+
+Load::Load(const Buf* buf, const std::vector<const Expr*>& indices)
+    : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
 
 ExprHandle Load::make(
     Dtype dtype,
     const BufHandle& buf,
     const std::vector<ExprHandle>& indices) {
-  return Load::make(dtype, buf, indices, IntImm::make(1));
+  return ExprHandle(
+      new Load(dtype, buf.node(), ExprHandleVectorToExprVector(indices)));
 }
 
 ExprHandle Load::make(
@@ -67,42 +56,9 @@ ExprHandle Load::make(
 Store::Store(
     const Buf* buf,
     std::vector<const Expr*> indices,
-    const Expr* value,
-    const Expr* mask)
-    : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
-  /*
-  TODO: Reenable the checks.
-  The reason they are disabled is that kernel.cpp is using Buffers somewhat
-  loosely: we don't set dimensions properly and just construct index expressions
-  directly. We should harden that part and then we'd be able to turn on these
-  checks.
-
-  if (!indicesValid(indices)) {
-    throw malformed_input();
-  }
-  if (!mask || !value) {
-    throw malformed_input();
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (index_dtype.lanes() != mask->dtype().lanes()) {
-    throw malformed_input();
-  }
-  if (index_dtype.lanes() != value->dtype().lanes()) {
-    throw malformed_input();
-  }
-  */
-}
-
-Store* Store::make(
-    const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& value,
-    const ExprHandle& mask) {
-  return new Store(
-      buf.node(),
-      ExprHandleVectorToExprVector(indices),
-      value.node(),
-      mask.node());
+    const Expr* value)
+    : buf_(buf), indices_(std::move(indices)), value_(value) {
+  castIndicesToInts(indices_);
 }
 
 Store* Store::make(
@@ -110,10 +66,7 @@ Store* Store::make(
     const std::vector<ExprHandle>& indices,
     const ExprHandle& value) {
   return new Store(
-      buf.node(),
-      ExprHandleVectorToExprVector(indices),
-      value.node(),
-      ExprHandle(1).node());
+      buf.node(), ExprHandleVectorToExprVector(indices), value.node());
 }
 
 const Expr* flatten_index(

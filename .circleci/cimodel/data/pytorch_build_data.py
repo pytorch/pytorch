@@ -32,14 +32,9 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("cuda", [
-            ("10.1", [
-                ("3.6", [
-                    ('build_only', [X(True)]),
-                ]),
-            ]),
             ("10.2", [
                 ("3.6", [
-                    ("shard_test", [XImportant(True)]),
+                    ("shard_test", [X(True)]),
                     ("libtorch", [
                         (True, [
                             ('build_only', [X(True)]),
@@ -49,10 +44,10 @@ CONFIG_TREE_DATA = [
             ]),
             ("11.1", [
                 ("3.8", [
-                    X(True),
+                    ("shard_test", [XImportant(True)]),
                     ("libtorch", [
                         (True, [
-                            ('build_only', [XImportant(True)]),
+                            ('build_only', [X(True)]),
                         ]),
                     ]),
                 ]),
@@ -62,12 +57,21 @@ CONFIG_TREE_DATA = [
     ("bionic", [
         ("clang", [
             ("9", [
-                XImportant("3.6"),
+                ("3.6", [
+                    ("noarch", [XImportant(True)]),
+                ]),
             ]),
             ("9", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
                     ("vulkan", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
+        ("cuda", [
+            ("10.2", [
+                ("3.9", [
+                    ("shard_test", [XImportant(True)]),
                 ]),
             ]),
         ]),
@@ -141,6 +145,8 @@ class PyVerConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["pyver"] = node_name
         self.props["abbreviated_pyver"] = get_major_pyver(node_name)
+        if node_name == "3.9":
+            self.props["abbreviated_pyver"] = "py3.9"
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
@@ -160,6 +166,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "mlc": MLCConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
+            "noarch": NoarchConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -244,6 +251,14 @@ class ParallelTBBConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["parallel_backend"] = "paralleltbb"
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class NoarchConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_noarch"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

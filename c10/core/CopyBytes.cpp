@@ -5,6 +5,7 @@ namespace c10 {
 
 // First dimension of the array is `bool async`: 0 is sync,
 // 1 is async (non-blocking)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static CopyBytesFunction g_copy_bytes[2][COMPILE_TIME_MAX_DEVICE_TYPES]
                                      [COMPILE_TIME_MAX_DEVICE_TYPES];
 
@@ -46,4 +47,4 @@ void CopyBytes(
   ptr(nbytes, src, src_device, dst, dst_device);
 }
 
-}
+} // namespace c10

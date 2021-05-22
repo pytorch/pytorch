@@ -46,8 +46,14 @@ std::vector<std::string> parseMethodHandle(const std::string& blob) {
 class BackendWithCompiler : public PyTorchBackendInterface {
  public:
   // Constructor.
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   explicit BackendWithCompiler() {}
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~BackendWithCompiler() = default;
+
+  bool is_available() override {
+    return true;
+  }
 
   // Since the actual compilation is done AOT,
   c10::impl::GenericDict compile(
@@ -83,6 +89,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
             "Constant value is expected in ",
             instruction);
         auto sub = instruction.substr(15);
+        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         const_val = stod(sub);
       } else if (token == "aten::add") {
         output_list.emplace_back(x.add(h, const_val));
@@ -102,56 +109,9 @@ class BackendWithCompiler : public PyTorchBackendInterface {
 };
 
 namespace {
-// For this backend, the actual compilation happens in preprocess function AOT.
-// Put here for demonstration of backend
-// as a whole piece. It's used when compilation is required. A dummy function
-// can be passed when there's no usage of compilation in runtime backend lib.
-c10::IValue preprocess(
-    const Module& mod,
-    const c10::Dict<IValue, IValue>& method_compile_spec) {
-  // The output of this process would produce a dictionary
-  // Key: method name.
-  // Val: compiled blob (represented by a string).
-  c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
-  for (const auto& method : mod.get_methods()) {
-    const auto graph = method.function().graph()->copy();
-    auto key = method.name();
-    std::stringstream ss;
-    for (const auto& node : graph->nodes()) {
-      switch (node->kind()) {
-        case prim::Constant:
-          ss << node->kind().toDisplayString() << "#"
-             << toIValue(node->output()).value();
-          break;
-        case aten::add:
-          ss << node->kind().toQualString();
-          break;
-        case aten::sub:
-          ss << node->kind().toQualString();
-          break;
-        default:
-          TORCH_CHECK(
-              false,
-              "The node of ",
-              node->kind().toQualString(),
-              " is not supported in this compiler. Source code: ",
-              node->sourceRange().str());
-          break;
-      }
-      ss << ",";
-    }
-    std::string blob = ss.str();
-    if (!blob.empty()) {
-      blob.pop_back();
-    }
-    compiled.insert(method.name(), blob);
-  }
-  return compiled;
-}
-
-static auto cls = torch::jit::backend<BackendWithCompiler>(
-    "backend_with_compiler_demo",
-    preprocess);
+constexpr auto backend_name = "backend_with_compiler_demo";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static auto cls = torch::jit::backend<BackendWithCompiler>(backend_name);
 } // namespace
 
 } // namespace jit

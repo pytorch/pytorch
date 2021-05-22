@@ -5,20 +5,21 @@
 #include <sys/socket.h>
 #endif
 
-#include <unordered_map>
-#include <cstdlib>
-#include <libshm.h>
-#include <TH/TH.h>
-#include <c10/util/Logging.h>
 #include <ATen/ATen.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/dlpack.h>
 #include <ATen/DLConvertor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/VmapMode.h>
+#include <ATen/dlpack.h>
+#include <ATen/core/Vitals.h>
+#include <TH/TH.h>
+#include <c10/util/Logging.h>
+#include <cstdlib>
+#include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <unordered_map>
 
 #include <torch/csrc/THP.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -34,6 +35,7 @@
 #include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
+#include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -47,11 +49,14 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
+#include <torch/csrc/fx/fx_init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
+#include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
 #ifdef USE_DISTRIBUTED
@@ -73,8 +78,10 @@
 
 namespace py = pybind11;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* module;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THPGenerator *THPDefaultCPUGenerator = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -87,6 +94,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
   THPObjectPtr types(PySequence_Fast(arg, "expected a sequence"));
   if (!types) return nullptr;
 
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
   for (Py_ssize_t i = 0; i < num_classes; i++) {
@@ -224,8 +232,8 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
-  PyObject *obj;
-  PyObject *doc_obj;
+  PyObject *obj = nullptr;
+  PyObject *doc_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &obj, &doc_obj)) {
     return nullptr;
   }
@@ -389,6 +397,9 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
   auto atensor = at::fromDLPack(dlMTensor);
 
+  // Make sure this capsule will never be used again.
+  PyCapsule_SetName(data, "used_dltensor");
+
   // It is possible that the call to at::fromDLPack is the very first
   // call to create a Tensor in PyTorch. If so, then _lazy_init has
   // not been called, and the attempt to call createPyObject will fail
@@ -398,8 +409,6 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   if(atensor.is_cuda()) {
     py::module::import("torch.cuda").attr("init")();
   }
-  // Make sure this capsule will never be used again.
-  PyCapsule_SetName(data, "used_dltensor");
   return THPVariable_Wrap(std::move(atensor));
   END_HANDLE_TH_ERRORS
 }
@@ -448,10 +457,12 @@ PyObject *THPModule_userEnabledMkldnn(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicCuDNN(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
@@ -462,10 +473,12 @@ PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "use_deterministic_algorithms expects a "
           "bool, but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicAlgorithms(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicAlgorithms(PyObject *_unused, PyObject *noargs)
@@ -488,7 +501,7 @@ PyObject *THPModule_warnAlways(PyObject *_unused, PyObject *noargs)
 {
   if (c10::Warning::get_warnAlways()) {
     Py_RETURN_TRUE;
-  } 
+  }
   Py_RETURN_FALSE;
 }
 
@@ -551,7 +564,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(
-          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_dispatch_key()),
+          c10::DeviceTypeName(dispatchKeyToDeviceType(torch::tensors::get_default_dispatch_key()),
                               /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
@@ -641,7 +654,7 @@ static PyObject * THPModule_are_vmap_fallback_warnings_enabled(PyObject* _unused
   END_HANDLE_TH_ERRORS
 }
 
-//NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+//NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  THPModule_initExtension,   METH_O,       nullptr},
   {"_autograd_init",  THPAutograd_initExtension, METH_NOARGS,  nullptr},
@@ -753,6 +766,7 @@ bool THDPBFloat16Storage_init(PyObject *module);
 bool THDPComplexDoubleStorage_init(PyObject *module);
 bool THDPComplexFloatStorage_init(PyObject *module);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -764,6 +778,20 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
     c10::LogAPIUsage(event);
   }
 }
+
+// Weak reference to tensor, used to test a tensor isn't leaked
+class WeakTensorRef {
+  c10::weak_intrusive_ptr<c10::TensorImpl> weakref_;
+
+public:
+  WeakTensorRef(const at::Tensor& t):
+    weakref_(t.getIntrusivePtr()) {
+  }
+
+  bool expired() {
+    return weakref_.expired();
+  }
+};
 
 extern "C"
 #ifdef _WIN32
@@ -826,11 +854,14 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::fx::initFx(module);
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
+  torch::crash_handler::initCrashHandlerBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
+  torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
 #ifdef USE_CUDA
@@ -900,6 +931,10 @@ PyObject* initModule() {
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
+    if (torch::crash_handler::is_enabled()) {
+      torch::crash_handler::write_minidump();
+    }
+
     try {
       if (e) {
         std::rethrow_exception(e);
@@ -911,6 +946,11 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
+
+  py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
+  py_module.def("set_vital", [](const std::string &vital, const std::string &attr, const std::string value){
+    return at::vitals::VitalsAPI.setVital(vital, attr, value);
+  });
 
   py_module.def(
     "init_num_threads",
@@ -947,6 +987,26 @@ Call this whenever a new thread is created in order to propagate values from
       #endif
     }
   );
+
+  py_module.def(
+    "_valgrind_toggle_and_dump_stats", [](){
+      #if defined(USE_VALGRIND)
+      // NB: If we don't toggle collect around dump stats, callgrind_annotate
+      //     won't process the results correctly. Specifically,
+      //     `callgrind_annotate --inclusive=no` will be almost completely empty.
+      CALLGRIND_TOGGLE_COLLECT;
+      CALLGRIND_DUMP_STATS;
+      #else
+      TORCH_CHECK(false, "Valgrind is not supported.");
+      #endif
+    }
+  );
+
+  py::class_<WeakTensorRef>(py_module, "_WeakTensorRef")
+    .def(py::init([](py::object tensor) {
+      return WeakTensorRef(THPVariable_Unpack(tensor.ptr()));
+    }))
+    .def("expired", &WeakTensorRef::expired);
 
 #ifdef USE_CUDA
   PyObject *has_cuda = Py_True;
@@ -1021,4 +1081,5 @@ struct call_duplicate_guard {
   call_duplicate_guard() { pytorch_duplicate_guard(); }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static call_duplicate_guard _call_duplicate_guard;

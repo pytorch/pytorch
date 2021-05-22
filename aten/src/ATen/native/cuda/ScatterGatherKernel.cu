@@ -174,9 +174,9 @@ struct cuda_scatter_gather_base_kernel {
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
+      .add_borrowed_output(self_restrided)
+      .add_borrowed_input(src_restrided)
+      .add_borrowed_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -246,9 +246,9 @@ struct cuda_scatter_gather_base_kernel {
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
+      .add_borrowed_output(self_restrided)
+      .add_borrowed_input(src_restrided)
+      .add_borrowed_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -355,8 +355,8 @@ struct cuda_scatter_fill_base_kernel {
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self_restrided)
-      .add_input(index)
+      .add_borrowed_output(self_restrided)
+      .add_borrowed_input(index)
       .build();
 
     auto index_size = ensure_nonempty_size(self, dim);
@@ -407,8 +407,8 @@ struct cuda_scatter_fill_base_kernel {
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_output(self_restrided)
-      .add_input(index)
+      .add_borrowed_output(self_restrided)
+      .add_borrowed_input(index)
       .build();
 
     auto index_size = ensure_nonempty_size(self, dim);
@@ -444,7 +444,7 @@ void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const T
     "scatter_cuda_", tensor_assign);
 }
 
-void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
+void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Scalar& src) {
   cuda_scatter_fill_base_kernel<>()(
     self, dim, index, src,
     "scatter_fill_cuda_", tensor_assign);
@@ -474,7 +474,7 @@ void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& i
 }
 
 void scatter_scalar_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                               Scalar& value, const SCATTER_GATHER_OP& reduce) {
+                               const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,

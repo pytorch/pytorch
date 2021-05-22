@@ -515,6 +515,8 @@ class TestTracer(JitTestCase):
 
         with warnings.catch_warnings(record=True) as warns:
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
+        for warn in warns:
+            self.assertIs(warn.category, torch.jit.TracerWarning)
         warns = [str(w.message) for w in warns]
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
@@ -2106,7 +2108,7 @@ class TestMixTracingScripting(JitTestCase):
         class Param(nn.Module):
             def __init__(self):
                 super(Param, self).__init__()
-                self.register_parameter("bias", nn.Parameter(torch.Tensor(4, 4)))
+                self.register_parameter("bias", nn.Parameter(torch.empty(4, 4)))
 
             def forward(self, x):
                 return x

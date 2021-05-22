@@ -139,12 +139,12 @@ using EnforceNotMet = ::c10::Error;
   } while (false)
 
 #define CAFFE_ENFORCE_FINITE(condition, ...)                        \
-    do {                                                            \
-      if (C10_UNLIKELY(!(condition))) {                             \
-        ::c10::ThrowEnforceFiniteNotMet(                            \
+  do {                                                              \
+    if (C10_UNLIKELY(!(condition))) {                               \
+      ::c10::ThrowEnforceFiniteNotMet(                              \
           __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
-      }                                                             \
-    } while (false)
+    }                                                               \
+  } while (false)
 
 #define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                         \
   do {                                                                    \
@@ -186,131 +186,83 @@ using EnforceNotMet = ::c10::Error;
 
 namespace enforce_detail {
 
-struct C10_API EnforceOK {};
+template <typename T1, typename T2>
+std::string enforceFailMsgImpl(const T1& x, const T2& y) {
+  return c10::str(x, " vs ", y);
+}
 
-class C10_API EnforceFailMessage {
- public:
-#ifdef _MSC_VER
-  // MSVC + NVCC ignores constexpr and will issue a warning if included.
-  /* implicit */ EnforceFailMessage(EnforceOK) : msg_(nullptr) {}
-#else
-  constexpr /* implicit */ EnforceFailMessage(EnforceOK) : msg_(nullptr) {}
-#endif
-  EnforceFailMessage(EnforceFailMessage&&) = default;
-  EnforceFailMessage(const EnforceFailMessage&) = delete;
-  EnforceFailMessage& operator=(EnforceFailMessage&&) = delete;
-  EnforceFailMessage& operator=(const EnforceFailMessage&) = delete;
+template <typename T1, typename T2, typename... Args>
+std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
+  return c10::str(x, " vs ", y, ". ", args...);
+}
 
-  // Catch all wrong usages like CAFFE_ENFORCE_THAT(x < y)
-  template <class... Args>
-  /* implicit */ EnforceFailMessage(Args...) {
-    static_assert(
-        // This stands for an "impossible" condition. Plain `false` doesn't
-        // trick compiler enough.
-        sizeof...(Args) == std::numeric_limits<std::size_t>::max(),
-        "CAFFE_ENFORCE_THAT has to be used with one of special check functions "
-        "like `Equals`. Use CAFFE_ENFORCE for simple boolean checks.");
+template <typename Pred, typename T1, typename T2, typename... Args>
+void enforceThatImpl(
+    Pred p,
+    const T1& lhs,
+    const T2& rhs,
+    const char* file,
+    int line,
+    const char* expr,
+    const void* caller,
+    const Args&... args) {
+  if (C10_UNLIKELY(!(p(lhs, rhs)))) {
+    ::c10::ThrowEnforceNotMet(
+        file,
+        line,
+        expr,
+        ::c10::enforce_detail::enforceFailMsgImpl(lhs, rhs, args...),
+        caller);
   }
+}
+#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...) \
+  ::c10::enforce_detail::enforceThatImpl(                \
+      op, lhs, rhs, __FILE__, __LINE__, expr, nullptr, ##__VA_ARGS__)
 
-  /* implicit */ EnforceFailMessage(std::string&& msg);
+#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...) \
+  ::c10::enforce_detail::enforceThatImpl(                            \
+      op, (lhs), (rhs), __FILE__, __LINE__, expr, this, ##__VA_ARGS__)
 
-  inline bool bad() const {
-    return msg_ != nullptr;
-  }
-  std::string get_message_and_free(const std::string& extra) const {
-    std::string r;
-    if (extra.empty()) {
-      r = std::move(*msg_);
-    } else {
-      r = ::c10::str(std::move(*msg_), ". ", extra);
-    }
-    delete msg_;
-    return r;
-  }
-
- private:
-  std::string* msg_{};
-};
-
-#define BINARY_COMP_HELPER(name, op)                         \
-  template <typename T1, typename T2>                        \
-  inline EnforceFailMessage name(const T1& x, const T2& y) { \
-    if (x op y) {                                            \
-      return EnforceOK();                                    \
-    }                                                        \
-    return c10::str(x, " vs ", y);                           \
-  }
-BINARY_COMP_HELPER(Equals, ==)
-BINARY_COMP_HELPER(NotEquals, !=)
-BINARY_COMP_HELPER(Greater, >)
-BINARY_COMP_HELPER(GreaterEquals, >=)
-BINARY_COMP_HELPER(Less, <)
-BINARY_COMP_HELPER(LessEquals, <=)
-#undef BINARY_COMP_HELPER
-
-#define CAFFE_ENFORCE_THAT_IMPL(condition, expr, ...)                   \
-  do {                                                                  \
-    using namespace ::c10::enforce_detail;                              \
-    const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_r_ = (condition); \
-    if (C10_UNLIKELY(CAFFE_ENFORCE_THAT_IMPL_r_.bad())) {               \
-      ::c10::ThrowEnforceNotMet(                                        \
-          __FILE__,                                                     \
-          __LINE__,                                                     \
-          expr,                                                         \
-          CAFFE_ENFORCE_THAT_IMPL_r_.get_message_and_free(              \
-              ::c10::str(__VA_ARGS__)));                                \
-    }                                                                   \
-  } while (false)
-
-#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(condition, expr, ...)      \
-  do {                                                                 \
-    using namespace ::c10::enforce_detail;                             \
-    const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_ = \
-        (condition);                                                   \
-    if (C10_UNLIKELY(CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.bad())) {  \
-      ::c10::ThrowEnforceNotMet(                                       \
-          __FILE__,                                                    \
-          __LINE__,                                                    \
-          expr,                                                        \
-          CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.get_message_and_free( \
-              ::c10::str(__VA_ARGS__)),                                \
-          this);                                                       \
-    }                                                                  \
-  } while (false)
 } // namespace enforce_detail
 
-#define CAFFE_ENFORCE_THAT(condition, ...) \
-  CAFFE_ENFORCE_THAT_IMPL((condition), #condition, __VA_ARGS__)
+#define CAFFE_ENFORCE_THAT(cmp, op, lhs, rhs, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(cmp, lhs, rhs, #lhs " " #op " " #rhs, ##__VA_ARGS__)
 
+#define CAFFE_ENFORCE_BINARY_OP(cmp, op, x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_EQ(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(Equals((x), (y)), #x " == " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_NE(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(NotEquals((x), (y)), #x " != " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_LE(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(LessEquals((x), (y)), #x " <= " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_LT(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(Less((x), (y)), #x " < " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::less<void>(), <, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_GE(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(GreaterEquals((x), (y)), #x " >= " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_GT(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(Greater((x), (y)), #x " > " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::greater<void>(), >, x, y, ##__VA_ARGS__)
+
+#define CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(cmp, op, x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(                          \
+      cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_EQ_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      Equals((x), (y)), #x " == " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_NE_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      NotEquals((x), (y)), #x " != " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_LE_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      LessEquals((x), (y)), #x " <= " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(Less((x), (y)), #x " < " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less<void>(), <, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      GreaterEquals((x), (y)), #x " >= " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      Greater((x), (y)), #x " > " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::greater<void>(), >, x, y, ##__VA_ARGS__)
 
 /**
  * Very lightweight logging for the first time API usage. It's beneficial for
@@ -324,7 +276,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
  *   // Logs caller info with an arbitrary text event, if there is a usage.
  *   C10_LOG_API_USAGE_ONCE("my_api");
  */
-#define C10_LOG_API_USAGE_ONCE(...)             \
+#define C10_LOG_API_USAGE_ONCE(...)                        \
   C10_UNUSED static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
       ::c10::detail::LogAPIUsageFakeReturn(__VA_ARGS__);
 
@@ -338,78 +290,20 @@ C10_API void LogAPIUsage(const std::string& context);
 // c10 directory so that it can be easily imported by both c10
 // and torch files.
 struct DDPLoggingData {
-  // Data that can be got during DistributedDataParallel construction time
-  int world_size = -1;
-  int rank = -1;
-  std::string module_name = "";
-  std::vector<int> device_ids = std::vector<int>();
-  int output_device = -1;
-  std::string backend_name = "";
-  // Parameter's data type
-  std::string dtype = "";
-  // Total parameters size (Bytes)
-  int64_t total_parameter_size_bytes = -1;
-  // The number of parameter tensors
-  int num_parameter_tensors = -1;
-  // A list of bucket sizes (Bytes) calculated during construction time
-  std::vector<int> bucket_sizes = std::vector<int>();
-
-  // Environment variables
-  std::string master_port = "";
-  std::string master_addr = "";
-  std::string cuda_visible_devices = "";
-  std::string gloo_socket_ifname = "";
-  std::string gloo_device_transport = "";
-  std::string nccl_socket_ifname = "";
-  std::string nccl_blocking_wait = "";
-  std::string nccl_debug = "";
-  std::string nccl_nthreads = "";
-  std::string nccl_ib_timeout = "";
-
-  // DistributedDataParallel constructor input parameters
-  bool broadcast_buffers = false;
-  float bucket_cap_mb = -1.0;
-  bool find_unused_parameters = false;
-  bool gradient_as_bucket_view = false;
-
-  // The following runtime stats are collected for the first 10 iterations
-  // and then are collected every kDDPRuntimeLoggingSampleRate=100 iterations.
-  // Users can get these stats at any iteration of training
-  // loop by calling get_ddp_logging_data() in python.
-
-  // In which iteration of the training loop the get_ddp_logging_data()
-  // is called to fetch the DDPLoggingData, 0 if the data is fetched
-  // before training loop.
-  int64_t iteration = -1;
-
-  // When get_ddp_logging_data() is called, "unused_parameter_size",
-  // "has_rebuilt_buckets" and "rebuilt_bucket_sizes" are updated in the latest
-  // sampling iteration.
-  // Total unused parameter size (Bytes)
-  int64_t unused_parameter_size = 0;
-  // Rebuild buckets stats after 1st iteration
-  bool has_rebuilt_buckets = false;
-  std::vector<int> rebuilt_bucket_sizes = std::vector<int>();
-  // Average performance stats for the number of sampling iterations
-  // when time is recorded (ns).
-  // e.g., training loop has ran "DDPLoggingData::iteration=1000" iterations,
-  // time is recorded every kDDPRuntimeLoggingSampleRate=100 iterations,
-  // the following performance stats are averaged among the
-  // "DDPLoggingData::iteration"/"kDDPRuntimeLoggingSampleRate"=10 sampling
-  // iterations.
-  int64_t avg_forward_compute_time = 0;
-  int64_t avg_backward_compute_time = 0;
-  int64_t avg_backward_comm_time = 0;
-  int64_t avg_backward_compute_comm_overlap_time = 0;
+  // logging fields that are string types.
+  std::map<std::string, std::string> strs_map;
+  // logging fields that are int64_t types.
+  std::map<std::string, int64_t> ints_map;
 };
 
-C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
-C10_API void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData);
+C10_API void SetPyTorchDDPUsageLogger(
+    std::function<void(const DDPLoggingData&)> logger);
+C10_API void LogPyTorchDDPUsage(const DDPLoggingData& ddpData);
 
 namespace detail {
 // Return value is needed to do the static variable initialization trick
 C10_API bool LogAPIUsageFakeReturn(const std::string& context);
-}
+} // namespace detail
 
 } // namespace c10
 

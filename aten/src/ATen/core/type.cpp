@@ -3,6 +3,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 #include <iostream>
@@ -32,12 +33,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 
       out << "(";
       size_t i = 0;
+      bool symbolic = type_verbosity() == TypeVerbosity::Symbolic;
       for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
         if (auto s = value->sizes()[i]) {
           out << *s;
+        } else if (symbolic) {
+          out << value->symbolic_sizes().at(i);
         } else {
           out << "*";
         }
@@ -123,7 +127,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 }
 
 AnyTypePtr AnyType::get() {
-  static auto value = AnyType::create();
+  static AnyTypePtr value(new AnyType());
   return value;
 }
 
@@ -134,63 +138,63 @@ TensorTypePtr TensorType::get() {
 }
 
 NumberTypePtr NumberType::get() {
-  static auto value = NumberType::create();
+  static NumberTypePtr value(new NumberType());
   return value;
 }
 IntTypePtr IntType::get() {
-  static auto value = IntType::create();
+  static IntTypePtr value(new IntType());
   return value;
 }
 FloatTypePtr FloatType::get() {
-  static auto value = FloatType::create();
+  static FloatTypePtr value(new FloatType());
   return value;
 }
 ComplexTypePtr ComplexType::get() {
-  static auto value = ComplexType::create();
+  static ComplexTypePtr value(new ComplexType());
   return value;
 }
 BoolTypePtr BoolType::get() {
-  static auto value = BoolType::create();
+  static BoolTypePtr value(new BoolType());
   return value;
 }
 StorageTypePtr StorageType::get() {
-  static auto value = StorageType::create();
+  static StorageTypePtr value(new StorageType());
   return value;
 }
 NoneTypePtr NoneType::get() {
-  static auto value = NoneType::create();
+  static NoneTypePtr value(new NoneType());
   return value;
 }
 GeneratorTypePtr GeneratorType::get() {
-  static auto value = GeneratorType::create();
+  static GeneratorTypePtr value(new GeneratorType());
   return value;
 }
 QuantizerTypePtr QuantizerType::get() {
-  static auto value = QuantizerType::create();
+  static QuantizerTypePtr value(new QuantizerType());
   return value;
 }
 QSchemeTypePtr QSchemeType::get() {
-  static auto value = QSchemeType::create();
+  static QSchemeTypePtr value(new QSchemeType());
   return value;
 }
 StringTypePtr StringType::get() {
-  static auto value = StringType::create();
+  static StringTypePtr value(new StringType());
   return value;
 }
 DeviceObjTypePtr DeviceObjType::get() {
-  static auto value = DeviceObjType::create();
+  static DeviceObjTypePtr value(new DeviceObjType());
   return value;
 }
 StreamObjTypePtr StreamObjType::get() {
-  static auto value = StreamObjType::create();
+  static StreamObjTypePtr value(new StreamObjType());
   return value;
 }
 ScalarTypeTypePtr ScalarTypeType::get() {
-static auto value = ScalarTypeType::create();
+static ScalarTypeTypePtr value(new ScalarTypeType());
 return value;
 }
 LayoutTypePtr LayoutType::get() {
-static auto value = LayoutType::create();
+static LayoutTypePtr value(new LayoutType());
 return value;
 }
 OptionalTypePtr OptionalType::ofTensor() {
@@ -198,11 +202,11 @@ OptionalTypePtr OptionalType::ofTensor() {
   return value;
 }
 PyObjectTypePtr PyObjectType::get() {
-  static auto value = PyObjectType::create();
+  static PyObjectTypePtr value(new PyObjectType());
   return value;
 }
 CapsuleTypePtr CapsuleType::get() {
-  static auto value = CapsuleType::create();
+  static CapsuleTypePtr value(new CapsuleType());
   return value;
 }
 ListTypePtr ListType::ofTensors() {
@@ -231,22 +235,22 @@ ListTypePtr ListType::ofStrings() {
 }
 
 AnyListTypePtr AnyListType::get() {
-  static auto value = AnyListType::create();
+  static AnyListTypePtr value(new AnyListType());
   return value;
 }
 
 AnyTupleTypePtr AnyTupleType::get() {
-  static auto value = AnyTupleType::create();
+  static AnyTupleTypePtr value(new AnyTupleType());
   return value;
 }
 
 AnyClassTypePtr AnyClassType::get() {
-  static auto value = AnyClassType::create();
+  static AnyClassTypePtr value(new AnyClassType());
   return value;
 }
 
 AnyEnumTypePtr AnyEnumType::get() {
-  static auto value = AnyEnumType::create();
+  static AnyEnumTypePtr value(new AnyEnumType());
   return value;
 }
 
@@ -389,6 +393,7 @@ MatchTypeReturn matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
         // propagate the errMsg onward
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -414,6 +419,7 @@ MatchTypeReturn matchTypeVariables(
         const auto result = matchTypeVariables(
             tp_formal->elements()[i], tp_actual->elements()[i], type_env);
         if (!result.success()) {
+          // NOLINTNEXTLINE(performance-no-automatic-move)
           return result;
         }
       }
@@ -428,6 +434,7 @@ MatchTypeReturn matchTypeVariables(
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -441,6 +448,7 @@ MatchTypeReturn matchTypeVariables(
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -454,6 +462,7 @@ MatchTypeReturn matchTypeVariables(
       const auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
       if (!optionedMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return optionedMatch;
       }
     } else if (!actual->isSubtypeOf(NoneType::get())) {
@@ -704,7 +713,11 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
-  os << "SS(" << s.value_ << ')';
+  if (s.value_ >= 0) {
+    os << s.value_;
+  } else {
+    os << "SS(" << s.value_ << ')';
+  }
   return os;
 }
 
@@ -852,16 +865,24 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
-    for(size_t i = 0; i < elements().size(); ++i) {
-      if(i > 0)
-        ss << ", ";
-      ss << elements()[i]->annotation_str(printer);
+    if (elements().size() == 0) {
+      // `typing.Tuple` special-cases the annotation syntax for empty tuple
+      // with `typing.Tuple[()]`. See
+      // https://docs.python.org/3/library/typing.html#typing.Tuple
+      ss << "()";
+    } else {
+      for (size_t i = 0; i < elements().size(); ++i) {
+        if (i > 0)
+          ss << ", ";
+        ss << elements()[i]->annotation_str(printer);
+      }
     }
     ss << "]";
   }
   return ss.str();
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static std::vector<bool> findContiguous(
     const at::IntArrayRef& sizes,
     const at::IntArrayRef& strides) {
@@ -933,6 +954,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   return VaryingShape<Stride>{stride_properties};
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<size_t> ShapeSymbol::num_symbols{1};
 
 template struct VaryingShape<c10::ShapeSymbol>;
@@ -943,6 +965,7 @@ template struct VaryingShape<int64_t>;
 TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const SymbolicShape& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
@@ -1107,7 +1130,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
 std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = schema.arguments();
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (const auto i : c10::irange(1, forward_args.size())) {
     input_types << forward_args[i].type()->annotation_str();
     if (forward_args.size() - 1 != i) {
       input_types << ", ";
@@ -1124,12 +1147,12 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
   std::string input_types = getSchemaInputTypesString(forward_schema);
   const std::vector<Argument>& forward_args = forward_schema.arguments();
-   
+
   std::string single_output = "";
   if (forward_args.size() == 2 &&
       forward_args[1].type()->cast<TupleType>() == nullptr) {
     // if the output type is a single tuple, it needs to be wrapped in an outer tuple
-    // to match eager's behavior 
+    // to match eager's behavior
     single_output = ", '" + forward_args[1].type()->annotation_str() + "',";
   }
   std::string pre_hook_schema =
@@ -1138,9 +1161,9 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
       "This error occured while scripting the forward pre-hook '" +
       pre_hook_name + "' on module '" + name()->name() +
       "'. If you did not want to script this pre-hook remove it from the "
-      "original NN module before scripting. Pre-hooks for module '" + 
-      name()->name() + "' are expected to have the following signature: " 
-      + pre_hook_schema + " with a return type of either 'None'" + 
+      "original NN module before scripting. Pre-hooks for module '" +
+      name()->name() + "' are expected to have the following signature: "
+      + pre_hook_schema + " with a return type of either 'None'" +
       single_output + " or 'Tuple[" + input_types + "]'.";
   return return_string;
 }
@@ -1148,7 +1171,7 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
 std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   const std::string& hook_name = forward_hooks_[hook_idx]->name();
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
-  std::string input_types = getSchemaInputTypesString(forward_schema); 
+  std::string input_types = getSchemaInputTypesString(forward_schema);
 
   // create expected output types string
   const Argument& pre_output =
@@ -1160,33 +1183,40 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   std::string hook_schema = hook_name + "(self, input: Tuple[" +
                             input_types + "], output: " + output_types + ")";
   std::string return_string =
-      "This error occured while scripting the forward hook '" 
+      "This error occured while scripting the forward hook '"
       + hook_name + "' on module " + name()->name() +
       ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
       " expected to have the following signature: " + hook_schema +
-      ". The type of the output arg is the returned type from" + 
-      " either the forward method or the previous hook if it exists. " + 
-      "Note that hooks can return anything, but if the hook is " + 
+      ". The type of the output arg is the returned type from" +
+      " either the forward method or the previous hook if it exists. " +
+      "Note that hooks can return anything, but if the hook is " +
       "on a submodule the outer module is expecting" +
       " the same return type as the submodule's forward.";
   return return_string;
 }
 
+bool ClassType::isUnresolvedClassAttribute(const std::string& name) const {
+  return std::find(
+      unresolved_class_attributes_.begin(),
+      unresolved_class_attributes_.end(),
+      name) != unresolved_class_attributes_.end();
+}
+
 void checkForwardHookInputArguments(
-    const FunctionSchema& forward_schema, 
-    const FunctionSchema& hook_schema, 
-    const std::string& hook_id, 
+    const FunctionSchema& forward_schema,
+    const FunctionSchema& hook_schema,
+    const std::string& hook_id,
     const std::string& hook_err_msg) {
   // check for proper tuple input types
   const std::vector<Argument>& forward_args = forward_schema.arguments();
   const Argument input_arg = hook_schema.arguments()[1];
   TORCH_CHECK(
-      input_arg.type()->cast<TupleType>() != nullptr, 
+      input_arg.type()->cast<TupleType>() != nullptr,
       hook_id,
       "expected the input argument to be typed as a Tuple but found type: '",
-      input_arg.type()->annotation_str(), 
-      "' instead.\n", 
+      input_arg.type()->annotation_str(),
+      "' instead.\n",
       hook_err_msg
    );
 
@@ -1213,7 +1243,7 @@ void checkForwardHookInputArguments(
         hook_err_msg
     );
 
-    for (int i = 1; i < forward_args.size(); ++i) {
+    for (const auto i : c10::irange(1, forward_args.size())) {
       if (*forward_args[i].type() != *input_tuple_types[i - 1]) {
         TORCH_CHECK(
             false,
@@ -1229,7 +1259,7 @@ void checkForwardHookInputArguments(
 }
 
 void ClassType::checkForwardPreHookSchema(
-    int pre_hook_idx, 
+    int pre_hook_idx,
     const FunctionSchema& pre_hook_schema) const {
   const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
   std::string hook_id =
@@ -1261,7 +1291,7 @@ void ClassType::checkForwardPreHookSchema(
             pre_hook_err_msg
   );
   const Argument return_arg = pre_hook_schema.returns()[0];
-  std::string wrong_type_returned_err_msg = hook_id + 
+  std::string wrong_type_returned_err_msg = hook_id +
       "returned the wrong type of: '" +
       return_arg.type()->annotation_str() + "'.";
 
@@ -1269,9 +1299,9 @@ void ClassType::checkForwardPreHookSchema(
     return;
   }
   if (forward_args.size() == 2 && *forward_args[1].type() == *return_arg.type()) {
-    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the 
+    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the
     // pre-hook returns a matching tuple. Eager doesn't support this- the working eager return
-    // for a tuple type is the forward's input tuple wrapped inside of another tuple. 
+    // for a tuple type is the forward's input tuple wrapped inside of another tuple.
     TORCH_CHECK(
         return_arg.type()->cast<TupleType>() == nullptr,
         wrong_type_returned_err_msg,
@@ -1313,10 +1343,10 @@ void ClassType::checkForwardPreHookSchema(
       pre_hook_err_msg
   );
   // check that contained types match forward types
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (const auto i : c10::irange(1, forward_args.size())) {
     if (*forward_args[i].type() != *return_tuple_types[i - 1]) {
       TORCH_CHECK(
-          false, 
+          false,
           wrong_type_returned_err_msg,
           " The returned tuple contains the wrong inner types.\n",
           pre_hook_err_msg);
@@ -1325,7 +1355,7 @@ void ClassType::checkForwardPreHookSchema(
 }
 
 void ClassType::checkForwardHookSchema(
-      int hook_idx, 
+      int hook_idx,
       const FunctionSchema& hook_schema) const {
   const torch::jit::Function* hook = forward_hooks_[hook_idx];
   std::string hook_id =
@@ -1388,8 +1418,8 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
 torch::jit::Function* ClassType::findHook(const std::string& name) const {
   auto hook = findForwardHook(name);
   if (hook == nullptr) {
-    hook = findForwardPreHook(name); 
-  } 
+    hook = findForwardPreHook(name);
+  }
   return hook;
 }
 
@@ -1488,6 +1518,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
         return false;
       }
       if (!self_method->getSchema().isSubtypeOf(
+              // NOLINTNEXTLINE(bugprone-argument-comment)
               schema, /*is_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on class '" << repr_str()
@@ -1529,6 +1560,7 @@ bool InterfaceType::isSubTypeImpl(
         }
         return false;
       }
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on interface '" << lhs.repr_str()
@@ -1574,20 +1606,27 @@ ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
-    std::string doc_string) {
-  return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes) {
+  return ClassTypePtr(new ClassType(
+      std::move(qualifiedName),
+      std::move(cu),
+      is_module,
+      std::move(doc_string),
+      std::move(unresolved_class_attributes)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module = false,
-    std::string doc_string = "")
+    bool is_module,
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes)
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       isModule_(is_module),
-      doc_string_(std::move(doc_string)) {}
+      doc_string_(std::move(doc_string)),
+      unresolved_class_attributes_(std::move(unresolved_class_attributes)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
@@ -1609,6 +1648,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 
   // Check no overlap with existing attributes
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < attributes_.size(); ++i) {
     TORCH_CHECK(
         name != attributes_[i].getName(),
@@ -1800,6 +1840,10 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return SymbolicShape(std::move(dims));
+}
+
+void SymbolicShape::dump() const {
+  std::cout << *this << "\n";
 }
 
 bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {

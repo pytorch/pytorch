@@ -6,6 +6,8 @@
 
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 static void AddConstInput(
@@ -58,6 +60,7 @@ static void AddInput(
   return;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestComputeAllAnchors) {
   ERMatXf anchors(3, 4);
   anchors << -38, -16, 53, 31, -84, -40, 99, 55, -176, -88, 191, 103;
@@ -90,6 +93,7 @@ TEST(GenerateProposalsTest, TestComputeAllAnchors) {
   EXPECT_EQ((all_anchors_result - all_anchors_gt).norm(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestComputeSortedAnchors) {
   ERMatXf anchors(3, 4);
   anchors << -38, -16, 53, 31, -84, -40, 99, 55, -176, -88, 191, 103;
@@ -140,6 +144,7 @@ TEST(GenerateProposalsTest, TestComputeSortedAnchors) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
   // Similar to TestComputeAllAnchors but for rotated boxes with angle info.
   ERMatXf anchors_xyxy(3, 4);
@@ -190,6 +195,7 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
   EXPECT_EQ((all_anchors_result - all_anchors_gt).norm(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestComputeSortedAnchorsRotated) {
   // Similar to TestComputeSortedAnchors but for rotated boxes with angle info.
   ERMatXf anchors_xyxy(3, 4);
@@ -250,6 +256,7 @@ TEST(GenerateProposalsTest, TestComputeSortedAnchorsRotated) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestEmpty) {
   Workspace ws;
   OperatorDef def;
@@ -287,6 +294,7 @@ TEST(GenerateProposalsTest, TestEmpty) {
   EXPECT_EQ(rois_probs.numel(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestRealDownSampled) {
   Workspace ws;
   OperatorDef def;
@@ -415,6 +423,7 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
       1e-4);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
   const float angle = 0;
@@ -587,6 +596,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
       1e-4);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
   const float angle = 45.0;
@@ -719,7 +729,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   // Verify that the resulting angles are correct
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
-  for (int i = 0; i < rois.size(0); ++i) {
+  for (const auto i : c10::irange(rois.size(0))) {
     EXPECT_LE(std::abs(rois_data(i, 5) - expected_angle), 1e-4);
   }
 }

@@ -8,6 +8,9 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <vector>
 
@@ -26,8 +29,10 @@ void calc_col_offsets_transpose(
     int32_t* B_zero_point,
     int32_t* col_offsets,
     c10::QScheme qtype) {
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < N; ++i) {
     int32_t sum = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t j = 0; j < K; ++j) {
       sum += Bint8[i * K + j];
     }
@@ -59,7 +64,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     weight_zero_points_int32[0] = weight.q_zero_point();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_zero_points_int32.resize(N, 0);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       weight_zero_points_int32[i] =
           weight.q_per_channel_zero_points()[i].item<int32_t>();
     }
@@ -69,7 +74,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     weight_scales_float[0] = weight.q_scale();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_scales_float.resize(N, 0.0);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       weight_scales_float[i] = weight.q_per_channel_scales()[i].item<float>();
     }
   }

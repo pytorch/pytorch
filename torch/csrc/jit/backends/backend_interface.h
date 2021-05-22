@@ -9,7 +9,11 @@ namespace jit {
 class TORCH_API PyTorchBackendInterface : public torch::CustomClassHolder {
  public:
   PyTorchBackendInterface();
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~PyTorchBackendInterface();
+
+  // Returns true if the backend is available to process delegation calls.
+  virtual bool is_available() = 0;
 
   // Compile the module contained in \p processed using the details provided in
   // \p method_compile_spec for each module method that should be compiled for

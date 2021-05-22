@@ -40,6 +40,14 @@ void RMSpropOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, centered);
 }
 
+double RMSpropOptions::get_lr() const {
+  return lr();
+}
+
+void RMSpropOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
          torch::equal(lhs.square_avg(), rhs.square_avg()) &&

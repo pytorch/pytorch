@@ -43,7 +43,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| all_to_all     | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
+| all_to_all     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -174,14 +174,6 @@ joined.
 
 .. autofunction:: init_process_group
 
-.. autoclass:: Backend
-
-.. autofunction:: get_backend
-
-.. autofunction:: get_rank
-
-.. autofunction:: get_world_size
-
 .. autofunction:: is_initialized
 
 .. autofunction:: is_mpi_available
@@ -270,6 +262,22 @@ The machine with rank 0 will be used to set up all connections.
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
 
+Post-Initialization
+-------------------
+
+Once :func:`torch.distributed.init_process_group` was run, the following functions can be used. To
+check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
+
+.. autoclass:: Backend
+
+.. autofunction:: get_backend
+
+.. autofunction:: get_rank
+
+.. autofunction:: get_world_size
+
+--------------------------------------------------------------------------------
+
 Distributed Key-Value Store
 ---------------------------
 
@@ -353,6 +361,9 @@ is guaranteed to support two methods:
 * ``wait()`` - in the case of CPU collectives, will block the process until the operation is completed. In the case
   of CUDA collectives, will block until the operation has been successfully enqueued onto a CUDA stream and the
   output can be utilized on the default stream without further synchronization.
+* ``get_future()`` - returns ``torch._C.Future`` object. Supported for NCCL, also supported for most operations on GLOO
+  and MPI, except for peer to peer operations.
+  Note: as we continue adopting Futures and merging APIs, ``get_future()`` call might become redundant.
 
 **Example**
 
@@ -408,6 +419,8 @@ Collective functions
 
 .. autofunction:: barrier
 
+.. autofunction:: monitored_barrier
+
 .. autoclass:: ReduceOp
 
 .. class:: reduce_op
@@ -416,6 +429,22 @@ Collective functions
     ``MIN``, and ``MAX``.
 
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
+
+Profiling Collective Communication
+-----------------------------------------
+
+Note that you can use ``torch.profiler`` (recommended, only available after 1.8.1)  or ``torch.autograd.profiler`` to profile collective communication and point-to-point communication APIs mentioned here. All out-of-the-box backends (``gloo``,
+``nccl``, ``mpi``) are supported and collective communication usage will be rendered as expected in profiling output/traces. Profiling your code is the same as any regular torch operator:
+
+::
+
+    import torch
+    import torch.distributed as dist
+    with torch.profiler():
+        tensor = torch.randn(20, 10)
+        dist.all_reduce(tensor)
+
+Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
 
 Autograd-enabled communication primitives
 -----------------------------------------

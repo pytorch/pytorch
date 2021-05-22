@@ -24,7 +24,7 @@ TORCH_META_FUNC(upsample_trilinear3d) (
       "Non-empty 5D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(upsample_trilinear3d_backward) (
@@ -112,7 +112,9 @@ Tensor upsample_trilinear3d_backward(
   return at::upsample_trilinear3d_backward(grad_output, osize, input_size, align_corners, scale_d, scale_h, scale_w);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_trilinear3d_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_trilinear3d_backward_kernel);
 
 } // namespace native

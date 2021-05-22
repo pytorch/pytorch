@@ -1,6 +1,6 @@
 import random
 
-from torch.utils.data import IterDataPipe, Sampler, SequentialSampler
+from torch.utils.data import IterDataPipe, Sampler, SequentialSampler, functional_datapipe
 from typing import TypeVar, Type, Iterator, Sized, Optional, Tuple, Dict, List
 
 T_co = TypeVar('T_co', covariant=True)
@@ -31,7 +31,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
         # https://github.com/python/mypy/pull/9629 will solve
-        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args, **self.sampler_kwargs)  # type: ignore
+        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args, **self.sampler_kwargs)  # type: ignore[misc]
 
     def __iter__(self) -> Iterator[T_co]:
         return iter(self.sampler)
@@ -43,6 +43,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         raise NotImplementedError
 
 
+@functional_datapipe('shuffle')
 class ShuffleIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`ShuffleIterDataPipe`
 
@@ -93,6 +94,6 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
             yield self._buffer.pop()
 
     def __len__(self) -> int:
-        if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
+        if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise NotImplementedError

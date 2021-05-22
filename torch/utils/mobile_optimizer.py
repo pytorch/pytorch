@@ -24,7 +24,7 @@ def optimize_for_mobile(
         optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
             optimization method will run all the optimizer pass; otherwise, optimizer
             method will run the optimization pass that is not included inside optimization_blocklist.
-        perserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked
+        preserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked
         backend: Device type to use for running the result model ('CPU'(default), 'Vulkan' or 'Metal').
     Returns:
         A new optimized torch script module
@@ -117,7 +117,6 @@ def _get_bundled_inputs_preserved_attributes(script_module: torch.jit.ScriptModu
     if hasattr(script_module, 'get_all_bundled_inputs'):
         bundled_inputs_attributes.append('get_all_bundled_inputs')
         bundled_inputs_attributes.append('get_num_bundled_inputs')
-        bundled_inputs_attributes.append('run_on_bundled_input')
 
     # Bundled inputs in module after the change that introduced bundled inputs for multiple functions
     if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):

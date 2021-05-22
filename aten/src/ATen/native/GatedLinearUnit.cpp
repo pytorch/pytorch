@@ -6,10 +6,12 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_backward_stub);
 
-Tensor& glu_out(Tensor &result, const Tensor& self, int64_t dim) {
+Tensor& glu_out(const Tensor& self, int64_t dim, Tensor &result) {
   // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
   // can't be evenly halved, but give a nicer error message here.
   TORCH_CHECK(self.dim() > 0, "glu does not support 0-dimensional tensors");
@@ -26,7 +28,7 @@ Tensor& glu_out(Tensor &result, const Tensor& self, int64_t dim) {
   Tensor firstHalf = self.narrow(wrap_dim, 0, selfSize);
   Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
 
-  auto iter = TensorIterator::binary_op(result, firstHalf, secondHalf);
+  auto iter = TensorIterator::borrowing_binary_op(result, firstHalf, secondHalf);
   glu_stub(iter.device_type(), iter);
   return result;
 }
@@ -36,8 +38,7 @@ Tensor glu(const Tensor& self, int64_t dim) {
   return at::glu_out(result, self, dim);
 }
 
-Tensor& glu_backward_out(Tensor& grad_input,
-    const Tensor& grad_output, const Tensor& input, int64_t dim) {
+Tensor& glu_backward_out(const Tensor& grad_output, const Tensor& input, int64_t dim, Tensor& grad_input) {
   TORCH_CHECK(input.dim() > 0, "glu does not support 0-dimensional tensors");
   auto wrap_dim = maybe_wrap_dim(dim, input.dim());
   const int64_t nIn = input.size(wrap_dim);
@@ -51,14 +52,14 @@ Tensor& glu_backward_out(Tensor& grad_input,
   Tensor secondHalf = input.narrow(wrap_dim, inputSize, inputSize);
   Tensor gradInputfirstHalf = grad_input.narrow(wrap_dim, 0, inputSize);
   Tensor gradInputsecondHalf = grad_input.narrow(wrap_dim, inputSize, inputSize);
-  
+
   at::sigmoid_out(gradInputfirstHalf, secondHalf);
   // for second gradinput half, can get a better performance by fusion
   auto iter = at::TensorIteratorConfig()
-    .add_output(gradInputsecondHalf)
-    .add_input(gradInputfirstHalf)
-    .add_input(firstHalf)
-    .add_input(grad_output)
+    .add_borrowed_output(gradInputsecondHalf)
+    .add_borrowed_input(gradInputfirstHalf)
+    .add_borrowed_input(firstHalf)
+    .add_borrowed_input(grad_output)
     .build();
   glu_backward_stub(iter.device_type(), iter);
   gradInputfirstHalf.mul_(grad_output);

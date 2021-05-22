@@ -54,11 +54,17 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
 
 Tensor to(
   const Tensor& self,
-  const TensorOptions& options_,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
   bool non_blocking,
   bool copy,
   c10::optional<c10::MemoryFormat> optional_memory_format
 ) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   TORCH_CHECK(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
@@ -100,6 +106,17 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy,
   return to_impl(self, options.memory_format(optional_memory_format), non_blocking, copy);
 }
 
+// This op is important primarily for lazy / graph-based backends.
+// While this vanilla implementation loops through each tensor and independently converts it to cpu,
+// a lazy backend like XLA might need to tell sync updates across tensors.
+std::vector<Tensor> _to_cpu(TensorList tensors) {
+    std::vector<Tensor> cpu_tensors;
+    for (const auto& t : tensors) {
+        cpu_tensors.push_back(t.cpu());
+    }
+    return cpu_tensors;
+}
+
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() != c10::kStrided);
   if (input_.layout() == c10::kSparse) {
@@ -122,6 +139,7 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
     return self;
   }
   auto type_meta = c10::scalarTypeToTypeMeta(dtype);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(self.element_size() == type_meta.itemsize(),
     "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   Storage storage = self.storage();

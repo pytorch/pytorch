@@ -6,7 +6,6 @@
 
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <ATen/native/cuda/im2col.cuh>
 
@@ -175,7 +174,7 @@ void slow_conv_transpose2d_out_cuda_template(
       columns_arg{columns_, "columns", 5}, ones_arg{ones_, "ones", 6};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_out_cuda",
+      __func__,
       {input_arg, output_arg, weight_arg, bias_arg, columns_arg, ones_arg});
 
   int n_input_plane = weight_.size(0);
@@ -390,7 +389,7 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
       grad_input_arg{grad_input, "grad_input", 5};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_backward_out_cuda",
+      __func__,
       {input_arg,
        grad_output_arg,
        weight_arg,
@@ -472,7 +471,9 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
-          if (kernel_height != 1 || kernel_width != 1) {
+          if (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+              stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+              dilation_height != 1 || dilation_width != 1) {
             im2col<scalar_t>(
                 at::cuda::getCurrentCUDAStream(),
                 grad_output_n.data_ptr<scalar_t>(),
@@ -500,8 +501,12 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
-              grad_columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr =
+              (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+               stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+               dilation_height != 1 || dilation_width != 1)
+              ? grad_columns.data_ptr<scalar_t>()
+              : grad_output_n.data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               'n',
               'n',
@@ -572,7 +577,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
       columns_arg{columns_, "columns", 5}, ones_arg{ones_, "ones", 6};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_acc_grad_parameters_cuda",
+      __func__,
       {input_arg,
        grad_output_arg,
        grad_weight_arg,
@@ -684,7 +689,9 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
             // Matrix mulitply per output:
             input_n = input.select(0, elt);
 
-            if (kernel_height != 1 || kernel_width != 1) {
+            if (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+                stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+                dilation_height != 1 || dilation_width != 1) {
               // Extract columns:
               im2col<scalar_t>(
                   at::cuda::getCurrentCUDAStream(),
@@ -713,8 +720,12 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
-                columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr =
+                (kernel_height != 1 || kernel_width != 1 ||
+                 stride_height != 1 || stride_width != 1 || pad_height != 0 ||
+                 pad_width != 0 || dilation_height != 1 || dilation_width != 1)
+                ? columns.data_ptr<scalar_t>()
+                : grad_output_n.data_ptr<scalar_t>();
             at::cuda::blas::gemm<scalar_t>(
                 't',
                 'n',
@@ -764,16 +775,18 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
 }
 } // namespace
 
-Tensor& slow_conv_transpose2d_out_cuda(
-    Tensor& output,
-    const Tensor& input,
+Tensor& slow_conv_transpose2d_out_cuda(const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
-    IntArrayRef dilation) {
+    IntArrayRef dilation,
+    Tensor& output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
@@ -796,12 +809,15 @@ Tensor& slow_conv_transpose2d_out_cuda(
 Tensor slow_conv_transpose2d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -822,11 +838,7 @@ Tensor slow_conv_transpose2d_cuda(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -835,7 +847,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(
     IntArrayRef output_padding,
     IntArrayRef dilation,
     const Tensor& columns,
-    const Tensor& ones) {
+    const Tensor& ones,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_input.defined()) {
     slow_conv_transpose2d_backward_out_cuda_template(
         input,

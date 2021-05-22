@@ -3,8 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestNMS) {
   Eigen::ArrayXXf input(5, 5);
   input << 10, 10, 50, 60, 0.5, 11, 12, 48, 60, 0.7, 8, 9, 40, 50, 0.6, 100,
@@ -18,7 +21,7 @@ TEST(UtilsNMSTest, TestNMS) {
   // test utils::nms_cpu without indices input
   auto proposals = input.block(0, 0, input.rows(), 4);
   auto scores = input.col(4);
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (const auto i : c10::irange(input_thresh.size())) {
     auto cur_out = utils::nms_cpu(
         proposals, scores, input_thresh[i], true /* legacy_plus_one */);
     EXPECT_EQ(output_gt[i], cur_out);
@@ -31,7 +34,7 @@ TEST(UtilsNMSTest, TestNMS) {
       indices.data(),
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (const auto i : c10::irange(input_thresh.size())) {
     auto cur_out = utils::nms_cpu(
         proposals,
         scores,
@@ -45,7 +48,7 @@ TEST(UtilsNMSTest, TestNMS) {
   // test utils::nms_cpu with topN
   std::vector<int> top_n = {1, 1, 2, 2, 3};
   auto gt_out = output_gt;
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (const auto i : c10::irange(input_thresh.size())) {
     auto cur_out = utils::nms_cpu(
         proposals,
         scores,
@@ -58,6 +61,7 @@ TEST(UtilsNMSTest, TestNMS) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestNMS1) {
   Eigen::ArrayXXf proposals(53, 4);
   proposals << 350.9821, 161.8200, 369.9685, 205.2372, 250.5236, 154.2844,
@@ -110,6 +114,7 @@ TEST(UtilsNMSTest, TestNMS1) {
   EXPECT_EQ(output_gt, cur_out);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestSoftNMS) {
   Eigen::ArrayXXf input(5, 5);
   input.row(0) << 5.18349426e+02, 1.77783920e+02, 9.06085266e+02,
@@ -149,7 +154,7 @@ TEST(UtilsNMSTest, TestSoftNMS) {
       9.99834776e-01, 9.99737203e-01;
 
   Eigen::ArrayXf out_scores;
-  for (int i = 0; i < method.size(); ++i) {
+  for (const auto i : c10::irange(method.size())) {
     LOG(INFO) << "Testing SoftNMS with method=" << method[i]
               << ", overlap_thresh=" << overlap_thresh[i];
     const auto& expected_scores = scores_gt.col(i);
@@ -232,6 +237,7 @@ TEST(UtilsNMSTest, TestSoftNMS) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   // Same inputs as TestNMS, but in RRPN format with angle 0 for testing
   // nms_cpu_rotated
@@ -254,7 +260,7 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   proposals.col(3) = input.col(3) - input.col(1) + 1.0; // h = y2 - y1 + 1
 
   auto scores = input.col(4);
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (const auto i : c10::irange(input_thresh.size())) {
     auto cur_out = utils::nms_cpu(
         proposals, scores, input_thresh[i], true /* legacy_plus_one */);
     EXPECT_EQ(output_gt[i], cur_out);
@@ -267,7 +273,7 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
       indices.data(),
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (const auto i : c10::irange(input_thresh.size())) {
     auto cur_out = utils::nms_cpu(
         proposals,
         scores,
@@ -281,7 +287,7 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   // test utils::nms_cpu with topN
   std::vector<int> top_n = {1, 1, 2, 2, 3};
   auto gt_out = output_gt;
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (const auto i : c10::irange(input_thresh.size())) {
     auto cur_out = utils::nms_cpu(
         proposals,
         scores,
@@ -294,6 +300,7 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
   // Same inputs as TestSoftNMS, but in RRPN format with angle 0 for testing
   // nms_cpu_rotated
@@ -342,7 +349,7 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
       9.99834776e-01, 9.99737203e-01;
 
   Eigen::ArrayXf out_scores;
-  for (int i = 0; i < method.size(); ++i) {
+  for (const auto i : c10::irange(method.size())) {
     LOG(INFO) << "Testing SoftNMS with method=" << method[i]
               << ", overlap_thresh=" << overlap_thresh[i];
     const auto& expected_scores = scores_gt.col(i);
@@ -425,6 +432,7 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsNMSTest, RotatedBBoxOverlaps) {
   {
     // One box is fully within another box, the angle is irrelavant

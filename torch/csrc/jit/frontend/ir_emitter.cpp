@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/hash.h>
 
 #include <atomic>
 #include <climits>
@@ -231,11 +232,16 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Function& method;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ResolverPtr resolver;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<std::string, std::function<std::string()>> error_messages;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Block* b;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
@@ -444,6 +450,10 @@ struct Environment {
            makeMagic(
                "__float__",
                std::make_shared<CastValue>(FloatType::get(), aten::Float))},
+          {"complex",
+           makeMagic(
+               "__complex__",
+               std::make_shared<CastValue>(ComplexType::get(), aten::Complex))},
           {"int",
            makeMagic(
                "__int__",
@@ -570,12 +580,12 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T>
+template <class T, class Hash>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*>& map) {
+    std::unordered_map<T, Value*, Hash>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -662,8 +672,13 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
+  std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
+  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
+  std::unordered_map<
+      c10::complex<double>,
+      Value*,
+      c10::hash<c10::complex<double>>>
+      complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
@@ -1399,6 +1414,7 @@ struct to_ir {
 
     // if this is an OR, eval second expression if first expr is False
     // If this is an AND, eval second expression if first expr is True
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* new_result;
     c10::optional<RefinementSet> refinements;
     c10::optional<bool> static_if;
@@ -1464,6 +1480,7 @@ struct to_ir {
     return expr_value;
   }
   Value* emitToBool(const SourceRange& loc, Value* v) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
@@ -1586,7 +1603,9 @@ struct to_ir {
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* tv;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* fv;
 
       {
@@ -1781,6 +1800,7 @@ struct to_ir {
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
@@ -2020,7 +2040,7 @@ struct to_ir {
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
       if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT ||
-          assignee.kind() == TK_TUPLE_LITERAL) {
+          assignee.kind() == TK_TUPLE_LITERAL || assignee.kind() == '.') {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
@@ -2068,6 +2088,7 @@ struct to_ir {
       case '^':
         return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
       case TK_LSHIFT:
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
@@ -2242,6 +2263,7 @@ struct to_ir {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
@@ -2288,13 +2310,14 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool/number types to tensors
+    // Add implicit conversion of int/float/complex/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
-        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType ||
+        kind == c10::TypeKind::ComplexType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2325,6 +2348,7 @@ struct to_ir {
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
       // TODO: the Python equivalent code has special-cased copy_to
@@ -2336,7 +2360,7 @@ struct to_ir {
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
 
-      // rhs must be a tensor, implicitly convert int/float/bool
+      // rhs must be a tensor, implicitly convert int/float/complex/bool
       const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
       if (tensorIndices.size() == 0) {
@@ -2471,6 +2495,10 @@ struct to_ir {
               sub_starred_unpack);
           i++;
         } break;
+        case '.': {
+          emitSelectAssign(assignee, outputs.at(i), rhs_loc);
+          i++;
+        } break;
         default:
           throw ErrorReport(assignee)
               << "unexpected expression on the left-hand side";
@@ -2583,6 +2611,16 @@ struct to_ir {
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+  }
+
+  void emitSelectAssign(
+      const Expr& lhs,
+      SugaredValuePtr rhs,
+      const SourceRange& loc) {
+    const auto lhs_select = Select(lhs);
+    auto lhs_sv = emitSugaredExpr(lhs_select.value(), 1);
+    const auto rhs_value = rhs->asValue(loc, method);
+    lhs_sv->setAttr(loc, method, lhs_select.selector().name(), rhs_value);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -3303,6 +3341,7 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* fork_node;
     TypePtr out_type;
 
@@ -3473,6 +3512,21 @@ struct to_ir {
       // checked is second)
       std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
     }
+
+    // if this is adding two tuples, we deal with it here.
+    // the reason is we can't specify the length of tuples
+    // when registering custom aten::add.
+    if (named_values[0].type()->kind() == TupleType::Kind &&
+        named_values[1].type()->kind() == TupleType::Kind &&
+        kind == aten::add) {
+      auto first_tuple = createTupleUnpack(named_values[0].value(*graph)).vec();
+      auto second_tuple =
+          createTupleUnpack(named_values[1].value(*graph)).vec();
+      first_tuple.insert(
+          first_tuple.end(), second_tuple.begin(), second_tuple.end());
+      return graph->insertNode(graph->createTuple(first_tuple))->output();
+    }
+
     return asSimple(
         makeMagic(
             overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
@@ -3675,6 +3729,9 @@ struct to_ir {
     if (c.isFloatingPoint())
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
+    else if (c.isComplex())
+      return materializeConstant(
+          c.asComplex(), *graph, c.range(), complex_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);
@@ -4159,20 +4216,29 @@ struct to_ir {
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
         std::vector<at::optional<NamedValue>> tuple_args;
         tuple_args.reserve(3);
-        auto begin =
-            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
-        tuple_args.emplace_back(begin);
+        if (slice.start().present()) {
+          auto begin = NamedValue(
+              val_range, "begin", emitExpr(Expr(slice.start().get())));
+          tuple_args.emplace_back(begin);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
+
         if (slice.end().present()) {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
           tuple_args.emplace_back(end);
-
         } else {
           tuple_args.emplace_back(c10::nullopt);
         }
-        // pushing step_size to match the tuple_args
-        tuple_args.emplace_back(c10::nullopt);
 
+        if (slice.step().present()) {
+          auto step =
+              NamedValue(val_range, "step", emitExpr(Expr(slice.step().get())));
+          tuple_args.emplace_back(step);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
         auto tupleSliceValue =
             emitTupleSlice(val_range, s_tuple_val, tuple_args);
         return std::make_shared<SimpleValue>(tupleSliceValue);

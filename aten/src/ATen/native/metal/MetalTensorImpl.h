@@ -2,9 +2,8 @@
 #define MetalTensorImpl_h
 
 #include <ATen/OpaqueTensorImpl.h>
-#include <ATen/Tensor.h>
 #include <ATen/WrapDimUtils.h>
-#import <ATen/native/metal/MetalTensor.h>
+#import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>
 
 namespace at {
@@ -23,15 +22,16 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             device,
             opaque_handle,
             sizes),
-        strides_(strides.vec()) {}
+        strides_(strides.vec()) {
+    TensorImpl::set_has_contiguity_policy(
+        TensorImpl::HasContiguityPolicy::CustomBehavior);
+  }
 
   IntArrayRef strides() const override {
     return strides_;
   }
 
-  bool is_contiguous(
-      c10::MemoryFormat memory_format =
-          c10::MemoryFormat::Contiguous) const override {
+  bool is_contiguous_custom(c10::MemoryFormat memory_format) const override {
     return true;
   }
 
@@ -41,9 +41,9 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   }
 
   void release_resources() override {
-    using MetalTensor = at::native::metal::MetalTensor;
-    auto&& handle = (MetalTensor)this->opaque_handle();
-    handle.texture()->recycleImage();
+    using MetalTensorImplStorage = at::native::metal::MetalTensorImplStorage;
+    auto&& handle = (MetalTensorImplStorage)this->opaque_handle();
+    handle.texture()->release();
     OpaqueTensorImpl<OpaqueHandle>::release_resources();
   }
 

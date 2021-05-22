@@ -21,6 +21,11 @@
 namespace torch {
 namespace jit {
 
+// Controls whether graph source ranges are printed by default
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+bool global_print_source_ranges = true;
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
@@ -136,6 +141,7 @@ std::string ConcretePythonOp::name() const {
 }
 
 void ConcretePythonOp::cloneFrom(Node* other_) {
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   Node::cloneFrom(other_);
   auto other = other_->cast<ConcretePythonOp>();
   this->cconv = other->cconv;
@@ -209,11 +215,30 @@ Node* Graph::createPythonOp(
 
 void initPythonIRBindings(PyObject* module_) {
   auto m = py::handle(module_).cast<py::module>();
+
+  py::class_<AliasDb, std::shared_ptr<AliasDb>>(m, "AliasDb")
+      .def("dump", &AliasDb::dump)
+      .def("to_graphviz_str", &AliasDb::toGraphviz)
+      .def("__str__", &AliasDb::toString);
+
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
-      .def("__repr__", [](Graph& g) { return g.toString(); })
+      .def(
+          "__repr__",
+          [&](Graph& g) { return g.toString(global_print_source_ranges); })
       .def("str", &Graph::toString, py::arg("print_source_ranges") = true)
+      .def_readonly_static(
+          "global_print_source_ranges", &global_print_source_ranges)
+      .def_static(
+          "set_global_print_source_ranges",
+          [&](const bool enabled) { global_print_source_ranges = enabled; },
+          py::arg("enabled") = true)
+      .def(
+          "alias_db",
+          [](std::shared_ptr<Graph> g) {
+            return std::make_shared<AliasDb>(std::move(g));
+          })
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -438,7 +463,9 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(requires_grad)
       .def(
           "requiresGrad",
-          [](Value& n) { n.type()->expectRef<TensorType>().requiresGrad(); })
+          [](Value& n) {
+            return n.type()->expectRef<TensorType>().requiresGrad();
+          })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -591,6 +618,7 @@ void initPythonIRBindings(PyObject* module_) {
   })
       .CREATE_ACCESSOR(Float, f)
       .CREATE_ACCESSOR(Floats, fs)
+      .CREATE_ACCESSOR(Complex, c)
       .CREATE_ACCESSOR(String, s)
       .CREATE_ACCESSOR(Strings, ss)
       .CREATE_ACCESSOR(Int, i)
@@ -713,6 +741,31 @@ void initPythonIRBindings(PyObject* module_) {
             return py::none();
           })
       .def(
+          "symbolic_sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              auto ss = ptt->symbolic_sizes();
+              if (!ss.rank().has_value()) {
+                return py::none();
+              }
+
+              std::vector<int64_t> ss_vals;
+              for (size_t i = 0; i < *ss.rank(); ++i) {
+                ss_vals.push_back(ss.at(i).value());
+              }
+              return py::cast(ss_vals);
+            }
+            return py::none();
+          })
+      .def(
+          "with_sizes",
+          [](Type& t, std::vector<c10::optional<int64_t>> sizes) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withSymbolicShapes(sizes));
+            }
+            return py::none();
+          })
+      .def(
           "varyingSizes",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
@@ -761,9 +814,15 @@ void initPythonIRBindings(PyObject* module_) {
             }
             return self->isSubtypeOf(other);
           })
-      .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
-        return self->cast<InterfaceType>() != nullptr;
-      });
+      .def(
+          "is_interface_type",
+          [](const std::shared_ptr<Type>& self) {
+            return self->cast<InterfaceType>() != nullptr;
+          })
+      .def_property_readonly(
+          "annotation_str", [](const std::shared_ptr<Type>& self) {
+            return self->annotation_str();
+          });
 
   py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
       .def_static("get", &AnyType::get);
@@ -837,7 +896,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
-      .def("name", [](ClassType& self) { return self.name()->name(); });
+      .def("name", [](ClassType& self) { return self.name()->name(); })
+      .def("qualified_name", [](ClassType& self) {
+        return self.name()->qualifiedName();
+      });
   py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,

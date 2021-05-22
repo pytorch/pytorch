@@ -4,6 +4,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ScalarOps.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 
@@ -19,7 +21,7 @@ Tensor _test_optional_intlist(
   Tensor output = at::empty_like(values);
   auto inp = values.accessor<int,1>();
   auto out = output.accessor<int,1>();
-  for(int i = 0; i < values.size(0); ++i) {
+  for (const auto i : c10::irange(values.size(0))) {
     out[i] = inp[i] + addends->at(i);
   }
   return output;
@@ -37,14 +39,14 @@ Tensor _test_optional_floatlist(
   Tensor output = at::empty_like(values);
   auto inp = values.accessor<float,1>();
   auto out = output.accessor<float,1>();
-  for(int i = 0; i < values.size(0); ++i) {
+  for (const auto i : c10::irange(values.size(0))) {
     out[i] = inp[i] + addends->at(i);
   }
   return output;
 }
 
 // Test default strings can handle escape sequences properly (although commas are broken)
-Tensor _test_string_default(const Tensor& dummy, std::string a, std::string b) {
+Tensor _test_string_default(const Tensor& dummy, c10::string_view a, c10::string_view b) {
   const c10::string_view expect = "\"'\\";
   TORCH_CHECK(a == expect, "Default A failed");
   TORCH_CHECK(b == expect, "Default B failed");
@@ -62,7 +64,7 @@ Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, int64_t b) {
 }
 
 // Overload b
-Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, std::string b) {
+Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, c10::string_view b) {
   TORCH_CHECK(a == 2);
   TORCH_CHECK(b == "2");
   return c10::scalar_to_tensor(2);

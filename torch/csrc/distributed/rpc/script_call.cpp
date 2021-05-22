@@ -34,7 +34,7 @@ bool ScriptCall::hasQualifiedName() const {
   return qualifiedName_ ? true : false;
 }
 
-const c10::QualifiedName ScriptCall::qualifiedName() const {
+const c10::QualifiedName& ScriptCall::qualifiedName() const {
   return *qualifiedName_;
 }
 
@@ -127,7 +127,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
 
   auto values = value.toTuple()->elements();
   return fromIValues(values);

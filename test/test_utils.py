@@ -1,5 +1,7 @@
 import sys
 import os
+import contextlib
+import io
 import re
 import shutil
 import random
@@ -25,6 +27,16 @@ from urllib.error import URLError
 load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
+
+def check_breakpad():
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        return "Minidump handler is uninintialized, make sure to call" in str(e)
+
+HAS_BREAKPAD = check_breakpad()
+
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -269,6 +281,65 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
 
+    def test_checkpoint_non_tensor_inputs_outputs(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
+
+        t1 = torch.rand(10, requires_grad=True)
+        t2 = torch.rand(10, requires_grad=True)
+        t3 = torch.rand(10)
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
+        # Validate running backward.
+        res[1].sum().backward(retain_graph=True)
+        res[4].sum().backward(retain_graph=True)
+        res[6].sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "Trying to backward through the graph a second time"):
+            res[6].sum().backward()
+        t1_grad = t1.grad
+        t2_grad = t2.grad
+
+        # Reset grads, run without checkpoint and validate we receive same grads.
+        t1.grad = None
+        t2.grad = None
+        res = foo(t1, t2, scale, t3)
+        torch.autograd.backward([res[1].sum(), res[4].sum(), res[6].sum()])
+        self.assertEqual(t1.grad, t1_grad)
+        self.assertEqual(t2.grad, t2_grad)
+
+    def test_checkpoint_no_tensors(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
+
+        t1 = random.random()
+        t2 = random.random()
+        t3 = random.random()
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
     def test_checkpoint_partial_grad(self):
         def run_fn(tensor1, tensor2):
             # tensor 2 is used for other application logic
@@ -289,7 +360,7 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
 
-class TestDataLoader(TestCase):
+class TestDataLoaderUtils(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
@@ -351,7 +422,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # type: ignore  # noqa: F401
+            from torch.utils.ffi import create_extension  # type: ignore[attr-defined] # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -360,7 +431,7 @@ class TestBottleneck(TestCase):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa: P204
                              stderr=subprocess.PIPE, shell=True)
         try:
             output, err = p.communicate(timeout=timeout)
@@ -636,9 +707,16 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(loaded_state),
                              SUM_OF_HUB_EXAMPLE)
 
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_commit_from_forked_repo(self):
+        with self.assertRaisesRegex(
+                ValueError,
+                'If it\'s a commit from a forked repo'):
+            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+
 class TestHipify(TestCase):
     def test_import_hipify(self):
-        from torch.utils.hipify import hipify_python # noqa
+        from torch.utils.hipify import hipify_python  # noqa: F401
 
 
 class TestAssert(TestCase):
@@ -667,6 +745,30 @@ class TestAssert(TestCase):
         ms(x)
         with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
             ms(torch.tensor([False], dtype=torch.bool))
+
+
+class TestCrashHandler(TestCase):
+    @unittest.skipIf(not HAS_BREAKPAD, "Crash handler lib was not linked in")
+    def test_python_exception_writing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            torch.utils._crash_handler.enable_minidump_collection(temp_dir)
+
+            files = os.listdir(temp_dir)
+            self.assertEqual(len(files), 0)
+
+            f = io.StringIO()
+            with contextlib.redirect_stderr(f):
+                try:
+                    @torch.jit.script
+                    def x(i: int):
+                        return i + "2"  # type: ignore[operator]
+                except RuntimeError as e:
+                    pass
+
+            files = os.listdir(temp_dir)
+            self.assertEqual(len(files), 1)
+            self.assertTrue(files[0].endswith(".dmp"))
+            torch.utils._crash_handler.disable_minidump_collection()
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")

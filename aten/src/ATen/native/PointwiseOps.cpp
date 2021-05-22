@@ -15,7 +15,7 @@ Tensor addcmul(
     const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    Scalar value) {
+    const Scalar& value) {
   Tensor result = at::empty({0}, self.options());
   return at::addcmul_out(result, self, tensor1, tensor2, value);
 }
@@ -24,22 +24,21 @@ Tensor& addcmul_(
     Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    Scalar value) {
+    const Scalar& value) {
   return at::addcmul_out(self, self, tensor1, tensor2, value);
 }
 
-Tensor& addcmul_out(
-    Tensor& result,
-    const Tensor& self,
+Tensor& addcmul_out(const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    Scalar value) {
+    const Scalar& value,
+    Tensor& result) {
   checkBackend("addcmul_cpu", result, self.options().backend());
   auto iter = at::TensorIteratorConfig()
-    .add_output(result)
-    .add_input(self)
-    .add_input(tensor1)
-    .add_input(tensor2)
+    .add_borrowed_output(result)
+    .add_borrowed_input(self)
+    .add_borrowed_input(tensor1)
+    .add_borrowed_input(tensor2)
     .build();
   addcmul_stub(iter.device_type(), iter, value);
   return result;
@@ -49,7 +48,7 @@ Tensor addcdiv(
     const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    Scalar value) {
+    const Scalar& value) {
   Tensor result = at::empty({0}, self.options());
   return at::addcdiv_out(result, self, tensor1, tensor2, value);
 }
@@ -58,16 +57,15 @@ Tensor& addcdiv_(
     Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    Scalar value) {
+    const Scalar& value) {
   return at::addcdiv_out(self, self, tensor1, tensor2, value);
 }
 
-Tensor& addcdiv_out(
-    Tensor& result,
-    const Tensor& self,
+Tensor& addcdiv_out(const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    Scalar value) {
+    const Scalar& value,
+    Tensor& result) {
   if (isIntegralType(tensor1.scalar_type(), /*includeBool=*/ true)
       && isIntegralType(tensor2.scalar_type(), /*includeBool=*/ true)) {
     TORCH_CHECK(false,
@@ -82,16 +80,18 @@ Tensor& addcdiv_out(
   }
   checkBackend("addcdiv_cpu", result, self.options().backend());
   auto iter = at::TensorIteratorConfig()
-    .add_output(result)
-    .add_input(self)
-    .add_input(tensor1)
-    .add_input(tensor2)
+    .add_borrowed_output(result)
+    .add_borrowed_input(self)
+    .add_borrowed_input(tensor1)
+    .add_borrowed_input(tensor2)
     .build();
   addcdiv_stub(iter.device_type(), iter, value);
   return result;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(addcmul_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(addcdiv_stub);
 
 } // namespace native

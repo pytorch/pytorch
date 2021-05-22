@@ -2,7 +2,7 @@ jobs:
   pytorch_linux_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -15,9 +15,6 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          if [[ "${DOCKER_IMAGE}" == *rocm3.9* ]]; then
-            export DOCKER_TAG="f3d89a32912f62815e4feaeed47e564e887dffd6"
-          fi
           if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
             echo 'BUILD_CAFFE2=OFF' >> "${BASH_ENV}"
           fi
@@ -33,11 +30,11 @@ jobs:
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
-          git submodule sync && git submodule update -q --init --recursive
+          git submodule sync && git submodule update -q --init --recursive --depth 1
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && export CIRCLE_JOB="$CIRCLE_JOB" && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -83,7 +80,7 @@ jobs:
   pytorch_linux_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -168,6 +165,7 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
+          export CIRCLE_JOB="$CIRCLE_JOB"
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
@@ -182,11 +180,27 @@ jobs:
           fi
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
+
+          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
+              echo "Retrieving C++ coverage report"
+              docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
+          fi
+          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
+              echo "Retrieving Python coverage report"
+              docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
+              docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
+              python3 -mpip install codecov
+              python3 -mcodecov
+          fi
     - run:
         name: Report results
         no_output_timeout: "5m"
         command: |
           set -e
+          # Retrieving test results should be done as very first step as command never fails
+          # But is always executed if previous step fails for some reason
+          echo "Retrieving test reports"
+          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
           docker stats --all --no-stream
 
           cat >docker_commands.sh \<<EOL
@@ -201,27 +215,18 @@ jobs:
           export CIRCLE_JOB="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          python torch/testing/_internal/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          export PYTHONPATH="\${PWD}"
+          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
-
-          echo "Retrieving test reports"
-          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
-          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
-              echo "Retrieving C++ coverage report"
-              docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
-          fi
-          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
-              echo "Retrieving Python coverage report"
-              docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
-              docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
-              python3 -mpip install codecov
-              python3 -mcodecov
-          fi
         when: always
     - store_test_results:
         path: test-reports
+    - store_artifacts:
+        path: test/.coverage
+    - store_artifacts:
+        path: test/coverage.xml
 
   pytorch_windows_build:
     <<: *pytorch_windows_params
@@ -256,6 +261,11 @@ jobs:
     executor: <<parameters.executor>>
     steps:
       - checkout
+      - run:
+          name: Install VS2019 toolchain
+          no_output_timeout: 10m
+          command: |
+              powershell .circleci/scripts/vs_install.ps1
       - run:
           name: Install Cuda
           no_output_timeout: 30m
@@ -321,6 +331,11 @@ jobs:
       - attach_workspace:
           at: c:/users/circleci/workspace
       - run:
+          name: Install VS2019 toolchain
+          no_output_timeout: 10m
+          command: |
+              powershell .circleci/scripts/vs_install.ps1
+      - run:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
@@ -346,5 +361,18 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
             .jenkins/pytorch/win-test.sh
+      - run:
+          name: Report results
+          no_output_timeout: "5m"
+          command: |
+            set -ex
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            export PYTHONPATH="$PWD"
+            pip install typing_extensions boto3
+            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          when: always
       - store_test_results:
           path: test/test-reports
+      - store_artifacts:
+          path: test/coverage.xml

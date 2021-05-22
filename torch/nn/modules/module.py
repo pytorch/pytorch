@@ -382,6 +382,149 @@ class Module:
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
+    def get_submodule(self, target: str) -> "Module":
+        """
+        Returns the submodule given by ``target`` if it exists,
+        otherwise throws an error.
+
+        For example, let's say you have an ``nn.Module`` ``A`` that
+        looks like this:
+
+        .. code-block::text
+
+            A(
+                (net_b): Module(
+                    (net_c): Module(
+                        (conv): Conv2d(16, 33, kernel_size=(3, 3), stride=(2, 2))
+                    )
+                    (linear): Linear(in_features=100, out_features=200, bias=True)
+                )
+            )
+
+        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested
+        submodule ``net_b``, which itself has two submodules ``net_c``
+        and ``linear``. ``net_c`` then has a submodule ``conv``.)
+
+        To check whether or not we have the ``linear`` submodule, we
+        would call ``get_submodule("net_b.linear")``. To check whether
+        we have the ``conv`` submodule, we would call
+        ``get_submodule("net_b.net_c.conv")``.
+
+        The runtime of ``get_submodule`` is bounded by the degree
+        of module nesting in ``target``. A query against
+        ``named_modules`` achieves the same result, but it is O(N) in
+        the number of transitive modules. So, for a simple check to see
+        if some submodule exists, ``get_submodule`` should always be
+        used.
+
+        Args:
+            target: The fully-qualified string name of the submodule
+                to look for. (See above example for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            torch.nn.Module: The submodule referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not an
+                ``nn.Module``
+        """
+        if target == "":
+            return self
+
+        atoms: List[str] = target.split(".")
+        mod: torch.nn.Module = self
+
+        for item in atoms:
+
+            if not hasattr(mod, item):
+                raise AttributeError(mod._get_name() + " has no "
+                                     "attribute `" + item + "`")
+
+            mod = getattr(mod, item)
+
+            if not isinstance(mod, torch.nn.Module):
+                raise AttributeError("`" + item + "` is not "
+                                     "an nn.Module")
+
+        return mod
+
+    def get_parameter(self, target: str) -> "Parameter":
+        """
+        Returns the parameter given by ``target`` if it exists,
+        otherwise throws an error.
+
+        See the docstring for ``get_submodule`` for a more detailed
+        explanation of this method's functionality as well as how to
+        correctly specify ``target``.
+
+        Args:
+            target: The fully-qualified string name of the Parameter
+                to look for. (See ``get_submodule`` for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            torch.nn.Parameter: The Parameter referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not an
+                ``nn.Parameter``
+        """
+        module_path, _, param_name = target.rpartition(".")
+
+        mod: torch.nn.Module = self.get_submodule(module_path)
+
+        if not hasattr(mod, param_name):
+            raise AttributeError(mod._get_name() + " has no attribute `"
+                                 + param_name + "`")
+
+        param: torch.nn.Parameter = getattr(mod, param_name)
+
+        if not isinstance(param, torch.nn.Parameter):
+            raise AttributeError("`" + param_name + "` is not an "
+                                 "nn.Parameter")
+
+        return param
+
+    def get_buffer(self, target: str) -> "Tensor":
+        """
+        Returns the buffer given by ``target`` if it exists,
+        otherwise throws an error.
+
+        See the docstring for ``get_submodule`` for a more detailed
+        explanation of this method's functionality as well as how to
+        correctly specify ``target``.
+
+        Args:
+            target: The fully-qualified string name of the buffer
+                to look for. (See ``get_submodule`` for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            torch.Tensor: The buffer referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not a
+                buffer
+        """
+        module_path, _, buffer_name = target.rpartition(".")
+
+        mod: torch.nn.Module = self.get_submodule(module_path)
+
+        if not hasattr(mod, buffer_name):
+            raise AttributeError(mod._get_name() + " has no attribute `"
+                                 + buffer_name + "`")
+
+        buffer: torch.Tensor = getattr(mod, buffer_name)
+
+        if buffer not in mod._buffers.values():
+            raise AttributeError("`" + buffer_name + "` is not a buffer")
+
+        return buffer
+
     def _apply(self, fn):
         for module in self.children():
             module._apply(fn)
@@ -481,6 +624,9 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on GPU while being optimized.
 
+        .. note::
+            This method modifies the module in-place.
+
         Args:
             device (int, optional): if specified, all parameters will be
                 copied to that device
@@ -497,6 +643,9 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on XPU while being optimized.
 
+        .. note::
+            This method modifies the module in-place.
+
         Arguments:
             device (int, optional): if specified, all parameters will be
                 copied to that device
@@ -509,6 +658,9 @@ class Module:
     def cpu(self: T) -> T:
         r"""Moves all model parameters and buffers to the CPU.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
@@ -516,6 +668,9 @@ class Module:
 
     def type(self: T, dst_type: Union[dtype, str]) -> T:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
+
+        .. note::
+            This method modifies the module in-place.
 
         Args:
             dst_type (type or string): the desired type
@@ -526,7 +681,10 @@ class Module:
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self: T) -> T:
-        r"""Casts all floating point parameters and buffers to float datatype.
+        r"""Casts all floating point parameters and buffers to ``float`` datatype.
+
+        .. note::
+            This method modifies the module in-place.
 
         Returns:
             Module: self
@@ -536,6 +694,9 @@ class Module:
     def double(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
@@ -543,6 +704,9 @@ class Module:
 
     def half(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
+
+        .. note::
+            This method modifies the module in-place.
 
         Returns:
             Module: self
@@ -552,10 +716,25 @@ class Module:
     def bfloat16(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
+
+    def to_empty(self: T, *, device: Union[str, device]) -> T:
+        r"""Moves the parameters and buffers to the specified device without copying storage.
+
+        Args:
+            device (:class:`torch.device`): The desired device of the parameters
+                and buffers in this module.
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: torch.empty_like(t, device=device))
 
     @overload
     def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
@@ -665,7 +844,7 @@ class Module:
                     "if a complex module does not work as expected.")
 
         def convert(t):
-            if convert_to_format is not None and t.dim() == 4:
+            if convert_to_format is not None and t.dim() in (4, 5):
                 return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
                             non_blocking, memory_format=convert_to_format)
             return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
@@ -776,7 +955,7 @@ class Module:
             inputs = (inputs,)
 
         # At this point we are sure that inputs and result are tuple of Tensors
-        out_grad_fn = set([r.grad_fn for r in result if r.grad_fn is not None])
+        out_grad_fn = {r.grad_fn for r in result if r.grad_fn is not None}
         if len(out_grad_fn) == 0 or (len(out_grad_fn) == 1 and grad_fn not in out_grad_fn):
             warnings.warn("Using a non-full backward hook when outputs are nested in python data structure "
                           "is deprecated and will be removed in future versions. This hook will be missing "
@@ -787,9 +966,9 @@ class Module:
                           "some grad_output. Please use register_full_backward_hook to get the documented behavior.")
         else:
             # At this point the grad_ouput part of the hook will most likely be correct
-            inputs_grad_fn = set([i.grad_fn for i in inputs if i.grad_fn is not None])
+            inputs_grad_fn = {i.grad_fn for i in inputs if i.grad_fn is not None}
 
-            next_functions = set([n[0] for n in grad_fn.next_functions])
+            next_functions = {n[0] for n in grad_fn.next_functions}
 
             if inputs_grad_fn != next_functions:
                 warnings.warn("Using a non-full backward hook when the forward contains multiple autograd Nodes "
@@ -851,7 +1030,7 @@ class Module:
         if recording_scopes:
             # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
-            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
+            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore[index, operator] # noqa: B950
             if name:
                 tracing_state.push_scope(name)
             else:
@@ -1048,10 +1227,10 @@ class Module:
     def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
         ...
 
-    # TODO: annotate with OrderedDict not Dict, but there is a problem:
-    # https://docs.python.org/3/library/typing.html#typing.OrderedDict
+    # TODO: Remove string escape once Python-3.6 no longer supported
+    # See https://github.com/python/mypy/issues/6904#issuecomment-496207426
     @overload
-    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Tensor]:
+    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> 'OrderedDict[str, Tensor]':
         ...
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
@@ -1310,7 +1489,7 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, buf in self.named_buffers(recurse=recurse):
+        for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
     def named_buffers(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
@@ -1392,12 +1571,18 @@ class Module:
             1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
-        for name, module in self.named_modules():
+        for _, module in self.named_modules():
             yield module
 
-    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = ''):
+    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate: bool = True):
         r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
+
+        Args:
+            memo: a memo to store the set of modules already added to the result
+            prefix: a prefix that will be added to the name of the module
+            remove_duplicate: whether to remove the duplicated module instances in the result
+            or not
 
         Yields:
             (string, Module): Tuple of name and module
@@ -1424,13 +1609,14 @@ class Module:
         if memo is None:
             memo = set()
         if self not in memo:
-            memo.add(self)
+            if remove_duplicate:
+                memo.add(self)
             yield prefix, self
             for name, module in self._modules.items():
                 if module is None:
                     continue
                 submodule_prefix = prefix + ('.' if prefix else '') + name
-                for m in module.named_modules(memo, submodule_prefix):
+                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
                     yield m
 
     def train(self: T, mode: bool = True) -> T:
@@ -1448,6 +1634,8 @@ class Module:
         Returns:
             Module: self
         """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
         self.training = mode
         for module in self.children():
             module.train(mode)

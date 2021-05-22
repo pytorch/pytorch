@@ -4,6 +4,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
@@ -13,6 +14,8 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+DECLARE_TRIGGER(llvm_codegen_parallel_dispatched);
 
 class LLVMCodeGenImpl;
 
@@ -30,6 +33,7 @@ class TORCH_API LLVMCodeGen : public CodeGen {
   ~LLVMCodeGen() override;
 
   TORCH_API void call(const std::vector<CallArg>& args) override;
+  TORCH_API void call_raw(const std::vector<void*>& args) override;
 
   at::Tensor empty_strided(
       c10::IntArrayRef size,
@@ -55,6 +59,8 @@ class TORCH_API LLVMCodeGen : public CodeGen {
     T rv = fp(args);
     return rv;
   }
+
+  std::string getCodeText(const std::string& attr = "") override;
 
  private:
   void* getKernelAddress(LLVMCodeGenImpl* impl);

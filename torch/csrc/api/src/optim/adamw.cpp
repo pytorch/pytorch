@@ -40,6 +40,14 @@ void AdamWOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, amsgrad);
 }
 
+double AdamWOptions::get_lr() const {
+  return lr();
+}
+
+void AdamWOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 bool operator==(const AdamWParamState& lhs, const AdamWParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
@@ -73,6 +81,7 @@ Tensor AdamW::step(LossClosure closure)  {
       if (!p.grad().defined()) {
         continue;
       }
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto grad = p.grad();
       TORCH_CHECK(!grad.is_sparse(), "AdamW does not support sparse gradients"/*, please consider SparseAdamW instead*/);
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));

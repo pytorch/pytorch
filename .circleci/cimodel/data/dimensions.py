@@ -1,14 +1,14 @@
 PHASES = ["build", "test"]
 
 CUDA_VERSIONS = [
-    "101",
     "102",
     "111",
 ]
 
 ROCM_VERSIONS = [
-    "3.10",
     "4.0.1",
+    "4.1",
+    "4.2",
 ]
 
 ROCM_VERSION_LABELS = ["rocm" + v for v in ROCM_VERSIONS]

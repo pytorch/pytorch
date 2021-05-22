@@ -29,29 +29,20 @@ enum IRNodeType {
   kRshift,
   kXor,
   kCompareSelect,
-  kLet,
   kCast,
   kBitCast,
-  kBroadcast,
-  kRamp,
-  kPolynomial,
-  kTerm,
-  kRoundOff,
-  kMaxTerm,
-  kMinTerm,
-  kNone,
-  kExtra
+  kOther,
 };
 
 // The common base between all expression node.
-class Expr : public KernelScopedObject {
+class TORCH_API Expr : public KernelScopedObject {
  public:
-  explicit Expr(Dtype dtype, IRNodeType expr_type = kNone)
+  explicit Expr(Dtype dtype, IRNodeType expr_type = kOther)
       : dtype_(dtype), expr_type_(expr_type) {}
   Dtype dtype() const {
     return dtype_;
   }
-  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
+  virtual void accept(IRVisitor* visitor) const = 0;
   virtual const Expr* accept_mutator(IRMutator* mutator) const = 0;
 
   IRNodeType expr_type() const {
@@ -85,8 +76,9 @@ class ExprNode : public Base {
 // Also serves the primary way to build and operate on other expressions.
 class TORCH_API ExprHandle {
  public:
-  ExprHandle() {}
+  ExprHandle() = default;
   explicit ExprHandle(const Expr* node)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       : base_expr_node_(const_cast<Expr*>(node)) {}
 
   Expr* node() {
@@ -112,6 +104,7 @@ class TORCH_API ExprHandle {
 
   template <class Op>
   const Op* AsNode() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     return const_cast<ExprHandle*>(this)->AsNode<Op>();
   }
 
@@ -133,6 +126,8 @@ class TORCH_API ExprHandle {
   ExprHandle operator<=(const ExprHandle& other) const;
   ExprHandle operator&(const ExprHandle& other) const;
   ExprHandle operator|(const ExprHandle& other) const;
+  ExprHandle operator&&(const ExprHandle& other) const;
+  ExprHandle operator||(const ExprHandle& other) const;
   ExprHandle operator^(const ExprHandle& other) const;
   ExprHandle operator<<(const ExprHandle& other) const;
   ExprHandle operator>>(const ExprHandle& other) const;
@@ -144,7 +139,7 @@ class TORCH_API ExprHandle {
 // The underlying representation node to a Var.
 // Currently, each Var object represents a unique variable, even though the
 // names might be the same. We should consider add a unique_name as well.
-class Var : public ExprNode<Var> {
+class TORCH_API Var : public ExprNode<Var> {
  public:
   static ExprHandle make(const std::string& name_hint, Dtype dtype) {
     return ExprHandle(new Var(name_hint, dtype));
@@ -158,8 +153,12 @@ class Var : public ExprNode<Var> {
     return name_hint_;
   }
 
-  Var(const std::string& name_hint, Dtype dtype)
-      : ExprNodeBase(dtype, kPrimitive), name_hint_(name_hint) {}
+  void set_name_hint(const std::string& name_hint) {
+    name_hint_ = name_hint;
+  }
+
+  Var(std::string name_hint, Dtype dtype)
+      : ExprNodeBase(dtype, kPrimitive), name_hint_(std::move(name_hint)) {}
 
  private:
   std::string name_hint_;
@@ -177,8 +176,15 @@ class TORCH_API Buf : public ExprNode<Buf> {
   const Var* base_handle() const {
     return base_handle_;
   }
+  void set_base_handle(Var* base_handle) {
+    base_handle_ = base_handle;
+  }
+
   const std::string& name_hint() const {
     return base_handle_->name_hint();
+  }
+  void set_name_hint(const std::string& name_hint) {
+    base_handle_->set_name_hint(name_hint);
   }
 
   Buf(const std::string& name_hint,
@@ -187,13 +193,13 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const Expr* initializer = nullptr)
       : Buf(new Var(name_hint, kHandle), dims, dtype, initializer) {}
 
-  Buf(const Var* var,
-      const std::vector<const Expr*>& dims,
+  Buf(Var* var,
+      std::vector<const Expr*> dims,
       Dtype dtype,
       const Expr* initializer = nullptr)
       : ExprNodeBase(dtype, kPrimitive),
         base_handle_(var),
-        dims_(dims),
+        dims_(std::move(dims)),
         initializer_(initializer) {
     TORCH_CHECK(var);
   }
@@ -218,8 +224,17 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return initializer_;
   };
 
+  bool hasConstantDims() const {
+    for (auto d : dims_) {
+      if (!d->isConstant()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
  private:
-  const Var* base_handle_;
+  Var* base_handle_;
   std::vector<const Expr*> dims_;
   const Expr* initializer_;
 };
@@ -236,6 +251,13 @@ class TORCH_API BufHandle : public ExprHandle {
   const Buf* node() const {
     return static_cast<const Buf*>(ExprHandle::node());
   }
+
+  template <typename... Ts>
+  inline ExprHandle load(const Ts&... ts) const;
+
+  template <typename T>
+  inline ExprHandle load(const std::vector<T>& args) const;
+
   bool operator==(const BufHandle& other) const {
     return this->node() == other.node();
   }
@@ -246,15 +268,26 @@ class TORCH_API BufHandle : public ExprHandle {
   const std::string& name_hint() const {
     return this->node()->name_hint();
   }
+
   bool empty() const {
     return (this->node() == nullptr);
+  }
+
+  size_t ndim() const {
+    return node()->ndim();
+  }
+
+  std::vector<ExprHandle> dims() const;
+
+  ExprHandle dim(size_t index) const {
+    return ExprHandle(node()->dim(index));
   }
 };
 
 // An expression to construct the underlying variable node.
 // Note: do not store any info here, since it is often possible to slice this
 // object. For example: VarHandle x('x'); ExprHandle x2 = x;
-class VarHandle : public ExprHandle {
+class TORCH_API VarHandle : public ExprHandle {
  public:
   VarHandle() : ExprHandle(nullptr) {}
   explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
@@ -281,6 +314,7 @@ class VarHandle : public ExprHandle {
 
 template <class Op, class Base>
 const Expr* ExprNode<Op, Base>::accept_mutator(IRMutator* mutator) const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   ExprNode* this_mutable = const_cast<ExprNode*>(this);
   return mutator->mutate(static_cast<Op*>(this_mutable));
 }
