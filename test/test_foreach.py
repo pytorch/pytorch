@@ -1,3 +1,4 @@
+import re
 import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
@@ -858,19 +859,10 @@ class TestForeach(TestCase):
             _cpu_tensors = self._get_test_data('cpu', dtype, 2)
             tensors1, tensors2 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
 
-            # note(mkozuki): Why handling sub with bool differently?
-            # Because the error message includes at least one special character, `^`,
-            # causing the regex match to fail in the following `try-except` block.
-            if dtype == torch.bool and native_op == torch.sub:
-                with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
-                    foreach_op(tensors1, tensors2)
-                with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
-                    foreach_op_(tensors1, tensors2)
-                continue
             try:
                 actual = foreach_op(tensors1, tensors2)
             except RuntimeError as e:
-                with self.assertRaisesRegex(type(e), str(e)):
+                with self.assertRaisesRegex(type(e), re.escape(str(e))):
                     [native_op(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
             else:
                 expected = [native_op(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
@@ -878,7 +870,7 @@ class TestForeach(TestCase):
             try:
                 foreach_op_(tensors1, tensors2)
             except RuntimeError as e:
-                with self.assertRaisesRegex(type(e), str(e)):
+                with self.assertRaisesRegex(type(e), re.escape(str(e))):
                     [getattr(t1, native_op.__name__ + '_')(t2) for t1, t2 in zip(tensors1, tensors2)]
             else:
                 self.assertEqual(actual, tensors1)
@@ -900,20 +892,10 @@ class TestForeach(TestCase):
             _cpu_tensors = self._get_test_data('cpu', dtype, 3)
             tensors1, tensors2, tensors3 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
 
-            # note(mkozuki): Why handling addcdiv with int and bool differently?
-            # Because the error message includes some special characters, `*`,
-            # causing the regex match to fail in the following `try-except` block.
-            if native_op == torch.addcdiv:
-                if dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
-                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv"):
-                        foreach_op(tensors1, tensors2, tensors3)
-                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv"):
-                        foreach_op_(tensors1, tensors2, tensors3)
-                    continue
             try:
                 actual = foreach_op(tensors1, tensors2, tensors3)
             except RuntimeError as e:
-                with self.assertRaisesRegex(type(e), str(e)):
+                with self.assertRaisesRegex(type(e), re.escape(str(e))):
                     expected = [native_op(t1, t2, t3) for t1, t2, t3 in zip(tensors1, tensors2, tensors3)]
             else:
                 expected = [native_op(t1, t2, t3) for t1, t2, t3 in zip(tensors1, tensors2, tensors3)]
@@ -921,7 +903,7 @@ class TestForeach(TestCase):
             try:
                 foreach_op_(tensors1, tensors2, tensors3)
             except RuntimeError as e:
-                with self.assertRaisesRegex(type(e), str(e)):
+                with self.assertRaisesRegex(type(e), re.escape(str(e))):
                     [getattr(t1, native_op.__name__ + '_')(t2, t3) for t1, t2, t3 in zip(tensors1, tensors3, tensors3)]
             else:
                 self.assertEqual(expected, tensors1)
