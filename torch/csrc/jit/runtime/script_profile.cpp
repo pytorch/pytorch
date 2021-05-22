@@ -71,7 +71,7 @@ auto initBindings() {
             return self->count;
           })
       .def("duration_ns", [](const c10::intrusive_ptr<InstructionStats>& self) {
-        return self->duration.count();
+        return static_cast<int64_t>(self->duration.count());
       });
 
   torch::class_<SourceStats>("profiling", "SourceStats")
