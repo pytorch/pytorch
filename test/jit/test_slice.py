@@ -136,3 +136,34 @@ class TestSlice(JitTestCase):
         self.assertTrue(num_outputs == {2})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
+
+    def test_module_list_slicing(self):
+        class Bar(torch.nn.Module):
+            def __init__(self, identifier: str):
+                super().__init__()
+                self.identifier = identifier
+
+            def forward(self):
+                return 0
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                module_list = [Bar("A"), Bar("B"), Bar("C"), Bar("D"), Bar("E")]
+                self.test = torch.nn.ModuleList(module_list)
+
+            def forward(self):
+                return self.test[::-2], self.test[1:4:]
+
+        scripted_foo = torch.jit.script(Foo())
+        result1, result2 = scripted_foo()
+
+        self.assertEqual(len(result1), 3)
+        self.assertEqual(result1[0].identifier, "E")
+        self.assertEqual(result1[1].identifier, "C")
+        self.assertEqual(result1[2].identifier, "A")
+
+        self.assertEqual(len(result2), 3)
+        self.assertEqual(result2[0].identifier, "B")
+        self.assertEqual(result2[1].identifier, "C")
+        self.assertEqual(result2[2].identifier, "D")
