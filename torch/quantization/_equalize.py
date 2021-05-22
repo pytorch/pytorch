@@ -3,6 +3,7 @@ import copy
 from typing import Dict, Any
 
 _supported_types = {torch.nn.Conv2d, torch.nn.Linear}
+_supported_intrinsic_types = {torch.nn.intrinsic.ConvReLU2d, torch.nn.intrinsic.LinearReLU}
 
 def max_over_ndim(input, axis_list, keepdim=False):
     ''' Applies 'torch.max' over the given axises
@@ -38,16 +39,18 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     the ranges of the first tensors' output channel are equal to the
     ranges of the second tensors' input channel
     '''
-    if type(module1) not in _supported_types or type(module2) not in _supported_types:
+    if (type(module1) not in _supported_types or type(module2) not in _supported_types) and \
+       (type(module1) not in _supported_intrinsic_types or type(module2) not in _supported_intrinsic_types):
         raise ValueError("module type not supported:", type(module1), " ", type(module2))
 
-    if module1.weight.size(output_axis) != module2.weight.size(input_axis):
+    weight1 = module1.weight if type(module1) in _supported_types else module1[0].weight
+    weight2 = module2.weight if type(module2) in _supported_types else module2[0].weight
+
+    if weight1.size(output_axis) != weight2.size(input_axis):
         raise TypeError("Number of output channels of first arg do not match \
         number input channels of second arg")
 
-    weight1 = module1.weight
-    weight2 = module2.weight
-    bias = module1.bias
+    bias = module1.bias if type(module1) in _supported_types else module1[0].bias
 
     weight1_range = channel_range(weight1, output_axis)
     weight2_range = channel_range(weight2, input_axis)
@@ -72,9 +75,17 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     weight1 = weight1 * inverse_scaling_factors
     weight2 = weight2 * scaling_factors
 
-    module1.weight = torch.nn.Parameter(weight1)
-    module1.bias = torch.nn.Parameter(bias)
-    module2.weight = torch.nn.Parameter(weight2)
+    if type(module1) in _supported_types:
+        module1.weight = torch.nn.Parameter(weight1)
+        module1.bias = torch.nn.Parameter(bias)
+    else:
+        module1[0].weight = torch.nn.Parameter(weight1)
+        module1[0].bias = torch.nn.Parameter(bias)
+
+    if type(module2) in _supported_types:
+        module2.weight = torch.nn.Parameter(weight2)
+    else:
+        module2[0].weight = torch.nn.Parameter(weight2)
 
 def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
     ''' Given a list of adjacent modules within a model, equalization will
@@ -131,6 +142,11 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
     if None in prev_modules.values():
         return False
     for name in curr_modules.keys():
-        difference = curr_modules[name].weight.sub(prev_modules[name].weight)
+        curr_weight = curr_modules[name].weight if type(
+            curr_modules[name]) in _supported_types else curr_modules[name][0].weight
+        prev_weight = prev_modules[name].weight if type(
+            prev_modules[name]) in _supported_types else prev_modules[name][0].weight
+
+        difference = curr_weight.sub(prev_weight)
         summed_norms += torch.norm(difference)
     return bool(summed_norms < threshold)
