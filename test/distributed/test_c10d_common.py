@@ -623,8 +623,6 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, err):
                 wrapper_pg.allreduce([tensor])
 
-        # import time ; time.sleep(3)
-
     def _test_collectives_op_mismatch(self, wrapper_pg, use_cuda=False):
         tensor = torch.randn(20, 10)
         if use_cuda:
