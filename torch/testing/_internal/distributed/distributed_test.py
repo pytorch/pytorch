@@ -3330,8 +3330,8 @@ class DistributedTest:
                     )
 
         @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "MPI backend does not support DDP communication hook on CUDA devices",
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3441,8 +3441,8 @@ class DistributedTest:
                 )
 
         @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "MPI backend does not support DDP communication hook on CUDA devices",
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3450,8 +3450,8 @@ class DistributedTest:
             self._test_ddp_hook_parity(state=None, hook=default.allreduce_hook)
 
         @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "MPI backend does not support DDP communication hook on CUDA devices",
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3463,8 +3463,8 @@ class DistributedTest:
             self._test_ddp_hook_parity(state=process_group, hook=default.allreduce_hook)
 
         @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "MPI backend does not support DDP communication hook on CUDA devices",
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
