@@ -278,15 +278,15 @@
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: sgn
+  structured_delegate: sgn.out
 
 - func: sgn_(Tensor(a!) self) -> Tensor(a!)
   variants: method
-  dispatch:
-    CompositeExplicitAutograd: sgn_
+  structured_delegate: sgn.out
 
 - func: sgn.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sgn_out
 
@@ -3672,7 +3672,7 @@
   device_check: NoCheck
   device_guard: False
 
-- func: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
+- func: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -6770,11 +6770,14 @@
     QuantizedCPU: min_quantized_cpu
 
 - func: fmin(Tensor self, Tensor other) -> Tensor
+  structured_delegate: fmin.out
+  device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA: fmin
 
 - func: fmin.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: fmin_out
 
@@ -6786,11 +6789,14 @@
     QuantizedCPU: max_quantized_cpu
 
 - func: fmax(Tensor self, Tensor other) -> Tensor
+  structured_delegate: fmax.out
+  device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA: fmax
 
 - func: fmax.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: fmax_out
 

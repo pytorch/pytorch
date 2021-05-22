@@ -21,9 +21,9 @@ TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Sc
   const Tensor& result = maybe_get_output();
   build(TensorIteratorConfig()
     .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(result)
-    .add_input(self)
-    .add_input(self) // other
+    .add_borrowed_output(result)
+    .add_borrowed_input(self)
+    .add_borrowed_input(self) // other
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -35,9 +35,9 @@ TORCH_META_FUNC(threshold_backward)(const Tensor& grad, const Tensor& self, cons
   const Tensor& gradInput = maybe_get_output();
   build(TensorIteratorConfig()
     .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(gradInput)
-    .add_input(self)
-    .add_input(grad)  // other
+    .add_borrowed_output(gradInput)
+    .add_borrowed_input(self)
+    .add_borrowed_input(grad)  // other
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -64,7 +64,7 @@ TORCH_META_FUNC(elu_backward) (
     "This is caused by calling in-place forward function with a negative slope, "
     "please call out-of-place version instead.");
 
-  build_binary_op(maybe_get_output(), grad_output, self_or_result);
+  build_borrowing_binary_op(maybe_get_output(), grad_output, self_or_result);
 }
 
 TORCH_META_FUNC(silu) (const Tensor& self) {
@@ -74,7 +74,7 @@ TORCH_META_FUNC(silu) (const Tensor& self) {
 TORCH_META_FUNC(silu_backward) (
   const Tensor& grad_output, const Tensor& input
 ) {
-  build_binary_op(maybe_get_output(), grad_output, input);
+  build_borrowing_binary_op(maybe_get_output(), grad_output, input);
 }
 
 TORCH_META_FUNC(softplus) (
@@ -90,7 +90,7 @@ TORCH_META_FUNC(softplus_backward) (
   const Scalar& threshold,
   const Tensor& output
 ) {
-  build_binary_op(maybe_get_output(), grad_output, self);
+  build_borrowing_binary_op(maybe_get_output(), grad_output, self);
 }
 
 TORCH_META_FUNC(leaky_relu) (
@@ -99,6 +99,12 @@ TORCH_META_FUNC(leaky_relu) (
   build_unary_op(maybe_get_output(), self);
 }
 
+// Note: leakyReLu backward calculation doesn't support in-place call with negative slope.
+// The reason is that for in-place forward call, the forward result will be saved into autograd
+// node instead of the input itself, when calculating backward gradient, there is no way to know
+// whether the original input for current node is positive or not if the input slope is
+// negative. eg. forward is 2, slope is -0.2, the original input for this node could be
+// either 2, or -10, so no way to get a correct backward gradient in this case.
 TORCH_META_FUNC(leaky_relu_backward) (
   const Tensor& grad_output,
   const Tensor& self_or_result,
@@ -112,7 +118,7 @@ TORCH_META_FUNC(leaky_relu_backward) (
     "please call out-of-place version instead. File an issue at https://github.com/pytorch/pytorch if you do "
     "require supporting in-place leakRelu backward calculation with negative slope");
 
-  build_binary_op(maybe_get_output(), self_or_result, grad_output);
+  build_borrowing_binary_op(maybe_get_output(), self_or_result, grad_output);
 }
 
 TORCH_META_FUNC(hardsigmoid) (const Tensor& self) {
@@ -120,7 +126,7 @@ TORCH_META_FUNC(hardsigmoid) (const Tensor& self) {
 }
 
 TORCH_META_FUNC(hardsigmoid_backward) (const Tensor& grad_output, const Tensor& self) {
-  build_binary_op(maybe_get_output(), grad_output, self);
+  build_borrowing_binary_op(maybe_get_output(), grad_output, self);
 }
 
 TORCH_META_FUNC(hardshrink) (const Tensor & self, const Scalar& lambd) {
@@ -130,7 +136,7 @@ TORCH_META_FUNC(hardshrink) (const Tensor & self, const Scalar& lambd) {
 TORCH_META_FUNC(hardshrink_backward) (
   const Tensor & grad, const Tensor & self, const Scalar& lambd
 ) {
-  build_binary_op(maybe_get_output(), grad, self);
+  build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
 static inline void softshrink_check(const Scalar& lambd) {
@@ -148,7 +154,7 @@ TORCH_META_FUNC(softshrink) (
 TORCH_META_FUNC(softshrink_backward) (
   const Tensor & grad, const Tensor & self, const Scalar& lambd
 ) {
-  build_binary_op(maybe_get_output(), grad, self);
+  build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
 TORCH_META_FUNC(gelu) (const Tensor & self) {
@@ -158,7 +164,7 @@ TORCH_META_FUNC(gelu) (const Tensor & self) {
 TORCH_META_FUNC(gelu_backward) (
   const Tensor& grad, const Tensor& self
 ) {
-  build_binary_op(maybe_get_output(), grad, self);
+  build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
 } // namespace meta
@@ -260,12 +266,6 @@ TORCH_IMPL_FUNC(leaky_relu_out) (
   leaky_relu_stub(device_type(), *this, negval);
 }
 
-// Note: leakyReLu backward calculation doesn't support in-place call with negative slope.
-// The reason is that for in-place forward call, the forward result will be saved into autograd
-// node instead of the input itself, when calculating backward gradient, there is no way to know
-// whether the original input for current node is positive or not if the input slope is
-// negative. eg. forward is 2, slope is -0.2, the original input for this node could be
-// either 2, or -10, so no way to get a correct backward gradient in this case.
 TORCH_IMPL_FUNC(leaky_relu_backward_out) (
   const Tensor& grad_output,
   const Tensor& self_or_result,
@@ -337,14 +337,14 @@ Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
 }
 
 Tensor& hardtanh_backward_out(const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max, Tensor& grad_input) {
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
+  auto iter = TensorIterator::borrowing_binary_op(grad_input, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
   return grad_input;
 }
 
 Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max) {
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, grad_output, self);
+  auto iter = TensorIterator::borrowing_binary_op(result, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
   return iter.output();
 }
@@ -381,7 +381,7 @@ Tensor& hardswish_(Tensor& self) {
 
 Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
   Tensor grad_input;
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
+  auto iter = TensorIterator::borrowing_binary_op(grad_input, grad_output, self);
   hardswish_backward_stub(iter.device_type(), iter);
   return iter.output();
 }
@@ -834,10 +834,10 @@ Tensor log_sigmoid(const Tensor & self) {
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
   auto iter = at::TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(buffer)
-    .add_input(grad_output)
+    .add_borrowed_output(grad_input)
+    .add_borrowed_input(input)
+    .add_borrowed_input(buffer)
+    .add_borrowed_input(grad_output)
     .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return iter.output();
@@ -848,10 +848,10 @@ Tensor& log_sigmoid_backward_out_cpu(const Tensor& grad_output,
     const Tensor& buffer,
     Tensor& grad_input) {
   auto iter = TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(buffer)
-    .add_input(grad_output)
+    .add_borrowed_output(grad_input)
+    .add_borrowed_input(input)
+    .add_borrowed_input(buffer)
+    .add_borrowed_input(grad_output)
     .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return grad_input;
