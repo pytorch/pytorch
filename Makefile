@@ -35,12 +35,12 @@ generate-gha-workflows:
 shellcheck:
 	@$(PYTHON) tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
-	 	--job 'shellcheck' \
-		 --step "Regenerate workflows"
+		--job 'shellcheck' \
+		--step "Regenerate workflows"
 	@$(PYTHON) tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
-	 	--job 'shellcheck' \
-		 --step "Assert that regenerating the workflows didn't change them"
+		--job 'shellcheck' \
+		--step "Assert that regenerating the workflows didn't change them"
 	@$(PYTHON) tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'shellcheck' \
@@ -52,13 +52,13 @@ shellcheck:
 
 setup_lint:
 	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'flake8-py3' --step 'Install dependencies' --no-quiet
+		--job 'flake8-py3' --step 'Install dependencies' --no-quiet
 	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'cmakelint' --step 'Install dependencies' --no-quiet
+		--job 'cmakelint' --step 'Install dependencies' --no-quiet
 	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'mypy' --step 'Install dependencies' --no-quiet
+		--job 'mypy' --step 'Install dependencies' --no-quiet
 	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'shellcheck' --step 'Install Jinja2' --no-quiet
+		--job 'shellcheck' --step 'Install Jinja2' --no-quiet
 
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		if [ -z "$$(which brew)" ]; then \
