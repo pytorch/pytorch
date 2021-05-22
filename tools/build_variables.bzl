@@ -793,7 +793,7 @@ aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
 ]
 
-# When buliding lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
+# When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
 # codegen process. The codegen version of this file, like Activation.cpp.DEFAULT.cpp, will be included
 # in ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt. As a result, in aten/src/ATen/CMakeLists.txt,
 # only aten_cpu_source_non_codegen_list need to be added to ${all_cpu_cpp}.
