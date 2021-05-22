@@ -14,9 +14,10 @@ class RpcCommandBase {
   // create a message for the RPC (Hence the &&).
   c10::intrusive_ptr<Message> toMessage() && {
     JitRRefPickleGuard jitPickleGuard;
-    return std::move(*this).toMessageImpl();
+    return c10::make_intrusive<Message>(std::move(*this).toMessageImpl());
   }
-  virtual c10::intrusive_ptr<Message> toMessageImpl() && = 0;
+  // FIXME Consider changing this return type to an intrusive_ptr too.
+  virtual Message toMessageImpl() && = 0;
   virtual ~RpcCommandBase() = 0;
 };
 
