@@ -307,7 +307,8 @@ bool BackportManager::backport(
     // has value.
     if (!output_model_stream.str().empty()) {
       input_model_stream.swap(output_model_stream);
-      output_model_stream.clear();
+      // reset output_model_stream
+      output_model_stream.str("");
     }
 
     if (!hasBytecodeBackportFunction(bytecode_version)) {
