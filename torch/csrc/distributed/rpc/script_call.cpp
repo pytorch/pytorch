@@ -34,7 +34,7 @@ bool ScriptCall::hasQualifiedName() const {
   return qualifiedName_ ? true : false;
 }
 
-const c10::QualifiedName ScriptCall::qualifiedName() const {
+const c10::QualifiedName& ScriptCall::qualifiedName() const {
   return *qualifiedName_;
 }
 

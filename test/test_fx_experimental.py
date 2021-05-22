@@ -1329,7 +1329,8 @@ class TestNormalizeOperators(JitTestCase):
                    '__rsub__',
                    '__rmul__',
                    '__rdiv__',
-                   '__rpow__'}
+                   '__rpow__',
+                   '__rmatmul__'}
 
         # Unsupported input types
         if op.name in op_skip:
@@ -1403,7 +1404,7 @@ class TestNormalizeOperators(JitTestCase):
                 if isinstance(v, torch.Tensor):
                     param_names.append(k)
                     param_values.append(v)
-                    fx_args.append(k)
+                    fx_args.append(f'{k} = {k}')
                 else:
                     fx_args.append(f'{k} = {repr(v)}')
 

@@ -271,10 +271,10 @@ void intraop_launch(std::function<void()> func) {
 #endif // C10_MOBILE
 }
 
-std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
 #ifndef C10_MOBILE
-  auto future = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
     _get_intraop_pool().run(
       [func, future]() {
@@ -290,7 +290,7 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
 #else
   // TODO: caffe2::PThreadPool only provides a data-parallel API.
   // Task parallelism is not currently supported.
-  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
   func();
   future->markCompleted();
   return future;
