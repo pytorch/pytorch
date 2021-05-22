@@ -5669,21 +5669,12 @@ else:
                 dest_ones.masked_scatter_(mask, src_ones)
                 self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
 
-                # Bound checking in CUDA is done inside a kernel
-                # in order to avoid synchronization, but this means
-                # we can not clear the failures. So there is no way
-                # to test it then recover.
-                if self.device_type != 'cuda':
-                    # make src smaller. this should fail
-                    src = torch.zeros(num_copy - 1, dtype=dt, device=device)
-                    with self.assertRaises(RuntimeError):
-                        dest.masked_scatter_(mask, src)
+                # make src smaller. this should fail
+                src = torch.zeros(num_copy - 1, dtype=dt, device=device)
+                with self.assertRaises(RuntimeError):
+                    dest.masked_scatter_(mask, src)
 
-
-        if self.device_type != 'cuda':
-            self.assertEqual(len(w), 3)
-        else:
-            self.assertEqual(len(w), 2)
+        self.assertEqual(len(w), 3)
 
         warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
         for wi in w:
@@ -5700,15 +5691,6 @@ else:
         mask = torch.tensor([True, False, True], device=device)
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
-
-    @onlyCUDA
-    @largeTensorTest('30GB')
-    def test_masked_scatter_large_tensor(self, device):
-        t_cpu = torch.empty(2**31 + 1, dtype=torch.bool).random_()
-        t = t_cpu.to(device)
-        result_cpu = t_cpu.masked_scatter(t_cpu, t_cpu)
-        result = t.masked_scatter(t, t)
-        self.assertEqual(result, result_cpu)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_masked_select(self, device, dtype):
