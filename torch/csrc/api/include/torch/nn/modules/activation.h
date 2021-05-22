@@ -609,7 +609,7 @@ TORCH_MODULE(SiLU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Mish ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies mish over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.mish to learn
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Mish to learn
 /// about the exact behavior of this module.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MishImpl : public torch::nn::Cloneable<MishImpl> {

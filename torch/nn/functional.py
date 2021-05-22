@@ -1899,11 +1899,11 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def mish(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the mish function, element-wise.
+    r"""Applies the Mish function, element-wise.
     Mish: A Self Regularized Non-Monotonic Neural Activation Function.
 
     .. math::
-        \text{mish}(x) = x * \tanh(\text{softplus}(x))
+        \text{Mish}(x) = x * \text{Tanh}(\text{Softplus}(x))
 
     .. note::
         See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`.
