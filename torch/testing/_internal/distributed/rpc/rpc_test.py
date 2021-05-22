@@ -4751,6 +4751,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 fut.wait()
 
+        # FIXME We wait until the remote completed creating the OwnerRRef
+        # because there's currently a race if we shut down RPC before that.
+        slow_rref.to_here()
+
     def test_rref_get_type_timeout_blocking(self):
         self._test_rref_get_type_timeout(blocking=True)
 
@@ -4793,6 +4797,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         # specified timeout.
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+
+        # FIXME We wait until the remote completed creating the OwnerRRef
+        # because there's currently a race if we shut down RPC before that.
+        slow_rref.to_here()
 
     @dist_init
     def test_rref_proxy_timeout(self):
