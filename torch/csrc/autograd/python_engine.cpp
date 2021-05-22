@@ -123,7 +123,7 @@ variable_list PythonEngine::execute(
   }
 }
 
-std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
+c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
