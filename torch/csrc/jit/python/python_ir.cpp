@@ -741,6 +741,31 @@ void initPythonIRBindings(PyObject* module_) {
             return py::none();
           })
       .def(
+          "symbolic_sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              auto ss = ptt->symbolic_sizes();
+              if (!ss.rank().has_value()) {
+                return py::none();
+              }
+
+              std::vector<int64_t> ss_vals;
+              for (size_t i = 0; i < *ss.rank(); ++i) {
+                ss_vals.push_back(ss.at(i).value());
+              }
+              return py::cast(ss_vals);
+            }
+            return py::none();
+          })
+      .def(
+          "with_sizes",
+          [](Type& t, std::vector<c10::optional<int64_t>> sizes) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withSymbolicShapes(sizes));
+            }
+            return py::none();
+          })
+      .def(
           "varyingSizes",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
