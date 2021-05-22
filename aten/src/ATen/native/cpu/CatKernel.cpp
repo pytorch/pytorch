@@ -2,8 +2,8 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/cpu/CatKernel.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 
 namespace at { namespace native {
 
@@ -31,7 +31,7 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
     inputs.emplace_back(tensor, dim, result.strides()[dim]);
   }
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   scalar_t* result_ptr = result_data;
   for (int64_t i = 0; i < outer; ++i) {
     for (int64_t j = 0; j < ninputs; j++) {
@@ -45,7 +45,7 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
           result_ptr[k] = input_ptr[k];
         }
       } else {
-        vec256::map(
+        vec::map(
             [](Vec x) { return x; },
             result_ptr,
             input_ptr,

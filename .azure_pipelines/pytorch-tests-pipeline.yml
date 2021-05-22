@@ -7,14 +7,26 @@
 #   2) runs custom PyTorch unit-tests on PyTorch
 #      wheels generated during PR builds.
 
+resources:
+  webhooks:
+    - webhook: GitHubPyTorchPRTrigger
+      connection: GitHubPyTorchPRTriggerConnection
+      filters:
+        - path: repositoryName
+          value: pytorch_tests
+
 stages:
 - stage: 'EnsureArtifactsReady'
   displayName: 'Ensure PyTorch PR Artifacts are ready'
   jobs:
   - template: job_templates/wheel-wait-template.yml
+  variables:
+    _TARGET_BRANCH_TO_CHECK: ${{ parameters.GitHubPyTorchPRTrigger.TARGET_BRANCH_TO_CHECK_AZ_DEVOPS_PR}}
 
 - stage: 'PRCustomTests'
   displayName: 'Run custom unit tests on PyTorch wheels'
+  dependsOn: EnsureArtifactsReady
+  condition: succeeded()
   jobs:
   - template: job_templates/pytorch-template-unix.yml
     parameters:
@@ -24,7 +36,7 @@ stages:
         PR_Custom_Tests:
           _PYTHON_VERSION: $(PYTHON_VERSION_PR)
           _CUDA_BUILD_VERSION: $(CUDA_BUILD_VERSION_PR)
-          _TARGET_CIRCLECI_BUILD: $(TARGET_CIRCLECI_PR)
-          _TARGET_BRANCH_TO_CHECK: $(TARGET_BRANCH_TO_CHECK_PR)
+          _TARGET_CIRCLECI_BUILD: $(TARGET_CIRCLECI_BUILD_PR)
+          _TARGET_BRANCH_TO_CHECK: ${{ parameters.GitHubPyTorchPRTrigger.TARGET_BRANCH_TO_CHECK_AZ_DEVOPS_PR}}
           _DOCKER_IMAGE: $(DOCKER_IMAGE_PR)
           _RUN_TESTS: $(RUN_TESTS_PR)
