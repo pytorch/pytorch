@@ -1879,6 +1879,10 @@ known_failures = [
     '__rmatmul__'
 ]
 
+# If your OpInfo test causes this test to fail, add it here
+skip_ops = [
+]
+
 def get_name(op):
     l = [op.name]
     if op.variant_test_name != '':
@@ -1936,6 +1940,8 @@ def f({', '.join(param_names)}):
             self.assertEqual(kernel.run(tuple(param_values)), correct_val)
             self.assertEqual(kernel.fallback(tuple(param_values)), correct_val)
 
+        # If all sample inputs have scalar output, we won't have tested it and
+        # we consider the op to be not working
         if not is_compiling:
             raise RuntimeError("Skipped all inputs")
 
@@ -1960,6 +1966,8 @@ def f({', '.join(param_names)}):
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
     @ops([op for op in op_db if get_name(op) not in works_list + known_failures], allowed_dtypes=(torch.float,))
     def test_unsupported(self, device, dtype, op):
+        if get_name(op) in skip_ops:
+            return
         try:
             self.te_compile(device, dtype, op)
         except Exception as e:
