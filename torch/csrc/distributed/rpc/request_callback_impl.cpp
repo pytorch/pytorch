@@ -169,7 +169,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
 
   return future->then(
       [](JitFuture& jitFuture) {
-        return ScriptResp(jitFuture.value()).toMessage();
+        return c10::make_intrusive<Message>(
+            ScriptResp(jitFuture.value()).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -181,7 +182,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
 
   return future->then(
       [](JitFuture& future) {
-        return PythonResp(serializePyObject(future.value())).toMessage();
+        return c10::make_intrusive<Message>(
+            PythonResp(serializePyObject(future.value())).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -228,7 +230,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
   return future->then(
       [](JitFuture& future) {
         SerializedPyObj result = serializePyObject(future.value());
-        return PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
+        return c10::make_intrusive<Message>(
+            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -287,7 +290,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRRefBackward(
         PyRRef::backwardOwnerRRef(
             autogradContextId, retainGraph, future.value());
 
-        return RRefBackwardResp().toMessage();
+        return c10::make_intrusive<Message>(RRefBackwardResp().toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }

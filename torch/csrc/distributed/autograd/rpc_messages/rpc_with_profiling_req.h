@@ -15,7 +15,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
   // For sending RPCs, invoked when client is creating this RPC command.
   RpcWithProfilingReq(
       rpc::MessageType messageType,
-      c10::intrusive_ptr<rpc::Message> wrappedMessage,
+      rpc::Message&& wrappedMessage,
       torch::autograd::profiler::ProfilerConfig&& profilerConfig,
       rpc::ProfilingId profilingKeyId);
 
@@ -50,7 +50,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
   // message type
   const rpc::MessageType messageType_;
   // wrapped message
-  c10::intrusive_ptr<rpc::Message> wrappedMessage_;
+  rpc::Message wrappedMessage_;
   std::unique_ptr<RpcCommandBase> wrappedRpc_;
   rpc::MessageType wrappedMessageType_;
   std::vector<torch::Tensor> tensors_;
