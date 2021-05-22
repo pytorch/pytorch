@@ -13,7 +13,7 @@ import fnmatch
 import shlex
 import configparser
 
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Union, NamedTuple
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -87,20 +87,28 @@ def find_changed_files() -> List[str]:
 
 
 def print_results(job_name: str, passed: bool, streams: List[str]) -> None:
-    header(job_name, passed)
+    icon = color(col.GREEN, "✓") if passed else color(col.RED, "x")
+    print(f"{icon} {color(col.BLUE, job_name)}")
+
     for stream in streams:
         stream = stream.strip()
         if stream != "":
             print(stream)
 
 
+class CommandResult(NamedTuple):
+    passed: bool
+    stdout: str
+    stderr: str
+
+
 async def shell_cmd(
     cmd: Union[str, List[str]],
     env: Optional[Dict[str, Any]] = None,
     redirect: bool = True,
-) -> Tuple[bool, str, str]:
+) -> CommandResult:
     if isinstance(cmd, list):
-        cmd_str = ' '.join(shlex.quote(arg) for arg in cmd)
+        cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
     else:
         cmd_str = cmd
 
@@ -117,176 +125,191 @@ async def shell_cmd(
 
     passed = proc.returncode == 0
     if not redirect:
-        return passed, "", ""
+        return CommandResult(passed, "", "")
 
-    return passed, stdout.decode().strip(), stderr.decode().strip()
-
-
-def header(name: str, passed: bool) -> None:
-    PASS = color(col.GREEN, "✓")
-    FAIL = color(col.RED, "x")
-    icon = PASS if passed else FAIL
-    print(f"{icon} {color(col.BLUE, name)}")
+    return CommandResult(passed, stdout.decode().strip(), stderr.decode().strip())
 
 
-def get_flake_excludes() -> List[str]:
-    config = configparser.ConfigParser()
-    config.read(os.path.join(REPO_ROOT, ".flake8"))
+class Check:
+    name: str
 
-    excludes = re.split(r',\s*', config["flake8"]["exclude"].strip())
-    excludes = [e.strip() for e in excludes if e.strip() != ""]
-    return excludes
+    def __init__(self, files: Optional[List[str]], quiet: bool):
+        self.quiet = quiet
+        self.files = files
 
-
-async def run_flake8(files: Optional[List[str]], quiet: bool) -> bool:
-    cmd = ["flake8"]
-
-    excludes = get_flake_excludes()
-
-    def should_include(name: str) -> bool:
-        for exclude in excludes:
-            if fnmatch.fnmatch(name, pat=exclude):
-                return False
-            if name.startswith(exclude) or ("./" + name).startswith(exclude):
-                return False
-        return True
-
-    if files is not None:
-        files = [f for f in files if should_include(f)]
-
-        if len(files) == 0:
-            print_results("flake8", True, [])
+    async def run(self) -> bool:
+        result = await self.run_helper()
+        if result is None:
             return True
 
-        # Running quicklint, pass in an explicit list of files (unlike mypy,
-        # flake8 will still use .flake8 to filter this list by the 'exclude's
-        # in the config
-        cmd += files
+        streams = []
+        if not result.passed:
+            streams = [
+                result.stderr,
+                result.stdout,
+            ]
+        print_results(self.name, result.passed, streams)
+        return result.passed
 
-    passed, stdout, stderr = await shell_cmd(cmd)
-    print_results("flake8", passed, [stdout, stderr])
-    return passed
+    async def run_helper(self) -> Optional[CommandResult]:
+        if self.files is not None:
+            relevant_files = self.filter_files(self.files)
+            if len(relevant_files) == 0:
+                # No files, do nothing
+                return CommandResult(passed=True, stdout="", stderr="")
+
+            return await self.quick(relevant_files)
+
+        return await self.full()
+
+    def filter_ext(self, files: List[str], extensions: List[str]) -> List[str]:
+        def passes(filename: str) -> bool:
+            return any(filename.endswith("." + extension) for extension in extensions)
+
+        return [f for f in files if passes(f)]
+
+    def filter_files(self, files: List[str]) -> List[str]:
+        return files
+
+    async def quick(self, files: List[str]) -> CommandResult:
+        raise NotImplementedError
+
+    async def full(self) -> Optional[CommandResult]:
+        raise NotImplementedError
 
 
-async def run_mypy(files: Optional[List[str]], quiet: bool) -> bool:
-    env = os.environ.copy()
-    if should_color():
-        # Secret env variable: https://github.com/python/mypy/issues/7771
-        env["MYPY_FORCE_COLOR"] = "1"
+class Flake8(Check):
+    name = "flake8"
 
-    if files is not None:
-        # Running quick lint, use mypy-wrapper instead so it checks that the files
-        # actually should be linted
+    def filter_files(self, files: List[str]) -> List[str]:
+        config = configparser.ConfigParser()
+        config.read(os.path.join(REPO_ROOT, ".flake8"))
 
-        passed, stdout, stderr = await shell_cmd(
-            [sys.executable, "tools/mypy_wrapper.py"] + [
-                os.path.join(REPO_ROOT, f) for f in files
+        excludes = re.split(r",\s*", config["flake8"]["exclude"].strip())
+        excludes = [e.strip() for e in excludes if e.strip() != ""]
+
+        def should_include(name: str) -> bool:
+            for exclude in excludes:
+                if fnmatch.fnmatch(name, pat=exclude):
+                    return False
+                if name.startswith(exclude) or ("./" + name).startswith(exclude):
+                    return False
+            return True
+
+        files = self.filter_ext(files, ["py"])
+        return [f for f in files if should_include(f)]
+
+    async def quick(self, files: List[str]) -> CommandResult:
+        return await shell_cmd(["flake8"] + files)
+
+    async def full(self) -> CommandResult:
+        return await shell_cmd(["flake8"])
+
+
+class Mypy(Check):
+    def filter_files(self, files: List[str]) -> List[str]:
+        return self.filter_ext(files, ["py", "pyi"])
+
+    def env(self) -> Dict[str, Any]:
+        env = os.environ.copy()
+        if should_color():
+            # Secret env variable: https://github.com/python/mypy/issues/7771
+            env["MYPY_FORCE_COLOR"] = "1"
+        return env
+
+    async def quick(self, files: List[str]) -> CommandResult:
+        # hackily change the name
+        self.name = "mypy (skipped typestub generation)"
+
+        return await shell_cmd(
+            [sys.executable, "tools/mypy_wrapper.py"]
+            + [os.path.join(REPO_ROOT, f) for f in files],
+            env=self.env(),
+        )
+
+    async def full(self) -> None:
+        env = self.env()
+        self.name = "mypy"
+
+        await shell_cmd(
+            [
+                sys.executable,
+                "tools/actions_local_runner.py",
+                "--job",
+                "mypy",
+                "--file",
+                ".github/workflows/lint.yml",
+                "--step",
+                "Run autogen",
             ],
+            redirect=False,
             env=env,
         )
 
-        print_results("mypy (skipped typestub generation)", passed, [
-            stdout + "\n",
-            stderr + "\n",
-        ])
-        return passed
-
-    # Not running quicklint, so use lint.yml
-    _, _, _ = await shell_cmd(
-        [
-            sys.executable,
-            "tools/actions_local_runner.py",
-            "--job",
-            "mypy",
-            "--file",
-            ".github/workflows/lint.yml",
-            "--step",
-            "Run autogen",
-        ],
-        redirect=False,
-        env=env,
-    )
-    passed, _, _ = await shell_cmd(
-        [
-            sys.executable,
-            "tools/actions_local_runner.py",
-            "--job",
-            "mypy",
-            "--file",
-            ".github/workflows/lint.yml",
-            "--step",
-            "Run mypy",
-        ],
-        redirect=False,
-        env=env,
-    )
-    return passed
-
-
-
-async def run_shellcheck(files: Optional[List[str]], quiet: bool) -> bool:
-    if files is not None:
-        # The files list should already be filtered by '--file-filter ".sh"' when
-        # calling this script
-        passed, stdout, stderr = await shell_cmd(
-            ["tools/run_shellcheck.sh"] + [
-                os.path.join(REPO_ROOT, f) for f in files
+        await shell_cmd(
+            [
+                sys.executable,
+                "tools/actions_local_runner.py",
+                "--job",
+                "mypy",
+                "--file",
+                ".github/workflows/lint.yml",
+                "--step",
+                "Run mypy",
             ],
+            redirect=False,
+            env=env,
         )
-        print_results("shellcheck: Run ShellCheck", passed, [
-            stdout + "\n",
-            stderr + "\n",
-        ])
-        return passed
-
-    # Not running quicklint, so use lint.yml
-    passed, _, _ = await shell_cmd(
-        [
-            sys.executable,
-            "tools/actions_local_runner.py",
-            "--job",
-            "shellcheck",
-            "--file",
-            ".github/workflows/lint.yml",
-            "--step",
-            "Run ShellCheck",
-        ],
-        redirect=False,
-    )
-    return passed
 
 
-async def run_step(
-    step: Dict[str, Any], job_name: str, files: Optional[List[str]], quiet: bool
-) -> bool:
-    env = os.environ.copy()
-    env["GITHUB_WORKSPACE"] = "/tmp"
-    script = step["run"]
+class ShellCheck(Check):
+    name = "shellcheck: Run ShellCheck"
 
-    if quiet:
-        # TODO: Either lint that GHA scripts only use 'set -eux' or make this more
-        # resilient
-        script = script.replace("set -eux", "set -eu")
-        script = re.sub(r"^time ", "", script, flags=re.MULTILINE)
-    name = f'{job_name}: {step["name"]}'
+    def filter_files(self, files: List[str]) -> List[str]:
+        return self.filter_ext(files, ["sh"])
 
-    passed, stderr, stdout = await shell_cmd(script, env=env)
-    if not passed:
-        print_results(name, passed, [stdout, stderr])
-    else:
-        print_results(name, passed, [])
+    async def quick(self, files: List[str]) -> CommandResult:
+        return await shell_cmd(
+            ["tools/run_shellcheck.sh"] + [os.path.join(REPO_ROOT, f) for f in files],
+        )
 
-    return passed
-
-
-async def run_steps(
-    steps: List[Dict[str, Any]], job_name: str, files: Optional[List[str]], quiet: bool
-) -> bool:
-    coros = [run_step(step, job_name, files, quiet) for step in steps]
-    return all(await asyncio.gather(*coros))
+    async def full(self) -> None:
+        await shell_cmd(
+            [
+                sys.executable,
+                "tools/actions_local_runner.py",
+                "--job",
+                "shellcheck",
+                "--file",
+                ".github/workflows/lint.yml",
+                "--step",
+                "Run ShellCheck",
+            ],
+            redirect=False,
+        )
 
 
-def relevant_changed_files(file_filters: Optional[List[str]]) -> Optional[List[str]]:
+class YamlStep(Check):
+    def __init__(self, step: Dict[str, Any], job_name: str, quiet: bool):
+        super().__init__(files=None, quiet=quiet)
+        self.step = step
+        self.name = f'{job_name}: {self.step["name"]}'
+
+    async def full(self) -> CommandResult:
+        env = os.environ.copy()
+        env["GITHUB_WORKSPACE"] = "/tmp"
+        script = self.step["run"]
+
+        if self.quiet:
+            # TODO: Either lint that GHA scripts only use 'set -eux' or make this more
+            # resilient
+            script = script.replace("set -eux", "set -eu")
+            script = re.sub(r"^time ", "", script, flags=re.MULTILINE)
+
+        return await shell_cmd(script, env=env)
+
+
+def changed_files() -> Optional[List[str]]:
     changed_files: Optional[List[str]] = None
     try:
         changed_files = sorted(find_changed_files())
@@ -298,16 +321,7 @@ def relevant_changed_files(file_filters: Optional[List[str]]) -> Optional[List[s
         )
         return None
 
-    if file_filters is None:
-        return changed_files
-    else:
-        relevant_files = []
-        for f in changed_files:
-            for file_filter in file_filters:
-                if f.endswith(file_filter):
-                    relevant_files.append(f)
-                    break
-        return relevant_files
+    return changed_files
 
 
 def grab_specific_steps(
@@ -332,11 +346,6 @@ def main() -> None:
     )
     parser.add_argument("--file", help="YAML file with actions")
     parser.add_argument(
-        "--file-filter",
-        help="only pass through files with this extension",
-        nargs="*",
-    )
-    parser.add_argument(
         "--changed-only",
         help="only run on changed files",
         action="store_true",
@@ -349,11 +358,7 @@ def main() -> None:
     parser.add_argument("--step", action="append", help="steps to run (in order)")
     args = parser.parse_args()
 
-    relevant_files = None
     quiet = not args.no_quiet
-
-    if args.changed_only:
-        relevant_files = relevant_changed_files(args.file_filter)
 
     if args.file is None:
         # If there is no .yml file provided, fall back to the list of known
@@ -363,7 +368,12 @@ def main() -> None:
             raise RuntimeError(
                 f"Job {args.job} not found and no .yml file was provided"
             )
-        future = ad_hoc_steps[args.job](relevant_files, quiet)
+
+        files = None
+        if args.changed_only:
+            files = changed_files()
+
+        checks = [ad_hoc_steps[args.job](files, quiet)]
     else:
         if args.step is None:
             raise RuntimeError("1+ --steps must be provided")
@@ -380,18 +390,21 @@ def main() -> None:
 
         # Pull the relevant sections out of the provided .yml file and run them
         relevant_steps = grab_specific_steps(args.step, job)
-        future = run_steps(relevant_steps, args.job, relevant_files, quiet)
+        checks = [
+            YamlStep(step=step, job_name=args.job, quiet=quiet)
+            for step in relevant_steps
+        ]
 
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(future)
+    loop.run_until_complete(asyncio.gather(*[check.run() for check in checks]))
 
 
 # These are run differently locally in order to enable quicklint, so dispatch
 # out to special handlers instead of using lint.yml
 ad_hoc_steps = {
-    "mypy": run_mypy,
-    "flake8-py3": run_flake8,
-    "shellcheck": run_shellcheck,
+    "mypy": Mypy,
+    "flake8-py3": Flake8,
+    "shellcheck": ShellCheck,
 }
 
 if __name__ == "__main__":

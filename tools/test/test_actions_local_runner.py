@@ -24,38 +24,23 @@ if sys.version_info >= (3, 8):
         def test_step_extraction(self) -> None:
             fake_job = {
                 "steps": [
-                    {
-                        "name": "test1",
-                        "run": "echo hi"
-                    },
-                    {
-                        "name": "test2",
-                        "run": "echo hi"
-                    },
-                    {
-                        "name": "test3",
-                        "run": "echo hi"
-                    },
+                    {"name": "test1", "run": "echo hi"},
+                    {"name": "test2", "run": "echo hi"},
+                    {"name": "test3", "run": "echo hi"},
                 ]
             }
 
             actual = actions_local_runner.grab_specific_steps(["test2"], fake_job)
             expected = [
-                {
-                    "name": "test2",
-                    "run": "echo hi"
-                },
+                {"name": "test2", "run": "echo hi"},
             ]
             self.assertEqual(actual, expected)
 
         async def test_runner(self) -> None:
-            fake_step = {
-                "name": "say hello",
-                "run": "echo hi"
-            }
+            fake_step = {"name": "say hello", "run": "echo hi"}
             f = io.StringIO()
             with contextlib.redirect_stdout(f):
-                await actions_local_runner.run_steps([fake_step], "test", None, True)
+                await actions_local_runner.YamlStep(fake_step, "test", True).run()
 
             result = f.getvalue()
             self.assertIn("say hello", result)
@@ -80,7 +65,9 @@ if sys.version_info >= (3, 8):
 
         def test_lint(self):
             cmd = ["make", "lint", "-j", str(multiprocessing.cpu_count())]
-            proc = subprocess.run(cmd, cwd=actions_local_runner.REPO_ROOT, stdout=subprocess.PIPE)
+            proc = subprocess.run(
+                cmd, cwd=actions_local_runner.REPO_ROOT, stdout=subprocess.PIPE
+            )
             stdout = proc.stdout.decode()
 
             for line in self.expected:
@@ -90,7 +77,9 @@ if sys.version_info >= (3, 8):
 
         def test_quicklint(self):
             cmd = ["make", "quicklint", "-j", str(multiprocessing.cpu_count())]
-            proc = subprocess.run(cmd, cwd=actions_local_runner.REPO_ROOT, stdout=subprocess.PIPE)
+            proc = subprocess.run(
+                cmd, cwd=actions_local_runner.REPO_ROOT, stdout=subprocess.PIPE
+            )
             stdout = proc.stdout.decode()
 
             for line in self.expected:
@@ -98,7 +87,6 @@ if sys.version_info >= (3, 8):
 
             # TODO: See https://github.com/pytorch/pytorch/issues/57967
             self.assertIn("mypy (skipped typestub generation)", stdout)
-
 
     class TestQuicklint(unittest.IsolatedAsyncioTestCase):
         test_files = [
@@ -108,17 +96,21 @@ if sys.version_info >= (3, 8):
             os.path.join("torch", "some_stubs.pyi"),
             os.path.join("test.sh"),
         ]
-        test_py_files = [f for f in test_files if f.endswith(".py") or f.endswith(".pyi")]
+        test_py_files = [
+            f for f in test_files if f.endswith(".py") or f.endswith(".pyi")
+        ]
         test_sh_files = [f for f in test_files if f.endswith(".sh")]
         maxDiff = None
 
         def setUp(self, *args, **kwargs):
             for name in self.test_files:
-                bad_code = textwrap.dedent("""
+                bad_code = textwrap.dedent(
+                    """
                     some_variable = '2'
                     some_variable = None
                     some_variable = 11.2
-                """).rstrip("\n")
+                """
+                ).rstrip("\n")
 
                 with open(name, "w") as f:
                     f.write(bad_code)
@@ -135,20 +127,22 @@ if sys.version_info >= (3, 8):
         async def test_flake8(self):
             f = io.StringIO()
             with contextlib.redirect_stdout(f):
-                await actions_local_runner.run_flake8(self.test_py_files, True)
+                await actions_local_runner.Flake8(self.test_py_files, True).run()
 
             # Should exclude the caffe2/ file
-            expected = textwrap.dedent("""
+            expected = textwrap.dedent(
+                """
                 x flake8
                 torch/some_cool_file.py:4:21: W292 no newline at end of file
                 aten/some_cool_file.py:4:21: W292 no newline at end of file
-            """).lstrip("\n")
+            """
+            ).lstrip("\n")
             self.assertEqual(expected, f.getvalue())
 
         async def test_shellcheck(self):
             f = io.StringIO()
             with contextlib.redirect_stdout(f):
-                await actions_local_runner.run_shellcheck(self.test_sh_files, True)
+                await actions_local_runner.ShellCheck(self.test_sh_files, True).run()
 
             self.assertIn("SC2148: Tips depend on target shell", f.getvalue())
             self.assertIn("SC2283: Remove spaces around = to assign", f.getvalue())
@@ -173,12 +167,12 @@ if sys.version_info >= (3, 8):
                     redirect=True,
                 )
 
-                await actions_local_runner.run_mypy(self.test_py_files, True)
-
+                await actions_local_runner.Mypy(self.test_py_files, True).run()
 
             # Should exclude the aten/ file; also, apparently mypy
             # typechecks files in reverse order
-            expected = textwrap.dedent("""
+            expected = textwrap.dedent(
+                """
                 x mypy (skipped typestub generation)
                 torch/some_stubs.pyi:3:17: error: Incompatible types in assignment (expression has type "None", variable has type "str")  [assignment]
                 torch/some_stubs.pyi:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
@@ -186,9 +180,12 @@ if sys.version_info >= (3, 8):
                 torch/some_cool_file.py:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
                 caffe2/some_cool_file.py:3:17: error: Incompatible types in assignment (expression has type "None", variable has type "str")  [assignment]
                 caffe2/some_cool_file.py:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
-            """).lstrip("\n")  # noqa: B950
+            """  # noqa: B950
+            ).lstrip(
+                "\n"
+            )
             self.assertEqual(expected, f.getvalue())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
