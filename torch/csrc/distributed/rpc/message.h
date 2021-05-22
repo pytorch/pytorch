@@ -109,9 +109,7 @@ enum MessageType {
 // and PythonResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
 class TORCH_API Message final : public torch::CustomClassHolder {
- private:
-  // Keep these private in order to force users to go through make_intrusive and
-  // thus prevent creating a Message that's not held by an intrusive_ptr.
+ public:
   Message();
 
   Message(
@@ -125,13 +123,11 @@ class TORCH_API Message final : public torch::CustomClassHolder {
       MessageType type,
       int64_t id);
 
-  friend c10::intrusive_ptr<Message>;
-
- public:
-  Message(const Message& other) = delete;
-  Message(Message&& other) = delete;
-  Message& operator=(Message const& rhs) = delete;
-  Message& operator=(Message&& rhs) = delete;
+  Message(const Message& other);
+  Message(Message&& other) noexcept;
+  Message& operator=(Message const& rhs) &;
+  Message& operator=(Message&& rhs) &;
+  void swap(Message& rhs) noexcept;
 
   // Destructively retrieves the payload.
   std::vector<char>&& movePayload() &&;
