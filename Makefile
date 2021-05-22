@@ -57,7 +57,7 @@ setup_lint:
 	 	--job 'cmakelint' --step 'Install dependencies' --no-quiet
 	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'mypy' --step 'Install dependencies' --no-quiet
-	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'shellcheck' --step 'Install Jinja2' --no-quiet
 
 	@if [ "$$(uname)" = "Darwin" ]; then \
