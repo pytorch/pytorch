@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/macros/Export.h>
 #include <memory>
 #include <unordered_map>
 

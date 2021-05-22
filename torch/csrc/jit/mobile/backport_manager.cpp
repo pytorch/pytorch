@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <cstddef>
+#include <sstream>
 
 namespace torch {
 namespace jit {
@@ -24,7 +25,6 @@ using caffe2::serialize::ReadAdapterInterface;
 namespace {
 constexpr int64_t kBytecodeVersionV4 = 0x4L;
 constexpr int64_t kBytecodeVersionV5 = 0x5L;
-constexpr int64_t kBytecodeVersionV6 = 0x6L;
 } // namespace
 
 // Utility function that can be reused by backport_vn_to_vn-1(). If any utility
@@ -106,6 +106,7 @@ bool check_bytecode_version(
   return true;
 }
 
+// Copy all content from reader to stringstream
 void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
     out.write(static_cast<const char*>(buf), nbytes);
@@ -121,12 +122,34 @@ void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
 
 } // namespace
 
-// To add next backport
-// function, for example, backport_vn_to_vn-1, create an anonymous namespace
-// with a backport_vn_to_vn-1 function + other necessary customized function. If
-// a function can be reused by other backport functions, move it to the utility
-// function group. It will be easier to split out backport_manager.cpp to
-// smaller files when it grows too long.
+/*
+ To add next backport function, for example, backport_vn_to_vn-1, create an
+ anonymous namespace with a backport_vn_to_vn-1 function + other necessary
+ customized function. If a function can be reused by other backport functions,
+ move it to the utility function group. It will be easier to split out
+ backport_manager.cpp to smaller files when it grows too long.
+
+ How to add backport_v{i}_to_v{i-1} ?
+ There are two options:
+ 1) [Format change only, recommended] Constrcut a reader with the
+ input_model_stream, modify the file, and use PyTorchWriter to write it to
+ output_model_stream. See backport_v5_to_v4.
+
+ 2) [Both format and content change] ]Use torch.jit.load() to load the stream,
+ and save it to output_model_stream.
+
+ The first option is preferred, because it will be purely format change, and
+ the model doesn't need to go through inline again and model content will
+ remain the same.
+
+ A note for manipulate stringstream, it's recommend to declare a new
+ stringstream, tmp_stream, and swap it with the argument output_model_stream
+ once it's ready, output_model_stream.swap(tmp_stream). Do not use
+ output_model_stream.clear(). It only clears out error state flag
+ (https://www.cplusplus.com/reference/ios/ios/clear/), while the content is the
+ same. It's cleaner to just declare a new one and swap.
+
+*/
 
 // The functions needed for backport model from v5 to v4.
 namespace {
@@ -167,10 +190,6 @@ bool backport_v5_to_v4(
   // 1) read from archive `bytecode` archive
   PyTorchStreamReader reader(&input_model_stream);
   std::vector<IValue> bytecode_values = get_bytecode_values(reader);
-  if (!check_bytecode_version(bytecode_values, kBytecodeVersionV5)) {
-    TORCH_WARN("Incorrect bytecode version for input model.");
-    return false;
-  }
   std::vector<IValue> constants_values =
       readArchive(kArchiveNameConstants, reader).toTuple()->elements();
 
@@ -212,62 +231,25 @@ bool backport_v5_to_v4(
 
 } // namespace
 
-namespace {
-
-
-bool backport_v6_to_v5(
-    std::stringstream& input_model_stream,
-    std::stringstream& output_model_stream) {
-
-  Module torch_script = torch::jit::load(input_model_stream);
-  BytecodeWriteVersion = 5;
-  std::stringstream output;
-  torch_script._save_for_mobile(output);
-
-  std::stringstream output_copy(output.str());
-  BytecodeWriteVersion = 6;
-  output_model_stream.swap(output);
-  std::stringstream output_model_stream_copy(output_model_stream.str());
-
-  torch_script._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/model_v6_to_v5_debug.ptl");
-  PyTorchStreamReader reader(&output_model_stream_copy);
-  PyTorchStreamWriter last_model_writer_debug("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/model_v6_to_v5_stream_debug.ptl");
-
-  selective_copy(
-      reader,
-      last_model_writer_debug,
-      std::unordered_set<std::string>({"version"}),
-      std::unordered_set<std::string>());
-
-  return true;
-}
-} // namespace
-
 // A generic contract for backport logic to the previous bytecode version.
 // Args:
 // * PyTorchStreamReader has access to the input model from N bytecode version.
 // * PyTorchStreamWriter has access to the output model backported to the
 // previous N-1 bytecode version. Returns true if successful, false otherwise.
-using BytecodeBackportFunction = std::function<bool(
-    std::stringstream&,
-    std::stringstream&)>;
+using BytecodeBackportFunction =
+    std::function<bool(std::stringstream&, std::stringstream&)>;
 
 BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
-  registerBytecodeBackportFunction(kBytecodeVersionV6, backport_v6_to_v5);
 }
 
 std::unordered_map<
     int64_t,
-    std::function<bool(
-        std::stringstream&,
-        std::stringstream&)>>&
+    std::function<bool(std::stringstream&, std::stringstream&)>>&
 BackportManager::bytecodeBackportFunctions() const {
   static std::unordered_map<
       int64_t,
-      std::function<bool(
-          std::stringstream&,
-          std::stringstream&)>>
+      std::function<bool(std::stringstream&, std::stringstream&)>>
       backport_functions;
   return backport_functions;
 }
@@ -310,13 +292,16 @@ bool BackportManager::backport(
   int64_t bytecode_version = from_version;
   bool backport_success = true;
 
-  // 1) Given an istream_adapter, get the model_stream
+  // 1) Given an istream_adapter (an adapter with access to the input model, the
+  // model can be from istrea, file and etc), copy all model content to
+  // stringstream
   std::stringstream oss;
   get_model_stream(start_reader, oss);
   std::stringstream input_model_stream(oss.str());
   std::stringstream output_model_stream;
 
-  // 2) backport input and output will be stream
+  // 2) backport model, backport_v{i}_to_v{i-1} function's argurment is
+  // (input_model_stream and output_model_stream)
   while (bytecode_version > to_version) {
     // Swap input and output if it's not the first time and output_model_stream
     // has value.
@@ -329,25 +314,26 @@ bool BackportManager::backport(
       return false;
     }
 
+    auto input_model_stream_version = _get_model_bytecode_version(input_model_stream);
+
+    if(input_model_stream_version != bytecode_version){
+      TORCH_WARN("The bytecode version of input model stream is supposed to be ", bytecode_version, ", but it gets ", input_model_stream_version);
+    }
+
     // Keep backporting till request version
     backport_success &= bytecodeBackportFunctions()[bytecode_version--](
         input_model_stream, output_model_stream);
 
-    std::stringstream output_model_stream_copy(output_model_stream.str());
-    PyTorchStreamReader copy_reader(&output_model_stream_copy);
-    PyTorchStreamWriter last_model_writer_debug("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/model_v6_to_v5_bp_stream_debug.ptl");
+    auto output_model_stream_version = _get_model_bytecode_version(output_model_stream);
 
-    selective_copy(
-        copy_reader,
-        last_model_writer_debug,
-        std::unordered_set<std::string>({"version"}),
-        std::unordered_set<std::string>());
+    if(output_model_stream_version != bytecode_version){
+      TORCH_WARN("The bytecode version of output model stream is supposed to be ", bytecode_version, ", but it gets ", output_model_stream_version);
+    }
 
-    auto version = _get_model_bytecode_version(output_model_stream);
-    std::cout << "version: " << version << std::endl;
   }
 
-  // 3) Write the final model_stream to final_writer
+  // 3) Write the final output_model_stream to final_writer, final_writer has
+  // access to the final model destination (file, ostream and etc)
   if (output_model_stream.str().empty()) {
     TORCH_WARN("No output model from backport.");
     return false;
