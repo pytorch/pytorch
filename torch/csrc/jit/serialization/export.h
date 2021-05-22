@@ -188,5 +188,7 @@ TORCH_API void SetExportModuleMobileInfoConverter(
  */
 TORCH_API std::vector<std::string> export_opnames(const Module& m);
 
+inline c10::optional<int64_t> BytecodeWriteVersion;
+
 } // namespace jit
 } // namespace torch
