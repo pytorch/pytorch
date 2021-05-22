@@ -145,7 +145,10 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
   auto future = runJitOperator(*scriptCall.op(), scriptCall.stackRef());
 
   return future->then(
-      [](JitFuture& future) { return ScriptResp(future.value()).toMessage(); },
+      [](JitFuture& future) {
+        return c10::make_intrusive<Message>(
+            ScriptResp(future.value()).toMessage());
+      },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
@@ -195,7 +198,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
           ownerRRef->recordAllStreams(lsctx);
           ownerRRef->setValue(future.value());
         }
-        return RemoteRet(rrefId, forkId).toMessage();
+        return c10::make_intrusive<Message>(
+            RemoteRet(rrefId, forkId).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -251,7 +255,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 
   return future->then(
       [](JitFuture& future) {
-        return ScriptRRefFetchRet({future.value()}).toMessage();
+        return c10::make_intrusive<Message>(
+            ScriptRRefFetchRet({future.value()}).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -354,9 +359,10 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
         } else {
           auto msg = getMessageWithAutograd(
               fromWorkerId,
-              wrappedRpcResponseFuture.value().toCustomClass<Message>(),
+              std::move(
+                  *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
               MessageType::FORWARD_AUTOGRAD_RESP);
-          return msg;
+          return c10::make_intrusive<Message>(std::move(msg));
         }
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -390,7 +396,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
         if (execFuture.hasError()) {
           std::rethrow_exception(execFuture.exception_ptr());
         } else {
-          return PropagateGradientsResp().toMessage();
+          return c10::make_intrusive<Message>(
+              PropagateGradientsResp().toMessage());
         }
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -481,7 +488,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
                     *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
                 profiledEvents,
                 profilingKeyId);
-            return std::move(*rpcWithProfilingResp).toMessage();
+            return c10::make_intrusive<Message>(
+                std::move(*rpcWithProfilingResp).toMessage());
           }
         }),
         c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -570,7 +578,8 @@ c10::intrusive_ptr<Message> RequestCallbackNoPython::handleError(
       DistAutogradContainer::getInstance().getWorkerId(),
       ": ",
       e.what());
-  return createExceptionResponse(errorMsg, messageId);
+  return c10::make_intrusive<Message>(
+      createExceptionResponse(errorMsg, messageId));
 }
 
 bool RequestCallbackNoPython::cudaAvailable() const {
@@ -611,6 +620,11 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
   return asFuture(
       std::move(message),
       at::getCustomClassType<c10::intrusive_ptr<Message>>());
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    Message message) const {
+  return asFuture(c10::make_intrusive<Message>(std::move(message)));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
