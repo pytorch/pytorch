@@ -244,6 +244,10 @@ struct TORCH_API ShapeSymbol {
     return value_;
   };
 
+  int64_t value() const {
+    return value_;
+  };
+
   static ShapeSymbol newSymbol() {
     return fromStaticSize(-static_cast<int64_t>(++num_symbols));
   };
@@ -300,6 +304,8 @@ struct TORCH_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
+  void dump() const;
+
   SymbolicShape(std::vector<ShapeSymbol> dims) : dims_(std::move(dims)) {}
 
   SymbolicShape(c10::IntArrayRef dims) {
@@ -312,6 +318,13 @@ struct TORCH_API SymbolicShape {
   }
 
   ShapeSymbol operator[](size_t i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
+  }
+
+  ShapeSymbol at(size_t i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
@@ -1482,6 +1495,7 @@ enum class TypeVerbosity {
   Type,
   TypeAndStride,
   Full,
+  Symbolic,
   Default = Full,
 };
 
