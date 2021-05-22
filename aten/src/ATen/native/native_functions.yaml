@@ -2156,6 +2156,7 @@
 - func: _cufft_clear_plan_cache(int device_index) -> ()
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: index
@@ -2180,6 +2181,7 @@
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
+  device_check: NoCheck   # delegate to _index_put_impl_, which leverages TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: index_put_
@@ -2190,6 +2192,7 @@
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Scalar v)
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
   variants: function, method
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
