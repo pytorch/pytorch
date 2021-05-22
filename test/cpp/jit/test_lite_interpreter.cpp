@@ -1058,7 +1058,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   extra_files["mobile_info.json"] = "{\"key\": 23}";
   module->_save_for_mobile(oss, extra_files);
 
-  std::stringstream iss(oss.str());
+  std::istringstream iss(oss.str());
   caffe2::serialize::IStreamAdapter adapter{&iss};
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
