@@ -7,7 +7,7 @@ torch.quantization
 This module implements the functions you call
 directly to convert your model from FP32 to quantized form. For
 example the :func:`~torch.quantization.prepare` is used in post training
-quantization to prepares your model for the calibration step and
+quantization to prepare your model for the calibration step and
 :func:`~torch.quantization.convert` actually converts the weights to int8 and
 replaces the operations with their quantized counterparts. There are
 other helper functions for things like quantizing the input to your
