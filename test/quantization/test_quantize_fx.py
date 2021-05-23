@@ -76,6 +76,8 @@ from torch.testing._internal.common_utils import TemporaryFileName
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
+from torch.testing._internal.common_quantization import ConvModel
+
 from torch.testing import FileCheck
 
 import copy
@@ -264,6 +266,24 @@ class TestFuseFx(QuantizationTestCase):
             ns.call_module(nni.BNReLU3d),
         ]
         self.checkGraphModuleNodes(m, expected_node_list=expected_nodes)
+
+    def test_fuse_custom_config_dict_validity(self):
+        r"""
+        Verifies that if a user passes an invalid key or makes a typo when
+        constructing a fuse_custom_config_dict, an error will be thrown and
+        users will be notified of what keys are supported.
+        """
+        m = ConvModel().eval()
+        from torch.quantization.quantize_fx import fuse_fx
+        fuse_custom_config_dict = {"typo": None}
+
+        with self.assertRaises(ValueError) as context:
+            m = fuse_fx(m, fuse_custom_config_dict=fuse_custom_config_dict)
+        self.assertTrue(
+            'Expected fuse_custom_config_dict to have the following keys:'
+            in str(context.exception)
+        )
+        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
@@ -1012,6 +1032,59 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(m.conv.qconfig, object_type_qconfig)
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
         self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
+
+    def test_qconfig_dict_validity(self):
+        r"""
+        Verifies that if a user passes an invalid key or makes a typo when
+        constructing a qconfig_dict, an error will be thrown and users will be
+        notified of what keys are supported.
+        """
+        m = ConvModel().eval()
+        qconfig_dict = {"object_typo": [(torch.nn.Conv2d, default_qconfig)]}
+
+        with self.assertRaises(ValueError) as context:
+            m = prepare_fx(m, qconfig_dict)
+        self.assertTrue(
+            'Expected qconfig_dict to have the following keys:' in str(context.exception)
+        )
+        self.assertTrue('But found \'object_typo\' instead.' in str(context.exception))
+
+    def test_prepare_custom_config_dict_validity(self):
+        r"""
+        Verifies that if a user passes an invalid key or makes a typo when
+        constructing a prepare_custom_config_dict, an error will be thrown and
+        users will be notified of what keys are supported.
+        """
+        m = ConvModel().eval()
+        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
+        prepare_custom_config_dict = {"typo": None}
+
+        with self.assertRaises(ValueError) as context:
+            m = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        self.assertTrue(
+            'Expected prepare_custom_config_dict to have the following keys:'
+            in str(context.exception)
+        )
+        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
+
+    def test_convert_custom_config_dict_validity(self):
+        r"""
+        Verifies that if a user passes an invalid key or makes a typo when
+        constructing a convert_custom_config_dict, an error will be thrown and
+        users will be notified of what keys are supported.
+        """
+        m = ConvModel().eval()
+        qconfig_dict = {"module_name_regex": [("conv*", default_qconfig)]}
+        m = prepare_fx(m, qconfig_dict)
+        convert_custom_config_dict = {"typo": None}
+
+        with self.assertRaises(ValueError) as context:
+            m = convert_fx(m, convert_custom_config_dict=convert_custom_config_dict)
+        self.assertTrue(
+            'Expected convert_custom_config_dict to have the following keys:'
+            in str(context.exception)
+        )
+        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
 
     def test_remove_qconfig(self):
         class M(torch.nn.Module):

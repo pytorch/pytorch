@@ -1,7 +1,9 @@
 import torch
 import warnings
+import unittest
 import random
-from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, coalescedonoff
+from torch.testing._internal.common_utils import \
+    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU)
 
@@ -82,7 +84,10 @@ class TestSparseCSR(TestCase):
                                     size, dtype=dtype, device=device)
 
     @onlyCPU
+    @unittest.skip("see: https://github.com/pytorch/pytorch/issues/58762")
     def test_sparse_csr_print(self, device):
+        orig_maxDiff = self.maxDiff
+        self.maxDiff = None
         shape_nnz = [
             ((10, 10), 10),
             ((100, 10), 10),
@@ -113,6 +118,7 @@ class TestSparseCSR(TestCase):
                     printed.append('')
                 printed.append('')
         self.assertExpected('\n'.join(printed))
+        self.maxDiff = orig_maxDiff
 
     @onlyCPU
     def test_sparse_csr_from_dense(self, device):
@@ -186,6 +192,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(coo.matmul(vec), csr.matmul(vec))
 
     @onlyCPU
+    @unittest.skipIf(IS_MACOS or IS_WINDOWS, "MKL doesn't work on windows or mac")
     @dtypes(torch.float, torch.double)
     def test_mkl_matvec_warnings(self, device, dtype):
         if torch.has_mkl:
