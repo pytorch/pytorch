@@ -3,13 +3,15 @@ from models.DummyModel import DummyModel
 from servers.AverageParameterServer import AverageParameterServer
 from trainers.DdpNcclTrainer import DdpNcclTrainer
 from trainers.DdpSparseRpcTrainer import DdpSparseRpcTrainer
+from trainers.DdpTrainer import DdpTrainer
 
 trainer_map = {
     "DdpNcclTrainer": DdpNcclTrainer,
+    "DdpTrainer": DdpTrainer,
     "DdpSparseRpcTrainer": DdpSparseRpcTrainer
 }
 
-ps_map = {
+server_map = {
     "AverageParameterServer": AverageParameterServer
 }
 
@@ -26,8 +28,8 @@ def get_benchmark_trainer_map():
     return trainer_map
 
 
-def get_benchmark_ps_map():
-    return ps_map
+def get_benchmark_server_map():
+    return server_map
 
 
 def get_benchmark_model_map():
