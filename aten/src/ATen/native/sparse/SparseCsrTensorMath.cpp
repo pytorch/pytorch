@@ -21,8 +21,10 @@ using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
 
-static constexpr bool is_msvc() {
+static constexpr bool is_mkl_supported() {
 #ifdef _MSC_VER
+  return true;
+#elif  __APPLE__ || __MACH__
   return true;
 #else
   return false;
@@ -148,7 +150,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   // r = beta * t + alpha * sparse * dense
 
   // Do not use MKL for Windows due to linking issues with sparse MKL routines.
-  if (at::hasMKL() && !is_msvc() && is_square_or_vec(dim_i, dim_j, dim_k)) {
+  if (at::hasMKL() && !is_mkl_supported() && is_square_or_vec(dim_i, dim_j, dim_k)) {
     AT_DISPATCH_FLOATING_TYPES(values.type(), "addmm_sparse_dense", [&] {
         scalar_t cast_beta = beta.to<scalar_t>();
         if (cast_beta == 0) {
