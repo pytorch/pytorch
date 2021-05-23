@@ -105,6 +105,11 @@ class SampleInput(object):
         self.broadcasts_input = broadcasts_input
 
     def _repr_helper(self, formatter):
+        # Helper function to return the details of the SampleInput as `str`
+        # It consolidates all the fields of SampleInput and allows,
+        # formatting the fields like `input`, `args`, etc with `formatter`
+        # callable to customize the representation.
+        # Look at `summary` method for example.
         arguments = [
             f'input={formatter(self.input)}',
             f'args={formatter(self.args)}',
@@ -119,6 +124,10 @@ class SampleInput(object):
         return self._repr_helper(lambda x: x)
 
     def summary(self):
+        # Returns the SampleInput details in a more
+        # friendly format.
+        # It formats `Tensor` and `TensorList`
+        # in a more condensed representation.
         def is_iter(arg):
             try:
                 iter(arg)
