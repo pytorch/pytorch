@@ -1,8 +1,8 @@
-from .DdpRpcTrainer import DdpRpcTrainer
+from .DdpRpcHelper import DdpRpcHelper
 from .DdpTrainer import DdpTrainer
 
 
-class DdpSparseRpcTrainer(DdpTrainer, DdpRpcTrainer):
+class DdpSparseRpcTrainer(DdpTrainer, DdpRpcHelper):
 
     def __init__(self, rank, trainer_count, process_group, use_cuda_rpc, ps_rref, backend, epochs):
         r"""
