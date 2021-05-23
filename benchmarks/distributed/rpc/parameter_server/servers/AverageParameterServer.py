@@ -54,7 +54,8 @@ class AverageParameterServer(ParameterServerBase):
 
     def param_key(self, param_loc):
         r"""
-        clears the server state
+        returns an encoded key that represents the current batch and
+        param location.
         Args:
             param_loc (int): bucket location sent by the trainer
             containing the gradient
@@ -72,7 +73,6 @@ class AverageParameterServer(ParameterServerBase):
         r"""
         stores the gradient if param_loc is not in dict.
         adds the gradient to param_loc if it is in dict.
-        records straggler and batch metric starts.
         Args:
             gradient (object): tensor sent from trainer
             param_loc (int): bucket location sent by the trainer
