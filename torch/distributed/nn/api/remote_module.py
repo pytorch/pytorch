@@ -20,7 +20,7 @@ import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
 from torch.distributed.rpc.internal import _internal_rpc_pickler
-from torch.distributed.rpc.utils import _parse_remote_device
+from torch.distributed.utils import _parse_remote_device
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
@@ -154,8 +154,12 @@ class _RemoteModule(nn.Module):
 
         Args:
             remote_device (str): Device on the destination worker where we'd like to place this module.
-                The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
-                E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
+                The device can be a local device or a remote device specified by one of the following remote
+                formats:
+
+                    1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
+                    2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
+
                 In addition, the device field can be optional and the default value is "cpu".
             module_cls (nn.Module): For example,
                 >>> class MyModule(nn.Module):
