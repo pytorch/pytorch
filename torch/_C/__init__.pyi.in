@@ -79,7 +79,7 @@ class iinfo:
     def __init__(self, dtype: _dtype) -> None: ...
 
 class finfo:
-    bits: _float
+    bits: _int
     min: _float
     max: _float
     eps: _float
