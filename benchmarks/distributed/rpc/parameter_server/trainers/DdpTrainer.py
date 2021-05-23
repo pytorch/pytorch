@@ -38,13 +38,13 @@ class DdpTrainer(DdpTrainerBase):
 
     def __init__(self, rank, trainer_count, process_group, use_cuda_rpc, server_rref, backend, epochs):
         r"""
-        a trainer that implements ddp using a simple hook that performs allreduce
+        a trainer that implements a DDP training algorithm using a simple hook that performs allreduce
         using the process group.
         Args:
             rank (int): worker rank
             trainer_count (int): count of trainer in the world
             process_group (object): distributed process group
-            use_cuda_rpc (bool): indicator to determine if this is a CUDA metric
+            use_cuda_rpc (bool): indicator for CUDA RPC
             server_rref (object): remote reference to the server
             backend (string): distributed communication backend
             epochs (int): epoch count for training

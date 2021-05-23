@@ -117,7 +117,7 @@ class TrainerBase(ABC):
 
     def record_backward_start(self, key, cuda=True):
         r"""
-        A helper method that records a forward metric
+        A helper method that records a backward metric
         for the given key. A user should call this before
         their .backward() call.
         Args:

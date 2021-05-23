@@ -27,8 +27,7 @@ class AverageBatchParameterServer(AverageParameterServer):
     def process_gradient(self, gradient, param_loc):
         r"""
         adds the gradient to param_loc bucket stored in
-        the gradient_dict. records straggler and batch
-        metric starts.
+        the gradient_dict.
         Args:
             gradient (object): tensor sent from trainer
             param_loc (int): bucket location sent by the trainer
