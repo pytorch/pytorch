@@ -3946,10 +3946,10 @@ else:
 
     def test_nondeterministic_alert_scatter_add(self, device):
         def test_func(op_call):
-            input = torch.randn(10, device=device)
+            input = torch.randn(5, 4, device=device)
             dim = 0
-            index = torch.tensor([3], device=device)
-            src = torch.randn(1, device=device)
+            index = torch.tensor([[3]], device=device)
+            src = torch.tensor([[1.0]], device=device)
 
             @expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')
             def forward_func(slf, device):
@@ -4165,6 +4165,24 @@ else:
     @onlyCPU
     def test_gather_backward_one_dim(self, device) -> None:
         self._test_gather_backward_one_dim(device, False)
+
+    @onlyOnCPUAndCUDA
+    def test_scatter_add_one_dim_deterministic(self, device) -> None:
+        with DeterministicGuard(True):
+            m = random.randint(20, 30)
+            elems = random.randint(2000 * m, 3000 * m)
+            dim = 0
+            src = torch.randn(elems, device=device)
+            idx = torch.randint(m, (elems,), device=device)
+
+            x = torch.zeros(m, device=device)
+            res = x.scatter_add(dim, idx, src)
+
+            expected = torch.zeros(m, device=device)
+            for i in range(elems):
+                expected[idx[i]] += src[i]
+
+            self.assertEqual(res, expected, atol=0, rtol=0)
 
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):
