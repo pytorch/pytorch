@@ -14,7 +14,7 @@ class DdpSparseRpcTrainer(DdpTrainer, DdpRpcTrainer):
             rank (int): worker rank
             trainer_count (int): count of trainer in the world
             process_group (object): distributed process group
-            use_cuda_rpc (bool): indicator to determine if this is a CUDA metric
+            use_cuda_rpc (bool): indicator for CUDA RPC
             server_rref (object): remote reference to the server
             backend (string): distributed communication backend
             epochs (int): epoch count for training
