@@ -1855,13 +1855,8 @@ def slice(g, self, *args):
         step = _parse_arg(step, 'i')
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
-        is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
-        is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
-        is_start_onnx_const = start.node().kind() == 'onnx::Constant'
-        is_end_onnx_const = end.node().kind() == 'onnx::Constant'
-        if ((not is_start_none) and (not is_start_onnx_const)) or \
-           ((not is_end_none) and (not is_end_onnx_const)) or \
-           dim.node().kind() != 'onnx::Constant':
+        if start.node().kind() != 'onnx::Constant' or \
+                end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
             if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
                 raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
                                    'is a deprecated experimental op. Please use statically allocated '
@@ -1872,18 +1867,16 @@ def slice(g, self, *args):
                 dim_unsqueezed = sym_help._unsqueeze_helper(g, dim, [0])
                 return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
         else:
-            start = 0 if is_start_none else _parse_arg(start, 'i')
-            end = 9223372036854775807 if is_end_none else _parse_arg(end, 'i')
+            start = _parse_arg(start, 'i')
+            end = _parse_arg(end, 'i')
             dim = _parse_arg(dim, 'i')
             return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     elif len(args) == 3:
         # aten::slice(t[] l, int start, int end, int step) -> t[]
         start, end, step = args
         dim = 0
-        is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
-        is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
-        start = 0 if is_start_none else _parse_arg(start, 'i')
-        end = 9223372036854775807 if is_end_none else _parse_arg(end, 'i')
+        start = _parse_arg(start, 'i')
+        end = _parse_arg(end, 'i')
         return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     else:
         raise NotImplementedError("Unknown aten::slice signature")
@@ -1970,22 +1963,11 @@ def to(g, self, *args):
             # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
-            # TestONNXRuntime::test_ones_bool shows args[0] of aten::to() can be onnx::Constant[value=<Tensor>]()
-            # In this case, the constant value is a tensor not int,
-            # so sym_help._maybe_get_const(args[0], 'i') would not work.
-            dtype = args[0]
-            if sym_help._is_value(args[0]) and args[0].node().kind() == 'onnx::Constant':
-                tval = args[0].node()['value']
-                if isinstance(tval, torch.Tensor):
-                    if len(tval.shape) == 0:
-                        tval = tval.item()
-                        dtype = int(tval)
-                    else:
-                        dtype = tval
-
-            if sym_help._is_value(dtype) or isinstance(dtype, torch.Tensor):
+            dtype = sym_help._maybe_get_const(args[0], 'i')
+            if sym_help._is_value(dtype):
                 # aten::to(Tensor, Tensor, bool, bool, memory_format)
-                dtype = args[0].type().scalarType()
+                other = args[0]
+                dtype = other.type().scalarType()
                 return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype])
             else:
                 # aten::to(Tensor, ScalarType, bool, bool, memory_format)
@@ -2017,7 +1999,7 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
-def repeat_interleave(g, self, repeats, dim=None):
+def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
@@ -3099,3 +3081,60 @@ def fill(g, self, value):
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
 
     return full_like(g, self, value, dtype)
+
+
+def index_add(g, self, dim, index, other):
+    warnings.warn("Warning: ONNX export does not support duplicated values in 'index' field, " +
+                  "this will cause the ONNX model to be incorrect.")
+    from torch.onnx.symbolic_opset9 import scatter_add
+    from sys import maxsize as maxsize
+
+    dim = sym_help._maybe_get_const(dim, 'i')
+    if dim is None:
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function with " +
+                                  "unknown 'dim' value.")
+
+    self_dim_rank = sym_help._get_tensor_rank(self)
+    other_dim_rank = sym_help._get_tensor_rank(other)
+
+    if self_dim_rank is None or other_dim_rank is None:
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function while " +
+                                  "the rank of self tensor or tensor to be added is unknown.")
+
+    if other_dim_rank != self_dim_rank:
+        delta = self_dim_rank - other_dim_rank
+        for i in range(delta):
+            other = sym_help._unsqueeze_helper(g, other, [sym_help._get_tensor_rank(other)])
+
+    other_dim_size = sym_help._get_tensor_dim_size(other, dim)
+    self_dim_size = sym_help._get_tensor_dim_size(self, dim)
+
+    if (other_dim_size is not None) and (self_dim_size is not None):
+        if other_dim_size > self_dim_size:
+            raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function with " +
+                                      "duplicated values in 'index' parameter yet.")
+
+    # Construct a new shape. It's almost as same as self except the size of the 'dim'
+    # dimension is 1, so that we can expand other dimensions as expected.
+    new_shape_axes = list(range(self_dim_rank))
+    new_shape_starts = [0 for i in range(self_dim_rank)]
+    new_shape_ends = [maxsize
+                      if (i != dim)
+                      else
+                      1
+                      for i in range(self_dim_rank)]
+
+    new_shape = sym_help._slice_helper(g,
+                                       self,
+                                       axes=new_shape_axes,
+                                       starts=new_shape_starts,
+                                       ends=new_shape_ends)
+    other = expand_as(g, other, new_shape)
+
+    for i in range(dim):
+        index = sym_help._unsqueeze_helper(g, index, [0])
+
+    for i in range(self_dim_rank - dim - 1):
+        index = sym_help._unsqueeze_helper(g, index, [sym_help._get_tensor_rank(index)])
+
+    return scatter_add(g, self, dim, expand_as(g, index, other), other)

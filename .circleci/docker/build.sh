@@ -300,7 +300,7 @@ if [ -n "${JENKINS:-}" ]; then
   JENKINS_GID=$(id -g jenkins)
 fi
 
-tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
+tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | head -c 32)"
 
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm

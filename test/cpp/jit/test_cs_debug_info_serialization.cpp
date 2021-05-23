@@ -81,7 +81,7 @@ TEST(CSDebugInfoSerializaitionTest, TwoSubmodules) {
       return self.A0.forward(x) + self.B0.forward(x)
   )JIT");
 
-  BackendDebugHandleManager debug_handle_manager;
+  BackendDebugInfoRecorder debug_info_recorder;
   auto graph = c.get_method("forward").graph();
   Inline(*graph);
   std::stack<Block*> blocks_to_visit;
@@ -100,7 +100,7 @@ TEST(CSDebugInfoSerializaitionTest, TwoSubmodules) {
       source_range_tags[n->sourceRange()] = source_range_tag;
       source_range_map[source_range_tag] = n->sourceRange();
       source_range_tag++;
-      debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(n);
+      debug_info_recorder.getNextDebugHandle(n);
       if (n->callstack().has_value()) {
         for (const auto& e : n->callstack().value()->vec()) {
           auto sr = std::get<1>(e);
@@ -111,7 +111,7 @@ TEST(CSDebugInfoSerializaitionTest, TwoSubmodules) {
       }
     }
   }
-  auto debug_handle_cs_ptr_map = debug_handle_manager.getCallStackPtrMap();
+  auto debug_handle_cs_ptr_map = debug_info_recorder.stopRecording();
   CallStackDebugInfoPickler cs_debug_info_pickler;
   auto cs_data =
       cs_debug_info_pickler.pickle(debug_handle_cs_ptr_map, source_range_tags);
