@@ -2,12 +2,12 @@ import threading
 
 import torch
 import torch.distributed.rpc as rpc
+from utils import sparse_rpc_format_to_tensor, sparse_tensor_to_rpc_format
 
-from .AverageParameterServerBase import AverageParameterServerBase
 from .ParameterServerBase import ParameterServerBase
 
 
-class AverageParameterServer(AverageParameterServerBase):
+class AverageParameterServer(ParameterServerBase):
 
     def __init__(
         self,
@@ -15,6 +15,18 @@ class AverageParameterServer(AverageParameterServerBase):
         trainer_count,
         use_cuda_rpc
     ):
+        r"""
+        a parameter server that averages the gradients
+        from trainers for each training iteration step.
+        gradients are added as they are received from trainers.
+        when all gradients have been received, the sum is
+        divided by the number of trainers.
+        Args:
+            rank (int): worker rank
+            trainer_count (int): count of trainers sending
+            gradients to the server
+            use_cuda_rpc (bool): indicator for CUDA RPC
+        """
         super().__init__(rank)
 
         self.lock = threading.Lock()
@@ -28,26 +40,44 @@ class AverageParameterServer(AverageParameterServerBase):
         self.gradient_dict = {}
 
     @staticmethod
-    def reset_state(ps_rref):
-        self = ps_rref.local_value()
+    def reset_state(server_rref):
+        r"""
+        clears the server state
+        Args:
+            server_rref (object): remote reference to the server
+        """
+        self = server_rref.local_value()
         self.batch_number = 0
         self.futures.clear()
         self.gradient_dict.clear()
         self.clear_metrics()
 
-    @staticmethod
-    def get_metrics_rpc(ps_rref):
-        self = ps_rref.local_value()
-        return self.get_metrics()
-
     def param_key(self, param_loc):
+        r"""
+        clears the server state
+        Args:
+            param_loc (int): bucket location sent by the trainer
+            containing the gradient
+        """
         return f"{self.batch_number},{param_loc}"
 
     def clear_batch_state(self):
+        r"""
+        clears current server batch state
+        """
         self.futures.clear()
         self.gradient_dict.clear()
 
     def process_gradient(self, gradient, param_loc):
+        r"""
+        stores the gradient if param_loc is not in dict.
+        adds the gradient to param_loc if it is in dict.
+        records straggler and batch metric starts.
+        Args:
+            gradient (object): tensor sent from trainer
+            param_loc (int): bucket location sent by the trainer
+            containing the gradient
+        """
         if param_loc not in self.gradient_dict:
             self.record_straggler_start(self.param_key(param_loc))
             self.record_batch_start(self.param_key(param_loc))
@@ -57,6 +87,13 @@ class AverageParameterServer(AverageParameterServerBase):
 
     @ParameterServerBase.record_method(name="average computation")
     def average(self, param_loc):
+        r"""
+        obtains the tensor at the param_loc in the gradient dict
+        and then divides by number of trainers.
+        Args:
+            param_loc (int): bucket location sent by the trainer
+            containing the gradient
+        """
         param_loc_avg = self.gradient_dict[param_loc]
         param_loc_avg / (1.0 * self.trainer_count)
         return param_loc_avg
@@ -64,16 +101,25 @@ class AverageParameterServer(AverageParameterServerBase):
     @staticmethod
     @rpc.functions.async_execution
     def average_gradient(
-        ps_rref,
+        server_rref,
         received_batch_number,
         param_loc,
         gradient
     ):
-        self = ps_rref.local_value()
+        r"""
+        averages gradients sent to the server by trainers.
+        Args:
+            server_rref (object): remote reference to the server
+            received_batch_number (int): batch number sent by
+            the trainer
+            param_loc (int): bucket location sent by the trainer
+            containing the gradient
+            gradient (int): tensor sent by the trainer
+        """
+        self = server_rref.local_value()
         if type(gradient) is list:
-            gradient = self.sparse_rpc_format_to_tensor(gradient)
-        if not self.use_cuda_rpc:
-            gradient = gradient.cuda(self.rank)
+            gradient = sparse_rpc_format_to_tensor(gradient)
+        gradient = gradient.cuda(self.rank)
         fut = torch.futures.Future()
         with self.lock:
             if self.batch_number < received_batch_number:
@@ -89,7 +135,7 @@ class AverageParameterServer(AverageParameterServerBase):
                 if not self.use_cuda_rpc:
                     param_loc_avg = param_loc_avg.cpu()
                 if param_loc_avg.is_sparse:
-                    param_loc_avg = self.sparse_tensor_to_rpc_format(param_loc_avg)
+                    param_loc_avg = sparse_tensor_to_rpc_format(param_loc_avg)
                 for cur_fut in self.futures[param_loc]:
                     cur_fut.set_result(param_loc_avg)
                 self.record_batch_end(self.param_key(param_loc))
