@@ -666,6 +666,12 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
     return;
   }
   auto strides = get_strides();
+  if (ndim() ==0 || is_reduction_){
+    while (strides.size() < 2U * ntensors()) {
+      strides.push_back(0);
+    }
+  }
+
 
   auto base_ptrs = get_base_ptrs();
   if (ndim() <= 1) {
