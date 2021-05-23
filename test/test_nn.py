@@ -16222,8 +16222,7 @@ class TestNNDeviceType(NNTestCase):
         # Test meta module instantiation.
         input = torch.randn(5, 10, device=device, dtype=dtype)
         m = MyModule(10, 1, device='meta', dtype=dtype)
-        with self.assertRaises(NotImplementedError):
-            m(input)
+        m(input)
 
         # Test materializing meta module on a real device.
         m.to_empty(device=device)
@@ -16234,8 +16233,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Test creating meta module from materialized module.
         m.to_empty(device='meta')
-        with self.assertRaises(NotImplementedError):
-            m(input)
+        m(input)
 
 class TestModuleGlobalHooks(TestCase):
 
