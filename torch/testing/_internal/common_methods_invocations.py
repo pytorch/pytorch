@@ -4364,7 +4364,7 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            skips=(
                # "cumsum_out_{cpu,cuda}" not implemented for 'Bool'
                SkipInfo('TestOpInfo', 'test_supported_dtypes',
@@ -4375,7 +4375,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_cumulative_ops),
     OpInfo('cumprod',
            dtypes=all_types_and_complex_and(torch.bool),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            skips=(
                # "cumprod_out_{cpu, cuda}" not implemented for 'Bool'
                SkipInfo('TestOpInfo', 'test_supported_dtypes',
@@ -4389,12 +4389,12 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=False),
     OpInfo('cummax',
            dtypesIfCPU=all_types_and(torch.bool),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('cummin',
            dtypesIfCPU=all_types_and(torch.bool),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     UnaryUfuncInfo('deg2rad',
@@ -6242,12 +6242,13 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('logcumsumexp',
            dtypes=floating_types_and(),
-           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,), device_type='cuda'),
-               # logcumsumexp_backward not implemented for 'Half
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,), device_type='cuda'),
+               # logcumsumexp_backward not implemented for Half & BFloat16
+               SkipInfo('TestOpInfo', 'test_supported_backward',
+                        dtypes=(torch.float16, torch.bfloat16), device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_logcumsumexp),
     UnaryUfuncInfo('sigmoid',
