@@ -3465,6 +3465,26 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 
+def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    def generator():
+        yield SampleInput(make_arg((S, M, S)))
+        yield SampleInput(make_arg(()))
+
+    return list(generator())
+
+
+def sample_inputs_contiguous(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    def generator():
+        yield SampleInput(make_arg((S, S)))
+        yield SampleInput(make_arg((S, S), noncontiguous=True))
+
+    return list(generator())
+
+
 def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -4172,6 +4192,21 @@ op_db: List[OpInfo] = [
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_chunk,
+           supports_out=False),
+    OpInfo('clone',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           sample_inputs_func=sample_inputs_clone,
+           supports_forward_ad=True,
+           supports_out=False),
+    OpInfo('contiguous',
+           op=lambda x, *args, **kwargs: x.contiguous(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           sample_inputs_func=sample_inputs_contiguous,
+           supports_forward_ad=True,
+           skips=(
+               # JIT has issue when op is passed as lambda
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
            supports_out=False),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
@@ -6510,10 +6545,6 @@ def method_tests():
         ('norm', (), (3, 0), '3_dim_scalar', (), [1]),
         ('norm', (), (2, 0, True), 'keepdim_2_dim_scalar', (), [1]),
         ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', (), [1]),
-        ('clone', (S, M, S), NO_ARGS),
-        ('clone', (), NO_ARGS, 'scalar'),
-        ('contiguous', (S, S), NO_ARGS, '', (True,)),
-        ('contiguous', torch.randn(S, S).transpose(0, 1), NO_ARGS, 'not_contiguous', (True,)),
         ('diag_embed', (S, S), NO_ARGS),
         ('diagonal', (M, M), NO_ARGS, '2d'),
         ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
