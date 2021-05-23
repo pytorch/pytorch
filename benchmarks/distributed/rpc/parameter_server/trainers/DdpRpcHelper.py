@@ -1,7 +1,7 @@
 from utils import sparse_tensor_to_rpc_format, sparse_rpc_format_to_tensor
 
 
-class DdpRpcTrainer:
+class DdpRpcHelper:
 
     RPC_SPARSE = "rpc_sparse"
     RPC_DENSE = "rpc_dense"
