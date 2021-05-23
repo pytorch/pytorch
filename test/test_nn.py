@@ -8901,6 +8901,12 @@ class TestNN(NNTestCase):
         self.assertEqual(input1.grad, torch.zeros_like(input1))
         self.assertEqual(input2.grad, input1 * 1e8)
 
+        # Check error when inputs are not the same shape
+        input1 = torch.randn(2, 2, 1)
+        input2 = torch.randn(2, 1, 3)
+        with self.assertRaises(RuntimeError):
+            F.cosine_similarity(input1, input2)
+
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
         grid = torch.empty(1, 1, 1, 2)
