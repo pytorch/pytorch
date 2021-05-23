@@ -2,7 +2,6 @@ import functools
 import time
 from abc import ABC, abstractmethod
 
-import torch
 from metrics.MetricsLogger import MetricsLogger
 
 
@@ -10,27 +9,52 @@ class ParameterServerBase(ABC):
 
     PARAMETER_SERVER_BATCH_METRIC = "parameter_server_batch_metric"
     PARAMETER_SERVER_STRAGGLER_METRIC = "parameter_server_straggler_metric"
-    BP_LOC_STRAGGLER = "bp_location_staggler"
-    BP_LOC_BATCH = "bp_location_batch"
+    PARAM_INDEX_STRAGGLER = "param_index_straggler"
+    PARAM_INDEX_BATCH = "param_index_batch"
 
     def __init__(self, rank):
+        r"""
+        Inits ParameterServerBase class
+        Args:
+            rank (int): worker rank
+        """
         self.__metrics_logger = MetricsLogger(rank)
 
     @abstractmethod
     def process_gradient(self):
+        r"""
+        Method to be implemented by child class that will process a
+        gradient received by a server
+        """
+        return
+
+    @staticmethod
+    @abstractmethod
+    def average_gradient():
+        r"""
+        Method to be implemented by child class that will average
+        gradients received for the sever
+        """
         return
 
     @staticmethod
     @abstractmethod
     def reset_state():
-        return
-
-    @staticmethod
-    @abstractmethod
-    def get_metrics_rpc():
+        r"""
+        Method to be implemented by child class that will reset
+        the server state
+        """
         return
 
     def record_start(self, type, key, name, cuda=True):
+        r"""
+        Records the start event for a metric
+        Args:
+            type (str): group id for metric
+            key (str): unique id for metric within a group
+            name (str): description of the metric
+            cuda (bool): indicator to determine if this is a CUDA metric
+        """
         self.__metrics_logger.record_start(
             type,
             key,
@@ -39,34 +63,71 @@ class ParameterServerBase(ABC):
         )
 
     def record_end(self, type, key):
+        r"""
+        Records the end event for a metric
+        Args:
+            type (str): group id for metric
+            key (str): unique id for metric within a group
+        """
         self.__metrics_logger.record_end(
             type,
             key
         )
 
     def record_straggler_start(self, key, cuda=True):
+        r"""
+        A helper method that records a straggler metric
+        for the given key. A user should call this when
+        the first gradient for the param location is received.
+        Args:
+            key (str): unique id for metric within a group
+            cuda (bool): indicator to determine if this is a CUDA metric
+        """
         self.__metrics_logger.record_start(
             self.PARAMETER_SERVER_STRAGGLER_METRIC,
             key,
-            self.BP_LOC_STRAGGLER,
+            self.PARAM_INDEX_STRAGGLER,
             cuda
         )
 
     def record_straggler_end(self, key):
+        r"""
+        A helper method that records a straggler metric
+        for the given key. A user should call this when
+        the last gradient for the param location is received.
+        Args:
+            key (str): unique id for metric within a group
+        """
         self.__metrics_logger.record_end(
             self.PARAMETER_SERVER_STRAGGLER_METRIC,
             key
         )
 
     def record_batch_start(self, key, cuda=True):
+        r"""
+        A helper method that records a batch metric
+        for the given key. A user should call this when
+        the first gradient for the param location is received.
+        Args:
+            key (str): unique id for metric within a group
+            cuda (bool): indicator to determine if this is a CUDA metric
+        """
         self.__metrics_logger.record_start(
             self.PARAMETER_SERVER_BATCH_METRIC,
             key,
-            self.BP_LOC_BATCH,
+            self.PARAM_INDEX_BATCH,
             cuda
         )
 
     def record_batch_end(self, key):
+        r"""
+        A helper method that records a batch metric
+        for the given key. A user should call this when
+        all futures for a param location have had their
+        result set.
+        Args:
+            key (str): unique id for metric within a group
+        """
         self.__metrics_logger.record_end(
             self.PARAMETER_SERVER_BATCH_METRIC,
             key
@@ -74,6 +135,13 @@ class ParameterServerBase(ABC):
 
     @staticmethod
     def record_method(name, type="method_metric", cuda=True):
+        r"""
+        A decorator that records a metric for the decorated method.
+        Args:
+            name (str): description of the metric
+            type (str): group id for metric
+            cuda (bool): indicator to determine if this is a CUDA metric
+        """
         def decorator(function):
             @functools.wraps(function)
             def wrapper(self, *args):
@@ -85,17 +153,18 @@ class ParameterServerBase(ABC):
             return wrapper
         return decorator
 
-    def get_metrics(self):
+    @staticmethod
+    def get_metrics(server_rref):
+        r"""
+        returns metrics captured by the __metrics_logger
+        Args:
+            server_rref (object): remote reference to the server
+        """
+        self = server_rref.local_value()
         return self.__metrics_logger.get_processed_metrics()
 
     def clear_metrics(self):
+        r"""
+        clears __metrics_logger state
+        """
         return self.__metrics_logger.clear_metrics()
-
-    def sparse_tensor_to_rpc_format(self, sparse_tensor):
-        sparse_tensor = sparse_tensor.coalesce()
-        return [sparse_tensor.indices(), sparse_tensor.values(), sparse_tensor.size()]
-
-    def sparse_rpc_format_to_tensor(self, sparse_rpc_format):
-        return torch.sparse_coo_tensor(
-            sparse_rpc_format[0], sparse_rpc_format[1], sparse_rpc_format[2]
-        ).coalesce()
