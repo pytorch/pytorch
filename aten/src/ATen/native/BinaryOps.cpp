@@ -58,7 +58,17 @@ TORCH_META_FUNC(special_xlog1py) (const Tensor& self, const Tensor& other) {
 }
 
 TORCH_META_FUNC(special_betainc) (const Tensor& self, const Tensor& a, const Tensor& b) {
-  build_binary_float_op(maybe_get_output(), self, a, b);
+    TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .promote_integer_inputs_to_float(true)
+    .add_output(maybe_get_output()) // maybe try using `add_borrowed_output(maybe_get_output())` if possible
+    .add_input(self)  // similarly try using `add_borrowed_input(self)` if possible.
+    .add_input(a)  // try using `add_borrowed_input(a)` if possible.
+    .add_input(b); // try using `add_borrowed_input(b)` if possible.
 }
 
 TORCH_META_FUNC2(copysign, Tensor) (
