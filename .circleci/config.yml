@@ -13,7 +13,7 @@ parameters:
     default: false
   run_build:
     type: boolean
-    default: true
+    default: false
   run_master_build:
     type: boolean
     default: false

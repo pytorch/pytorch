@@ -4,7 +4,6 @@
 name: Windows CI (pytorch-win-vs2019-cpu-py3)
 
 on:
-  pull_request:
   push:
     branches:
       - master
