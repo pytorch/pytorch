@@ -998,7 +998,7 @@ class LOBPCG(object):
         # The original algorithm 4 from [DuerschPhD2015].
         d_col = (d ** -0.5).reshape(d.shape[0], 1)
         DUBUD = (UBU * d_col) * _utils.transpose(d_col)
-        E, Z = _utils.symeig(DUBUD, eigenvectors=True)
+        E, Z = _utils.symeig(DUBUD)
         t = tau * abs(E).max()
         if drop:
             keep = torch.where(E > t)
