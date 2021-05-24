@@ -150,8 +150,9 @@ class LinuxGccConfigNode(ConfigNode):
             gpu_versions = filter(lambda x: x != "cuda_90", gpu_versions)
 
         # XXX disabling conda rocm build since docker images are not there
+        # XXX Also disabling conda for 11.3 as there's currently no appropriate cudatoolkit available
         if self.find_prop("package_format") == 'conda':
-            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
+            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS + ["113"], gpu_versions)
 
         # XXX libtorch rocm build  is temporarily disabled
         if self.find_prop("package_format") == 'libtorch':
