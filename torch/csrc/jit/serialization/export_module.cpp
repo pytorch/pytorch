@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -64,7 +65,7 @@ static IValue Table(
 std::pair<IValue, IValue> getFunctionTuple(
     const Module& module,
     const Function& func,
-    BackendDebugHandleManager& debug_handle_manager) {
+    BackendDebugInfoRecorder& debug_info_recorder) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -145,8 +146,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           " is not supported in mobile module.");
     }
     auto node = code->instructions_source()[i];
-    int64_t debug_handle =
-        debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(node);
+    int64_t debug_handle = debug_info_recorder.getNextDebugHandle(node);
     // Note 1-to-1 correspondence between instructions and debug handles
     op_debug_handles.emplace_back(debug_handle);
   }
@@ -275,7 +275,7 @@ void setstateTuple(
     std::vector<c10::IValue>& elements,
     std::unordered_set<std::string>& qn_cache,
     std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugHandleManager& debug_handle_manager) {
+    BackendDebugInfoRecorder& debug_info_recorder) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
@@ -287,8 +287,7 @@ void setstateTuple(
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple =
-          getFunctionTuple(module, setstate, debug_handle_manager);
+      auto func_tuple = getFunctionTuple(module, setstate, debug_info_recorder);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       debug_info_elements.push_back(func_tuple.second);
@@ -301,17 +300,80 @@ void setstateTuple(
           elements,
           qn_cache,
           debug_info_elements,
-          debug_handle_manager);
+          debug_info_recorder);
     }
   }
 }
+
+// Check if the global static map of backend debug info
+// contains debug info for this module and any of its children.
+// If so combine all the maps together and return one.
+void getBackendDebugInfoMap(
+    const Module& m,
+    BackendDebugInfoMapType& debug_map) {
+  c10::QualifiedName type_name;
+  if (m.type()->name()) {
+    type_name = m.type()->name().value();
+  }
+  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+    auto backend_debug_info =
+        m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
+    const auto& map = backend_debug_info->getDebugInfoMap();
+    if (map) {
+      debug_map.insert(map.value().begin(), map.value().end());
+    }
+  }
+  for (const auto& c : m.children()) {
+    getBackendDebugInfoMap(c, debug_map);
+  }
+}
+
+SourceRangeRecords getBackendSourceRanges(const Module& m) {
+  SourceRangeRecords sr_records;
+  c10::QualifiedName type_name;
+  if (m.type()->name()) {
+    type_name = m.type()->name().value();
+  }
+  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+    constexpr size_t kSourceRange = 1;
+    auto backend_debug_info =
+        m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
+    const auto& map = backend_debug_info->getDebugInfoMap();
+    if (map) {
+      const auto& map_val = map.value();
+      // This map is map of debug handle-to-delegateDebugInfoType
+      // DebugInfoPair = <source range, inlined_cs_ptr>
+      for (const auto& it : map_val) {
+        sr_records.emplace_back(
+            std::numeric_limits<size_t>::max(), it.second.first);
+        auto cs_ptr = it.second.second;
+        if (cs_ptr) {
+          for (const auto& e : cs_ptr->vec()) {
+            const auto sr = std::get<kSourceRange>(e);
+            sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
+          }
+        }
+      }
+    }
+  }
+  for (const auto& c : m.children()) {
+    const auto& child_sr_records = getBackendSourceRanges(c);
+    sr_records.reserve(sr_records.size() + child_sr_records.size());
+    std::move(
+        child_sr_records.begin(),
+        child_sr_records.end(),
+        std::back_inserter(sr_records));
+  }
+  return sr_records;
+}
+
 } // namespace
 
 void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements, // note: appended to in-place
     std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugHandleManager& debug_handle_manager) {
+    BackendDebugInfoRecorder& debug_info_recorder) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -321,7 +383,7 @@ void moduleMethodsTuple(
       continue;
     }
     auto func_tuple =
-        getFunctionTuple(module, method.function(), debug_handle_manager);
+        getFunctionTuple(module, method.function(), debug_info_recorder);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     debug_info_elements.push_back(func_tuple.second);
@@ -334,7 +396,7 @@ void moduleMethodsTuple(
       elements,
       qn_cache,
       debug_info_elements,
-      debug_handle_manager);
+      debug_info_recorder);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -564,7 +626,7 @@ void ScriptModuleSerializer::writeByteCode(
     const Module& module,
     const bool save_mobile_debug_info) {
   std::vector<c10::IValue> elements;
-  BackendDebugHandleManager debug_handle_manager;
+  BackendDebugInfoRecorder debug_info_recorder;
   elements.emplace_back(
       static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
   std::vector<c10::IValue> debug_info_elements;
@@ -573,7 +635,7 @@ void ScriptModuleSerializer::writeByteCode(
       static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
 
   moduleMethodsTuple(
-      module, elements, debug_info_elements, debug_handle_manager);
+      module, elements, debug_info_elements, debug_info_recorder);
   auto telements = Tup(std::move(elements));
   writeArchive(
       telements,
@@ -605,15 +667,41 @@ void ScriptModuleSerializer::writeByteCode(
         /*archive_name=*/"mobile_debug_handles",
         /*archive_dir=*/"",
         /*tensor_dir=*/"mobile_debug_handles/");
+    static constexpr size_t kMinToCompress = 200;
+    // For delegated backends get source ranges that are in the debug info
+    // map. Since delegated backend replace original module with lowered
+    // module we will not serialize original module's code which is what would
+    // have contained source range. Since we dont have that anymore, extract
+    // source ranges out of delegated module and store in a separate archive.
+    // Note that we must do this first because in order to serialize inlined
+    // CS appropriate source_range_tags must have been generated.
+    auto backend_source_range_records = getBackendSourceRanges(module);
+    SourceRangePickler source_range_pickler;
+    updateSourceRangeTags(backend_source_range_records);
+    auto range_data = source_range_pickler.pickle(
+        backend_source_range_records, source_range_tags_);
+    std::string debugFilename = "delegated_backends.debug_pkl";
+    writer_.writeRecord(
+        debugFilename,
+        range_data.data(),
+        range_data.size(),
+        range_data.size() > kMinToCompress /*compress*/);
+
+    // For delegated backends get debug_info_map
+    // This is merged with other debug_info_map of other modules
+    // which were not delegated.
+    BackendDebugInfoMapType backend_debug_info_map;
+    getBackendDebugInfoMap(module, backend_debug_info_map);
     // Now get the debug-handles-to-inlined-cs-ptr-map
     // And serialize that in a separate archive
-    auto debug_handle_cs_ptr_map = debug_handle_manager.getCallStackPtrMap();
+    auto debug_handle_cs_ptr_map = debug_info_recorder.stopRecording();
+    debug_handle_cs_ptr_map.insert(
+        backend_debug_info_map.begin(), backend_debug_info_map.end());
     CallStackDebugInfoPickler cs_debug_info_pickler;
     auto cs_data = cs_debug_info_pickler.pickle(
         debug_handle_cs_ptr_map, source_range_tags_);
     // Write out map: [debug-handle, {source range, InlinedCallStack}]
     std::string filename = "callstack_debug_map.pkl";
-    static constexpr size_t kMinToCompress = 200;
     writer_.writeRecord(
         filename,
         cs_data.data(),
@@ -726,7 +814,7 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   std::vector<c10::IValue> debug_info_elements;
-  BackendDebugHandleManager dummy;
+  BackendDebugInfoRecorder dummy;
   moduleMethodsTuple(m, elements, debug_info_elements, dummy);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
