@@ -147,10 +147,8 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   auto values = sparse.values();
   int64_t nnz        = sparse._nnz();
 
-  // r = beta * t + alpha * sparse * dense
-
   // Do not use MKL for Windows due to linking issues with sparse MKL routines.
-  if (at::hasMKL() && !is_mkl_supported() && is_square_or_vec(dim_i, dim_j, dim_k)) {
+  if (at::hasMKL() && is_mkl_supported() && is_square_or_vec(dim_i, dim_j, dim_k)) {
     AT_DISPATCH_FLOATING_TYPES(values.type(), "addmm_sparse_dense", [&] {
         scalar_t cast_beta = beta.to<scalar_t>();
         if (cast_beta == 0) {
@@ -166,6 +164,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
         _sparse_mm_mkl_(r, sparse, dense, t, alpha, Scalar(static_cast<scalar_t>(1.0)));
     });
   } else {
+    // r = beta * t + alpha * sparse * dense
     AT_DISPATCH_FLOATING_TYPES(values.type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, crow_indices, col_indices, values, dense);
     });
