@@ -68,7 +68,9 @@ DeviceType parse_type(const std::string& device_string) {
 Device::Device(const std::string& device_string) : Device(Type::CPU) {
   TORCH_CHECK(!device_string.empty(), "Device string must not be empty");
 
+#if !defined C10_MOBILE
   // We assume gcc 5+, so we can use proper regex.
+  // @lint-ignore CLANGTIDY
   static const std::regex regex("([a-zA-Z_]+)(?::([1-9]\\d*|0))?");
   std::smatch match;
   TORCH_CHECK(
@@ -90,6 +92,15 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
           "'");
     }
   }
+#else
+  // Check that we didn't get a device index.
+  TORCH_CHECK(
+    device_string.find("::") == std::string::npos,
+    "Did not expect :: in device string (for mobile build): ",
+    device_string
+  );
+  type_ = parse_type(device_string);
+#endif
   validate();
 }
 
