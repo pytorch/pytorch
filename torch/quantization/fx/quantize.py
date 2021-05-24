@@ -935,9 +935,6 @@ WEIGHT_PREPACK_OPS = {
 
 class Quantizer:
     def __init__(self):
-        # mapping from node name to qconfig that should be used for that node
-        # filled out for a model during _generate_qconfig_map
-        self.qconfig_map: Dict[str, QConfigAny] = {}
         # mapping from fully qualified module name to module instance
         # for example,
         # {
@@ -1007,8 +1004,8 @@ class Quantizer:
         self.modules = dict(model.named_modules())
 
         self.node_name_to_scope = node_name_to_scope
-        # fill self.qconfig_map, a map from node name to qconfig, used in _find_matches
-        self.qconfig_map = generate_qconfig_map(model, self.modules, model.graph, qconfig_dict, node_name_to_scope)
+        # fill qconfig_map, a map from node name to qconfig, used in _find_matches
+        qconfig_map = generate_qconfig_map(model, self.modules, model.graph, qconfig_dict, node_name_to_scope)
 
         # match the patterns that will get quantized
         standalone_module_name_configs = prepare_custom_config_dict.get(
@@ -1021,7 +1018,7 @@ class Quantizer:
         custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         matches = self._find_matches(
-            model.graph, self.modules, self.patterns, standalone_module_names,
+            model.graph, self.modules, self.patterns, qconfig_map, standalone_module_names,
             standalone_module_classes, custom_module_classes)
 
         input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
@@ -1033,11 +1030,11 @@ class Quantizer:
             model, self.modules, matches, prepare_custom_config_dict)
 
         result_node = insert_observers_for_model(
-            model, self.modules, matches, self.qconfig_map,
+            model, self.modules, matches, qconfig_map,
             model.graph, prepare_custom_config_dict,
             input_quantized_idxs, output_quantized_idxs)
 
-        self.save_state(model)
+        self.save_state(model, qconfig_map)
         preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
         model = ObservedGraphModule(model, model.graph, preserved_attributes)
         if is_standalone_module:
@@ -1053,9 +1050,9 @@ class Quantizer:
             model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
         return model
 
-    def save_state(self, observed: GraphModule) -> None:
+    def save_state(self, observed: GraphModule, qconfig_map: Dict[str, QConfigAny]) -> None:
         observed._patterns = self.patterns  # type: ignore[assignment]
-        observed._qconfig_map = self.qconfig_map  # type: ignore[assignment]
+        observed._qconfig_map = qconfig_map  # type: ignore[assignment]
         observed._prepare_custom_config_dict = \
             self.prepare_custom_config_dict  # type: ignore[assignment]
         observed._node_name_to_scope = self.node_name_to_scope  # type: ignore[assignment]
@@ -1064,7 +1061,6 @@ class Quantizer:
         assert is_observed_module(observed), \
             'incoming model must be produced by prepare_fx'
         self.patterns = observed._patterns  # type: ignore[assignment]
-        self.qconfig_map = observed._qconfig_map  # type: ignore[assignment]
         self.prepare_custom_config_dict = \
             observed._prepare_custom_config_dict  # type: ignore[assignment]
         self.node_name_to_scope = observed._node_name_to_scope  # type: ignore[assignment]
@@ -1115,6 +1111,7 @@ class Quantizer:
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         self.restore_state(model)
+        qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
         # always run weight observers in the top level forward method
         # for dynamic quant ops or weight only quant ops
         self._run_weight_observers(model)
@@ -1128,6 +1125,7 @@ class Quantizer:
             "observed_to_quantized_custom_module_class")
         matches = self._find_matches(
             model.graph, self.modules, self.patterns,
+            qconfig_map,
             custom_module_classes=custom_module_classes)
 
         self.quantized_graph = Graph()
@@ -1349,8 +1347,9 @@ class Quantizer:
                         assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                         quantized = 0 in out_quant_idxs
 
+                    qconfig = qconfig_map[node.name]
                     result = obj.convert(
-                        self, node, load_arg, is_reference=is_reference,
+                        self, node, qconfig, load_arg, is_reference=is_reference,
                         convert_custom_config_dict=convert_custom_config_dict)
                     if not is_observed_standalone_module_node:
                         quantized = is_output_quantized(node, obj)
@@ -1484,6 +1483,7 @@ class Quantizer:
     def _find_matches(
             self, graph: Graph, modules: Dict[str, torch.nn.Module],
             patterns: Dict[Pattern, QuantizeHandler],
+            qconfig_map: Dict[str, QConfigAny],
             standalone_module_names: List[str] = None,
             standalone_module_classes: List[Callable] = None,
             custom_module_classes: List[Any] = None) -> Dict[str, MatchResult]:
@@ -1552,7 +1552,7 @@ class Quantizer:
                                 base_node = node.args[0]
 
                             this_node_qconfig = \
-                                self.qconfig_map[base_node.name]
+                                qconfig_map[base_node.name]
                             if this_node_qconfig:
                                 dtypes = get_qconfig_dtypes(this_node_qconfig)
                                 # TODO(future PR): update the pattern to quantize
@@ -1586,7 +1586,7 @@ class Quantizer:
                             for n in matched:
                                 match_map[n.name] = (
                                     node, matched, pattern, value(self, node),  # type: ignore[operator]
-                                    self.qconfig_map[n.name])
+                                    qconfig_map[n.name])
                                 all_matched.add(n.name)
                             # break after finding the first match
                             break
@@ -1596,7 +1596,7 @@ class Quantizer:
         for node in graph.nodes:
             if node.op == 'call_module' and \
                type(self.modules[node.target]) in custom_module_classes:
-                custom_module_qconfig = self.qconfig_map[node.name]
+                custom_module_qconfig = qconfig_map[node.name]
                 match_map[node.name] = (
                     node, [node], None, CustomModuleQuantizeHandler(self, node),
                     custom_module_qconfig)
@@ -1614,7 +1614,7 @@ class Quantizer:
                (is_standalone_module(node.target) or
                     is_observed_standalone_module(self.modules[node.target])):
                 # add node to matched nodes
-                custom_module_qconfig = self.qconfig_map[node.name]
+                custom_module_qconfig = qconfig_map[node.name]
                 match_map[node.name] = (
                     node, [node], None,
                     StandaloneModuleQuantizeHandler(self, node),
