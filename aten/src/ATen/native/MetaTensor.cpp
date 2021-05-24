@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/detail/BackendDispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 
@@ -35,9 +36,18 @@ Tensor empty_meta(
   c10::optional<bool> pin_memory_opt,
   c10::optional<c10::MemoryFormat> memory_format_opt
 ) {
+  Device device = kCPU;
+  // In case dispatch to backend keys (e.g CPU, CUDA) is suspended, meaning all
+  // operations including backend selection is diverted to meta ops, we have to
+  // disregard the requested device and override it with a meta device.
+  if (at::detail::backendDispatchSuspended()) {
+    device = kMeta;
+  } else {
+    device = device_or_default(device_opt);
 
-  auto device = device_or_default(device_opt);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
+  }
+
   // NB: because there is no SparseMeta (yet), non-strided layout is
   // exerciseable
   TORCH_CHECK_NOT_IMPLEMENTED(

@@ -13,6 +13,7 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
+#include <ATen/detail/BackendDispatch.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -279,4 +280,13 @@ void Context::unsetDefaultMobileCPUAllocator() {
   c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
 }
+
+void Context::suspendBackendDispatch() {
+  detail::suspendBackendDispatch();
+}
+
+void Context::restoreBackendDispatch() {
+  detail::restoreBackendDispatch();
+}
+
 } // namespace at
