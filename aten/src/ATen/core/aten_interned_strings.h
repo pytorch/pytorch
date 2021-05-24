@@ -23,7 +23,7 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _amp_foreach_non_finite_check_and_unscale_) \
-_(aten, _amp_update_scale) \
+_(aten, _amp_update_scale_) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
@@ -137,7 +137,6 @@ _(aten, _tanh) \
 _(aten, _tanh_forward) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \
@@ -227,7 +226,6 @@ _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
-_(aten, chain_matmul) \
 _(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
@@ -299,6 +297,7 @@ _(aten, dim) \
 _(aten, dist) \
 _(aten, dot) \
 _(aten, dropout) \
+_(aten, dsplit) \
 _(aten, dstack) \
 _(aten, eig) \
 _(aten, einsum) \
@@ -314,12 +313,12 @@ _(aten, embedding_sparse_backward) \
 _(aten, empty) \
 _(aten, empty_like) \
 _(aten, empty_strided) \
+_(aten, special_entr) \
 _(aten, eq) \
 _(aten, equal) \
 _(aten, exp) \
 _(aten, expand) \
 _(aten, expand_as) \
-_(aten, expm1) \
 _(aten, exponential) \
 _(aten, eye) \
 _(aten, feature_alpha_dropout) \
@@ -351,6 +350,7 @@ _(aten, get_device) \
 _(aten, glu) \
 _(aten, glu_backward) \
 _(aten, glu_forward) \
+_(aten, gradient) \
 _(aten, grid_sampler) \
 _(aten, grid_sampler_2d) \
 _(aten, grid_sampler_2d_backward) \
@@ -372,6 +372,7 @@ _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
+_(aten, hsplit) \
 _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
@@ -404,6 +405,7 @@ _(aten, is_same_size) \
 _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
+_(aten, is_sparse_csr) \
 _(aten, isclose) \
 _(aten, isreal) \
 _(aten, istft) \
@@ -437,10 +439,10 @@ _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
-_(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, xlogy) \
+_(aten, special_xlog1py) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -450,7 +452,6 @@ _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
 _(aten, matmul) \
-_(aten, matrix_power) \
 _(aten, matrix_rank) \
 _(aten, matrix_exp) \
 _(aten, max) \
@@ -619,10 +620,10 @@ _(aten, rrelu_with_noise_forward) \
 _(aten, rsqrt) \
 _(aten, scatter) \
 _(aten, scatter_add) \
+_(aten, segment_reduce) \
 _(aten, select) \
 _(aten, selu) \
 _(aten, set) \
-_(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
@@ -675,8 +676,10 @@ _(aten, svd) \
 _(aten, symeig) \
 _(aten, t) \
 _(aten, take) \
+_(aten, take_along_dim) \
 _(aten, tan) \
 _(aten, tanh) \
+_(aten, tanh_) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
@@ -749,6 +752,7 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
+_(aten, vsplit) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \

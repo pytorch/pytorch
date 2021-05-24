@@ -4,6 +4,8 @@
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
+export PYTORCH_TEST_SKIP_NOARCH=1
+
 conda install -y six
 pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
 
@@ -11,7 +13,7 @@ pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
 pip install unittest-xml-reporting pytest
 
 if [ -z "${IN_CI}" ]; then
-  rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
+  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
@@ -29,9 +31,9 @@ fi
 
 # Download torch binaries in the test jobs
 if [ -z "${IN_CI}" ]; then
-  rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
-  aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
-  7z x ${IMAGE_COMMIT_TAG}.7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
+  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
+  aws s3 cp s3://ossci-macos-build/pytorch/"${IMAGE_COMMIT_TAG}".7z "${IMAGE_COMMIT_TAG}".7z
+  7z x "${IMAGE_COMMIT_TAG}".7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
 fi
 
 # Test that OpenMP is enabled
@@ -49,7 +51,11 @@ test_python_all() {
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
 
-  if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+  # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+  # CIRCLE_PULL_REQUEST comes from CircleCI
+  # GITHUB_HEAD_REF comes from Github Actions
+  IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+  if [ -n "$IN_PULL_REQUEST" ]; then
     DETERMINE_FROM=$(mktemp)
     file_diff_from_base "$DETERMINE_FROM"
   fi
@@ -73,12 +79,12 @@ test_libtorch() {
     echo "Testing libtorch"
 
     CPP_BUILD="$PWD/../cpp-build"
-    rm -rf $CPP_BUILD
-    mkdir -p $CPP_BUILD/caffe2
+    rm -rf "$CPP_BUILD"
+    mkdir -p "$CPP_BUILD"/caffe2
 
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    pushd $CPP_BUILD/caffe2
-    VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+    pushd "$CPP_BUILD"/caffe2
+    VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
 
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist

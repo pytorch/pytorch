@@ -13,6 +13,7 @@ namespace {
 // operators where we expect to find tuples as inputs/outputs
 // this is to assert we are only doing modifications when we know
 // we can flatten tuples
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_set<Symbol> supported_ops = {
     prim::If,
     prim::Loop,

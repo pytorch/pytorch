@@ -15,7 +15,7 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
-from .grad_mode import no_grad, enable_grad, set_grad_enabled
+from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
 from . import functional
@@ -73,7 +73,8 @@ def backward(
     grad_variables: Optional[_TensorOrTensors] = None,
     inputs: Optional[_TensorOrTensors] = None,
 ) -> None:
-    r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
+    r"""Computes the sum of gradients of given tensors with respect to graph
+    leaves.
 
     The graph is differentiated using the chain rule. If any of ``tensors``
     are non-scalar (i.e. their data has more than one element) and require
@@ -157,7 +158,8 @@ def grad(
     only_inputs: bool = True,
     allow_unused: bool = False
 ) -> Tuple[torch.Tensor, ...]:
-    r"""Computes and returns the sum of gradients of outputs w.r.t. the inputs.
+    r"""Computes and returns the sum of gradients of outputs with respect to
+    the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``
     containing the "vector" in Jacobian-vector product, usually the pre-computed
@@ -253,7 +255,8 @@ if not torch._C._autograd_init():
 # Import all native method/classes
 from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
-                                _enable_record_function, _set_empty_test_observer, kineto_available)
+                                _enable_record_function, _set_empty_test_observer, kineto_available,
+                                supported_kineto_activities, _add_metadata_json)
 
 if kineto_available():
     from torch._C._autograd import (ProfilerResult, KinetoEvent,

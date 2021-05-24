@@ -69,6 +69,7 @@ struct ConstantTableValue : public SugaredValue {
       Function& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* end;
     int64_t offset = strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)
@@ -221,6 +222,16 @@ struct SourceImporterImpl : public Resolver,
     if (name == "nan") {
       return std::make_shared<SimpleValue>(
           graph->insertConstant(std::numeric_limits<double>::quiet_NaN(), loc));
+    }
+    if (name == "infj") {
+      return std::make_shared<SimpleValue>(graph->insertConstant(
+          c10::complex<double>(0, std::numeric_limits<double>::infinity()),
+          loc));
+    }
+    if (name == "nanj") {
+      return std::make_shared<SimpleValue>(graph->insertConstant(
+          c10::complex<double>(0, std::numeric_limits<double>::quiet_NaN()),
+          loc));
     }
     if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(

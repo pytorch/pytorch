@@ -35,7 +35,7 @@ __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
-    'no_grad', 'enable_grad', 'rand', 'randn',
+    'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
@@ -171,13 +171,13 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
         try:
             # next try if DLFCN exists
-            import DLFCN as _dl_flags  # type: ignore
+            import DLFCN as _dl_flags  # type: ignore[import, no-redef]
         except ImportError:
             # as a last attempt, use compile-time constants
-            import torch._dl as _dl_flags  # type: ignore
+            import torch._dl as _dl_flags  # type: ignore[import, no-redef]
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
-    from torch._C import *
+    from torch._C import *  # noqa: F403
     sys.setdlopenflags(old_flags)
     del old_flags
     del _dl_flags
@@ -194,7 +194,7 @@ else:
     # See Note [Global dependencies]
     if USE_GLOBAL_DEPS:
         _load_global_deps()
-    from torch._C import *
+    from torch._C import *  # noqa: F403
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
@@ -278,6 +278,12 @@ def is_tensor(obj):
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> x=torch.tensor([1,2,3])
+        >>> torch.is_tensor(x)
+        True
+
     """
     return isinstance(obj, torch.Tensor)
 
@@ -345,20 +351,16 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def use_deterministic_algorithms(d):
+def use_deterministic_algorithms(mode):
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
-    When True, operations will use deterministic algorithms when available,
+    When enabled, operations will use deterministic algorithms when available,
     and if only nondeterministic algorithms are available they will throw a
-    :class:RuntimeError when called.
-
-    .. warning::
-        This feature is in beta, and its design and implementation may change
-        in the future.
+    :class:`RuntimeError` when called.
 
     The following normally-nondeterministic operations will act
-    deterministically when `d=True`:
+    deterministically when ``mode=True``:
 
         * :class:`torch.nn.Conv1d` when called on CUDA tensor
         * :class:`torch.nn.Conv2d` when called on CUDA tensor
@@ -367,50 +369,64 @@ def use_deterministic_algorithms(d):
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
-        * :func:`torch.__getitem__` backward when `self` is a CPU tensor and
-          ``indices`` is a list of tensors
-        * :func:`torch.index_put` with ``accumulate=True`` when called on a CPU
+        * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
+          and the index is a list of tensors
+        * :func:`torch.Tensor.index_put` with ``accumulate=False``
+        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on a CPU
           tensor
+        * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
+          tensor
+        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is one and called
+          on a CUDA tensor
+        * :func:`torch.gather` when ``input`` dimension is one and called
+          on a CUDA tensor that requires grad
+        * :func:`torch.index_add` when called on CUDA tensor
+        * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
+        * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
 
     The following normally-nondeterministic operations will throw a
-    :class:`RuntimeError` when `d=True`:
+    :class:`RuntimeError` when ``mode=True``:
 
-        * :class:`torch.nn.AvgPool3d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.AdaptiveAvgPool2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.AdaptiveAvgPool3d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.MaxPool3d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.AdaptiveMaxPool2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad
-        * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.AvgPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.AdaptiveAvgPool2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.AdaptiveAvgPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.AdaptiveMaxPool2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.FractionalMaxPool2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.FractionalMaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate a CUDA tensor
           and one of the following modes is used:
 
-          - `linear`
-          - `bilinear`
-          - `bicubic`
-          - `trilinear`
+          - ``linear``
+          - ``bilinear``
+          - ``bicubic``
+          - ``trilinear``
 
-        * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.ReplicationPad2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.ReplicationPad3d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.CTCLoss` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
-        * :func:`torch.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.index_add_` when called on a CUDA tensor
-        * :func:`torch.index_copy`
-        * :func:`torch.index_select` when called on a CUDA tensor that requires grad
-        * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
+        * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
+          ``mode='max'``
+        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is larger than one
+          and called on a CUDA tensor
+        * :func:`torch.gather` when ``input`` dimension is larger than one
+          and called on a CUDA tensor that requires grad
+        * :func:`torch.Tensor.put_` when ``accumulate=False``
+        * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
-    10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
-    or `CUBLAS_WORKSPACE_CONFIG=:16:8` is set. See the CUDA documentation for more
+    10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
+    or ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set. See the CUDA documentation for more
     details: `<https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility>`_
     If one of these environment variable configurations is not set, a :class:`RuntimeError`
     will be raised from these operations when called with CUDA tensors:
@@ -420,13 +436,36 @@ def use_deterministic_algorithms(d):
         * :func:`torch.bmm`
 
     Note that deterministic operations tend to have worse performance than
-    non-deterministic operations.
+    nondeterministic operations.
+
+    .. note::
+
+        This flag does not detect or prevent nondeterministic behavior caused
+        by calling an inplace operation on a tensor with an internal memory
+        overlap or by giving such a tensor as the :attr:`out` argument for an
+        operation. In these cases, multiple writes of different data may target
+        a single memory location, and the order of writes is not guaranteed.
 
     Args:
-        d (:class:`bool`): If True, force operations to be deterministic.
-                           If False, allow non-deterministic operations.
+        mode (:class:`bool`): If True, makes potentially nondeterministic
+            operations switch to a deterministic algorithm or throw a runtime
+            error. If False, allows nondeterministic operations.
+
+    Example::
+
+        >>> torch.use_deterministic_algorithms(True)
+
+        # Forward mode nondeterministic error
+        >>> torch.randn(10).index_copy(0, torch.tensor([0]), torch.randn(1))
+        ...
+        RuntimeError: index_copy does not have a deterministic implementation...
+
+        # Backward mode nondeterministic error
+        >>> torch.randn(10, requires_grad=True, device='cuda').index_select(0, torch.tensor([0], device='cuda')).backward()
+        ...
+        RuntimeError: index_add_cuda_ does not have a deterministic implementation...
     """
-    _C._set_deterministic_algorithms(d)
+    _C._set_deterministic_algorithms(mode)
 
 def set_deterministic(d):
     r"""This function is deprecated and will be removed in a future release.
@@ -577,7 +616,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore
+    from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
@@ -590,7 +629,7 @@ for name in dir(_C._VariableFunctions):
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
-from .functional import *
+from .functional import *  # noqa: F403
 
 
 ################################################################################
@@ -634,11 +673,13 @@ def _assert(condition, message):
 # side effect of adding to the imported module's members for other users.
 
 from torch import cuda as cuda
+from torch import cpu as cpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
     enable_grad as enable_grad,
     set_grad_enabled as set_grad_enabled,
+    inference_mode as inference_mode,
 )
 from torch import fft as fft
 from torch import futures as futures
@@ -683,8 +724,8 @@ def compiled_with_cxx11_abi():
 
 
 # Import the ops "namespace"
-from torch._ops import ops as ops
-from torch._classes import classes as classes
+from torch._ops import ops
+from torch._classes import classes
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom

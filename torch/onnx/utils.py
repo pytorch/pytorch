@@ -30,7 +30,7 @@ def is_in_onnx_export():
     return __IN_ONNX_EXPORT
 
 # Skip check due to cannot import IValue from torch._C
-_params_dict = {}  # type: ignore
+_params_dict = {}  # type: ignore[var-annotated]
 
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode):
@@ -56,7 +56,7 @@ def select_model_mode_for_export(model, mode):
             from torch.onnx.symbolic_helper import _export_onnx_opset_version
             if _export_onnx_opset_version < 12:
                 warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
-                              "Opset versions lower than opset 12 will not be able to export nodes such as"
+                              "Opset versions lower than opset 12 will not be able to export nodes such as "
                               "Dropout and BatchNorm correctly.".format(_export_onnx_opset_version))
             is_export_training = True
 
@@ -200,12 +200,12 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
 
-        torch._C._jit_pass_onnx_scalar_type_analysis(graph)
+        from torch.onnx.symbolic_helper import _export_onnx_opset_version
+        torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
         torch._C._jit_pass_lint(graph)
 
         torch._C._jit_pass_onnx_fold_if(graph)
 
-        from torch.onnx.symbolic_helper import _export_onnx_opset_version
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
         torch._C._jit_pass_lint(graph)
 
@@ -380,6 +380,17 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
+def _get_param_count_list(method_graph, args_params):
+    param_count_list = []
+    for input_, arg_params_ in zip(method_graph.inputs(), args_params):
+        if "PackedParams" in str(input_.type()):
+            in_vars, _ = torch.jit._flatten(arg_params_)
+            param_count_list.append(len(in_vars))
+        else:
+            param_count_list.append(1)
+    return param_count_list
+
+
 def _create_jit_graph(model, args, _retain_param_name):
     torch_out = None
     params: Union[List, Tuple]
@@ -390,10 +401,11 @@ def _create_jit_graph(model, args, _retain_param_name):
             freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
             module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
             method_graph = module._get_method('forward').graph
-
-            in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
+            args_params = tuple(args) + tuple(params)
+            param_count_list = _get_param_count_list(method_graph, args_params)
+            in_vars, _ = torch.jit._flatten(args_params)
             graph = _propagate_and_assign_input_shapes(
-                method_graph, tuple(in_vars), False, False)
+                method_graph, tuple(in_vars), param_count_list, False, False)
         except AttributeError as e:
             raise RuntimeError('\'forward\' method must be a script method') from e
         return graph, params, torch_out, module
@@ -402,8 +414,9 @@ def _create_jit_graph(model, args, _retain_param_name):
         in_vars, in_desc = torch.jit._flatten(tuple(args))
         graph = model.graph
         torch._C._jit_pass_onnx_function_substitution(graph)
+        param_count_list = _get_param_count_list(graph, args)
         graph = _propagate_and_assign_input_shapes(
-            graph, tuple(in_vars), False, False)
+            graph, tuple(in_vars), param_count_list, False, False)
         return graph, params, torch_out, None
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
@@ -436,10 +449,10 @@ def _model_to_graph(model, args, verbose=False,
                     training=None, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
-    if isinstance(args, torch.Tensor):
+    if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
 
-    if isinstance(example_outputs, torch.Tensor):
+    if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
         example_outputs = (example_outputs,)
 
     graph, params, torch_out, module = _create_jit_graph(model, args,
@@ -466,9 +479,9 @@ def _model_to_graph(model, args, verbose=False,
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
         if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
-            output_wrapped = [torch_out]  # type: ignore
+            output_wrapped = [torch_out]
         else:
-            output_wrapped = torch_out  # type: ignore
+            output_wrapped = torch_out  # type: ignore[assignment]
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
@@ -757,13 +770,13 @@ def _set_input_and_output_names(graph, input_names, output_names):
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
-def _run_symbolic_method(op_name, symbolic_fn, args):
+def _run_symbolic_method(g, op_name, symbolic_fn, args):
     r"""
     This trampoline function gets invoked for every symbolic method
     call from C++.
     """
     try:
-        return symbolic_fn(*args)
+        return symbolic_fn(g, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
@@ -1041,6 +1054,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
+                if op_name == 'PythonOp':
+                    inputs = (n, *inputs)
                 return symbolic_fn(g, *inputs, **attrs)
 
         elif ns == "quantized":
@@ -1115,7 +1130,7 @@ def _graph_constant(g, value, dims, type, *args, **kwargs):
     else:
         raise ValueError("Unknown type, type should be one of the following strings: "
                          "char, short, int, long, half, float, double")
-    tensor.fill_(value)  # type: ignore
+    tensor.fill_(value)  # type: ignore[call-overload]
     if isscalar:
         return g.op("Constant", *args, value_z=tensor, **kwargs)
     return g.op("Constant", *args, value_t=tensor, **kwargs)
@@ -1188,8 +1203,8 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
             dynamic_axes[key] = value_dict
 
 
-torch._C.Graph.op = _graph_op  # type: ignore
-torch._C.Graph.at = _graph_at  # type: ignore
-torch._C.Block.op = _block_op  # type: ignore
-torch._C.Graph.constant = _graph_constant  # type: ignore
-torch._C.Node.__getitem__ = _node_getitem  # type: ignore
+torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
+torch._C.Graph.at = _graph_at  # type: ignore[attr-defined]
+torch._C.Block.op = _block_op  # type: ignore[attr-defined]
+torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
+torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc]

@@ -39,12 +39,24 @@ from .gen_trace_type import should_trace
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.api import cpp
-from tools.codegen.api.types import *
-from tools.codegen.api.python import *
+from tools.codegen.api.types import CppSignatureGroup
+from tools.codegen.api.python import (PythonArgument, PythonSignature,
+                                      PythonSignatureDeprecated,
+                                      PythonSignatureGroup,
+                                      PythonSignatureNativeFunctionPair,
+                                      arg_parser_output_exprs,
+                                      argument_type_str, cpp_dispatch_exprs,
+                                      cpp_dispatch_target,
+                                      dispatch_lambda_args,
+                                      dispatch_lambda_exprs,
+                                      dispatch_lambda_return_str,
+                                      has_tensor_options,
+                                      namedtuple_fieldnames, signature)
 from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
 from tools.codegen.context import with_native_function
-from tools.codegen.model import *
-from tools.codegen.utils import *
+from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
+                                 Type, Variant)
+from tools.codegen.utils import split_name_params
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -52,7 +64,7 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 #
 # declarations blocklist
@@ -64,9 +76,10 @@ except ImportError:
 
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
-    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
+    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'is_sparse_csr', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
+    '_?sparse_csr_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
@@ -205,7 +218,8 @@ def load_signatures(
     skip_deprecated: bool = False,
     pyi: bool = False,
 ) -> Sequence[PythonSignatureNativeFunctionPair]:
-    native_functions = list(filter(should_generate_py_binding, parse_native_yaml(native_yaml_path)))
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
 
     @with_native_function
     def gen_signature_pairs(f: NativeFunction) -> PythonSignatureNativeFunctionPair:
@@ -472,7 +486,7 @@ def method_impl(
     method_header = ['HANDLE_TH_ERRORS']
     method_header += namedtuple_inits
     method_header += [
-        "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
+        "const Tensor& self = THPVariable_Unpack(self_);"
     ] if method else []
 
     method_footer = ([] if noarg else ['Py_RETURN_NONE;']) + ['END_HANDLE_TH_ERRORS']
@@ -747,7 +761,14 @@ def sort_overloads(
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return (str(t1) == 'Scalar' and str(t2) == 'Tensor' or
-                'Dimname' in str(t1) and 'Dimname' not in str(t2))
+                'Dimname' in str(t1) and 'Dimname' not in str(t2) or
+                # In the discussion https://github.com/pytorch/pytorch/issues/54555 it has been
+                # discussed why it is important to prioritize int/int? over int[]
+                str(t1) == 'int[]' and (str(t2) == 'int' or str(t2) == 'int?') or
+                # TensorList currently throws an error during argument parsing, that's why it needs to be
+                # last in signature ordering. See discussion: https://github.com/pytorch/pytorch/issues/58087
+                str(t1) == 'Tensor[]' and str(t2).find("[]") != -1)
+
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
         """Returns True if s1 < s2 in the partial order."""

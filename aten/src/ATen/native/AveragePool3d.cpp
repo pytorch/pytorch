@@ -36,6 +36,7 @@ static void avg_pool3d_out_frame(
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t i, j, ti;
 
       /* local pointers. */
@@ -71,6 +72,7 @@ static void avg_pool3d_out_frame(
               continue;
             }
 
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int divide_factor;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
@@ -78,12 +80,14 @@ static void avg_pool3d_out_frame(
               if(count_include_pad) {
                 divide_factor = pool_size;
               } else {
+                // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
                 divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
               }
             }
 
             /* compute local sum: */
             scalar_t sum = 0.0;
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int64_t x, y, z;
 
             for (z = tstart; z < tend; z++)
@@ -247,6 +251,7 @@ static void avg_pool3d_backward_out_frame(
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t i, j, ti;
 
       /* local pointers */
@@ -276,6 +281,7 @@ static void avg_pool3d_backward_out_frame(
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);
 
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int divide_factor;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
@@ -283,6 +289,7 @@ static void avg_pool3d_backward_out_frame(
               if(count_include_pad) {
                 divide_factor = pool_size;
               } else {
+                // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
                 divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
               }
             }
@@ -290,6 +297,7 @@ static void avg_pool3d_backward_out_frame(
             /* scatter gradients out to footprint: */
             scalar_t val  = *op++;
 
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int64_t x,y,z;
             for (z = tstart; z < tend; z++)
             {
@@ -432,15 +440,14 @@ Tensor& avg_pool3d_backward_out_cpu_template(
 
 } // namespace
 
-Tensor& avg_pool3d_out_cpu(
-  Tensor& output,
-  const Tensor& input,
+Tensor& avg_pool3d_out_cpu(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& output)
 {
   avg_pool3d_out_cpu_template(
     output,
@@ -476,16 +483,15 @@ Tensor avg_pool3d_cpu(
   return output;
 }
 
-Tensor& avg_pool3d_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& avg_pool3d_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& gradInput)
 {
   avg_pool3d_backward_out_cpu_template(
     gradInput,

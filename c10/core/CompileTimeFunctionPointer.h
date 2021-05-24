@@ -29,9 +29,11 @@ namespace c10 {
  *  }
  *  EXPECT_EQ(3, execute(TORCH_FN(add), 1, 2));
  */
-template<class FuncType_, FuncType_* func_ptr_>
+template <class FuncType_, FuncType_* func_ptr_>
 struct CompileTimeFunctionPointer final {
-  static_assert(guts::is_function_type<FuncType_>::value, "TORCH_FN can only wrap function types.");
+  static_assert(
+      guts::is_function_type<FuncType_>::value,
+      "TORCH_FN can only wrap function types.");
   using FuncType = FuncType_;
 
   static constexpr FuncType* func_ptr() {
@@ -39,11 +41,16 @@ struct CompileTimeFunctionPointer final {
   }
 };
 
-template<class T> struct is_compile_time_function_pointer : std::false_type {};
-template<class FuncType, FuncType* func_ptr>
-struct is_compile_time_function_pointer<CompileTimeFunctionPointer<FuncType, func_ptr>> : std::true_type {};
+template <class T>
+struct is_compile_time_function_pointer : std::false_type {};
+template <class FuncType, FuncType* func_ptr>
+struct is_compile_time_function_pointer<
+    CompileTimeFunctionPointer<FuncType, func_ptr>> : std::true_type {};
 
-}
+} // namespace c10
 
-#define TORCH_FN_TYPE(func) ::c10::CompileTimeFunctionPointer<std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, func>
+#define TORCH_FN_TYPE(func)                                           \
+  ::c10::CompileTimeFunctionPointer<                                  \
+      std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, \
+      func>
 #define TORCH_FN(func) TORCH_FN_TYPE(func)()

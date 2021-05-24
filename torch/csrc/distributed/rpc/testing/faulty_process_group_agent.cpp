@@ -58,11 +58,11 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
   return delayMessages;
 }
 
-std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
+c10::intrusive_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
     const float rpcTimeoutSeconds,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
+    const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message.type())) {
@@ -81,7 +81,7 @@ std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
   if (failMessageCountMap_[key] < failNumSends_) {
     failMessageCountMap_[key]++;
     lock.unlock();
-    auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+    auto jitFuture = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
     jitFuture->setError(std::make_exception_ptr(std::runtime_error(makeRPCError(
         c10::str("Send attempt failed intentionally for ", key),
         RPCErrorType::INTENTIONAL_FAILURE))));

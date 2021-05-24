@@ -35,10 +35,12 @@ class DataLoaderBase {
   DataLoaderBase(
       DataLoaderOptions options,
       std::unique_ptr<Dataset> main_thread_dataset = nullptr)
+      // NOLINTNEXTLINE(performance-move-const-arg)
       : options_(std::move(options)),
         main_thread_dataset_(std::move(main_thread_dataset)),
         sequencer_(new_sequencer()) {}
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   virtual ~DataLoaderBase() {
     join();
   }
@@ -123,6 +125,7 @@ class DataLoaderBase {
     Result(optional<Batch>&& b, size_t sqn)
         : Sequenced(sqn), batch(std::move(b)) {}
     Result(std::exception_ptr exception, size_t sqn)
+        // NOLINTNEXTLINE(performance-move-const-arg)
         : Sequenced(sqn), exception(std::move(exception)) {}
     optional<Batch> batch;
     std::exception_ptr exception;
@@ -218,28 +221,35 @@ class DataLoaderBase {
   }
 
   /// The options the DataLoader was configured with.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const FullDataLoaderOptions options_;
 
   /// The dataset for the main thread, only has a value if the number of
   /// worker threads was configured as zero, meaning the main thread has to do
   /// all the work (synchronously). NOTE: Really want this to be on the heap
   /// when empty, therefore `unique_ptr` and not `optional`.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<Dataset> main_thread_dataset_;
 
   /// The sequence number for the *next* batch to be retrieved from the
   /// dataset.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t sequence_number_ = 0;
 
   /// The worker threads, running the `worker_thread()` method.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::thread> workers_;
 
   /// The `DataShuttle` which takes care of the life cycle of a job.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   detail::DataShuttle<Job, Result> shuttle_;
 
   /// The `Sequencer`, which handles optional ordering of batches.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<detail::sequencers::Sequencer<Result>> sequencer_;
 
   /// True if the DataLoader has joined its worker threads.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool joined_ = false;
 };
 } // namespace data

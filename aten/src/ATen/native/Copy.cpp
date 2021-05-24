@@ -34,10 +34,13 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
 void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t BLOCK_SZ;
   if (self.scalar_type() == kByte) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 120;
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 60;
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
@@ -160,6 +163,16 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
+  // Copies into meta self are OK and just ignored (similar to inplace)
+  if (self.is_meta()) {
+    // TODO: need to see if there is extra error checking needed
+    return self;
+  }
+
+  if (src.is_meta()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
+  }
+
   // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).
   // _copy_from has a proper device dispatch setup.
   // This includes:
@@ -199,8 +212,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   auto iter = TensorIteratorConfig()
-    .add_output(self)
-    .add_input(src)
+    .add_borrowed_output(self)
+    .add_borrowed_input(src)
     .resize_outputs(false)
     .check_all_same_dtype(false)
     .check_all_same_device(false)
@@ -240,6 +253,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(copy_stub);
 
 } // namespace native

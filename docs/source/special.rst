@@ -18,7 +18,14 @@ function for details.
 Functions
 -----------------------
 
+.. autofunction:: entr
 .. autofunction:: erf
 .. autofunction:: erfc
 .. autofunction:: erfinv
+.. autofunction:: expit
+.. autofunction:: expm1
+.. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: i0e
+.. autofunction:: logit
+.. autofunction:: xlog1py

@@ -13,6 +13,7 @@ namespace torch { namespace autograd {
 using Variable = at::Tensor;
 struct Node;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
 /// A snapshot of a variable at a certain version. A `SavedVariable` stores

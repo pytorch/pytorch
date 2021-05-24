@@ -7,7 +7,6 @@ namespace jit {
 
 namespace {
 
-
 // having multiple ops in our IR that do the same thing makes the IR more
 // difficult to consumer for downstream user of the IR, such as our own
 // optimization passes here, we convert op aliases into a standard form
@@ -17,6 +16,26 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
     iter->replaceWithNewSymbol(alias->second);
     iter.destroyCurrent();
     return true;
+  }
+  return false;
+}
+
+// Normalizes a `__is__` comparison with a bool to `eq` (and same with
+// `__isnot__`)
+bool normalizeIsBool(graph_node_list_iterator& iter) {
+  ArrayRef<Value*> args = iter->inputs();
+  if (args.size() == 2 && args[0]->type() == BoolType::get() &&
+      args[1]->type() == BoolType::get()) {
+    if (iter->kind() == aten::__is__) {
+      iter->replaceWithNewSymbol(aten::eq);
+      iter.destroyCurrent();
+      return true;
+    }
+    if (iter->kind() == aten::__isnot__) {
+      iter->replaceWithNewSymbol(aten::ne);
+      iter.destroyCurrent();
+      return true;
+    }
   }
   return false;
 }
@@ -32,6 +51,9 @@ void NormalizeOps(Block* block) {
       continue;
     }
 
+    if (normalizeIsBool(it)) {
+      continue;
+    }
     it++;
   }
 }
@@ -45,7 +67,8 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::absolute_, aten::abs_},
       {aten::clip, aten::clamp},
       {aten::clip_, aten::clamp_},
-      {aten::linalg_det, aten::det},
+      {aten::det, aten::linalg_det},
+      {aten::matrix_power, aten::linalg_matrix_power},
       {aten::ger, aten::outer},
       {aten::arccos, aten::acos},
       {aten::arccos_, aten::acos_},
@@ -90,6 +113,10 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_erf, aten::erf},
       {aten::special_erfc, aten::erfc},
       {aten::special_erfinv, aten::erfinv},
+      {aten::special_expit, aten::sigmoid},
+      {aten::special_exp2, aten::exp2},
+      {aten::special_expm1, aten::expm1},
+      {aten::special_logit, aten::logit},
       {aten::orgqr, aten::linalg_householder_product},
       {aten::special_gammaln, aten::lgamma}};
   return alias_map;

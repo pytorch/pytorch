@@ -141,6 +141,7 @@ std::string ConcretePythonOp::name() const {
 }
 
 void ConcretePythonOp::cloneFrom(Node* other_) {
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   Node::cloneFrom(other_);
   auto other = other_->cast<ConcretePythonOp>();
   this->cconv = other->cconv;
@@ -462,7 +463,9 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(requires_grad)
       .def(
           "requiresGrad",
-          [](Value& n) { n.type()->expectRef<TensorType>().requiresGrad(); })
+          [](Value& n) {
+            return n.type()->expectRef<TensorType>().requiresGrad();
+          })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -615,6 +618,7 @@ void initPythonIRBindings(PyObject* module_) {
   })
       .CREATE_ACCESSOR(Float, f)
       .CREATE_ACCESSOR(Floats, fs)
+      .CREATE_ACCESSOR(Complex, c)
       .CREATE_ACCESSOR(String, s)
       .CREATE_ACCESSOR(Strings, ss)
       .CREATE_ACCESSOR(Int, i)
@@ -733,6 +737,31 @@ void initPythonIRBindings(PyObject* module_) {
               if (auto cs = ptt->sizes().concrete_sizes()) {
                 return py::cast(*cs);
               }
+            }
+            return py::none();
+          })
+      .def(
+          "symbolic_sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              auto ss = ptt->symbolic_sizes();
+              if (!ss.rank().has_value()) {
+                return py::none();
+              }
+
+              std::vector<int64_t> ss_vals;
+              for (size_t i = 0; i < *ss.rank(); ++i) {
+                ss_vals.push_back(ss.at(i).value());
+              }
+              return py::cast(ss_vals);
+            }
+            return py::none();
+          })
+      .def(
+          "with_sizes",
+          [](Type& t, std::vector<c10::optional<int64_t>> sizes) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withSymbolicShapes(sizes));
             }
             return py::none();
           })
@@ -867,7 +896,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
-      .def("name", [](ClassType& self) { return self.name()->name(); });
+      .def("name", [](ClassType& self) { return self.name()->name(); })
+      .def("qualified_name", [](ClassType& self) {
+        return self.name()->qualifiedName();
+      });
   py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,

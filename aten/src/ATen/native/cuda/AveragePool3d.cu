@@ -343,7 +343,7 @@ void avg_pool3d_out_cuda_template(
   TensorArg output_arg{ output, "output", 1 };
   TensorArg input_arg{ input, "input", 2 };
 
-  checkAllSameGPU("avg_pool3d_out_cuda", {output_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
@@ -472,7 +472,7 @@ void avg_pool3d_backward_out_cuda_template(
   TensorArg gradOutput_arg{ gradOutput, "gradOutput", 2 };
   TensorArg input_arg{ input, "input", 3 };
 
-  checkAllSameGPU("avg_pool3d_backward_out_cuda",
+  checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
@@ -638,15 +638,14 @@ void avg_pool3d_backward_out_cuda_template(
 
 } // namespace
 
-Tensor& avg_pool3d_out_cuda(
-  Tensor& output,
-  const Tensor& input,
+Tensor& avg_pool3d_out_cuda(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& output)
 {
   avg_pool3d_out_cuda_template(
     output,
@@ -682,16 +681,15 @@ Tensor avg_pool3d_cuda(
   return output;
 }
 
-Tensor& avg_pool3d_backward_out_cuda(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& avg_pool3d_backward_out_cuda(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

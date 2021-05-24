@@ -31,7 +31,7 @@ Tensors
 .. _tensor-creation-ops:
 
 Creation Ops
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~
 
 .. note::
     Random sampling creation ops are listed under :ref:`random-sampling` and
@@ -77,6 +77,8 @@ Creation Ops
     polar
     heaviside
 
+.. _indexing-slicing-joining:
+
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
@@ -85,9 +87,11 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    dsplit
     column_stack
     dstack
     gather
+    hsplit
     hstack
     index_select
     masked_select
@@ -106,11 +110,13 @@ Indexing, Slicing, Joining, Mutating Ops
     swapdims
     t
     take
+    take_along_dim
     tensor_split
     tile
     transpose
     unbind
     unsqueeze
+    vsplit
     vstack
     where
 
@@ -247,6 +253,7 @@ Examples::
     no_grad
     enable_grad
     set_grad_enabled
+    inference_mode
 
 Math operations
 ---------------
@@ -307,6 +314,7 @@ Pointwise Ops
     fmod
     frac
     frexp
+    gradient
     imag
     ldexp
     lerp
@@ -334,6 +342,7 @@ Pointwise Ops
     negative
     nextafter
     polygamma
+    positive
     pow
     rad2deg
     real

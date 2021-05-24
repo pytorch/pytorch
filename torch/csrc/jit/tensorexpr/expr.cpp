@@ -50,6 +50,22 @@ ExprHandle ExprHandle::operator<=(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kLE);
 }
 
+ExprHandle ExprHandle::operator&&(const ExprHandle& other) const {
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
+  }
+  return IfThenElse::make(
+      *this, other, ExprHandle(getImmediateByType(other.dtype(), 0)));
+}
+
+ExprHandle ExprHandle::operator||(const ExprHandle& other) const {
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
+  }
+  return IfThenElse::make(
+      *this, ExprHandle(getImmediateByType(other.dtype(), 1)), other);
+}
+
 ExprHandle ExprHandle::operator&(const ExprHandle& other) const {
   return And::make(*this, other);
 }
@@ -131,6 +147,7 @@ ExprHandle abs(const ExprHandle& v) {
 // The default tanh is quite slow, use the Eigen version from here:
 // https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
 ExprHandle fast_tanh(const ExprHandle& v) {
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   Dtype dtype = v.dtype();
   // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
   // times. Clamp the input expression to [-9, 9]
@@ -350,6 +367,10 @@ ExprHandle Buf::make(
 
 ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
   return Buf::make("", dims, dtype);
+}
+
+std::vector<ExprHandle> BufHandle::dims() const {
+  return ExprVectorToExprHandleVector(node()->dims());
 }
 
 ExprHandle expr_to_vec(ExprHandle v, int lanes) {

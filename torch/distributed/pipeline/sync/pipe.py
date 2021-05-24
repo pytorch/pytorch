@@ -117,20 +117,38 @@ def _retrieve_device(module: nn.Module) -> torch.device:
 
     return device if device is not None else torch.device("cpu")
 
+def _assemble_partition(modules: List[nn.Module]):
+    modules_list: List[nn.Module] = []
+    for module in modules:
+        if isinstance(module, nn.Sequential):
+            modules_list.extend(module.children())
+        else:
+            modules_list.append(module)
+    return nn.Sequential(*modules_list)
+
 def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []
     devices = []
+
+    current_partition = []
+    current_device = None
     for name, module in modules.named_children():
-        devices.append(_retrieve_device(module))
-        if isinstance(module, nn.Sequential):
-            partition = module
-        else:
-            partition = nn.Sequential(OrderedDict([(name, module)]))
-        partitions.append(partition)
+        device = _retrieve_device(module)
+        if current_device is not None and (current_device != device or device.type == 'cpu'):
+            partitions.append(_assemble_partition(current_partition))
+            devices.append(current_device)
+            current_partition = []
+        current_device = device
+        current_partition.append(module)
+
+    if current_device is not None:
+        partitions.append(_assemble_partition(current_partition))
+        devices.append(current_device)
 
     partitions = cast(List[nn.Sequential], nn.ModuleList(partitions))
 
     return partitions, devices
+
 
 MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
 
@@ -182,6 +200,12 @@ class Pipe(Module):
     Example::
         Pipeline of two FC layers across GPUs 0 and 1.
 
+        >>> # Need to initialize RPC framework first.
+        >>> os.environ['MASTER_ADDR'] = 'localhost'
+        >>> os.environ['MASTER_PORT'] = '29500'
+        >>> torch.distributed.rpc.init_rpc('worker', rank=0, world_size=1)
+        >>>
+        >>> # Build pipe.
         >>> fc1 = nn.Linear(16, 8).cuda(0)
         >>> fc2 = nn.Linear(8, 4).cuda(1)
         >>> model = nn.Sequential(fc1, fc2)
@@ -215,6 +239,12 @@ class Pipe(Module):
         deferred_batch_norm: bool = False,
     ) -> None:
         super().__init__()
+
+        # Check if RPC framework is initialized.
+        if not torch.distributed.rpc._is_current_rpc_agent_set():
+            raise RuntimeError(
+                'Please initialize RPC framework for Pipe using '
+                'torch.distributed.rpc.init_rpc')
 
         chunks = int(chunks)
         checkpoint = str(checkpoint)
@@ -323,7 +353,7 @@ class Pipe(Module):
 
         return self._copy_streams
 
-    def forward(self, input) -> RRef:  # type: ignore
+    def forward(self, input) -> RRef:
         """
         Processes a single input mini-batch through the pipe and returns an
         :class:`~torch.distributed.rpc.RRef` pointing to the output.

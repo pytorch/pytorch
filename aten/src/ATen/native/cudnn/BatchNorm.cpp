@@ -51,7 +51,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     bool training, double exponential_average_factor, double epsilon)
 {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
+  const Tensor& bias_t = *bias_t_maybe_owned;
   const Tensor& running_mean_t = c10::value_or_else(running_mean_t_opt, [] {return Tensor();});
   const Tensor& running_var_t = c10::value_or_else(running_var_t_opt, [] {return Tensor();});
 
@@ -240,8 +241,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   // TODO: Is it worth it to have a contiguous call or maybe we should go with
   // whatever format is given here.
 
+  auto grad_output_contig = grad_output_t.contiguous(input_t.suggest_memory_format());
   TensorArg input{ input_t, "input", 1 },
-            grad_output{ grad_output_t.contiguous(input_t.suggest_memory_format()), "grad_output", 2 },
+            grad_output{ grad_output_contig, "grad_output", 2 },
             weight{ weight_t, "weight", 3 },
             save_mean{ save_mean_t, "save_mean", 4 },
             save_var{ save_var_t, "save_var", 5 },
