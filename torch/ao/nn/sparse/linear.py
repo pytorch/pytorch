@@ -1,6 +1,5 @@
 import torch
 from torch.nn import functional as F
-from torch.nn.modules.module import _IncompatibleKeys
 
 class Linear(torch.nn.Linear):
     mask: torch.Tensor
