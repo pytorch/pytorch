@@ -496,7 +496,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             self.assertFalse(attrs["is_scriptable"])
 
             # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
-            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``foward_async``,
+            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``forward_async``,
             # not have another worker to initiate forward over the RPC layer.
             args = (torch.ones(1), 2, "3")
             ret1 = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
@@ -537,7 +537,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             self.assertFalse(attrs["is_scriptable"])
 
             # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
-            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``foward_async``,
+            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``forward_async``,
             # not have another worker to initiate forward over the RPC layer.
             args = (torch.ones(1), 2, "3")
             ret1 = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
@@ -554,10 +554,21 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
     def test_valid_device(self):
         if self.rank != 0:
             return
-        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker_name = dist_utils.worker_name(dst_rank)
 
         for remote_module in self._create_remote_module_iter(
             "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            device = rpc.rpc_sync(
+                dst_worker_name, remote_device, (remote_module.module_rref,)
+            )
+            self.assertEqual(device.type, "cuda")
+            self.assertEqual(device.index, 0)
+
+        # Test rank works as well.
+        for remote_module in self._create_remote_module_iter(
+            "rank:{}/cuda:0".format(dst_rank), modes=[ModuleCreationMode.MODULE_CTOR]
         ):
             device = rpc.rpc_sync(
                 dst_worker_name, remote_device, (remote_module.module_rref,)
@@ -614,7 +625,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             r"Could not parse remote_device: worker1/cuda:0/cuda:1. The valid format is '<workername>/<device>'",
         ):
             list(
@@ -626,8 +637,8 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            r"The workername in remote_device '/' cannot be empty. The valid format is '<workername>/<device>'",
+            ValueError,
+            r"Could not parse remote_device: /. The valid format is '<workername>/<device>'",
         ):
             list(
                 m.forward() for m in
@@ -638,8 +649,8 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            r"The workername in remote_device '/cuda:0' cannot be empty. The valid format is '<workername>/<device>'",
+            ValueError,
+            r"Could not parse remote_device: /cuda:0. The valid format is '<workername>/<device>'",
         ):
             list(
                 m.forward() for m in
