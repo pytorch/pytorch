@@ -2156,6 +2156,7 @@
 - func: _cufft_clear_plan_cache(int device_index) -> ()
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: index
@@ -2180,6 +2181,7 @@
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
+  device_check: NoCheck   # delegate to _index_put_impl_, which leverages TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: index_put_
@@ -2190,6 +2192,7 @@
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Scalar v)
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
   variants: function, method
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
@@ -2877,15 +2880,15 @@
     CUDA: miopen_rnn_backward
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
+  structured_delegate: mm.out
   variants: function, method
   dispatch:
-    CPU: mm_cpu
-    CUDA: mm_cuda
     SparseCPU, SparseCUDA, SparseCsrCPU: _sparse_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: mm_cpu_out
+    CPU: mm_out_cpu
     CUDA: mm_out_cuda
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU: _sparse_csr_mm_out
@@ -3331,16 +3334,16 @@
   dispatch:
     CompositeExplicitAutograd: repeat
 
-- func: repeat_interleave.Tensor(Tensor repeats) -> Tensor
+- func: repeat_interleave.Tensor(Tensor repeats, int? output_size=None) -> Tensor
   variants: function
   dispatch:
     CPU: repeat_interleave_cpu
     CUDA: repeat_interleave_cuda
 
-- func: repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None) -> Tensor
+- func: repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, int? output_size=None) -> Tensor
   variants: function, method
 
-- func: repeat_interleave.self_int(Tensor self, int repeats, int? dim=None) -> Tensor
+- func: repeat_interleave.self_int(Tensor self, int repeats, int? dim=None, int? output_size=None) -> Tensor
   variants: function, method
 
 - func: reshape(Tensor(a) self, int[] shape) -> Tensor(a)
@@ -3642,7 +3645,7 @@
   device_check: NoCheck
   device_guard: False
 
-- func: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
+- func: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
