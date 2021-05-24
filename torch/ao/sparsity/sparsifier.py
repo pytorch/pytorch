@@ -2,10 +2,8 @@
 import abc
 from collections import defaultdict
 import copy
-import inspect
 
 from torch.quantization.quantize import prepare as qprepare
-from torch.quantization.quantize import convert as qconvert
 
 from . import _variables
 
@@ -47,11 +45,11 @@ class BaseSparsifier(abc.ABC):
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
         for i, (layer, sparse_args) in enumerate(self.module_groups.items()):
-                format_string += '\n'
-                format_string += f'\tModule Group {i}\n'
-                format_string += f'\t    module: {layer}\n'
-                for key in sorted(sparse_args.keys()):
-                    format_string += f'\t    {key}: {sparse_args[key]}\n'
+            format_string += '\n'
+            format_string += f'\tModule Group {i}\n'
+            format_string += f'\t    module: {layer}\n'
+            for key in sorted(sparse_args.keys()):
+                format_string += f'\t    {key}: {sparse_args[key]}\n'
         format_string += ')'
         return format_string
 
@@ -66,6 +64,7 @@ class BaseSparsifier(abc.ABC):
         """
         if mapping is None:
             mapping = _variables.get_sparse_mapping()
+
         def new_child_fn(child, mapping):
             new_child = mapping[type(child)].from_dense(child)
             new_child.load_state_dict(child.state_dict())
@@ -83,6 +82,7 @@ class BaseSparsifier(abc.ABC):
     def convert(self, model, mapping=None):
         if mapping is None:
             mapping = _variables.get_static_sparse_quantized_mapping()
+
         def new_child_fn(child, mapping, **kwargs):
             new_child = mapping[type(child)].from_float(child, **kwargs)
             return new_child
