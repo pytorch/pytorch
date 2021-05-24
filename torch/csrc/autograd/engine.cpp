@@ -963,7 +963,7 @@ void Engine::initialize_device_threads_pool() {
   std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 
-std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
+c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
