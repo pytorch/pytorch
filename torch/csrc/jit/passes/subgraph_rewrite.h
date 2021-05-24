@@ -87,7 +87,8 @@ class TORCH_API SubgraphRewriter {
   void RegisterRewritePattern(
       const std::string& pattern,
       const std::string& replacement,
-      const std::vector<std::pair<std::string, std::string>>& value_name_pair = {});
+      const std::vector<std::pair<std::string, std::string>>& value_name_pair =
+          {});
 
  private:
   std::vector<RewritePatternDescr> patterns_;
