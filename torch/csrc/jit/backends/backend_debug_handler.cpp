@@ -1,11 +1,9 @@
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 
+#include <stack>
+
 namespace torch {
 namespace jit {
-
-namespace {
-thread_local BackendDebugInfoRecorder* debug_info_recorder_ptr{nullptr};
-} // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<DebugHandleType> BackendDebugInfoRecorder::unique_debug_handle_{0};
@@ -36,22 +34,26 @@ BackendDebugInfoMapType BackendDebugInfoRecorder::stopRecording() {
   return handles_to_inlined_callstack_ptrs_;
 }
 
-WithBackendDebugInfoRecorder::WithBackendDebugInfoRecorder(
-    BackendDebugInfoRecorder* recorder) throw() {
-  TORCH_CHECK(
-      debug_info_recorder_ptr == nullptr,
-      "Module debug recording already in progress.");
-  debug_info_recorder_ptr = recorder;
-}
+NodeToDebugHandle BackendDebugInfoRecorder::generate_debug_handles(const std::shared_ptr<Graph>& graph) {
+  NodeToDebugHandle node_to_debug_handles;
 
-WithBackendDebugInfoRecorder::~WithBackendDebugInfoRecorder() {
-  // If due to some exception within preprocess, such as compilation failure
-  // we throw, then we want to make sure the exit is clean
-  debug_info_recorder_ptr = nullptr;
-}
-
-BackendDebugInfoRecorder* getBackendDebugInfoRecorder() {
-  return debug_info_recorder_ptr;
+  std::stack<Block*> blocks_to_visit;
+  // TODO: Look into using DepthFirstGraphNodeIterator
+  // At the moment it takes non-const graph but maybe we can make it
+  // general such that it can work with both.
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      DebugHandleType debug_handle = getNextDebugHandle(n);
+      node_to_debug_handles.emplace(n, debug_handle);
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  return node_to_debug_handles;
 }
 
 } // namespace jit

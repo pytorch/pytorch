@@ -69,7 +69,6 @@ Module codegen_backend_module(
   // 2. Later call debug_info_recorder.stopRecording() to gather
   //    recorded debug info and save it in __backend_debug_info.
   BackendDebugInfoRecorder debug_info_recorder;
-  WithBackendDebugInfoRecorder recorder_context(&debug_info_recorder);
 
   // Generate attributes.
   // This is the preprocessed module.
@@ -81,7 +80,7 @@ Module codegen_backend_module(
       "__processed_module",
       AnyType::get(),
       detail::getBackendPreprocessFunction(backend_name)(
-          cloned_module, method_compile_spec),
+          cloned_module, method_compile_spec, debug_info_recorder),
       /*is_param=*/false);
 
   // This is for the method_compile_spec passed in to to_<backend> or

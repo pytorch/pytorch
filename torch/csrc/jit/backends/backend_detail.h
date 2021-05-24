@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
 
 #include <ATen/core/jit_type.h>
 
@@ -11,7 +12,7 @@ namespace jit {
 namespace detail {
 
 using BackendPreprocessFunction =
-    std::function<c10::IValue(const Module&, const c10::Dict<IValue, IValue>&)>;
+    std::function<c10::IValue(const Module&, const c10::Dict<IValue, IValue>&, BackendDebugInfoRecorder&)>;
 
 TORCH_API void registerBackendPreprocessFunction(
     const std::string& name,

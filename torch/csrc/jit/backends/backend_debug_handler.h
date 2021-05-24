@@ -114,6 +114,7 @@ using DebugHandleType = int64_t;
 using BackendDebugInfoMapType =
     std::unordered_map<DebugHandleType, DebugInfoTuple>;
 
+using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
 /*
  * This class is used to generate debug info map.
  * It instantiates debug_handle_manager and initialize thread local pointer to
@@ -125,31 +126,17 @@ using BackendDebugInfoMapType =
 class TORCH_API BackendDebugInfoRecorder {
  public:
   BackendDebugInfoRecorder() = default;
-
   int64_t getNextDebugHandle(const Node* node);
   // Reason this is not done as RAII is that work done in stopRecording
   // can throw, and throwing with dtor will call terminate and thus voids any
   // exception catching at a higher level.
   BackendDebugInfoMapType stopRecording();
+  NodeToDebugHandle generate_debug_handles(const std::shared_ptr<Graph>& graph);
 
  private:
   static std::atomic<DebugHandleType> unique_debug_handle_;
   BackendDebugInfoMapType handles_to_inlined_callstack_ptrs_;
 };
-
-// This is a RAII class that on ctor captures pointer to
-// BackendDebugInfoRecorder and initializes thread_local pointer
-// debug_info_recorder to it. Upon dtor it sets debug_info_recorder
-// pointer back to null. Note that this context manager always requires
-// that debug_info_recorder be nullptr when initializing the context.
-// This is because nested scopes with debug_info_recorder are not yet allowed.
-class WithBackendDebugInfoRecorder {
- public:
-  WithBackendDebugInfoRecorder(BackendDebugInfoRecorder* recorder) throw();
-  ~WithBackendDebugInfoRecorder();
-};
-
-BackendDebugInfoRecorder* getBackendDebugInfoRecorder();
 
 } // namespace jit
 } // namespace torch

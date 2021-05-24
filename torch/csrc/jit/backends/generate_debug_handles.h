@@ -8,8 +8,6 @@
 namespace torch {
 namespace jit {
 
-using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
-
 /*
  * This is the API via which backend's preprocess function will obtain debug
  * handles corresponding to the nodes of the graph for the lowered methods of
@@ -32,8 +30,6 @@ using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
  * which module's callstack ptr maps are stored and can be queried during
  * serialization.
  */
-NodeToDebugHandle TORCH_API
-generate_debug_handles(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch
