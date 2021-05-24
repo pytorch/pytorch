@@ -447,14 +447,21 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     options.device = c10::Device(DeviceType::CUDA, device_index);
     FusionGuard fg(fusion_to_run.get());
     scheduler_entry->schedule(fusion_to_run.get());
-    executors_[group_id].compileFusion(fusion_to_run.get(), options);
-  }
-
-  // Load launch params for reduction and normalization kernels
-  if (scheduler_entry->hasReductionParam()) {
-    launch_params = scheduler_entry->reductionParams().lparams;
+    // Load launch params for reduction and normalization kernels
+    if (scheduler_entry->hasReductionParam()) {
+      launch_params = scheduler_entry->reductionParams().lparams;
+    } else {
+      launch_params = scheduler_entry->pointwiseParams().lparams;
+    }
+    executors_[group_id].compileFusion(
+        fusion_to_run.get(), options, inputs, launch_params);
   } else {
-    launch_params = scheduler_entry->pointwiseParams().lparams;
+    // Load launch params for reduction and normalization kernels
+    if (scheduler_entry->hasReductionParam()) {
+      launch_params = scheduler_entry->reductionParams().lparams;
+    } else {
+      launch_params = scheduler_entry->pointwiseParams().lparams;
+    }
   }
 
   if (profiling_) {

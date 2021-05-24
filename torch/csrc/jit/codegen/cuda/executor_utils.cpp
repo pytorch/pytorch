@@ -24,6 +24,8 @@
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/welford.h>
 
+#include <cuda_occupancy.h>
+
 #include <fstream>
 
 namespace torch {
@@ -600,7 +602,8 @@ ExpressionEvaluator bindFusionInputs(
 NvrtcFunction nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
-    int id) {
+    int id,
+    c10::optional<int> opt_block_size) {
   FUSER_PERF_SCOPE("NVRTC");
 
   // lazily construct context if non-existing yet;
@@ -679,6 +682,35 @@ NvrtcFunction nvrtcCompile(
 #ifndef NDEBUG
   args.push_back("-lineinfo");
 #endif
+
+  // keeping the string outside the loop for lifetime
+  std::string max_register_usage = "--maxrregcount=";
+  if (opt_block_size.has_value() && opt_block_size.value() > 0) {
+    int num_partition = 0;
+    int reg_allocation_granularity = 0;
+    int max_regs_per_thread = 0;
+    cudaOccDeviceProp occ_prop(*prop);
+    cudaOccSubPartitionsPerMultiprocessor(&num_partition, &occ_prop);
+    cudaOccRegAllocationGranularity(&reg_allocation_granularity, &occ_prop);
+    cudaOccRegAllocationMaxPerThread(&max_regs_per_thread, &occ_prop);
+    int warp_size = prop->warpSize;
+    int num_warps = ceilDiv(opt_block_size.value(), warp_size);
+
+    // warps could be distributed unevenly across partition
+    int max_warps_per_sm_partition = ceilDiv(num_warps, num_partition);
+    // registers are evenly distributed across partitions, partition with most
+    // wraps determins the maximum register available per warp
+    int max_reg_per_warp =
+        prop->regsPerBlock / num_partition / max_warps_per_sm_partition;
+    // clamp down to register allocation granularity at warp level
+    int effective_max_reg_per_warp = max_reg_per_warp /
+        reg_allocation_granularity * reg_allocation_granularity;
+    int max_register =
+        std::min(effective_max_reg_per_warp / warp_size, max_regs_per_thread);
+
+    max_register_usage += std::to_string(max_register);
+    args.push_back(max_register_usage.c_str());
+  }
 
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
   uint32_t jit_opt_level = 0;

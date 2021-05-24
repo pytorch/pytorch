@@ -110,7 +110,11 @@ void FusionExecutor::debugCompileFusionFromStr(
       fusion_id_ > 0, "assign a fusion_id_ <= 0 is not accepted.");
 }
 
-void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
+void FusionExecutor::compileFusion(
+    Fusion* fusion,
+    CompileOptions options,
+    const at::ArrayRef<IValue>& inputs,
+    const LaunchParams& launch_constraints) {
   FUSER_PERF_SCOPE("compileFusion");
 
   TORCH_INTERNAL_ASSERT(
@@ -181,10 +185,21 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
       !kernel_summary.has_grid_reduction_in_loop,
       "Grid reduction must not be placed inside a loop.");
 
+  // TODO: pass block_size here;
+  c10::optional<int> block_size = c10::nullopt;
+  if (!inputs.empty()) {
+    auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
+    auto launch_params = computeLaunchParams(launch_constraints, expr_eval);
+    block_size = launch_params.nThreads();
+    TORCH_INTERNAL_ASSERT(
+        block_size > 0, "launch param inferred block size < 0");
+  }
+
   compiled_kernel_ = executor_utils::nvrtcCompile(
       structured_code,
       (kernelNamespace() + "::" + kernelName()).c_str(),
-      fusion_id_);
+      fusion_id_,
+      block_size);
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "failed to assign a fusion_id_ after compilation.");
 }

@@ -32,7 +32,11 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       int id,
       CompileOptions options = CompileOptions());
 
-  void compileFusion(Fusion* fusion, CompileOptions options = CompileOptions());
+  void compileFusion(
+      Fusion* fusion,
+      CompileOptions options = CompileOptions(),
+      const at::ArrayRef<IValue>& inputs = {},
+      const LaunchParams& launch_constraints = LaunchParams());
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,

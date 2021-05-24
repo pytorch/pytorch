@@ -75,7 +75,8 @@ struct NvrtcFunction {
 NvrtcFunction nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
-    int id);
+    int id,
+    c10::optional<int> opt_block_size = c10::nullopt);
 
 } // namespace executor_utils
 } // namespace cuda
