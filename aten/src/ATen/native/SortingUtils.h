@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Parallel.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 namespace native {
@@ -61,7 +62,7 @@ inline void _reduction_with_indices_allocate_or_resize_output(
       // unsqueeze to preserve passed in noncontiguous tensor in resize
       values.unsqueeze_(dim);
     }
-    values.resize_(result_sizes);
+    resize_output(values, result_sizes);
   } else {
     values = at::empty(result_sizes, self.options());
   }
@@ -75,7 +76,7 @@ inline void _reduction_with_indices_allocate_or_resize_output(
       // unsqueeze to preserve passed in noncontiguous tensor in resize
       indices.unsqueeze_(dim);
     }
-    indices.resize_(result_sizes);
+    resize_output(indices, result_sizes);
   } else {
     indices = at::empty(result_sizes, self.options().dtype(kLong));
   }
