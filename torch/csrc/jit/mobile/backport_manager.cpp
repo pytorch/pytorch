@@ -25,6 +25,7 @@ using caffe2::serialize::ReadAdapterInterface;
 namespace {
 constexpr int64_t kBytecodeVersionV4 = 0x4L;
 constexpr int64_t kBytecodeVersionV5 = 0x5L;
+constexpr int64_t kBytecodeVersionV6 = 0x6L;
 } // namespace
 
 // Utility function that can be reused by backport_vn_to_vn-1(). If any utility
@@ -229,6 +230,35 @@ bool backport_v5_to_v4(
   return true;
 }
 
+bool backport_v6_to_v5(
+    std::stringstream& input_model_stream,
+    std::stringstream& output_model_stream) {
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
+  auto reader = std::make_shared<PyTorchStreamReader>(rai);
+
+  // If there are debug info files in the original model file, it should also
+  // show up in the backported model
+  bool hasBytecodeDebug = reader->hasRecord("mobile_debug_handles.pkl");
+  // extra_files are kept
+  ExtraFilesMap extra_files;
+  // Loading the TS module is required for this backport, because bytecode needs
+  // to be re-emitted (refer to the comments below)
+  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+
+  // The RAII guard to change the flag, emitBytecodeDefaultInputs, to true, so
+  // that TS stores the default argument values in the constant table, and emits
+  // the instructions (LOADC, for example), to push the values to the stack. It
+  // restores the behavior of V5 and before. For V6, the default arg values are
+  // resolved at runtime init stage for better operator compatibility.
+  BytecodeEmitDefaultInputsGuard argNumGuard(true);
+  std::stringstream output;
+  torch_script._save_for_mobile(output, extra_files, hasBytecodeDebug);
+  std::stringstream output_copy(output.str());
+  output_model_stream.swap(output);
+
+  return true;
+}
 } // namespace
 
 // A generic contract for backport logic to the previous bytecode version.
@@ -241,6 +271,7 @@ using BytecodeBackportFunction =
 
 BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
+  registerBytecodeBackportFunction(kBytecodeVersionV6, backport_v6_to_v5);
 }
 
 std::unordered_map<

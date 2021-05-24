@@ -71,13 +71,11 @@ std::pair<IValue, IValue> getFunctionTuple(
   Inline(*graph);
 
   std::shared_ptr<MobileCode> code;
-  if (caffe2::serialize::kProducedBytecodeVersion == 6) {
-    code = std::make_shared<MobileCode>(
-        graph, func.name(), false /* emit_default_input_instructions */);
-  } else {
-    code = std::make_shared<MobileCode>(
-        graph, func.name(), true /* emit_default_input_instructions */);
-  }
+  code = std::make_shared<MobileCode>(
+      graph,
+      func.name(),
+      BytecodeEmitDefaultInputsMode::
+          is_enabled() /* emit_default_input_instructions */);
   auto instructions_copy = code->instructions();
 
   // operator names
@@ -173,11 +171,11 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    if (caffe2::serialize::kProducedBytecodeVersion == 6) {
+    if (BytecodeEmitDefaultInputsMode::is_enabled()) {
+      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    } else {
       operators.emplace_back(
           Tup({opname.name, opname.overload_name, num_args}));
-    } else {
-      operators.emplace_back(Tup({opname.name, opname.overload_name}));
     }
   }
 
@@ -627,12 +625,20 @@ void ScriptModuleSerializer::writeByteCode(
     const bool save_mobile_debug_info) {
   std::vector<c10::IValue> elements;
   BackendDebugInfoRecorder debug_info_recorder;
-  elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
+
+  // When backporting from v6 to v5 through byte-code re-emitting, the version
+  // should be v5 instead of v6. Another option is to keep v6 here, but in the
+  // backport function, change version number in both bytecode.pkl,
+  // and other files containling the version number, like
+  // mobile_debug_handles.pkl.
+  if (version_to_write == 6 && BytecodeEmitDefaultInputsMode::is_enabled()) {
+    version_to_write = 5;
+  }
+  elements.emplace_back(static_cast<int64_t>(version_to_write));
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
-  debug_info_elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
   moduleMethodsTuple(
       module, elements, debug_info_elements, debug_info_recorder);
@@ -845,6 +851,17 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   std::set<std::string> names;
   export_opnames(m, names);
   return std::vector<std::string>(names.begin(), names.end());
+}
+
+// Thread local floag (only happens in export, i.e. on server side)
+// to control if
+thread_local bool emitBytecodeDefaultInputs =
+    caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
+bool BytecodeEmitDefaultInputsMode::is_enabled() {
+  return emitBytecodeDefaultInputs;
+}
+void BytecodeEmitDefaultInputsMode::set_enabled(bool enabled) {
+  emitBytecodeDefaultInputs = enabled;
 }
 
 } // namespace jit

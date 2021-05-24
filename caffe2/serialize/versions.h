@@ -71,7 +71,7 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  to the unify format, the root key of tensor storage is updated from {index} to
 //  {the_pointer_value_the_tensor.storage}, for example: `140245072983168.storage`
 //  Forward-compatibility change.
-constexpr uint64_t kProducedBytecodeVersion = 0x5L;
+constexpr uint64_t kProducedBytecodeVersion = 0x6L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");

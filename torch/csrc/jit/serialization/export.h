@@ -188,5 +188,21 @@ TORCH_API void SetExportModuleMobileInfoConverter(
  */
 TORCH_API std::vector<std::string> export_opnames(const Module& m);
 
+struct TORCH_API BytecodeEmitDefaultInputsMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
+struct TORCH_API BytecodeEmitDefaultInputsGuard {
+  BytecodeEmitDefaultInputsGuard(bool enable)
+      : prev_mode(BytecodeEmitDefaultInputsMode::is_enabled()) {
+    BytecodeEmitDefaultInputsMode::set_enabled(enable);
+  }
+  ~BytecodeEmitDefaultInputsGuard() {
+    BytecodeEmitDefaultInputsMode::set_enabled(prev_mode);
+  }
+  bool prev_mode;
+};
+
 } // namespace jit
 } // namespace torch
