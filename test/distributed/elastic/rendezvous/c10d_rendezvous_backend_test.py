@@ -41,7 +41,7 @@ class CreateBackendTest(TestCase):
     def setUp(self) -> None:
         self._params = RendezvousParameters(
             backend="dummy_backend",
-            endpoint="localhost:29400",
+            endpoint="localhost:29300",
             run_id="dummy_run_id",
             min_nodes=1,
             max_nodes=1,
@@ -51,7 +51,7 @@ class CreateBackendTest(TestCase):
         )
 
         self._expected_endpoint_host = "localhost"
-        self._expected_endpoint_port = 29400
+        self._expected_endpoint_port = 29300
         self._expected_store_type = TCPStore
         self._expected_read_timeout = timedelta(seconds=10)
 
@@ -102,7 +102,7 @@ class CreateBackendTest(TestCase):
     def test_create_backend_returns_backend_if_endpoint_port_is_not_specified(self) -> None:
         self._params.endpoint = self._expected_endpoint_host
 
-        self._expected_endpoint_port = 29500
+        self._expected_endpoint_port = 29400
 
         self.test_create_backend_returns_backend()
 
