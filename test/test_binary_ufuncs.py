@@ -1681,6 +1681,7 @@ class TestBinaryUfuncs(TestCase):
                     ((torch.fmod, torch.Tensor.fmod_, np.fmod),
                      (torch.remainder, torch.Tensor.remainder_, np.remainder),))
 
+        # Tests for torch.remainder(scalar, tensor)
         for dividend, mod in product([5, 3.14], mods):
             if torch.is_tensor(mod):
                 _helper(dividend, mod,

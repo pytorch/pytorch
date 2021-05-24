@@ -5783,6 +5783,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
+           # Support autograd after torch.remainder(Tensor, Tensor) supports
+           # autograd of the second argument.
+           # https://github.com/pytorch/pytorch/pull/58476/files#r637167630
            supports_autograd=False,
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::remainder'],),
