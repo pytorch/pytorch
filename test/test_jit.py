@@ -19,6 +19,7 @@ from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
+from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
@@ -61,6 +62,7 @@ from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import make_tensor
 import torch.autograd.profiler
 import torch.cuda
 import torch.jit
@@ -1580,15 +1582,27 @@ graph(%Ra, %Rb):
         self.checkScript(fn_out, (real, img, out, ))
 
     def test_einsum(self):
-        def outer(x, y):
+        def check(fn, jitted, *args):
+            self.assertGraphContains(jitted.graph, kind='aten::einsum')
+            self.assertEqual(fn(*args), jitted(*args))
+
+        def equation_format(x, y):
             return torch.einsum('i,j->ij', (x, y))
 
-        traced = torch.jit.trace(outer, (torch.randn(4), torch.randn(5)))
-        script = torch.jit.script(outer)
-        x, y = torch.randn(10), torch.randn(2)
-        for fn in [traced, script]:
-            self.assertGraphContains(fn.graph, kind='aten::einsum')
-            self.assertEqual(fn(x, y), outer(x, y))
+        def sublist_format(x, y):
+            return torch.einsum(x, [0], y, [1], [0, 1])
+
+        # Sublist format cannot be scripted because it is
+        # a NumPy API only feature
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(sublist_format)
+
+        x = make_tensor((5,), 'cpu', torch.float32)
+        y = make_tensor((10,), 'cpu', torch.float32)
+
+        check(equation_format, torch.jit.script(equation_format), x, y)
+        check(equation_format, torch.jit.trace(equation_format, (x, y)), x, y)
+        check(sublist_format, torch.jit.trace(sublist_format, (x, y)), x, y)
 
     def test_python_ivalue(self):
         # Test if pure python object can be hold as IValue and conversion
