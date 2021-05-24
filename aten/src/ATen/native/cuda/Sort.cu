@@ -323,26 +323,28 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
 
-  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self_.scalar_type(), "sort", [&]{
-    const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
-    auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
-    int64_t remaining = numel;
-    while (remaining > 0) {
-      int64_t n = std::min(remaining, nbatch);
-      int64_t nsegments = n / nsort;
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self_.scalar_type(), "sort", 
+    AT_SKIP_BFLOAT16_IF_ROCM([&]{
+      const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
+      auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
+      int64_t remaining = numel;
+      while (remaining > 0) {
+        int64_t n = std::min(remaining, nbatch);
+        int64_t nsegments = n / nsort;
 
-      auto reverse_indices = at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}).contiguous();
+        auto reverse_indices = at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}).contiguous();
 
-      at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
-        reverse_indices.data_ptr<int64_t>(), indices_ptr, n, nsegments,
-        offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
+        at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
+          reverse_indices.data_ptr<int64_t>(), indices_ptr, n, nsegments,
+          offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
 
-      remaining -= n;
-      self_ptr += n;
-      values_ptr += n;
-      indices_ptr += n;
-    }
-  });
+        remaining -= n;
+        self_ptr += n;
+        values_ptr += n;
+        indices_ptr += n;
+      }
+    })
+  );
 
   if (values_tmp.defined()) {
     values.copy_(values_tmp);
