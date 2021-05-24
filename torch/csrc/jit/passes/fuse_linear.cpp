@@ -33,8 +33,10 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
 
   // replace addmm pattern to linear
   SubgraphRewriter addmm_to_linear;
-  std::vector<std::pair<std::string, std::string>> value_mappings({{"weight", "res"}, {"res", "res"}});
-  addmm_to_linear.RegisterRewritePattern(addmm_pattern, fused_linear_addmm, value_mappings);
+  std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"weight", "res"}, {"res", "res"}});
+  addmm_to_linear.RegisterRewritePattern(
+      addmm_pattern, fused_linear_addmm, value_mappings);
   addmm_to_linear.runOnGraph(
       graph, {aten_add_alpha_is_one, beta_is_one, weight_transposed});
 
@@ -89,7 +91,9 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
   value_mappings = {{"res", "res"}};
   SubgraphRewriter cleanup;
   cleanup.RegisterRewritePattern(
-      linear_weight_extra_transpose, linear_weight_no_transpose, value_mappings);
+      linear_weight_extra_transpose,
+      linear_weight_no_transpose,
+      value_mappings);
   cleanup.runOnGraph(graph);
 }
 } // namespace jit

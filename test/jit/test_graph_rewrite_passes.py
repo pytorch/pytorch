@@ -4,6 +4,7 @@ import torch
 import torch._C
 from torch.testing import FileCheck
 
+
 class TestGraphRewritePasses(JitTestCase):
     def test_fuse_linear(self):
         class FunctionalLinear(torch.nn.Module):

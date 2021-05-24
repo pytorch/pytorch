@@ -10,8 +10,7 @@ namespace {
 void update_source_range_and_cs_ptr(
     const std::set<const Node*>& input_nodes,
     const Match& m,
-    std::unordered_map<Node*, Node*>& pattern_node_map
-    ) {
+    std::unordered_map<Node*, Node*>& pattern_node_map) {
   // pattern_node_map, maps nodes of the replacement graph
   // to the nodes of the pattern graph.
   // Now we iterate over each node of the replacement graph
@@ -51,7 +50,8 @@ void SubgraphRewriter::RegisterRewritePattern(
     const std::string& pattern,
     const std::string& replacement,
     const std::vector<std::pair<std::string, std::string>>& value_name_pairs) {
-  std::unordered_map<std::string, std::string>  value_name_map(value_name_pairs.begin(), value_name_pairs.end());
+  std::unordered_map<std::string, std::string> value_name_map(
+      value_name_pairs.begin(), value_name_pairs.end());
   RewritePatternDescr d = {pattern, replacement, value_name_map};
   patterns_.push_back(d);
 }
@@ -98,8 +98,10 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     const auto& replacement_value_name = it.first;
     Node* replacement_value_node = it.second->node();
     if (pattern.value_name_map.count(replacement_value_name)) {
-      const auto& pattern_value_name = pattern.value_name_map.at(replacement_value_name);
-      TORCH_CHECK(vmap.count(pattern_value_name),
+      const auto& pattern_value_name =
+          pattern.value_name_map.at(replacement_value_name);
+      TORCH_CHECK(
+          vmap.count(pattern_value_name),
           "Value must be found in the replacement graph.");
       Node* pattern_value_node = vmap.at(pattern_value_name)->node();
       pattern_node_map.emplace(replacement_value_node, pattern_value_node);
@@ -156,7 +158,8 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // Before rewriting the graph, update source range and callstack
     // info of the replacement pattern graph so that the rewritten graph
     // has the updated info
-    update_source_range_and_cs_ptr(pattern_input_nodes, match, pattern_node_map);
+    update_source_range_and_cs_ptr(
+        pattern_input_nodes, match, pattern_node_map);
     // Insert a clone of replacement subgraph.
     // `inputs` vector holds values that we would use as incoming values to the
     // new subgraph, and we will get `new_outputs` vector containing values
