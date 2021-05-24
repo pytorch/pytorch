@@ -1194,6 +1194,10 @@ Arguments:
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_backend_name",
+              &::c10d::ProcessGroup::getBackendName,
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
