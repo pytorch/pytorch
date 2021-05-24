@@ -44,7 +44,7 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
   static std::unique_ptr<ScriptRemoteCall> fromIValues(
       std::vector<at::IValue>& ivalues);
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  Message toMessageImpl() && override;
   static std::unique_ptr<ScriptRemoteCall> fromMessage(const Message& message);
 
  private:

@@ -24,12 +24,10 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const MessageType& messageType) const;
 
   virtual c10::intrusive_ptr<JitFuture> processScriptCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> lsctx) const;
+      RpcCommandBase& rpc) const;
 
   virtual c10::intrusive_ptr<JitFuture> processPythonCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> lsctx) const;
+      RpcCommandBase& rpc) const;
 
   c10::intrusive_ptr<JitFuture> assignOwnerRRef(
       const RRefId& rrefId,
@@ -38,8 +36,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       std::shared_ptr<LazyStreamContext> lsctx) const;
 
   virtual c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> lsctx) const;
+      RpcCommandBase& rpc) const;
 
   virtual c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
@@ -104,8 +101,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
 
   c10::intrusive_ptr<JitFuture> runJitOperator(
       const jit::Operator& op,
-      std::vector<at::IValue>& stack,
-      std::shared_ptr<LazyStreamContext> lsctx) const;
+      std::vector<at::IValue>& stack) const;
 
   // Helpers to convert various kinds of objects into already-completed futures.
 
@@ -113,6 +109,8 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
 
   c10::intrusive_ptr<JitFuture> asFuture(
       c10::intrusive_ptr<Message> message) const;
+
+  c10::intrusive_ptr<JitFuture> asFuture(Message message) const;
 
   c10::intrusive_ptr<JitFuture> asFuture(std::exception_ptr err) const;
 };
