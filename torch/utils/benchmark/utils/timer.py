@@ -443,7 +443,7 @@ class Timer(object):
         jitter from the Python interpreter.) This makes them ideal for detailed
         performance analysis. This method runs `stmt` in a separate process
         so that Valgrind can instrument the program. Performance is severely
-        degraded due to the instrumentation, howevever this is ameliorated by
+        degraded due to the instrumentation, however this is ameliorated by
         the fact that a small number of iterations is generally sufficient to
         obtain good measurements.
 
