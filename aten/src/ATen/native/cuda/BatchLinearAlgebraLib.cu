@@ -1227,7 +1227,6 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
 void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     self.scalar_type(),
     "lu_cusolver",
