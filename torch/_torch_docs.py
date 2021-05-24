@@ -4900,6 +4900,8 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
     .. math::
         \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
 
+.. note:: Alias for :func:`torch.special.logsumexp`.
+
 {keepdim_details}
 
 Args:

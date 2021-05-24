@@ -1013,6 +1013,14 @@ Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 
+// special_logsumexp, alias for logsumexp
+Tensor special_logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return self.logsumexp(dims, keepdim);
+}
+Tensor& special_logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
+  return at::logsumexp_out(self, dims, keepdim, result);
+}
+
 static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0).to<double>();

@@ -322,6 +322,8 @@ namespace c10 {
   _(aten, moveaxis)                  \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, logsumexp)		     \
+  _(aten, special_logsumexp)         \
   _(aten, erf)                       \
   _(aten, special_erf)               \
   _(aten, erfc)                      \

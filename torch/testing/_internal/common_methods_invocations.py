@@ -6219,6 +6219,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_xlog1py),
     OpInfo('logsumexp',
+           aliases=('special.logsumexp',),
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
            assert_autodiffed=True,

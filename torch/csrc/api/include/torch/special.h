@@ -85,6 +85,22 @@ inline Tensor& erfinv_out(Tensor& result, const Tensor& self) {
   return torch::special_erfinv_out(result, self);
 }
 
+/// Computes the log of summed exponentials of each row of input in the given dimension dim
+/// See https://pytorch.org/docs/master/special.html#torch.special.logsumexp.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(3, 3);
+/// torch::special::logsumexp(t, 1);
+/// ```
+inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return torch::special_logsumexp(self, dims, keepdim);
+}
+
+inline Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
+  return torch::special_logsumexp_out(self, dims, keepdim, result);
+}
+
 /// Computes the logit of input, elementwise.
 /// See https://pytorch.org/docs/master/special.html#torch.special.logit.
 ///
