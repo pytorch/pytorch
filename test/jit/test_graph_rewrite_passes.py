@@ -1,5 +1,4 @@
 from torch.testing._internal.jit_utils import JitTestCase
-import unittest
 import torch
 import torch._C
 from torch.testing import FileCheck
