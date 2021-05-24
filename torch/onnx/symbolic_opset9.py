@@ -2558,7 +2558,11 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 def one_hot(g, self, num_classes, dtype):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = g.op("Constant", value_t=torch.LongTensor([num_classes]))
-    return g.op("OneHot", self, depth, values, axis_i=-1)
+    one_hot_tensor = g.op("OneHot", self, depth, values, axis_i=-1)
+    dtype = sym_help._maybe_get_const(dtype, 'i')
+    if sym_help._is_value(dtype):
+        dtype = 4  # default to int64
+    return g.op("Cast", one_hot_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
 
 
 @parse_args('v', 'i', 'v', 'v')
