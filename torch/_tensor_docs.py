@@ -3820,6 +3820,26 @@ Args:
     {memory_format}
 """.format(**common_args))
 
+add_docstr_all('cdouble',
+               r"""
+cdouble(memory_format=torch.preserve_format) -> Tensor
+
+``self.cdouble()`` is equivalent to ``self.to(torch.complex128)``. See :func:`to`.
+
+Args:
+    {memory_format}
+""".format(**common_args))
+
+add_docstr_all('cfloat',
+               r"""
+cfloat(memory_format=torch.preserve_format) -> Tensor
+
+``self.cfloat()`` is equivalent to ``self.to(torch.complex64)``. See :func:`to`.
+
+Args:
+    {memory_format}
+""".format(**common_args))
+
 add_docstr_all('half',
                r"""
 half(memory_format=torch.preserve_format) -> Tensor
