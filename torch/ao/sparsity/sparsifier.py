@@ -83,11 +83,11 @@ class BaseSparsifier(abc.ABC):
     def convert(self, model, mapping=None):
         if mapping is None:
             mapping = _variables.get_static_sparse_quantized_mapping()
-        def new_child_fn(child, mapping):
-            new_child = mapping[type(child)].from_float(child)
+        def new_child_fn(child, mapping, **kwargs):
+            new_child = mapping[type(child)].from_float(child, **kwargs)
             return new_child
-        self._swap_modules(model, new_child_fn, mapping=mapping)
-        # qconvert(model, inplace=True, mapping=mapping)
+        self._swap_modules(model, new_child_fn, mapping=mapping,
+                           from_float_args=from_float_args)
 
 
     @abc.abstractmethod
