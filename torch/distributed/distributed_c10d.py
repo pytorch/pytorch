@@ -2538,7 +2538,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
 
 def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
     """
-    Synchronizes all processes similar to torch.distributed.barrier, but takes
+    Synchronizes all processes similar to ``torch.distributed.barrier``, but takes
     a configurable timeout and is able to report ranks that did not pass this
     barrier within that timeout. Specifically, for non-zero ranks, will block
     until a send/recv is processed from rank 0. Rank 0 will block until all send
@@ -2550,7 +2550,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     This collective will block all processes/ranks in the group, until the
     whole group exits the function successfully, making it useful for debugging
     and synchronizing. However, it can have a performance impact and should only
-    be used for debugging or scenarios that require full synhcronization points
+    be used for debugging or scenarios that require full synchronization points
     on the host-side. For debugging purposees, this barrier can be inserted
     before the application's collective calls to check if any ranks are
     desynchronized.

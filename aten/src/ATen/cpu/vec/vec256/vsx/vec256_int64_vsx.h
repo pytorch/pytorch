@@ -116,7 +116,8 @@ class Vectorized<int64_t> {
         vec_sel(a._vec0, b._vec0, mask._vecb0),
         vec_sel(a._vec1, b._vec1, mask._vecb1)};
   }
-  static Vectorized<int64_t> arange(int64_t base = 0., int64_t step = 1.) {
+  template <typename step_t>
+  static Vectorized<int64_t> arange(int64_t base = 0., step_t step = static_cast<step_t>(1)) {
     return Vectorized<int64_t>(base, base + step, base + 2 * step, base + 3 * step);
   }
 

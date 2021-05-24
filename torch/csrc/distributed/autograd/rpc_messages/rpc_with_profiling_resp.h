@@ -14,7 +14,7 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
   // For sending RPCs over the wire
   RpcWithProfilingResp(
       rpc::MessageType messageType,
-      c10::intrusive_ptr<rpc::Message> wrappedMessage,
+      rpc::Message&& wrappedMessage,
       std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents,
       rpc::ProfilingId profilingId);
 
@@ -27,7 +27,7 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
       std::vector<torch::Tensor> tensors,
       std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents,
       rpc::ProfilingId profilingId);
-  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
+  rpc::Message toMessageImpl() && override;
   static std::unique_ptr<RpcWithProfilingResp> fromMessage(
       const rpc::Message& message);
   // Retrieve remote Events
@@ -47,7 +47,7 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
   // message type
   const rpc::MessageType messageType_;
   // wrapped message
-  c10::intrusive_ptr<rpc::Message> wrappedMessage_;
+  rpc::Message wrappedMessage_;
   std::unique_ptr<RpcCommandBase> wrappedRpc_;
   rpc::MessageType wrappedMessageType_;
   std::vector<torch::Tensor> tensors_;
