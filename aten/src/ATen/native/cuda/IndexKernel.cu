@@ -373,7 +373,7 @@ template <typename mask_t>
 void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
   auto srcSize = source.numel();
 
-  if (srcSize == 0) {
+  if (self.numel() == 0) {
     return;
   }
 
