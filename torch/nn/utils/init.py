@@ -11,6 +11,7 @@ def skip_init(module_cls, *args, **kwargs):
 
     1. The module must accept a `device` arg in its constructor that is passed to any parameters
     or buffers created during construction.
+
     2. The module must not perform any computation on parameters in its constructor except
     initialization (i.e. functions from :mod:`torch.nn.init`).
 
