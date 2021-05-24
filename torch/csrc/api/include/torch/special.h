@@ -98,7 +98,7 @@ inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
 }
 
 inline Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
-  return torch::special_logsumexp_out(self, dims, keepdim, result);
+  return torch::special_logsumexp_out(result, self, dims, keepdim);
 }
 
 /// Computes the logit of input, elementwise.
