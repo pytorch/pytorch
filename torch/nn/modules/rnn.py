@@ -373,9 +373,9 @@ class RNN(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            with the batch dimension before the sequence dimension. Note that this does
-            not apply to hidden or cell states. See the Inputs/Outputs sections below for details.
-            Default: ``False``
+            as `(batch, seq, feature)` instead of `(seq, batch, feature)`.
+            Note that this does not apply to hidden or cell states. See the
+            Inputs/Outputs sections below for details.  Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             RNN layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
@@ -387,7 +387,7 @@ class RNN(RNNBase):
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(S, N, H_{out})` containing the initial hidden
+        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
           state for each element in the batch. Defaults to zeros if not provided.
 
         where:
@@ -397,26 +397,18 @@ class RNN(RNNBase):
                 N ={} & \text{batch size} \\
                 L ={} & \text{sequence length} \\
                 D ={} & 2 \text{ if bidirectional=True otherwise } 1 \\
-                S ={} & \text{num\_layers} * D \\
                 H_{in} ={} & \text{input\_size} \\
                 H_{out} ={} & \text{hidden\_size}
             \end{aligned}
 
     Outputs: `output, h_n`
-        * **output**: tensor of shape :math:`(L, N, H_{all})` when ``batch_first=False`` or
-          :math:`(N, L, H_{all})` when ``batch_first=True`` containing the output features
+        * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
+          :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the RNN, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(S, N, H_{out})` containing the final hidden state
+        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
           for each element in the batch.
-
-        where:
-
-        .. math::
-            \begin{aligned}
-                H_{all} ={} & D * \text{hidden\_size}
-            \end{aligned}
 
     Attributes:
         weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
@@ -523,9 +515,9 @@ class LSTM(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            with the batch dimension before the sequence dimension. Note that this does
-            not apply to hidden or cell states. See the Inputs/Outputs sections below for details.
-            Default: ``False``
+            as `(batch, seq, feature)` instead of `(seq, batch, feature)`.
+            Note that this does not apply to hidden or cell states. See the
+            Inputs/Outputs sections below for details.  Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             LSTM layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
@@ -538,11 +530,11 @@ class LSTM(RNNBase):
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(S, N, H_{out})` containing the initial hidden
-          state for each element in the batch.
+        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the
+          initial hidden state for each element in the batch.
           Defaults to zeros if `(h_0, c_0)` is not provided.
-        * **c_0**: tensor of shape :math:`(S, N, H_{out})` containing the initial cell
-          state for each element in the batch.
+        * **c_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
+          initial cell state for each element in the batch.
           Defaults to zeros if `(h_0, c_0)` is not provided.
 
         where:
@@ -552,28 +544,21 @@ class LSTM(RNNBase):
                 N ={} & \text{batch size} \\
                 L ={} & \text{sequence length} \\
                 D ={} & 2 \text{ if bidirectional=True otherwise } 1 \\
-                S ={} & \text{num\_layers} * D \\
                 H_{in} ={} & \text{input\_size} \\
+                H_{cell} ={} & \text{hidden\_size} \\
                 H_{out} ={} & \text{proj\_size if } \text{proj\_size}>0 \text{ otherwise hidden\_size} \\
             \end{aligned}
 
     Outputs: `output, (h_n, c_n)`
-        * **output**: tensor of shape :math:`(L, N, H_{all})` when ``batch_first=False`` or
-          :math:`(N, L, H_{all})` when ``batch_first=True`` containing the output features
+        * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
+          :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the LSTM, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(S, N, H_{out})` containing the final hidden state
-          for each element in the batch.
-        * **c_n**: tensor of shape :math:`(S, N, H_{out})` containing the final cell state
-          for each element in the batch.
-
-        where:
-
-        .. math::
-            \begin{aligned}
-                H_{all} ={} & D * (\text{proj\_size if proj\_size}>0 \text{ otherwise hidden\_size})
-            \end{aligned}
+        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the
+          final hidden state for each element in the batch.
+        * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
+          final cell state for each element in the batch.
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
@@ -742,9 +727,9 @@ class GRU(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            with the batch dimension before the sequence dimension. Note that this does
-            not apply to hidden or cell states. See the Inputs/Outputs sections below for details.
-            Default: ``False``
+            as `(batch, seq, feature)` instead of `(seq, batch, feature)`.
+            Note that this does not apply to hidden or cell states. See the
+            Inputs/Outputs sections below for details.  Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             GRU layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
@@ -756,7 +741,7 @@ class GRU(RNNBase):
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(S, N, H_{out})` containing the initial hidden
+        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
           state for each element in the batch. Defaults to zeros if not provided.
 
         where:
@@ -766,26 +751,18 @@ class GRU(RNNBase):
                 N ={} & \text{batch size} \\
                 L ={} & \text{sequence length} \\
                 D ={} & 2 \text{ if bidirectional=True otherwise } 1 \\
-                S ={} & \text{num\_layers} * D \\
                 H_{in} ={} & \text{input\_size} \\
                 H_{out} ={} & \text{hidden\_size}
             \end{aligned}
 
     Outputs: `output, h_n`
-        * **output**: tensor of shape :math:`(L, N, H_{all})` when ``batch_first=False`` or
-          :math:`(N, L, H_{all})` when ``batch_first=True`` containing the output features
+        * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
+          :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the GRU, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(S, N, H_{out})` containing the final hidden state
+        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
           for each element in the batch.
-
-        where:
-
-        .. math::
-            \begin{aligned}
-                H_{all} ={} & D * \text{hidden\_size}
-            \end{aligned}
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
