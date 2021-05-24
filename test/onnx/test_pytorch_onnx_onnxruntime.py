@@ -81,7 +81,7 @@ def run_ort(ort_sess, input):
     return inline_flatten_list(ort_outs, [])
 
 
-def ort_compare_with_pytorch(ort_outs, output, rtol, atol, check_dtypes):
+def ort_compare_with_pytorch(ort_outs, output, rtol, atol, check_dtypes=False):
     output, _ = torch.jit._flatten(output)
     outputs = [to_numpy(outp) for outp in output]
 
