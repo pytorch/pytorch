@@ -140,8 +140,8 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.2.0 # Deviating from major.minor to conform to nvidia's Docker image names
+  pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=7
@@ -197,6 +197,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    BREAKPAD=yes
     ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
     CUDA_VERSION=10.2
@@ -216,21 +217,24 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-rocm3.9-py3.6)
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.9
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9)
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
     ROCM_VERSION=3.9
-    ;;
-  pytorch-linux-bionic-rocm3.10-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.10
     ;;
   pytorch-linux-bionic-rocm4.0.1-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
@@ -239,6 +243,22 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=4.0.1
+    ;;
+  pytorch-linux-bionic-rocm4.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=4.1
+    ;;
+  pytorch-linux-bionic-rocm4.2-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=4.2
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -280,7 +300,7 @@ if [ -n "${JENKINS:-}" ]; then
   JENKINS_GID=$(id -g jenkins)
 fi
 
-tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
+tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | head -c 32)"
 
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
@@ -308,6 +328,7 @@ docker build \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
+       --build-arg "BREAKPAD=${BREAKPAD}" \
        --build-arg "ANDROID=${ANDROID}" \
        --build-arg "ANDROID_NDK=${ANDROID_NDK_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \

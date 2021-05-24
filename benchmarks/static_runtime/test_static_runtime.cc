@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
 
@@ -36,8 +38,8 @@ void compareTensorLists(
     ASSERT_TRUE(r[i].isTensor());
     VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
     VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
-    if (! l[i].toTensor().defined()) {
-      EXPECT_TRUE(! r[i].toTensor().defined());
+    if (!l[i].toTensor().defined()) {
+      EXPECT_TRUE(!r[i].toTensor().defined());
     } else {
       EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
     }
@@ -51,8 +53,8 @@ void compareTensorLists(
   for (int i = 0; i < l.size(); ++i) {
     VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
     VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
-    if (! l[i].defined()) {
-      EXPECT_TRUE(! r[i].defined());
+    if (!l[i].defined()) {
+      EXPECT_TRUE(!r[i].defined());
     } else {
       EXPECT_TRUE(l[i].equal(r[i]));
     }
@@ -88,18 +90,38 @@ void testStaticRuntime(
   } else if (expect.isList()) {
     compareTensorLists(expect.toTensorVector(), actual.toTensorVector());
   } else {
+    VLOG(2) << "expect " << expect.toTensor() << std::endl;
+    VLOG(2) << "output " << actual.toTensor() << std::endl;
     EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
   }
   // make sure inputs were not modified
   compareTensorLists(args_tensors, args_copy);
 }
+
+bool testHasInplaceOp(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
+
+  torch::jit::AliasDb alias_db(graph);
+  return torch::jit::HasInplaceOp(graph, alias_db);
+}
 } // namespace
 
+TEST(StaticRuntime, InPlace) {
+  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
+  EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
+  EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
 TEST(StaticRuntime, UnaryOps) {
-  auto a = at::ones({2, 3});
+  auto a = at::randn({2, 3});
 
   std::vector<IValue> args{a};
 
+  // sum
   testStaticRuntime(aten_sum, args);
   testStaticRuntime(aten_sum_0, args);
   testStaticRuntime(aten_sum_1, args);
@@ -107,8 +129,41 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1_true, args);
 }
 
+TEST(StaticRuntime, Clone) {
+  auto a = at::randn({2, 3});
+  auto b = at::empty_strided({3, 2}, {1, 3});
+
+  std::vector<IValue> args_0{b, c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args_1{b, c10::MemoryFormat::Preserve};
+
+  testStaticRuntime(clone_script_0, {a});
+  testStaticRuntime(clone_script_1, args_0);
+  testStaticRuntime(clone_script_1, args_1);
+}
+
+TEST(StaticRuntime, Clamp) {
+  auto a = at::randn({2, 3});
+  auto max_t = at::full_like(a, 1);
+  auto min_t = at::full_like(a, -1);
+
+  testStaticRuntime(clamp_script_1, {a, -1, 1});
+  testStaticRuntime(clamp_script_2, {a, min_t, max_t});
+}
+
+TEST(StaticRuntime, Logit) {
+  auto a = at::ones({2, 3});
+  double b = 1e-6;
+  std::vector<IValue> args_1{a};
+  std::vector<IValue> args_2({a, b});
+
+  // logit
+  testStaticRuntime(logit_script_1, args_1);
+  testStaticRuntime(logit_script_2, args_1);
+  testStaticRuntime(logit_script_3, args_2);
+}
+
 TEST(StaticRuntime, EmbeddingBag) {
-  at::Tensor weight = torch::ones({3, 11}, at::ScalarType::Float);
+  at::Tensor weight = torch::randn({3, 11}, at::ScalarType::Float);
   at::Tensor input = torch::tensor({0, 1, 0, 2});
   at::Tensor offset = torch::tensor({0, 2, 4});
 
@@ -120,6 +175,19 @@ TEST(StaticRuntime, EmbeddingBag) {
   testStaticRuntime(embedding_bag_sum_last_offset, args);
   testStaticRuntime(embedding_bag_mean_last_offset, args);
   testStaticRuntime(embedding_bag_max_last_offset, args);
+}
+
+TEST(StaticRuntime, LayerNorm) {
+  const auto input = torch::rand({20, 10, 10, 10});
+  for (int normalized_size: {2, 3}) {
+      std::vector<int64_t> normalized_shape(normalized_size, 10);
+      const auto weight = torch::rand(normalized_shape);
+      const auto bias = torch::rand(normalized_shape);
+      std::vector<IValue> args{input, normalized_shape, weight, bias};
+      testStaticRuntime(layer_norm_with_weights, args);
+      args = {input, normalized_shape};
+      testStaticRuntime(layer_norm_without_weights, args);
+  }
 }
 
 TEST(StaticRuntime, IndividualOps_Binary) {
@@ -138,6 +206,77 @@ TEST(StaticRuntime, IndividualOps_Binary) {
   testStaticRuntime(tuple_construct_script_2, args);
 }
 
+TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
+  // 1-D, 1-D
+  std::vector<IValue> args{at::randn({3}), at::randn({3})};
+  testStaticRuntime(aten_matmul, args);
+  // 2-D, 2-D
+  args = {at::randn({3, 2}), at::randn({2, 3})};
+  testStaticRuntime(aten_matmul, args);
+  // 1-D, 2-D
+  args = {at::randn({3}), at::randn({3, 5})};
+  testStaticRuntime(aten_matmul, args);
+  // 2-D, 1-D
+  args = {at::randn({3, 5}), at::randn({5})};
+  testStaticRuntime(aten_matmul, args);
+  // > 2-D , > 2-D
+  args = {at::randn({3, 1, 4, 5}), at::randn({2, 5, 6})};
+  testStaticRuntime(aten_matmul, args);
+}
+
+TEST(StaticRuntime, IndividualOps_Div) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+
+  std::vector<IValue> args0{a, b};
+  testStaticRuntime(div_tensor, args0);
+
+  std::vector<IValue> args1{a, 3};
+  testStaticRuntime(div_scalar, args1);
+
+  std::vector<IValue> args2{a, b, "floor"};
+  testStaticRuntime(div_tensor_mode, args2);
+
+  std::vector<IValue> args3{a, 2.3, "trunc"};
+  testStaticRuntime(div_scalar_mode, args3);
+}
+
+TEST(StaticRuntime, IndividualOps_Sub) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+
+  std::vector<IValue> args0{a, b};
+  testStaticRuntime(sub_tensor, args0);
+
+  std::vector<IValue> args1{a, 3};
+  testStaticRuntime(sub_scalar, args1);
+
+  std::vector<IValue> args2{a, b, 2.3};
+  testStaticRuntime(sub_tensor_alpha, args2);
+
+  std::vector<IValue> args3{a, 2.3, 4};
+  testStaticRuntime(sub_scalar_alpha, args3);
+}
+
+TEST(StaticRuntime, IndividualOps_Norm) {
+  auto a = at::randn({2, 3});
+  auto dim = std::vector<int64_t>({1});
+  auto dtype = at::ScalarType::Float;
+
+  std::vector<IValue> args2{a, 2};
+  testStaticRuntime(norm_2arg, args2);
+
+  std::vector<IValue> args3{a, 2, dtype};
+  testStaticRuntime(norm_3arg, args3);
+
+  std::vector<IValue> args4{a, 3, dim, false};
+  testStaticRuntime(norm_4arg, args4);
+
+  std::vector<IValue> args5{a, 4, dim, true, dtype};
+  testStaticRuntime(norm_5arg, args5);
+
+}
+
 TEST(StaticRuntime, IndividualOps_Reshape) {
   auto a = at::randn({2, 3});
   auto b = std::vector<int64_t>({3, 2});
@@ -150,6 +289,17 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_5, args);
   testStaticRuntime(reshape_inplace_script, args);
   testStaticRuntime(reshape_incontiguous_script, args);
+}
+
+TEST(StaticRuntime, IndividualOps_Repeat) {
+  auto a = at::randn({2, 3});
+  auto b = std::vector<int64_t>({1, 2});
+  auto c = std::vector<int64_t>({2, 3});
+  std::vector<IValue> args1{a, b};
+  std::vector<IValue> args2{a, c};
+
+  testStaticRuntime(repeat, args1);
+  testStaticRuntime(repeat, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {
@@ -185,19 +335,30 @@ TEST(StaticRuntime, IndividualOps_pow) {
 }
 
 TEST(StaticRuntime, IndividualOps_to) {
-  auto test_to =
-      [](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
-        auto a = at::randn({2, 3});
-        std::vector<IValue> args0{a, b, c, d, e};
-        std::vector<IValue> args1{a, b, c, d};
-        testStaticRuntime(to_script_0, args0);
-        testStaticRuntime(to_script_1, args1);
-      };
+  auto test_to = [](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
+    auto a = at::randn({2, 3});
+    auto other = at::randn({2, 3}, b);
+    std::vector<IValue> args0{a, b, c, d, e};
+    std::vector<IValue> args1{a, b, c, d};
+    std::vector<IValue> args2{a, other, c, d, e};
+    testStaticRuntime(to_script_0, args0);
+    testStaticRuntime(to_script_1, args1);
+    testStaticRuntime(to_script_2, args2);
+  };
 
   test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::Contiguous);
   test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
   test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::Preserve);
+}
+
+TEST(StaticRuntime, IndividualOps_FullLike) {
+  auto a = at::randn({2, 3});
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  std::vector<IValue> args {a, 4, dtype, at::kStrided, cpu, false,
+                            c10::MemoryFormat::Contiguous};
+  testStaticRuntime(full_like_script, args);
 }
 
 TEST(StaticRuntime, LongModel) {
@@ -363,31 +524,52 @@ TEST(StaticRuntime, CleanUpMemory) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
-  torch::jit::StaticModule smod(mod);
 
-  for (auto cleanup_memory : {true, false}) {
+  for (auto cleanup_activations : {true, false}) {
     for (auto enable_out_variant : {true, false}) {
-      VLOG(1) << "cleanup_memory: " << cleanup_memory
-              << ", enable_out_variant: " << enable_out_variant;
-      torch::jit::StaticModuleOptions opts{cleanup_memory, enable_out_variant};
-      torch::jit::StaticModule smod(mod, opts);
+      for (auto optimize_memory : {true, false}) {
+        for (auto optimize_graph_output_memory : {true, false}) {
+          if (optimize_graph_output_memory && !optimize_memory) {
+            // when optimize_graph_output_memory is enabled, optimize_memory
+            // must be enabled too
+            continue;
+          }
+          if (optimize_memory && !enable_out_variant) {
+            // when optimize_memory is enabled, enable_out_variant must be
+            // enabled too
+            continue;
+          }
+          VLOG(1) << "cleanup_activations: " << cleanup_activations
+                  << ", enable_out_variant: " << enable_out_variant
+                  << ", optimize_memory: " << optimize_memory
+                  << ", optimize_graph_output_memory: "
+                  << optimize_graph_output_memory;
+          torch::jit::StaticModuleOptions opts{
+              cleanup_activations,
+              enable_out_variant,
+              optimize_memory,
+              optimize_graph_output_memory};
+          torch::jit::StaticModule smod(mod, opts);
 
-      for (int batch_size : {1, 8, 32}) {
-        for (int i = 0; i < 2; ++i) {
-          auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
-          auto user_emb = torch::randn({batch_size, 1, embedding_size});
-          auto wide = torch::randn({batch_size, num_features});
+          for (int batch_size : {1, 8, 32}) {
+            for (int i = 0; i < 2; ++i) {
+              auto ad_emb_packed =
+                  torch::randn({batch_size, 1, embedding_size});
+              auto user_emb = torch::randn({batch_size, 1, embedding_size});
+              auto wide = torch::randn({batch_size, num_features});
 
-          // run jit graph executor
-          std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
-          auto output_1 = getTensor(mod.forward(inputs));
+              // run jit graph executor
+              std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
+              auto output_1 = getTensor(mod.forward(inputs));
 
-          // run static runtime
-          std::vector<at::Tensor> input_tensors(
-              {ad_emb_packed, user_emb, wide});
-          at::Tensor output_2 = smod(input_tensors)[0];
-          smod.runtime().check_for_memory_leak();
-          EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+              // run static runtime
+              std::vector<at::Tensor> input_tensors(
+                  {ad_emb_packed, user_emb, wide});
+              at::Tensor output_2 = smod(input_tensors)[0];
+              smod.runtime().check_for_memory_leak();
+              EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            }
+          }
         }
       }
     }

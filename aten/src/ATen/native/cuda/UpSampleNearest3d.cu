@@ -128,7 +128,12 @@ static void upsample_nearest3d_out_cuda_template(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
-  checkAllSameGPU("upsample_nearest3d_out_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
+
+  // TODO: remove this when the cuda kernel is updated to support the channels_last memory format.
+  // This is a temporary hack to prevent a silence correctness issue when calling this kernel
+  // with tensors in channels_last format.
+  auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
 
   int output_depth = output_size[0];
   int output_height = output_size[1];
@@ -159,7 +164,7 @@ static void upsample_nearest3d_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.data_ptr<scalar_t>();
-        auto odata = output.data_ptr<scalar_t>();
+        auto odata = output_c.data_ptr<scalar_t>();
 
         const float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
         const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
@@ -181,6 +186,10 @@ static void upsample_nearest3d_out_cuda_template(
             width_scale);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
+
+  if (!output.is_contiguous()) {
+      output.copy_(output_c);
+  }
 }
 
 static void upsample_nearest3d_backward_out_cuda_template(
@@ -194,7 +203,7 @@ static void upsample_nearest3d_backward_out_cuda_template(
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
-      "upsample_nearest3d_backward_out_cuda",
+      __func__,
       {grad_output_arg, grad_input_arg});
 
   int output_depth = output_size[0];
@@ -289,7 +298,7 @@ Tensor upsample_nearest3d_cuda(
   return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w);
 }
 
-// when structured kernels can handle QuantizedCPU, update these overloads to be DefaultBackend
+// when structured kernels can handle QuantizedCPU, update these overloads to be CompositeExplicitAutograd
 Tensor upsample_nearest3d_backward_cuda(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,

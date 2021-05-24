@@ -18,19 +18,14 @@ IValue deepCopy(const IValue& self) {
   if (self.isTensor()) {
     return IValue(self.toTensor().clone(at::MemoryFormat::Preserve));
   }
-  if (self.isTensorList()) {
-    c10::List<at::Tensor> newList;
-    for (const at::Tensor& oldTensor : self.toTensorVector()) {
-      newList.push_back(oldTensor.clone(at::MemoryFormat::Preserve));
-    }
-    return newList;
-  }
 
   // Lists of ivalues should recursively deep copy their contents
   if (self.isList()) {
+    // NOLINTNEXTLINE(performance-move-const-arg)
     auto source = std::move(self).toList();
     auto newList = c10::impl::GenericList(source.elementType());
     newList.reserve(source.size());
+    // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
     for (const IValue& value : source) {
       newList.push_back(deepCopy(value));
     }
@@ -67,6 +62,20 @@ Stack deepCopy(const Stack& stack) {
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
+  }
+
+  if (lhs.isTensorList() && rhs.isTensorList()) {
+    const auto a = lhs.toTensorList();
+    const auto b = rhs.toTensorList();
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (auto i = decltype(a.size()){0}; i < a.size(); ++i) {
+      if (!a[i].equal(b[i])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   return lhs == rhs;
@@ -229,6 +238,7 @@ void checkAliasAnnotation(
   // it was created by the op.
   checkInputPreconditions(stack);
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   const auto schema = node->schema();
 
   std::vector<AliasAndIValue> inputsToCheck;

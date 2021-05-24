@@ -152,20 +152,20 @@ void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
 STD_FUNCTOR(op_name, functor_name);                 \
 OP_CUSTOM_FUNCTOR(function, op_name, functor_name); \
 
-OP(floating_half, erfc, Erfc);
-OP(floating_half, expm1, Expm1);
+OP(floating_half_bfloat16, erfc, Erfc);
+OP(floating_half_bfloat16, expm1, Expm1);
 OP(floating_half, lgamma, Lgamma);
-OP(floating_half, trunc, Truncf);
-OP(floating_half, floor, Floor);
-OP(floating_half, ceil, Ceil);
+OP(floating_half_bfloat16, trunc, Truncf);
+OP(floating_half_bfloat16, floor, Floor);
+OP(floating_half_bfloat16, ceil, Ceil);
 
-OP(floating_complex_half, acos, Acos);
-OP(floating_complex_half, asin, Asin);
-OP(floating_complex_half, atan, Atan);
-OP(floating_complex_half, cosh, Cosh);
-OP(floating_complex_half, tan, Tan);
-OP(floating_complex_half, sin, Sin);
-OP(floating_complex_half, sinh, Sinh);
+OP(floating_complex_half_bfloat16, acos, Acos);
+OP(floating_complex_half_bfloat16, asin, Asin);
+OP(floating_complex_half_bfloat16, atan, Atan);
+OP(floating_complex_half_bfloat16, cosh, Cosh);
+OP(floating_complex_half_bfloat16, tan, Tan);
+OP(floating_complex_half_bfloat16, sin, Sin);
+OP(floating_complex_half_bfloat16, sinh, Sinh);
 
 OP(floating_complex_half_bfloat16, exp, Exp);
 OP(floating_complex_half_bfloat16, tanh, Tanh);
@@ -205,8 +205,8 @@ struct Reciprocal {
 };
 
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sigmoid, Sigmoid)
-OP_CUSTOM_FUNCTOR(floating_half, round, Round)
-OP_CUSTOM_FUNCTOR(floating_half, frac, Trunc)
+OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
+OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {

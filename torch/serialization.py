@@ -332,9 +332,16 @@ def _check_dill_version(pickle_module) -> None:
 
 def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
-    """Saves an object to a disk file.
+    # Reference: https://github.com/pytorch/pytorch/issues/54354
+    # The first line of this docstring overrides the one Sphinx generates for the
+    # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
+    # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    See also: `saving-loading-tensors`
+    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)
+
+    Saves an object to a disk file.
+
+    See also: :ref:`saving-loading-tensors`
 
     Args:
         obj: saved object
@@ -348,7 +355,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
 
     .. note::
         PyTorch preserves storage sharing across serialization. See
-        `preserve-storage-sharing` for more details.
+        :ref:`preserve-storage-sharing` for more details.
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new
@@ -449,6 +456,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
 
 def _save(obj, zip_file, pickle_module, pickle_protocol):
     serialized_storages = {}
+    id_map: Dict[int, str] = {}
 
     def persistent_id(obj):
         # FIXME: the docs say that persistent_id should only return a string
@@ -458,7 +466,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = str(obj._cdata)
+            obj_key = id_map.setdefault(obj._cdata, str(len(id_map)))
             location = location_tag(obj)
             serialized_storages[obj_key] = obj
 
@@ -492,7 +500,14 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
-    """Loads an object saved with :func:`torch.save` from a file.
+    # Reference: https://github.com/pytorch/pytorch/issues/54354
+    # The first line of this docstring overrides the one Sphinx generates for the
+    # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
+    # the build environment (e.g. `<module 'pickle' from '/leaked/path').
+
+    """load(f, map_location=None, pickle_module=pickle, **pickle_load_args)
+
+    Loads an object saved with :func:`torch.save` from a file.
 
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
     which underlie tensors, specially. They are first deserialized on the

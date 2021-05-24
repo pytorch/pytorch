@@ -6,4 +6,10 @@ TORCH_LIBRARY(torch_library, m) {
   m.def("logical_and", &logical_and);
 }
 
+struct CuaevComputer : torch::CustomClassHolder {};
+
+TORCH_LIBRARY(cuaev, m) {
+  m.class_<CuaevComputer>("CuaevComputer");
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}

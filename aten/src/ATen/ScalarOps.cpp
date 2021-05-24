@@ -31,7 +31,7 @@ Tensor& scalar_fill(Tensor& self, const Scalar& value) {
 
 Tensor scalar_tensor_static(const Scalar& s, c10::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt) {
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
   auto result = at::detail::empty_cpu({}, dtype_opt, c10::nullopt, device_opt, c10::nullopt, c10::nullopt);
   scalar_fill(result, s);
   return result;

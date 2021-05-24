@@ -33,7 +33,7 @@ class AliasInfo(object):
         self.decorators = decorators
 
 alias_infos = (
-    AliasInfo('linalg.det', torch.linalg.det, 'det', torch.det,
+    AliasInfo('linalg_det', torch.linalg.det, 'det', torch.det,
               lambda d: torch.randn(10, 10, device=d),
               decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma)),
     # NOTE: only runs on CPU because it leaks CUDA memory
@@ -111,14 +111,6 @@ alias_infos = (
     AliasInfo('true_divide_', torch.Tensor.true_divide_, 'div_', torch.Tensor.div_,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
               decorators=(onlyCPU,)),
-    AliasInfo('swapdims', torch.swapdims, 'transpose', torch.transpose,
-              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
-    AliasInfo('swapdims_', torch.Tensor.swapdims_, 'transpose_', torch.Tensor.transpose_,
-              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
-    AliasInfo('swapaxes', torch.swapaxes, 'transpose', torch.transpose,
-              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
-    AliasInfo('swapaxes_', torch.Tensor.swapaxes_, 'transpose_', torch.Tensor.transpose_,
-              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
     AliasInfo('row_stack', torch.row_stack, 'vstack', torch.vstack,
               lambda d: ((torch.randn(20, device=d), torch.randn(20, device=d)))),
     AliasInfo('moveaxis', torch.moveaxis, 'movedim', torch.movedim,

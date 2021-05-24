@@ -119,7 +119,8 @@ namespace jit {
   _(TK_WITH_ITEM, "withitem", "")                \
   _(TK_AS, "as", "as")                           \
   _(TK_PROP, "property", "")                     \
-  _(TK_ELLIPSIS, "Ellipsis", "Ellipsis")
+  _(TK_ELLIPSIS, "Ellipsis", "Ellipsis")         \
+  _(TK_NONE_TYPE, "NoneType", "NoneType")
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -193,9 +194,15 @@ struct TORCH_API SharedParserData {
     if (first == '-' || first == '+' || isalpha(first))
       return false;
     const char* startptr = str.c_str() + start;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* endptr;
     torch::jit::strtod_c(startptr, &endptr);
     *len = endptr - startptr;
+    // check if the number is complex valued
+    // access is safe because string is assumed to be null terminated
+    if (endptr != nullptr && *endptr == 'j') {
+      *len += 1;
+    }
     return *len > 0;
   }
 
@@ -468,6 +475,7 @@ struct Lexer {
       case TK_WHITESPACE:
       case TK_WHITESPACE_EOF: {
         int depth =
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             r.kind == TK_WHITESPACE_EOF ? indent_stack.front() : r.range.size();
         // note: TK_WHITESPACE_EOF is whitespace right before the EOF token
         // just like we allow the code to be indented to a particular initial
@@ -499,8 +507,11 @@ struct Lexer {
     next_tokens.push_back(std::move(r));
   }
   Token lexRaw(bool whitespace_token = false) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int kind;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t start;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t length;
     AT_ASSERT(source);
     if (!shared.match(

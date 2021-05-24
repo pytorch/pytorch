@@ -61,7 +61,7 @@ decltype(auto) init(Func&& f) {
 /// a pointer to the Foo class's `myMethod()` method. `lambdaMethod()`
 /// is registered with a C++ lambda expression.
 template <class CurClass>
-class class_ : public detail::class_base {
+class class_ : public ::torch::detail::class_base {
   static_assert(std::is_base_of<CustomClassHolder, CurClass>::value,
     "torch::class_<T> requires T to inherit from CustomClassHolder");
 

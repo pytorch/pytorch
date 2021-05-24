@@ -70,7 +70,7 @@ TEST(VulkanAPITest, adaptive_avg_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
-  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
+  c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({5, 7, 47, 31}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::adaptive_avg_pool2d(in_cpu, {3, 3});
@@ -395,8 +395,8 @@ TEST(VulkanAPITest, conv2d) {
   }
 
   constexpr int64_t groups = 1;
-  constexpr std::array<int64_t, 2u> stride{1, 2};
-  constexpr std::array<int64_t, 2u> padding{3, 0};
+  constexpr std::array<int64_t, 2u> stride{2, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 1};
   //TODO: Support conv2d with dilation != 1
   constexpr std::array<int64_t, 2u> dilation{1, 1};
 
@@ -414,7 +414,7 @@ TEST(VulkanAPITest, conv2d) {
         height,
       };
     }
-  } input {1, 37, 223, 227};
+  } input {1, 3, 8, 8};
 
   constexpr struct {
     uint32_t output_channels;
@@ -430,7 +430,7 @@ TEST(VulkanAPITest, conv2d) {
         height,
       };
     }
-  } weights {83, input.channels, 13, 2};
+  } weights {1, input.channels, 3, 3};
 
   const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
   const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
@@ -452,11 +452,11 @@ TEST(VulkanAPITest, conv2d) {
       stride,
       padding,
       dilation,
-      groups);
+      groups).cpu();
 
-  const bool check = almostEqual(output_cpu, output_vulkan.cpu());
+  const bool check = almostEqual(output_cpu, output_vulkan);
   if (!check) {
-    showRtol(output_cpu, output_vulkan.cpu());
+    showRtol(output_cpu, output_vulkan);
   }
 
   ASSERT_TRUE(check);
@@ -601,6 +601,78 @@ TEST(VulkanAPITest, conv2d_pw) {
   const bool check = almostEqual(output_cpu, output_vulkan.cpu());
   if (!check) {
     showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, conv2d_winograd) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 1};
+  constexpr std::array<int64_t, 2u> padding{2, 2};
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        batches,
+        channels,
+        width,
+        height,
+      };
+    }
+  } input {1, 10, 177, 232};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        output_channels,
+        input_channels,
+        width,
+        height,
+      };
+    }
+  } weights {13, input.channels, 3, 3};
+
+  const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::rand({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::conv2d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const auto output_vulkan = at::conv2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups).cpu();
+
+  const bool check = almostEqual(output_cpu, output_vulkan);
+  if (!check) {
+    showRtol(output_cpu, output_vulkan);
   }
 
   ASSERT_TRUE(check);
@@ -853,7 +925,7 @@ TEST(VulkanAPITest, hardsigmoid_) {
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   auto vulkan = cpu.vulkan();
 
-  at::native::hardsigmoid_(cpu);
+  at::hardsigmoid_(cpu);
   at::hardsigmoid_(vulkan);
 
   const auto check = almostEqual(cpu, vulkan.cpu());
@@ -1171,7 +1243,7 @@ TEST(VulkanAPITest, reshape) {
   if (!at::is_vulkan_available()) {
     return;
   }
-  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
+  c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({47, 11, 83, 97}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -1193,7 +1265,7 @@ TEST(VulkanAPITest, reshape_) {
   if (!at::is_vulkan_available()) {
     return;
   }
-  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
+  c10::InferenceMode mode;
 
   const auto cpu = at::rand({59, 41, 19, 67}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
@@ -1202,6 +1274,44 @@ TEST(VulkanAPITest, reshape_) {
 
   cpu.reshape(shape);
   vulkan.reshape(shape);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, sigmoid) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::sigmoid(in_cpu);
+  const auto out_vulkan = at::sigmoid(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, sigmoid_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  auto vulkan = cpu.vulkan();
+
+  at::sigmoid_(cpu);
+  at::sigmoid_(vulkan);
 
   const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
@@ -1393,14 +1503,12 @@ enum class OpType {
 
 class BaseOp {
  public:
-  explicit BaseOp(const OpType type) : type_(type) {}
+  explicit BaseOp(const OpType) {}
   virtual ~BaseOp() = default;
 
   virtual at::Tensor run(at::Tensor&) const = 0;
   virtual std::string toString() const = 0;
 
- private:
-  OpType type_;
 };
 
 class Addmm final : public BaseOp {
@@ -1626,7 +1734,7 @@ TEST(VulkanAPITest, mobilenetv2) {
   if (!at::is_vulkan_available()) {
     return;
   }
-  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
+  c10::InferenceMode mode;
 
   MobileNetV2 mn2;
 

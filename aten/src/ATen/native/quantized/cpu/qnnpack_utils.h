@@ -147,6 +147,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
           convolution_op =
             std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>(convolution);
 
+          // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
           convolution->ukernel_type = conv_p.ukernel_type;
           convolution->groups = groups;
           convolution->group_input_channels = conv_p.group_input_channels;
@@ -210,6 +211,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
             }
           }
 
+          // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
           void* zero_buffer = malloc(zero_size);
           if (zero_buffer == NULL) {
             pytorch_qnnp_delete_operator(convolution);

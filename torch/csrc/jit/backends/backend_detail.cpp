@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 
-#include <ATen/core/builtin_function.h>
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 
@@ -10,46 +12,6 @@
 namespace torch {
 namespace jit {
 namespace detail {
-c10::FunctionSchema getIsAvailableSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument available("available", c10::BoolType::get());
-  c10::FunctionSchema preprocessor_schema(
-      "is_available",
-      /*overload_name=*/"",
-      /*arguments=*/{self},
-      /*returns=*/{available});
-  return preprocessor_schema;
-}
-
-c10::FunctionSchema getCompileSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument mod("processed", c10::AnyType::get());
-  auto any_dict_ty =
-      c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
-  c10::Argument method_compile_spec("method_compile_spec", any_dict_ty);
-  c10::Argument handles("handles", any_dict_ty);
-
-  c10::FunctionSchema compile_schema(
-      "compile",
-      /*overload_name=*/"",
-      /*arguments=*/{self, mod, method_compile_spec},
-      /*returns=*/{handles});
-  return compile_schema;
-}
-
-c10::FunctionSchema getExecuteSchema() {
-  auto any_list_ty = c10::ListType::create(c10::AnyType::get());
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument handle("handle", c10::AnyType::get());
-  c10::Argument input("input", any_list_ty);
-  c10::Argument output("output", any_list_ty);
-  return c10::FunctionSchema(
-      "execute",
-      /*overload_name=*/"",
-      /*arguments=*/{self, handle, input},
-      /*returns=*/{output});
-}
-
 namespace {
 std::unordered_map<std::string, BackendPreprocessFunction>&
 backendPreprocessFunctions() {
@@ -90,11 +52,7 @@ Module codegen_backend_module(
     const c10::Dict<IValue, IValue>& method_compile_spec,
     const c10::DictTypePtr& any_dict_ty) {
   const c10::QualifiedName qual_backend_name(
-      {"__torch__",
-       "torch",
-       "classes",
-       detail::kBackendsNamespace,
-       backend_name});
+      {"__torch__", "torch", "classes", kBackendsNamespace, backend_name});
   // TODO: Validate method_compile_spec.
 
   // Clone orig_module to make sure backend transformation is
@@ -106,6 +64,12 @@ Module codegen_backend_module(
       "torch.jit." + backend_name + "LoweredModule",
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
+
+  // 1. Initialized debug info recorder.
+  // 2. Later call debug_info_recorder.stopRecording() to gather
+  //    recorded debug info and save it in __backend_debug_info.
+  BackendDebugInfoRecorder debug_info_recorder;
+  WithBackendDebugInfoRecorder recorder_context(&debug_info_recorder);
 
   // Generate attributes.
   // This is the preprocessed module.
@@ -168,6 +132,43 @@ Module codegen_backend_module(
             )",
       loweredModuleResolver());
 
+  // backend_debug_info_class is an instance of BackendDebugInfo that
+  // stores debug information.
+  // The purpose of this class is to make the debug information available
+  // at model saving time for serializing it outside of the lowered module,
+  // while still tying it to the module's lifetime (so it gets destroyed along
+  // with it).
+  // Whereas this information is not serialized as part of the lowered
+  // module, we still need to provide a valid instance of the
+  // BackendDebugInfo class when the lowered module is deserialized.
+  // Since the deserialized modules does not need this information,
+  // we create a "dummy" instance with no extra code dependencies (to avoid
+  // overhead) when the backend is created in __setstate__.
+  c10::intrusive_ptr<torch::CustomClassHolder> backend_debug_info_class;
+  const c10::QualifiedName backend_debug_info_class_name(
+      {"__torch__",
+       "torch",
+       "classes",
+       kBackendUtilsNamespace,
+       kBackendDebugInfoClass});
+  auto debug_info_cls =
+      getCustomClass(backend_debug_info_class_name.qualifiedName());
+  TORCH_CHECK(debug_info_cls, "BackendDebugInfo class must be available.");
+  loweredModule.register_attribute(
+      "__backend_debug_info",
+      OptionalType::create(debug_info_cls),
+      IValue::make_capsule(backend_debug_info_class));
+  static const auto create_backend_debug_info_ct = CodeTemplate(R"(
+            def __create_backend_debug_info(self):
+                self.__backend_debug_info = $backend_debug_info()
+            )");
+  TemplateEnv create_backend_debug_info_te;
+  create_backend_debug_info_te.s(
+      "backend_debug_info", backend_debug_info_class_name.qualifiedName());
+  loweredModule.define(
+      create_backend_debug_info_ct.format(create_backend_debug_info_te),
+      loweredModuleResolver());
+
   // getstate and setstate are for serialization/deserialization of
   // the LoweredModule.
   // setstate is in charge of initializing self.__backend by invoking
@@ -192,6 +193,7 @@ Module codegen_backend_module(
                 # state[2] indicates whether to create the backend instance.
                 if state[2]:
                     self.__create_backend()
+                    self.__create_backend_debug_info()
                 if self.__backend.is_available() :
                     self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
                 else:
@@ -318,6 +320,14 @@ Module codegen_backend_module(
         "] is not available. Execution of this Module is still possible by "
         "saving and loading on a device where the backend is available.");
   }
+
+  // stop debug info recording and get debug_info_map
+  auto debug_info_map = debug_info_recorder.stopRecording();
+  loweredModule.run_method("__create_backend_debug_info");
+  auto backend_debug_info = loweredModule.attr("__backend_debug_info")
+                                .toCustomClass<PyTorchBackendDebugInfo>();
+  backend_debug_info->setDebugInfoMap(std::move(debug_info_map));
+
   return loweredModule;
 }
 } // namespace detail

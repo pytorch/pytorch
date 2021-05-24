@@ -20,10 +20,10 @@ struct LoadImpl {
 };
 
 template <typename scalar_t>
-struct LoadImpl<Vec256<scalar_t>> {
-  static Vec256<scalar_t> load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
+struct LoadImpl<Vectorized<scalar_t>> {
+  static Vectorized<scalar_t> load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
     auto *ptr = data + index * stride;
-    return Vec256<scalar_t>::loadu(ptr);
+    return Vectorized<scalar_t>::loadu(ptr);
   }
 };
 
@@ -42,6 +42,7 @@ template <typename scalar_t, size_t numel>
 void accumulate_result(char * C10_RESTRICT data, int64_t stride, int64_t index,
     const std::array<scalar_t, numel> &values) {
   auto *base_ptr = data + stride * index;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int64_t k = 0; k < numel; ++k) {
     accumulate_result(base_ptr, stride, k, values[k]);
   }
@@ -104,6 +105,7 @@ std::array<scalar_t, nrows> multi_row_sum(
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   scalar_t acc[num_levels][nrows];
   std::fill_n(&acc[0][0], num_levels * nrows, scalar_t(0));
 
@@ -154,6 +156,7 @@ std::array<scalar_t, nrows> multi_row_sum(
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<scalar_t, nrows> ret;
   for (int64_t k = 0; k < nrows; ++k) {
     ret[k] = acc[0][k];
@@ -184,9 +187,10 @@ scalar_t row_sum(const char * C10_RESTRICT in_data,
 
 template <typename scalar_t>
 void vectorized_inner_sum(
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     char * C10_RESTRICT data[2], int64_t outer_stride, int64_t out_stride,
     int64_t size0, int64_t size1) {
-  using vec_t = Vec256<scalar_t>;
+  using vec_t = Vectorized<scalar_t>;
   constexpr int64_t vec_stride = vec_t::size() * sizeof(scalar_t);
   const int64_t vec_size = size0 / vec_t::size();
 
@@ -200,6 +204,7 @@ void vectorized_inner_sum(
       final_acc += load<scalar_t>(row_in, sizeof(scalar_t), k);
     }
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     scalar_t partials[vec_t::size()];
     vec_acc.store(partials);
     for (int64_t k = 0; k < vec_t::size(); ++k) {
@@ -211,6 +216,7 @@ void vectorized_inner_sum(
 
 template <typename scalar_t>
 void scalar_inner_sum(
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     char * C10_RESTRICT data[2], int64_t in_strides[2], int64_t out_stride,
     int64_t size0, int64_t size1) {
   for (int64_t j = 0; j < size1; ++j) {
@@ -222,9 +228,10 @@ void scalar_inner_sum(
 
 template <typename scalar_t>
 void vectorized_outer_sum(
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     char * C10_RESTRICT data[2], int64_t inner_stride, int64_t out_stride,
     int64_t size0, int64_t size1) {
-  using vec_t = Vec256<scalar_t>;
+  using vec_t = Vectorized<scalar_t>;
   constexpr int64_t nrows = 4;
   constexpr int64_t vec_stride = vec_t::size() * sizeof(scalar_t);
 
@@ -237,6 +244,7 @@ void vectorized_outer_sum(
     for (int64_t i = 0; i < nrows; ++i) {
       const int64_t base_idx = j + i * vec_t::size();
 
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       std::array<scalar_t, vec_t::size()> ans;
       sums[i].store(ans.data());
       accumulate_result(data[0], out_stride, base_idx, ans);
@@ -247,6 +255,7 @@ void vectorized_outer_sum(
     const auto *row_in = data[1] + j * sizeof(scalar_t);
     const vec_t sums = row_sum<vec_t>(row_in, inner_stride, size0);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<scalar_t, vec_t::size()> ans;
     sums.store(ans.data());
     accumulate_result(data[0], out_stride, j, ans);
@@ -261,6 +270,7 @@ void vectorized_outer_sum(
 
 template <typename scalar_t>
 void scalar_outer_sum(
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     char * C10_RESTRICT data[2], int64_t in_strides[2], int64_t out_stride,
     int64_t size0, int64_t size1) {
 
@@ -286,7 +296,7 @@ void sum_kernel_impl(TensorIterator &iter) {
       [&] {
         binary_kernel_reduce_vec(
             iter, [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-            [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
+            [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return a + b; });
       });
     return;
   }
@@ -298,7 +308,9 @@ void sum_kernel_impl(TensorIterator &iter) {
       iter.output().fill_(scalar_t(0));
       iter.parallel_reduce(
         [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
+          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
           int64_t in_strides[] = { strides[1], strides[3] };
+          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
           int64_t out_strides[] = { strides[0], strides[2] };
 
           // Move reduction to be the 1st dim
@@ -310,9 +322,12 @@ void sum_kernel_impl(TensorIterator &iter) {
 
           // Special case? - not a true reduction
           if (out_strides[0] != 0 && out_strides[1] != 0) {
+            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
             int64_t outer_strides[] = { strides[2], strides[3] };
             UNARY_OUTER_LOOP(data, outer_strides, size1, [&] {
+              // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
               char* ptrs[3] = { data[0], data[0], data[1] };
+              // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
               int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
               basic_loop(ptrs, inner_strides, 0, size0, [](scalar_t a, scalar_t b) { return a + b; });
             });
@@ -322,10 +337,10 @@ void sum_kernel_impl(TensorIterator &iter) {
           const int64_t out_stride = out_strides[1];
           TORCH_INTERNAL_ASSERT(out_strides[0] == 0);
 
-          if (in_strides[0] == sizeof(scalar_t) && size0 >= Vec256<scalar_t>::size()) {
+          if (in_strides[0] == sizeof(scalar_t) && size0 >= Vectorized<scalar_t>::size()) {
             // Contiguous inner reduction
             vectorized_inner_sum<scalar_t>(data, in_strides[1], out_stride, size0, size1);
-          } else if (in_strides[1] == sizeof(scalar_t) && size1 >= Vec256<scalar_t>::size()) {
+          } else if (in_strides[1] == sizeof(scalar_t) && size1 >= Vectorized<scalar_t>::size()) {
             // Contiguous outer reduction
             vectorized_outer_sum<scalar_t>(data, in_strides[0], out_stride, size0, size1);
           } else if (in_strides[0] < in_strides[1]) {
@@ -339,6 +354,7 @@ void sum_kernel_impl(TensorIterator &iter) {
 
 }  // namespace (anonymous)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 
 }}  // namespace at::native

@@ -24,6 +24,8 @@ from torch._jit_internal import _qualified_name, is_scripting, get_callable_argu
 from torch.autograd import function
 from torch.nn import Module
 
+from torch.testing._core import _get_default_tolerance
+
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 
@@ -217,7 +219,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     # TODO: Consider adding a utility function to torch.jit to test
     # for this case
-    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore
+    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore[attr-defined]
         raise TypeError(
             "Cannot verify an uncompiled module.  Add @torch.jit.compile to compile it"
         )
@@ -487,7 +489,7 @@ def _check_trace(
                         orig.double(),
                         ref.double(),
                         rtol=check_tolerance,
-                        atol=torch.testing._get_default_tolerance(orig, ref)[1],
+                        atol=_get_default_tolerance(orig, ref)[1],
                     )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
@@ -1017,7 +1019,7 @@ class TracedModule(ScriptModule):
         class QualnameWrapper(torch.nn.Module):
             pass
 
-        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore[attr-defined]
             type(orig)
         )
 
@@ -1109,11 +1111,11 @@ def _script_if_tracing(fn):
             # Not tracing, don't do anything
             return fn(*args, **kwargs)
 
-        compiled_fn = script(wrapper.__original_fn)  # type: ignore
+        compiled_fn = script(wrapper.__original_fn)  # type: ignore[attr-defined]
         return compiled_fn(*args, **kwargs)
 
-    wrapper.__original_fn = fn  # type: ignore
-    wrapper.__script_if_tracing_wrapper = True  # type: ignore
+    wrapper.__original_fn = fn  # type: ignore[attr-defined]
+    wrapper.__script_if_tracing_wrapper = True  # type: ignore[attr-defined]
 
     return wrapper
 

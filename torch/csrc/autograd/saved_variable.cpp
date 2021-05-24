@@ -16,6 +16,26 @@ namespace torch { namespace autograd {
 
 SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view) {
   if (variable.defined()) {
+    // Note [Inference tensor cannot be saved for backward]
+    // Invariant:
+    //   You can't save an inference tensor for backwards.
+    // If an inference tensor was saved for backward in an autograd session and
+    // then you reenter inference mode and make an inplace update to the tensor
+    // without bumping version_counter, it'll lead to silent wrong result when
+    // you do backward() for the previous autograd session.  Technically we don't
+    // have to check here since it'll fail when querying `current_version` on
+    // the inference tensor, but we can give a much better error message here.
+    //
+    // Note in the documentation we say "inference tensor cannot participate
+    // in autograd" which is more restrictive than the invariant.  In practice
+    // the check is more permissive and only error out when an inference tensor
+    // is saved for backward.  Whether a tensor is saved for backward is determined
+    // by derivative formula and thus varies op by op, so by saying "no inference
+    // tensor in autograd" it's easier for users to understand and follow.
+    TORCH_CHECK(!variable.unsafeGetTensorImpl()->is_inference_tensor(),
+      "Inference tensors cannot be saved for backward. To work around "
+      "you can make a clone to get a normal tensor and use it in autograd.")
+
     was_default_constructed_ = false;
     output_nr_ = variable.output_nr();
     requires_grad_ = variable.requires_grad();
@@ -119,9 +139,12 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* ERR_BACKWARD_TWICE =
-    "Trying to backward through the graph a second time, but the saved intermediate "
-    "results have already been freed. Specify retain_graph=True when calling "
-    ".backward() or autograd.grad() the first time.";
+    "Trying to backward through the graph a second time (or directly access saved "
+    "variables after they have already been freed). Saved intermediate values "
+    "of the graph are freed when you call .backward() or autograd.grad(). Specify "
+    "retain_graph=True if you need to backward through the graph a second time or "
+    "if you need to access saved variables after calling backward.";
 
 }} // namespace torch::autograd

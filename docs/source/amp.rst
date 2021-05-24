@@ -104,6 +104,7 @@ Ops that can autocast to ``float16``
 ``baddbmm``,
 ``bmm``,
 ``chain_matmul``,
+``multi_dot``,
 ``conv1d``,
 ``conv2d``,
 ``conv3d``,
@@ -141,6 +142,7 @@ Ops that can autocast to ``float32``
 ``exp``,
 ``expm1``,
 ``gelu``,
+``grid_sample``,
 ``group_norm``,
 ``hinge_embedding_loss``,
 ``kl_div``,
@@ -191,6 +193,7 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``dot``,
 ``equal``,
 ``index_put``,
+``scatter_add``,
 ``stack``,
 ``tensordot``
 

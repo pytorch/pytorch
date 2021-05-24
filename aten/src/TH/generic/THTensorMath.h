@@ -21,15 +21,13 @@ TH_API void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src,
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim);
-TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 TH_API void THTensor_(renorm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, scalar_t maxnorm);
 TH_API void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue);
 
-TH_API accreal THTensor_(var_all)(THTensor *self, bool unbiased);
-TH_API accreal THTensor_(std_all)(THTensor *self, bool unbiased);
+TH_API accreal THTensor_(std_var_all)(THTensor* self, int64_t correction, bool take_sqrt);
 
 #endif
 #endif

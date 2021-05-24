@@ -111,6 +111,7 @@ private:
 
 struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
 
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     ForwardGrad() {}
 
     // This function must only be called when AutogradMeta or SavedVariable is being
@@ -184,10 +185,5 @@ private:
     mutable std::mutex mutex_;
 
 };
-
-// Temporary functions to disable forward AD
-// TODO(alband) remove these when perf issues are solved
-bool TORCH_API isForwardADEnabled();
-void TORCH_API setForwardADEnabled(bool value);
 
 }} // namespace torch::autograd

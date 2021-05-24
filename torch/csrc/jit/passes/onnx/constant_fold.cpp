@@ -28,6 +28,7 @@ enum OnnxType : int {
   ONNX_UINT32,
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
@@ -146,6 +147,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
     axes.reserve(inputTensorValues[3].sizes()[0]);
     // ONNX slice accepts negative axis, fix this for aten op
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < inputTensorValues[3].sizes()[0]; ++i) {
       axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size()
                               : axes_a[i];
@@ -170,6 +172,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
       return c10::nullopt;
     }
     auto steps_a = inputTensorValues[4].accessor<int64_t, 1>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < inputTensorValues[4].sizes()[0]; ++i) {
       // Only steps == 1 are supported for constant-folding.
       if (steps_a[i] != 1) {
@@ -183,6 +186,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
   auto starts_a = inputTensorValues[1].accessor<int64_t, 1>();
   auto ends_a = inputTensorValues[2].accessor<int64_t, 1>();
   auto updated_val = inputTensorValues[0];
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
     // ONNX slice accepts negative starts and ends values.
     int64_t start = starts_a[i], end = ends_a[i], axis = axes[i];
@@ -328,7 +332,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::nullopt;
     }
   } else if (node->kind() == onnx::Squeeze) {
-    assert(inputTensorValues.size() == 2 or inputTensorValues.size() == 1);
+    assert(inputTensorValues.size() == 2 || inputTensorValues.size() == 1);
     if (opset_version == ONNX_OPSET_13) {
       // Squeeze version 13 input axes is optional, inputTensorValues.size() ==
       // 1 means axes equal to None
