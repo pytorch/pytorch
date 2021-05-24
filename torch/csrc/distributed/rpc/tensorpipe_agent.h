@@ -176,7 +176,7 @@ class TensorPipeAgent : public RpcAgent {
 
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      c10::intrusive_ptr<Message> message,
+      Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
       const DeviceMap& deviceMap = {}) override;
 
@@ -234,16 +234,16 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       std::function<void(
           const tensorpipe::Error&,
-          c10::intrusive_ptr<Message>,
+          Message&&,
           std::shared_ptr<LazyStreamContext>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
   void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      c10::intrusive_ptr<Message> message,
+      Message&& message,
       std::vector<c10::Device>&& devices,
-      std::vector<c10::Stream> streams,
+      std::shared_ptr<LazyStreamContext> ctx,
       std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
@@ -258,7 +258,7 @@ class TensorPipeAgent : public RpcAgent {
       std::shared_ptr<tensorpipe::Pipe>& pipe,
       JitFuture& futureResponseMessage,
       uint64_t messageId,
-      std::vector<c10::Stream> stream);
+      std::shared_ptr<LazyStreamContext> ctx);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(
@@ -436,7 +436,7 @@ class TensorPipeAgent : public RpcAgent {
   // Helpers to set the state of the requests.
   void markFutureAsComplete(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
-      c10::intrusive_ptr<Message> message,
+      Message message,
       std::shared_ptr<LazyStreamContext> ctx);
   void markFutureWithError(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
