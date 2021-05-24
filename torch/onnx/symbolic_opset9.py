@@ -1999,7 +1999,7 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
-def repeat_interleave(g, self, repeats, dim=None):
+def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array

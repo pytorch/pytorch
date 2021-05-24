@@ -182,7 +182,7 @@ TEST(TensorIteratorTest, SerialLoopSingleThread) {
 TEST(TensorIteratorTest, InputDType) {
   auto iter = at::TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .add_output(at::ones({1, 1}, at::dtype(at::kBool)))
+      .add_owned_output(at::ones({1, 1}, at::dtype(at::kBool)))
       .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
       .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .build();
@@ -194,7 +194,7 @@ TEST(TensorIteratorTest, InputDType) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIteratorConfig()
-      .add_output(at::ones({1, 1}, at::dtype(at::kBool)))
+      .add_owned_output(at::ones({1, 1}, at::dtype(at::kBool)))
       .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
       .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .promote_inputs_to_common_dtype(true)
@@ -209,7 +209,7 @@ TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
 TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .add_output(at::ones({1, 1}, at::dtype(at::kLong)))
+      .add_owned_output(at::ones({1, 1}, at::dtype(at::kLong)))
       .add_owned_input(at::ones({1, 1}, at::dtype(at::kFloat)))
       .add_owned_input(at::ones({1, 1}, at::dtype(at::kDouble)))
       .build();
