@@ -74,6 +74,7 @@ WINDOWS_WORKFLOWS = [
         build_environment="pytorch-win-vs2019-cpu-py3",
         cuda_version="cpu",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
+        on_pull_request=True
     ),
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cuda10-cudnn7-py3",
