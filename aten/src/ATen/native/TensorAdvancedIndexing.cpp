@@ -1189,9 +1189,10 @@ TORCH_IMPL_FUNC(scatter_add)
     torch::List<c10::optional<Tensor>> indices;
     indices.reserve(1);
     indices.push_back(index);
-    return mut_out.index_put_(indices, src, true);
+    mut_out.index_put_(indices, src, true);
+  } else {
+    scatter_add_stub(self.device().type(), mut_out, dim, index, src);
   }
-  scatter_add_stub(self.device().type(), mut_out, dim, index, src);
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
