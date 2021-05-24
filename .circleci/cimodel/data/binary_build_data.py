@@ -37,7 +37,7 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
         "3.8m",
         "3.9m"
     ],
-    # conda=dimensions.STANDARD_PYTHON_VERSIONS,
+    conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
         "3.7m",
     ],
@@ -45,28 +45,28 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
 
 CONFIG_TREE_DATA = OrderedDict(
     linux=(dimensions.GPU_VERSIONS, LINUX_PACKAGE_VARIANTS),
-    # macos=([None], OrderedDict(
-    #     wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-    #     conda=dimensions.STANDARD_PYTHON_VERSIONS,
-    #     libtorch=[
-    #         "3.7",
-    #     ],
-    # )),
-    # macos_arm64=([None], OrderedDict(
-    #     wheel=[
-    #         "3.8",
-    #         "3.9",
-    #     ],
-    #     conda=[
-    #         "3.8",
-    #         "3.9",
-    #     ],
-    # )),
+    macos=([None], OrderedDict(
+        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        libtorch=[
+            "3.7",
+        ],
+    )),
+    macos_arm64=([None], OrderedDict(
+        wheel=[
+            "3.8",
+            "3.9",
+        ],
+        conda=[
+            "3.8",
+            "3.9",
+        ],
+    )),
     windows=(
         [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS],
         OrderedDict(
             wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-            # conda=dimensions.STANDARD_PYTHON_VERSIONS,
+            conda=dimensions.STANDARD_PYTHON_VERSIONS,
             libtorch=[
                 "3.7",
             ],
@@ -83,7 +83,7 @@ CONFIG_TREE_DATA = OrderedDict(
 # Libtorch with new gcc ABI is built with gcc 5.4 on Ubuntu 16.04.
 LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
     manywheel=['devtoolset7'],
-    # conda=['devtoolset7'],
+    conda=['devtoolset7'],
     libtorch=[
         "devtoolset7",
         "gcc5.4_cxx11-abi",
@@ -126,6 +126,10 @@ class PackageFormatConfigNode(ConfigNode):
         self.props["python_versions"] = python_versions
         self.props["package_format"] = package_format
 
+        # XXX Disabling conda for 11.3 as there's currently no appropriate cudatoolkit available
+        if package_format == "conda":
+            self.props["gpu_versions"] = filter(lambda x: x != "cuda113", self.find_prop("gpu_versions"))
+
     def get_children(self):
         if self.find_prop("os_name") == "linux":
             return [LinuxGccConfigNode(self, v) for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]]
@@ -150,9 +154,8 @@ class LinuxGccConfigNode(ConfigNode):
             gpu_versions = filter(lambda x: x != "cuda_90", gpu_versions)
 
         # XXX disabling conda rocm build since docker images are not there
-        # XXX Also disabling conda for 11.3 as there's currently no appropriate cudatoolkit available
         if self.find_prop("package_format") == 'conda':
-            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS + ["113"], gpu_versions)
+            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
 
         # XXX libtorch rocm build  is temporarily disabled
         if self.find_prop("package_format") == 'libtorch':
