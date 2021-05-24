@@ -659,29 +659,31 @@ void backportAllVersionCheck(
   constexpr int64_t minimum_to_version = 4;
   int64_t current_to_version = from_version - 1;
 
-  std::ostringstream oss;
   // Verify all candidate to_version work as expected. All backport to version
   // larger than minimum_to_version should success.
   while (current_to_version >= minimum_to_version) {
-    oss.clear();
+    // Do not declare std::stringstream oss outside of the while loop and use
+    // oss.clear() oss.clear() only clears out error state flag in stringstream,
+    // while the content is the same. It's cleaner to just declare a new one and
+    // swap
+    std::stringstream oss;
     bool backPortSuccess =
         _backport_for_mobile(test_model_file_stream, oss, current_to_version);
     AT_ASSERT(backPortSuccess);
 
     // Check backport model version
-    std::stringstream iss(oss.str());
-    auto backport_version = _get_model_bytecode_version(iss);
+    auto backport_version = _get_model_bytecode_version(oss);
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
-        iss, input_data, expect_result_list, current_to_version);
+        oss, input_data, expect_result_list, current_to_version);
 
     current_to_version--;
   }
   //  backport to minimum version - 1 should fail
-  oss.clear();
+  std::stringstream oss;
   bool backPortSuccess =
       _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
   AT_ASSERT(!backPortSuccess);
