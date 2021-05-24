@@ -196,7 +196,7 @@ class Flake8(Check):
                     return False
             return True
 
-        files = self.filter_ext(files, {"py"})
+        files = self.filter_ext(files, {".py"})
         return [f for f in files if should_include(f)]
 
     async def quick(self, files: List[str]) -> CommandResult:
@@ -210,7 +210,7 @@ class Mypy(Check):
     name = "mypy (skipped typestub generation)"
 
     def filter_files(self, files: List[str]) -> List[str]:
-        return self.filter_ext(files, {"py", "pyi"})
+        return self.filter_ext(files, {".py", ".pyi"})
 
     def env(self) -> Dict[str, Any]:
         env = os.environ.copy()
@@ -266,7 +266,7 @@ class ShellCheck(Check):
     name = "shellcheck: Run ShellCheck"
 
     def filter_files(self, files: List[str]) -> List[str]:
-        return self.filter_ext(files, {"sh"})
+        return self.filter_ext(files, {".sh"})
 
     async def quick(self, files: List[str]) -> CommandResult:
         return await shell_cmd(
