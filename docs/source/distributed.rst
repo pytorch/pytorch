@@ -361,6 +361,9 @@ is guaranteed to support two methods:
 * ``wait()`` - in the case of CPU collectives, will block the process until the operation is completed. In the case
   of CUDA collectives, will block until the operation has been successfully enqueued onto a CUDA stream and the
   output can be utilized on the default stream without further synchronization.
+* ``get_future()`` - returns ``torch._C.Future`` object. Supported for NCCL, also supported for most operations on GLOO
+  and MPI, except for peer to peer operations.
+  Note: as we continue adopting Futures and merging APIs, ``get_future()`` call might become redundant.
 
 **Example**
 
@@ -416,6 +419,8 @@ Collective functions
 
 .. autofunction:: barrier
 
+.. autofunction:: monitored_barrier
+
 .. autoclass:: ReduceOp
 
 .. class:: reduce_op
@@ -424,6 +429,22 @@ Collective functions
     ``MIN``, and ``MAX``.
 
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
+
+Profiling Collective Communication
+-----------------------------------------
+
+Note that you can use ``torch.profiler`` (recommended, only available after 1.8.1)  or ``torch.autograd.profiler`` to profile collective communication and point-to-point communication APIs mentioned here. All out-of-the-box backends (``gloo``,
+``nccl``, ``mpi``) are supported and collective communication usage will be rendered as expected in profiling output/traces. Profiling your code is the same as any regular torch operator:
+
+::
+
+    import torch
+    import torch.distributed as dist
+    with torch.profiler():
+        tensor = torch.randn(20, 10)
+        dist.all_reduce(tensor)
+
+Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
 
 Autograd-enabled communication primitives
 -----------------------------------------

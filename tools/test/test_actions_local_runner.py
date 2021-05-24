@@ -59,22 +59,23 @@ if sys.version_info >= (3, 8):
 
             result = f.getvalue()
             self.assertIn("say hello", result)
-            self.assertIn("hi", result)
 
     class TestEndToEnd(unittest.TestCase):
         expected = [
-            "✓ quick-checks: Extract scripts from GitHub Actions workflows",
-            "✓ cmakelint: Run cmakelint",
-            "✓ quick-checks: Ensure no direct cub include",
-            "✓ quick-checks: Ensure no unqualified type ignore",
-            "✓ quick-checks: Ensure no unqualified noqa",
-            "✓ quick-checks: Ensure canonical include",
-            "✓ quick-checks: Ensure no non-breaking spaces",
-            "✓ quick-checks: Ensure no tabs",
-            "✓ flake8",
-            "✓ quick-checks: Ensure correct trailing newlines",
-            "✓ quick-checks: Ensure no trailing spaces",
-            "✓ quick-checks: Run ShellCheck",
+            "cmakelint: Run cmakelint",
+            "quick-checks: Ensure no direct cub include",
+            "quick-checks: Ensure no unqualified type ignore",
+            "quick-checks: Ensure no unqualified noqa",
+            "quick-checks: Ensure canonical include",
+            "quick-checks: Ensure no non-breaking spaces",
+            "quick-checks: Ensure no tabs",
+            "flake8",
+            "quick-checks: Ensure correct trailing newlines",
+            "quick-checks: Ensure no trailing spaces",
+            "shellcheck: Regenerate workflows",
+            "shellcheck: Assert that regenerating the workflows didn't change them",
+            "shellcheck: Extract scripts from GitHub Actions workflows",
+            "shellcheck: Run ShellCheck",
         ]
 
         def test_lint(self):
@@ -85,7 +86,7 @@ if sys.version_info >= (3, 8):
             for line in self.expected:
                 self.assertIn(line, stdout)
 
-            self.assertIn("✓ mypy", stdout)
+            self.assertIn("mypy", stdout)
 
         def test_quicklint(self):
             cmd = ["make", "quicklint", "-j", str(multiprocessing.cpu_count())]
@@ -96,7 +97,7 @@ if sys.version_info >= (3, 8):
                 self.assertIn(line, stdout)
 
             # TODO: See https://github.com/pytorch/pytorch/issues/57967
-            # self.assertIn("✓ mypy (skipped typestub generation)", stdout)
+            self.assertIn("mypy (skipped typestub generation)", stdout)
 
 
     class TestQuicklint(unittest.IsolatedAsyncioTestCase):
@@ -105,7 +106,10 @@ if sys.version_info >= (3, 8):
             os.path.join("torch", "some_cool_file.py"),
             os.path.join("aten", "some_cool_file.py"),
             os.path.join("torch", "some_stubs.pyi"),
+            os.path.join("test.sh"),
         ]
+        test_py_files = [f for f in test_files if f.endswith(".py") or f.endswith(".pyi")]
+        test_sh_files = [f for f in test_files if f.endswith(".sh")]
         maxDiff = None
 
         def setUp(self, *args, **kwargs):
@@ -131,7 +135,7 @@ if sys.version_info >= (3, 8):
         async def test_flake8(self):
             f = io.StringIO()
             with contextlib.redirect_stdout(f):
-                await actions_local_runner.run_flake8(self.test_files, True)
+                await actions_local_runner.run_flake8(self.test_py_files, True)
 
             # Should exclude the caffe2/ file
             expected = textwrap.dedent("""
@@ -140,6 +144,14 @@ if sys.version_info >= (3, 8):
                 aten/some_cool_file.py:4:21: W292 no newline at end of file
             """).lstrip("\n")
             self.assertEqual(expected, f.getvalue())
+
+        async def test_shellcheck(self):
+            f = io.StringIO()
+            with contextlib.redirect_stdout(f):
+                await actions_local_runner.run_shellcheck(self.test_sh_files, True)
+
+            self.assertIn("SC2148: Tips depend on target shell", f.getvalue())
+            self.assertIn("SC2283: Remove spaces around = to assign", f.getvalue())
 
         async def test_mypy(self):
             self.maxDiff = None
@@ -161,7 +173,7 @@ if sys.version_info >= (3, 8):
                     redirect=True,
                 )
 
-                await actions_local_runner.run_mypy(self.test_files, True)
+                await actions_local_runner.run_mypy(self.test_py_files, True)
 
 
             # Should exclude the aten/ file; also, apparently mypy
