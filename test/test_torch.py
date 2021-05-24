@@ -5708,11 +5708,21 @@ else:
                     with self.assertRaises(RuntimeError):
                         dest.masked_scatter_(mask, src)
 
+                # empty tensor
+                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+                mask = torch.empty_like(dest, dtype=maskType, device=device)
+                src = torch.empty((0,), dtype=dt, device=device)
+                dest.masked_scatter_(mask, src)
+
+                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+                mask = torch.empty((5, 1, 5), dtype=maskType, device=device)
+                src = torch.empty((0,), dtype=dt, device=device)
+                dest.masked_scatter_(mask, src)
 
         if self.device_type != 'cuda':
-            self.assertEqual(len(w), 3)
+            self.assertEqual(len(w), 5)
         else:
-            self.assertEqual(len(w), 2)
+            self.assertEqual(len(w), 4)
 
         warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
         for wi in w:

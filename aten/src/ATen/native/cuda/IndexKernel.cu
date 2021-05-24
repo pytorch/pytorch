@@ -373,6 +373,10 @@ template <typename mask_t>
 void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
   auto srcSize = source.numel();
 
+  if (srcSize == 0) {
+    return;
+  }
+
   auto mask_cont = mask.contiguous();
 
   // Use a prefix sum to determine the output locations of the masked elements
