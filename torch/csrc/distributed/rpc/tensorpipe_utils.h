@@ -49,9 +49,9 @@ struct TensorpipeReadBuffers {
 // data that must be kept alive while the write is performed asynchronously.
 TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
 tensorpipeSerialize(
-    c10::intrusive_ptr<Message> rpcMessage,
+    Message&& rpcMessage,
     std::vector<c10::Device> devices,
-    const std::vector<c10::Stream>& streams);
+    const std::shared_ptr<LazyStreamContext>& ctx);
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
@@ -60,12 +60,12 @@ tensorpipeSerialize(
 TORCH_API std::pair<tensorpipe::Allocation, TensorpipeReadBuffers>
 tensorpipeAllocate(
     const tensorpipe::Descriptor& tpDescriptor,
-    const std::vector<c10::Stream>& streams);
+    const std::shared_ptr<LazyStreamContext>& ctx);
 
 // Convert a TensorPipe message back into an RPC message. This requires the data
 // to be available and can thus only be performed once the asynchronous read has
 // completed. The holder can be destroyed once this function returns.
-TORCH_API c10::intrusive_ptr<Message> tensorpipeDeserialize(
+TORCH_API Message tensorpipeDeserialize(
     tensorpipe::Descriptor&& tpDescriptor,
     TensorpipeReadBuffers&& holder);
 
