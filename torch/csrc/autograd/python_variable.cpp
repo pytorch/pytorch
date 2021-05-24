@@ -156,14 +156,12 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
     // In this case, the only way to get a new reference to the grad_fn is by using
     // this python object, which requires the GIL to be accessed.
 
-  // std::cout<<"Traversing "<<(int64_t)self<<" "<< tensor.sizes() << ", use: "<<tensor.use_count()<<std::endl;
     if (tensor.use_count() == 1) {
       auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
         int blah = grad_fn? -1:grad_fn.use_count();
-  // std::cout<<"Traversing "<< tensor.sizes() << ", grad: "<< blah <<std::endl;
         if (grad_fn && grad_fn.use_count() == 1) {
           // All Node can have a pyobj (stored in "pyobj_")
           Py_VISIT(grad_fn->pyobj());
@@ -180,7 +178,6 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
         Py_VISIT(pyhook->dict);
       }
     }
-  // std::cout<<"Done traversing "<< tensor.sizes() <<std::endl;
   }
 
   return 0;
