@@ -5504,6 +5504,7 @@ class TestNN(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
+    @skipIfRocm
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -16222,8 +16223,7 @@ class TestNNDeviceType(NNTestCase):
         # Test meta module instantiation.
         input = torch.randn(5, 10, device=device, dtype=dtype)
         m = MyModule(10, 1, device='meta', dtype=dtype)
-        with self.assertRaises(NotImplementedError):
-            m(input)
+        m(input)
 
         # Test materializing meta module on a real device.
         m.to_empty(device=device)
@@ -16234,8 +16234,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Test creating meta module from materialized module.
         m.to_empty(device='meta')
-        with self.assertRaises(NotImplementedError):
-            m(input)
+        m(input)
 
 class TestModuleGlobalHooks(TestCase):
 
