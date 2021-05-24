@@ -24,6 +24,9 @@ env:
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
+{%- if cuda_version != "cpu" %}
+  USE_CUDA: 1
+{%- endif %}
 
 jobs:
   build:

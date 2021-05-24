@@ -23,6 +23,7 @@ env:
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
+  USE_CUDA: 1
 
 jobs:
   build:
