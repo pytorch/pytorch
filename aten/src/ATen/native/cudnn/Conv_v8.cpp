@@ -74,12 +74,10 @@ void filterEngineConfigs(
   cudnn_frontend::filter(from, to, filter);
 }
 
-// TODO: resolve this hack to avoid collision
-enum Direction {FWD, BWD_DATA, BWD_FILTER};
 
 struct CacheKey {
   ConvolutionParams params;
-  Direction dir;
+  cudnnBackendDescriptorType_t dir;
   uint8_t input_alignment;
   uint8_t weight_alignment;
   uint8_t output_alignment;
@@ -90,6 +88,78 @@ std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, ParamsHash
 
 }
 
+void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t dir, const Tensor& convoutput, const Tensor& convinput1, const Tensor& convinput2, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+   setConvolutionParams(&key.params, convinput1, convinput2, padding, stride, dilation, groups, deterministic, allow_tf32);
+   key.dir = dir;
+   key.input_alignment = getAlignment(convinput1);
+   key.output_alignment = getAlignment(convoutput);
+   key.weight_alignment = getAlignment(convinput2);
+}
+
+void run_conv_cfg(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, cudnn_frontend::ManagedOpaqueDescriptor cfg) {
+    auto plan = cudnn_frontend::ExecutionPlanBuilder()
+        .setHandle(handle)
+        .setEngineConfig(cfg)
+        .build();
+
+    auto workspace_size = plan.getWorkspaceSize();
+    // TODO: is always using 'x' options() ok? e.g., in backward data
+    Tensor workspace;
+    workspace = at::empty({workspace_size}, x.options().dtype(kByte));
+    void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
+    // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+    int64_t uids[] = {'x', 'y', 'w'};
+    auto variantPack = cudnn_frontend::VariantPackBuilder()
+        .setWorkspacePointer(workspace.data_ptr())
+        .setDataPointers(3, data_ptrs)
+        .setUids(3, uids)
+        .build();
+    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+}
+
+void get_configs(cudnn_frontend::EngineConfigList& filtered_configs, cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+  auto op = cudnn_frontend::OperationBuilder(desc)
+      .setxDesc(getTensorDescriptor(x, 'x', key.input_alignment))
+      .setyDesc(getTensorDescriptor(y, 'y', key.output_alignment))
+      .setwDesc(getTensorDescriptor(w, 'w', key.weight_alignment))
+      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
+      .build();
+
+  std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
+
+  auto opGraph = cudnn_frontend::OperationGraphBuilder()
+      .setHandle(handle)
+      .setOperationGraph(1, ops.data())
+      .build();
+  auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
+      .setOperationGraph(opGraph)
+      .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
+      .build();
+  auto fallback = cudnn_frontend::EngineFallbackListBuilder()
+                    .setOperationGraph(opGraph)
+                    .setOperation(desc)
+                    .build();
+  auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
+  auto& fallback_list = fallback.getFallbackList();
+
+  // TODO: Is this ok or do we need to change type deduction based on descriptor?
+  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, x.scalar_type());
+  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, x.scalar_type());
+}
+
+
+void try_filtered_configs(const cudnn_frontend::EngineConfigList filtered_configs, const CacheKey key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
+  for (auto &cfg : filtered_configs) {
+    try {
+      run_conv_cfg(handle, x, y, w, cfg);
+      engine_cache[key] = cfg;
+      return;
+    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
+  }
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+}
+
+
 void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
@@ -99,81 +169,20 @@ void raw_cudnn_convolution_forward_out(
   if (output.numel() == 0) {
     return;
   }
-
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKey key;
-  setConvolutionParams(&key.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  key.dir = FWD;
-  key.input_alignment = getAlignment(input);
-  key.output_alignment = getAlignment(output);
-  key.weight_alignment = getAlignment(weight);
-
-  auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor cfg) {
-    auto plan = cudnn_frontend::ExecutionPlanBuilder()
-        .setHandle(handle)
-        .setEngineConfig(cfg)
-        .build();
-
-    auto workspace_size = plan.getWorkspaceSize();
-    auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-    void *data_ptrs[] = {input.data_ptr(), output.data_ptr(), weight.data_ptr()};
-    // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
-    int64_t uids[] = {'x', 'y', 'w'};
-    auto variantPack = cudnn_frontend::VariantPackBuilder()
-        .setWorkspacePointer(workspace.data_ptr())
-        .setDataPointers(3, data_ptrs)
-        .setUids(3, uids)
-        .build();
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
-  };
-
+  get_cachekey(key, CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, output, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   auto search = engine_cache.find(key);
   if (search != engine_cache.end()) {
-    run(search->second);
+    run_conv_cfg(handle, input, output, weight, search->second);
     return;
   }
 
-  auto op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(input, 'x', key.input_alignment))
-      .setyDesc(getTensorDescriptor(output, 'y', key.output_alignment))
-      .setwDesc(getTensorDescriptor(weight, 'w', key.weight_alignment))
-      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
-      .build();
-  // std::cout << op.describe() << std::endl;
-
-  std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
-
-  auto opGraph = cudnn_frontend::OperationGraphBuilder()
-      .setHandle(handle)
-      .setOperationGraph(1, ops.data())
-      .build();
-  // std::cout << opGraph.describe() << std::endl;
-
-  auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
-      .setOperationGraph(opGraph)
-      .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-      .build();
-  auto fallback = cudnn_frontend::EngineFallbackListBuilder()
-                    .setOperationGraph(opGraph)
-                    .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-                    .build();
-
-  auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-  auto& fallback_list = fallback.getFallbackList();
-
   cudnn_frontend::EngineConfigList filtered_configs;
-  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
-  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, input.scalar_type());
+  get_configs(filtered_configs, handle, CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, input, output, weight, key, padding, stride, dilation, deterministic, allow_tf32);
 
-  for (auto &cfg : filtered_configs) {
-    try {
-      run(cfg);
-      engine_cache[key] = cfg;
-      return;
-    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
-  }
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  try_filtered_configs(filtered_configs, key, handle, input, output, weight);
 }
 
 void raw_cudnn_convolution_backward_input_out(
@@ -186,77 +195,19 @@ void raw_cudnn_convolution_backward_input_out(
   if (grad_input.numel() == 0) {
     return;
   }
-
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKey key;
-  setConvolutionParams(&key.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  // TODO: does reusing CacheKey type here make sense?
-  key.dir = BWD_DATA;
-  key.input_alignment = getAlignment(grad_output);
-  key.output_alignment = getAlignment(grad_input);
-  key.weight_alignment = getAlignment(weight);
-
-  // TODO: can we avoid this boilerplate?
-  auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor cfg) {
-    auto plan = cudnn_frontend::ExecutionPlanBuilder()
-        .setHandle(handle)
-        .setEngineConfig(cfg)
-        .build();
-
-    auto workspace_size = plan.getWorkspaceSize();
-    auto workspace = at::empty({workspace_size}, grad_output.options().dtype(kByte));
-    void *data_ptrs[] = {grad_input.data_ptr(), grad_output.data_ptr(), weight.data_ptr()};
-    int64_t uids[] = {'x', 'y', 'w'};
-    auto variantPack = cudnn_frontend::VariantPackBuilder()
-        .setWorkspacePointer(workspace.data_ptr())
-        .setDataPointers(3, data_ptrs)
-        .setUids(3, uids)
-        .build();
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
-  };
-
+  get_cachekey(key, CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR, grad_output, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   auto search = engine_cache.find(key);
   if (search != engine_cache.end()) {
-    run(search->second);
+    run_conv_cfg(handle, grad_input, grad_output, weight, search->second);
     return;
   }
 
-  auto op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(grad_input, 'x', key.output_alignment))
-      .setyDesc(getTensorDescriptor(grad_output, 'y', key.input_alignment))
-      .setwDesc(getTensorDescriptor(weight, 'w', key.weight_alignment))
-      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
-      .build();
-
-  std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
-  auto opGraph = cudnn_frontend::OperationGraphBuilder()
-      .setHandle(handle)
-      .setOperationGraph(1, ops.data())
-      .build();
-  auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
-      .setOperationGraph(opGraph)
-      .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-      .build();
-  auto fallback = cudnn_frontend::EngineFallbackListBuilder()
-                    .setOperationGraph(opGraph)
-                    .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR)
-                    .build();
-  auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-  auto& fallback_list = fallback.getFallbackList();
-
   cudnn_frontend::EngineConfigList filtered_configs;
-  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, grad_output.scalar_type());
-  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, grad_output.scalar_type());
-
-  for (auto &cfg : filtered_configs) {
-    try {
-      run(cfg);
-      engine_cache[key] = cfg;
-      return;
-    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
-  }
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  get_configs(filtered_configs, handle, CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR, grad_input, grad_output, weight, key, padding, stride, dilation, deterministic, allow_tf32);
+  try_filtered_configs(filtered_configs, key, handle, grad_input, grad_output, weight);
 }
 
 void raw_cudnn_convolution_backward_weight_out(
@@ -267,79 +218,20 @@ void raw_cudnn_convolution_backward_weight_out(
   if (grad_weight.numel() == 0) {
     return;
   }
-
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKey key;
-  setConvolutionParams(&key.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  // TODO: does reusing CacheKey type here make sense?
-  key.dir = BWD_FILTER;
-  key.input_alignment = getAlignment(input);
-  // Confusing naming here...
-  key.output_alignment = getAlignment(grad_output);
-  key.weight_alignment = getAlignment(grad_weight);
-
-  // TODO: can we avoid this boilerplate?
-  auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor cfg) {
-    auto plan = cudnn_frontend::ExecutionPlanBuilder()
-        .setHandle(handle)
-        .setEngineConfig(cfg)
-        .build();
-
-    auto workspace_size = plan.getWorkspaceSize();
-    auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-    void *data_ptrs[] = {input.data_ptr(), grad_output.data_ptr(), grad_weight.data_ptr()};
-    int64_t uids[] = {'x', 'y', 'w'};
-    auto variantPack = cudnn_frontend::VariantPackBuilder()
-        .setWorkspacePointer(workspace.data_ptr())
-        .setDataPointers(3, data_ptrs)
-        .setUids(3, uids)
-        .build();
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
-  };
+  get_cachekey(key, CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, grad_output, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
 
   auto search = engine_cache.find(key);
   if (search != engine_cache.end()) {
-    run(search->second);
+    run_conv_cfg(handle, input, grad_output, grad_weight, search->second);
     return;
   }
 
-  auto op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(input, 'x', key.input_alignment))
-      .setyDesc(getTensorDescriptor(grad_output, 'y', key.output_alignment))
-      .setwDesc(getTensorDescriptor(grad_weight, 'w', key.weight_alignment))
-      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
-      .build();
-
-  std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
-  auto opGraph = cudnn_frontend::OperationGraphBuilder()
-      .setHandle(handle)
-      .setOperationGraph(1, ops.data())
-      .build();
-  auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
-      .setOperationGraph(opGraph)
-      .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-      .build();
-  auto fallback = cudnn_frontend::EngineFallbackListBuilder()
-                    .setOperationGraph(opGraph)
-                    .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR)
-                    .build();
-  auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-  auto& fallback_list = fallback.getFallbackList();
-
   cudnn_frontend::EngineConfigList filtered_configs;
-  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, grad_output.scalar_type());
-  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, grad_output.scalar_type());
-
-  for (auto &cfg : filtered_configs) {
-    try {
-      run(cfg);
-      engine_cache[key] = cfg;
-      return;
-    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
-  }
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
-
+  get_configs(filtered_configs, handle, CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, input, grad_output, grad_weight, key, padding, stride, dilation, deterministic, allow_tf32);
+  try_filtered_configs(filtered_configs, key, handle, input, grad_output, grad_weight);
 }
 
 }} // at::native
