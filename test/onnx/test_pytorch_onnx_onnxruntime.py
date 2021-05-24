@@ -1933,10 +1933,23 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ArangeStartOutModel(), (x, y), remained_onnx_input_idx=[1])
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_linspace(self):
+        class LinspaceModel(torch.nn.Module):
+            def forward(self, start, end, steps):
+                return torch.linspace(start, end, steps)
+        
+        x = torch.tensor(3, dtype=torch.float)
+        y = torch.tensor(10, dtype=torch.float)
+        z = torch.tensor(5, dtype=torch.int)
+        self.run_test(LinspaceModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, start, end):
-                return torch.arange(start.size(0), end, 1.5, dtype=torch.int64)
+                out = torch.arange(start.size(0), end, 1.5, dtype=torch.int64)
+                print(out)
+                return out
 
         x = torch.randn(2, 3, 4)
         y = torch.tensor(8.5, dtype=torch.float)
