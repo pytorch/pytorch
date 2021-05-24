@@ -1633,6 +1633,37 @@ class TestFX(JitTestCase):
         input = torch.randn(33, 44)
         self.assertEqual(gm(input), torch.relu(torch.neg(input)))
 
+    def test_update_args_api(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        orig_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        inp_x, inp_y = torch.randn(5, 3), torch.randn(3, 5)
+        self.assertEqual(orig_gm(inp_x, inp_y), torch.relu(inp_x))
+
+
+        b.update_arg(0, y)
+        new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
+
+    def test_update_kwargs_api(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, kwargs={'input': x})
+        output : torch.fx.Node = graph.output(b)
+
+        orig_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        inp_x, inp_y = torch.randn(5, 3), torch.randn(3, 5)
+        self.assertEqual(orig_gm(inp_x, inp_y), torch.relu(inp_x))
+
+
+        b.update_kwarg('input', y)
+        new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
 
     def test_move_before(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -2573,6 +2604,7 @@ class TestOperatorSignatures(JitTestCase):
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         known_no_schema = {'cdist',
+                           'contiguous',
                            'dstack',
                            'einsum',
                            'expand',
@@ -2592,7 +2624,8 @@ class TestOperatorSignatures(JitTestCase):
                            '__rsub__',
                            '__rmul__',
                            '__rdiv__',
-                           '__rpow__'}
+                           '__rpow__',
+                           '__rmatmul__'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)

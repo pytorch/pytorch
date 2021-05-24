@@ -10430,6 +10430,9 @@ Args:
     dim (int, optional): The dimension along which to repeat values.
         By default, use the flattened input array, and return a flat output
         array.
+    output_size (int, optional): Total output size for the given axis
+        ( e.g. sum of repeats). If given, it will avoid stream syncronization
+        needed to calculate output shape of the tensor.
 
 Returns:
     Tensor: Repeated tensor which has the same shape as input, except along the given axis.
@@ -10446,6 +10449,10 @@ Example::
     tensor([[1, 1, 1, 2, 2, 2],
             [3, 3, 3, 4, 4, 4]])
     >>> torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0)
+    tensor([[1, 2],
+            [3, 4],
+            [3, 4]])
+    >>> torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0, output_size=3)
     tensor([[1, 2],
             [3, 4],
             [3, 4]])
