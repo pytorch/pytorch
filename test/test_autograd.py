@@ -5341,14 +5341,14 @@ for shape in [(1,), ()]:
             @staticmethod
             def forward(ctx, x):
                 x = x.clone()
-                ctx.save_for_backward(x)
+                # BAD!!! Don't do this ever!!
+                ctx.x = x
                 return x
 
             @staticmethod
             def backward(ctx, gO):
-                x, = ctx.saved_tensors
-                self.assertEqual(x, 3.14)
-                return gO * x
+                self.assertEqual(ctx.x, 3.14)
+                return gO * ctx.x
 
         def get_refs(with_backward):
             a = torch.tensor(3.14, requires_grad=True)
@@ -5366,41 +5366,12 @@ for shape in [(1,), ()]:
         gc.collect()
         self.assertTrue(ref.expired())
 
-        # The backward call frees the buffers, breaking the cycle naturally
+        # The backward clears the saved_variables but not the __dict__
         ref = get_refs(True)
+        self.assertFalse(ref.expired())
+        gc.collect()
         self.assertTrue(ref.expired())
 
-    def test_tensor_subclass(self):
-        class LoggingTensor(torch.Tensor):
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-                return super().__torch_function__(func, types, args, kwargs)
-
-        class SquareFunction(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                y = torch.mul(x,x)
-                ctx.save_for_backward(x, y)
-                ctx.ids = (id(x), id(y))
-
-                self.assertEqual(type(x), LoggingTensor)
-                self.assertEqual(type(y), LoggingTensor)
-                return y
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                x, y = ctx.saved_tensors
-                self.assertEqual(type(x), LoggingTensor)
-                self.assertEqual(type(y), LoggingTensor)
-                self.assertEqual(id(x), ctx.ids[0])
-                self.assertEqual(id(y), ctx.ids[1])
-                return 2*x*grad_output
-
-        lt = LoggingTensor(torch.rand(3, requires_grad=True))
-        y = SquareFunction.apply(lt)
-        y.sum().backward()
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):

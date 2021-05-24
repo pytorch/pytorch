@@ -137,38 +137,37 @@ PyObject * THPVariable_Wrap(Variable var)
 static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->backward_hooks);
+
   const auto& tensor = THPVariable_Unpack(self);
   if (tensor.defined()) {
-    // We don't want to traverse the grad_fn, even if the Variable owns it and the
-    // shared pointer's use count is 1. This is because we would need to treat
-    // the grad_fn as part of the Python state and hold the GIL sometimes when
-    // grad_fn's shared_ptr is copied, otherwise a race condition with the Python
-    // GC could occur. Holding the GIL when the shared_ptr is copied adds
-    // undesirable complexity/overhead.
-    //
-    // When hooks, a Variable, and its grad_fn are involved in a Python reference
-    // cycle, because we're not traversing the grad_fn, the reference cycle will
-    // in fact leak.
-    //
-    // See https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
-    // for more details about the race condition involving traversing the grad_fn
-    // and the python GC.
 
-    // We want a special case though when this THPVariable has the only owning
-    // reference to the Tensor and the Tensor has the only owning reference to
-    // the grad_fn. In such cases, we know that the above case cannot happen
-    // as the only way to access the grad_fn is via this THPVariable which is a
-    // python object and we hold the GIL right now.
-    // In such cases, we can traverse the grad_fn.
+    // WARNING: The grad_fn traversal logic is very subtle, if you change this,
+    // be very careful not to re-introduce this bug:
+    // https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
+
+    // We want to be conservative here and make sure that we only traverse the
+    // grad_fn if this python object is the sole owner of the grad_fn and no
+    // other thread can create another owner without taking the GIL first.
+    // This is because we need to ensure that the "owning or not" of the grad_fn
+    // doesn't change between this traverse and the clear below.
+
+    // We ensure this is true by checking that this python object is the sole owner
+    // of the underlying Tensor and that this Tensor is the sole owner of its grad_fn.
+    // In this case, the only way to get a new reference to the grad_fn is by using
+    // this python object, which requires the GIL to be accessed.
+
+  // std::cout<<"Traversing "<<(int64_t)self<<" "<< tensor.sizes() << ", use: "<<tensor.use_count()<<std::endl;
     if (tensor.use_count() == 1) {
       auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
+        int blah = grad_fn? -1:grad_fn.use_count();
+  // std::cout<<"Traversing "<< tensor.sizes() << ", grad: "<< blah <<std::endl;
         if (grad_fn && grad_fn.use_count() == 1) {
-          // All Node can have a pyobj
+          // All Node can have a pyobj (stored in "pyobj_")
           Py_VISIT(grad_fn->pyobj());
-          // PyNode are special as they might store one in the obj field
+          // PyNode are special as they also have an "obj" field
           if (auto py_node_fn = dynamic_cast<PyNode*>(grad_fn.get())) {
             Py_VISIT(py_node_fn->obj);
           }
@@ -176,13 +175,14 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
       }
     }
 
-
     for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
       if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
+  // std::cout<<"Done traversing "<< tensor.sizes() <<std::endl;
   }
+
   return 0;
 }
 

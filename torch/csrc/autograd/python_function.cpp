@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -155,16 +156,8 @@ auto PyNode::is_traceable() -> bool {
 auto PyNode::release_variables() -> void {
   pybind11::gil_scoped_acquire gil;
   auto f = (THPFunction*) obj;
-
-  Py_CLEAR(f->needs_input_grad);
-  Py_CLEAR(f->to_save);
-  Py_CLEAR(f->non_differentiable);
-  Py_CLEAR(f->dirty_tensors);
-
+  f->saved_variables.clear();
   f->has_freed_buffers = 1;
-  f->output_info.clear();
-  f->input_info.clear();
-  f->is_variable_input.clear();
 }
 
 auto PyNode::name() const -> std::string {
@@ -216,9 +209,7 @@ static int THPFunction_clear(THPFunction *self)
   // assert triggering in the wild, feel free to comment it out.  They're
   // likely to standardize that you ARE guaranteed to see the weak pointers
   // as expired in the destructor in the future, so we'll keep this for now.
-
-  // This is not True as this can be called by the GC if this PyNode was part of a cycle
-  // TORCH_INTERNAL_ASSERT(self->cdata.expired());
+  TORCH_INTERNAL_ASSERT(self->cdata.expired());
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -228,6 +219,7 @@ static int THPFunction_clear(THPFunction *self)
 
   self->output_info.clear();
   self->input_info.clear();
+  self->saved_variables.clear();
   self->is_variable_input.clear();
 
   return 0;
@@ -240,6 +232,7 @@ static void THPFunction_dealloc(THPFunction* self)
   self->cdata.~weak_ptr<PyNode>();
   self->output_info.~vector();
   self->input_info.~vector();
+  self->saved_variables.~vector();
   self->is_variable_input.~vector();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -255,6 +248,7 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   new (&self->cdata) std::weak_ptr<PyNode>();
   new (&self->output_info) std::vector<VariableInfo>();
   new (&self->input_info) std::vector<VariableInfo>();
+  new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
   self->materialize_grads = true;
   return obj;
@@ -360,14 +354,25 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
       "error: to_save attribute is expected to be a tuple but is %s",
       THPUtils_typename(self->to_save));
   Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
+  self->saved_variables.clear();
+  self->saved_variables.reserve(num_saved);
   for (int i = 0; i < num_saved; i++) {
     PyObject *obj = PyTuple_GET_ITEM(self->to_save, i);
-    if (obj != Py_None && !THPVariable_Check(obj)) {
+    if (obj == Py_None) {
+      self->saved_variables.emplace_back();
+      continue;
+    } else if (THPVariable_Check(obj)) {
+      const auto& tensor = THPVariable_Unpack(obj);
+      bool is_output = tensor.grad_fn().get() == cdata_ptr.get();
+      self->saved_variables.emplace_back(tensor, is_output);
+    } else {
       throw torch::TypeError(
-          "save_for_backward can only save Tensors, but argument %d is of "
+          "save_for_backward can only save variables, but argument %d is of "
           "type %s", i, Py_TYPE(obj)->tp_name);
     }
   }
+  // Free .to_save
+  Py_CLEAR(self->to_save);
 }
 
 // Mark requires_grad = 0 on non-differentiable variables (as per non_differentiable)
@@ -680,16 +685,48 @@ int THPFunction_set_materialize_grads(THPFunction *self, PyObject *value, void *
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-static PyObject *unpack_saved_variables(THPFunction *self)
+static PyObject *unpack_saved_variables(
+    THPFunction *self,
+    const std::function<PyObject*(const Variable&)>& unpack_fn)
 {
-  Py_INCREF(self->to_save);
-  return self->to_save;
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
+    return PyTuple_New(0);
+
+  int num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(num_saved));
+  if (!saved)
+    return nullptr;
+  auto saved_for = self->cdata.lock();
+  // This is really a true assert, because we've already tested for the
+  // self->has_freed_buffers case at the beginning of this function:
+  // buffers are freed when PyNode dies; if the buffers are not freed,
+  // PyNode must be live.  (Note that the buffers could be freed
+  // even though the PyNode is live, but that doesn't matter here
+  // because we will never hit this line of code if the buffers are freed--
+  // and in any case saved_for will be non-NULL.)
+  TORCH_INTERNAL_ASSERT(saved_for);
+  for (int i = 0; i < num_saved; i++) {
+    auto unpacked_var = saved_variables[i].unpack(saved_for);
+    THPObjectPtr value;
+    if (!unpacked_var.defined()) {
+      Py_INCREF(Py_None);
+      value = Py_None;
+    } else {
+      value = unpack_fn(unpacked_var);
+    }
+    PyTuple_SET_ITEM(saved.get(), i, value.release());
+  }
+  return saved.release();
 }
 
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
-  return unpack_saved_variables(self);
+  return unpack_saved_variables(self, [](const Variable& var) {
+    return THPVariable_Wrap(var);
+  });
   END_HANDLE_TH_ERRORS
 }
 
@@ -699,7 +736,9 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
   auto r = PyErr_WarnEx(PyExc_DeprecationWarning,
       "'saved_variables' is deprecated; use 'saved_tensors'", 0);
   if (r != 0) throw python_error();
-  return unpack_saved_variables(self);
+  return unpack_saved_variables(self, [](const Variable& var) {
+    return THPVariable_Wrap(var);
+  });
   END_HANDLE_TH_ERRORS
 }
 

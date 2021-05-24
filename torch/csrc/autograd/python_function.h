@@ -99,6 +99,7 @@ struct THPFunction {
 
     std::vector<torch::autograd::VariableInfo> output_info;
     std::vector<torch::autograd::VariableInfo> input_info;
+    std::vector<torch::autograd::SavedVariable> saved_variables;
     // For each input, true if the input is a THPVariable
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
