@@ -327,6 +327,18 @@ class TestFX(JitTestCase):
         ref_batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
         self.assertEqual(ref_batchnorm1d(input), m(input))
 
+    def test_wrapped_retrace(self):
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
+
+        retraced = symbolic_trace(m)
+        self.assertIn('wrapped_via_decorator', retraced.code)
+        self.assertEqual(retraced(0), 1)
+
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -906,6 +918,124 @@ class TestFX(JitTestCase):
         stringed = str(traced.graph)
         for s in ['args', 'kwargs', '#users']:
             assert s in stringed
+
+    def test_custom_proxy_type(self):
+        class TensorPair:
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair(x : TensorPair, y : TensorPair):
+            s = x.add(y)
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+        y = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+
+        ref_out = use_tensor_pair(x, y)
+
+        traced = symbolic_trace(use_tensor_pair)
+
+        traced_out = traced(x, y)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_type_literal(self):
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair_literal(x : TensorPair):
+            s = x.add(TensorPair(torch.zeros(5, 3), torch.zeros(5, 3)))
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+
+        ref_out = use_tensor_pair_literal(x)
+
+        traced = symbolic_trace(use_tensor_pair_literal)
+
+        traced_out = traced(x)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_dynamic_value(self):
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair_ctor(x : TensorPair, y : torch.Tensor):
+            s = x.add(TensorPair(y, y))
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+        y = torch.randn(5, 3)
+        ref_out = use_tensor_pair_ctor(x, y)
+
+        traced = symbolic_trace(use_tensor_pair_ctor)
+
+        traced_out = traced(x, y)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_input_dependent_control_flow(self):
+        class ZeroTensor(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, inp):
+                if inp.sum() == 0:
+                    self.is_zero = True
+                    self.tensor = torch.tensor([])
+                else:
+                    self.is_zero = False
+                    self.tensor = inp
+
+            def add(self, other):
+                if self.is_zero:
+                    return ZeroTensor(other.tensor)
+                elif other.is_zero:
+                    return self
+
+        def use_zero_tensor(x : torch.Tensor, y : torch.Tensor):
+            return ZeroTensor(x + y)
+
+        x, y = torch.randn(5, 3), torch.randn(5, 3)
+
+        ref_out = use_zero_tensor(x, y)
+
+        traced = symbolic_trace(use_zero_tensor)
+
+        traced_out = traced(x, y)
+
+        self.assertEqual(traced_out.is_zero, ref_out.is_zero)
+        self.assertEqual(traced_out.tensor, ref_out.tensor)
 
     def test_graph_fns(self):
         g = Graph()
@@ -1503,6 +1633,37 @@ class TestFX(JitTestCase):
         input = torch.randn(33, 44)
         self.assertEqual(gm(input), torch.relu(torch.neg(input)))
 
+    def test_update_args_api(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        orig_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        inp_x, inp_y = torch.randn(5, 3), torch.randn(3, 5)
+        self.assertEqual(orig_gm(inp_x, inp_y), torch.relu(inp_x))
+
+
+        b.update_arg(0, y)
+        new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
+
+    def test_update_kwargs_api(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, kwargs={'input': x})
+        output : torch.fx.Node = graph.output(b)
+
+        orig_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        inp_x, inp_y = torch.randn(5, 3), torch.randn(3, 5)
+        self.assertEqual(orig_gm(inp_x, inp_y), torch.relu(inp_x))
+
+
+        b.update_kwarg('input', y)
+        new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
 
     def test_move_before(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -2429,7 +2590,7 @@ class TestFX(JitTestCase):
 
 
 def run_getitem_target():
-    from torch.fx.symbolic_trace import _wrapped_methods_to_patch
+    from torch.fx._symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
     try:
         TestFX().getitem_inner()
@@ -2443,6 +2604,7 @@ class TestOperatorSignatures(JitTestCase):
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         known_no_schema = {'cdist',
+                           'contiguous',
                            'dstack',
                            'einsum',
                            'expand',
@@ -2451,16 +2613,19 @@ class TestOperatorSignatures(JitTestCase):
                            'linalg.multi_dot',
                            'polygamma',
                            'repeat',
+                           'reshape_as',
                            'stack',
                            'view',
                            'view_as',
+                           'nn.functional.hardshrink',
                            'vstack',
                            '__getitem__',
                            '__radd__',
                            '__rsub__',
                            '__rmul__',
                            '__rdiv__',
-                           '__rpow__'}
+                           '__rpow__',
+                           '__rmatmul__'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)

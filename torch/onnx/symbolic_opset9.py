@@ -1959,7 +1959,7 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
     if len(args) == 4:
-        if args[0].type().isSubtypeOf(ListType.ofInts()):
+        if args[0].node().kind() == 'prim::device' or args[0].type().isSubtypeOf(ListType.ofInts()):
             # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
@@ -1999,7 +1999,7 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
-def repeat_interleave(g, self, repeats, dim=None):
+def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
@@ -2938,6 +2938,10 @@ def __getitem_(g, self, i):
     return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
 
 
+def item(g, self):
+    return self
+
+
 def take(g, self, index):
     self_flattened = g.op('Reshape', self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
     out = index_select(g, self_flattened, 0, index)
@@ -3066,3 +3070,71 @@ def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device
 
 def mv(g, self, vec):
     return matmul(g, self, vec)
+
+
+@parse_args('v', 'v')
+def fill(g, self, value):
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = 6  # float
+    else:
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+
+    return full_like(g, self, value, dtype)
+
+
+def index_add(g, self, dim, index, other):
+    warnings.warn("Warning: ONNX export does not support duplicated values in 'index' field, " +
+                  "this will cause the ONNX model to be incorrect.")
+    from torch.onnx.symbolic_opset9 import scatter_add
+    from sys import maxsize as maxsize
+
+    dim = sym_help._maybe_get_const(dim, 'i')
+    if dim is None:
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function with " +
+                                  "unknown 'dim' value.")
+
+    self_dim_rank = sym_help._get_tensor_rank(self)
+    other_dim_rank = sym_help._get_tensor_rank(other)
+
+    if self_dim_rank is None or other_dim_rank is None:
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function while " +
+                                  "the rank of self tensor or tensor to be added is unknown.")
+
+    if other_dim_rank != self_dim_rank:
+        delta = self_dim_rank - other_dim_rank
+        for i in range(delta):
+            other = sym_help._unsqueeze_helper(g, other, [sym_help._get_tensor_rank(other)])
+
+    other_dim_size = sym_help._get_tensor_dim_size(other, dim)
+    self_dim_size = sym_help._get_tensor_dim_size(self, dim)
+
+    if (other_dim_size is not None) and (self_dim_size is not None):
+        if other_dim_size > self_dim_size:
+            raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function with " +
+                                      "duplicated values in 'index' parameter yet.")
+
+    # Construct a new shape. It's almost as same as self except the size of the 'dim'
+    # dimension is 1, so that we can expand other dimensions as expected.
+    new_shape_axes = list(range(self_dim_rank))
+    new_shape_starts = [0 for i in range(self_dim_rank)]
+    new_shape_ends = [maxsize
+                      if (i != dim)
+                      else
+                      1
+                      for i in range(self_dim_rank)]
+
+    new_shape = sym_help._slice_helper(g,
+                                       self,
+                                       axes=new_shape_axes,
+                                       starts=new_shape_starts,
+                                       ends=new_shape_ends)
+    other = expand_as(g, other, new_shape)
+
+    for i in range(dim):
+        index = sym_help._unsqueeze_helper(g, index, [0])
+
+    for i in range(self_dim_rank - dim - 1):
+        index = sym_help._unsqueeze_helper(g, index, [sym_help._get_tensor_rank(index)])
+
+    return scatter_add(g, self, dim, expand_as(g, index, other), other)

@@ -380,6 +380,17 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
+def _get_param_count_list(method_graph, args_params):
+    param_count_list = []
+    for input_, arg_params_ in zip(method_graph.inputs(), args_params):
+        if "PackedParams" in str(input_.type()):
+            in_vars, _ = torch.jit._flatten(arg_params_)
+            param_count_list.append(len(in_vars))
+        else:
+            param_count_list.append(1)
+    return param_count_list
+
+
 def _create_jit_graph(model, args, _retain_param_name):
     torch_out = None
     params: Union[List, Tuple]
@@ -390,10 +401,11 @@ def _create_jit_graph(model, args, _retain_param_name):
             freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
             module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
             method_graph = module._get_method('forward').graph
-
-            in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
+            args_params = tuple(args) + tuple(params)
+            param_count_list = _get_param_count_list(method_graph, args_params)
+            in_vars, _ = torch.jit._flatten(args_params)
             graph = _propagate_and_assign_input_shapes(
-                method_graph, tuple(in_vars), False, False)
+                method_graph, tuple(in_vars), param_count_list, False, False)
         except AttributeError as e:
             raise RuntimeError('\'forward\' method must be a script method') from e
         return graph, params, torch_out, module
@@ -402,8 +414,9 @@ def _create_jit_graph(model, args, _retain_param_name):
         in_vars, in_desc = torch.jit._flatten(tuple(args))
         graph = model.graph
         torch._C._jit_pass_onnx_function_substitution(graph)
+        param_count_list = _get_param_count_list(graph, args)
         graph = _propagate_and_assign_input_shapes(
-            graph, tuple(in_vars), False, False)
+            graph, tuple(in_vars), param_count_list, False, False)
         return graph, params, torch_out, None
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
@@ -757,13 +770,13 @@ def _set_input_and_output_names(graph, input_names, output_names):
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
-def _run_symbolic_method(op_name, symbolic_fn, args):
+def _run_symbolic_method(g, op_name, symbolic_fn, args):
     r"""
     This trampoline function gets invoked for every symbolic method
     call from C++.
     """
     try:
-        return symbolic_fn(*args)
+        return symbolic_fn(g, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
@@ -1041,6 +1054,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
+                if op_name == 'PythonOp':
+                    inputs = (n, *inputs)
                 return symbolic_fn(g, *inputs, **attrs)
 
         elif ns == "quantized":

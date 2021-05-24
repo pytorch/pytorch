@@ -11,13 +11,15 @@ inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor&
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
   at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_output(ret)
-      .add_input(self)
-      .add_input(end)
-      .add_input(weights)
+      .add_borrowed_output(ret)
+      .add_borrowed_input(self)
+      .add_borrowed_input(end)
+      .add_borrowed_input(weights)
       .build();
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-      at::ScalarType::Half, iter.common_dtype(), "lerp_cuda", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      iter.common_dtype(), "lerp_cuda",
+      [&] {
         at::native::gpu_kernel(
             iter,
             [] GPU_LAMBDA(
@@ -36,22 +38,24 @@ inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor&
 inline void lerp_scalar_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, const c10::Scalar& weight) {
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_output(ret)
-      .add_input(self)
-      .add_input(end)
+      .add_borrowed_output(ret)
+      .add_borrowed_input(self)
+      .add_borrowed_input(end)
       .build();
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::ScalarType::Half, self.scalar_type(), "lerp_cuda", [&]{
-  auto weight_val = weight.to<scalar_t>();
-  at::native::gpu_kernel(
-      iter, [=] GPU_LAMBDA(scalar_t self_val, scalar_t end_val) {
-        return (std::abs(weight_val) < 0.5)
-            ? self_val + weight_val * (end_val - self_val)
-            : end_val -
-                (end_val - self_val) * (static_cast<scalar_t>(1) - weight_val);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      self.scalar_type(), "lerp_cuda",
+      [&]{
+        auto weight_val = weight.to<scalar_t>();
+        at::native::gpu_kernel(
+            iter, [=] GPU_LAMBDA(scalar_t self_val, scalar_t end_val) {
+              return (std::abs(weight_val) < 0.5)
+                  ? self_val + weight_val * (end_val - self_val)
+                  : end_val -
+                      (end_val - self_val) * (static_cast<scalar_t>(1) - weight_val);
+            });
       });
-  });
-}
-
+    }
 } // anonymous namespace
 
 namespace at {
