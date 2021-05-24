@@ -253,6 +253,7 @@ Examples::
     no_grad
     enable_grad
     set_grad_enabled
+    inference_mode
 
 Math operations
 ---------------

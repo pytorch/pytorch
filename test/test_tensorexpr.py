@@ -142,7 +142,6 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.rand(M, N, device=device)
             x = traced(a, b, c)
             x = warmup_and_run_forward(traced, a, b, c)
-            print(torch.jit.last_executed_optimized_graph())
             self.assertLastGraphAllFused()
             npr = a.cpu().numpy() + b.cpu().numpy() + c.cpu().numpy()
             np.testing.assert_allclose(npr, x.cpu().numpy())
@@ -1163,7 +1162,6 @@ class TestTensorExprFuser(BaseTestClass):
         r = test(x, y, z)
         assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
-    @unittest.skip("no shape inference for aten::slice yet")
     def test_slice(self):
         def easy(x, y):
             a = x[0:512:2]
