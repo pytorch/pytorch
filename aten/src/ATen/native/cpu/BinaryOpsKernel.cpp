@@ -979,8 +979,13 @@ void betainc_kernel(TensorIteratorBase& iter) {
       if (at::_isnan(x)){
         return NAN;
       }
-
-      if (x < 0.0 || x > 1.0){
+      if (at::_isnan(a)){
+        return NAN;
+      }
+      if (at::_isnan(b)){
+        return NAN;
+      }
+      if (x < 0.0 || x > 1.0 || a < 0.0 || b < 0.0){
         return NAN;
       }
 
@@ -994,13 +999,13 @@ void betainc_kernel(TensorIteratorBase& iter) {
       }
 
       /*Find the first part before the continued fraction.*/
-      const scalar_t lbeta_ab = std::lgamma(a) + std::lgamma(b) - std::lgamma(a+b);
+      const scalar_t lbeta_ab = std::lgamma(a) + std::lgamma(b) - std::lgamma(a + b);
       const scalar_t front = std::exp(std::log(x) * a + std::log(1.0 - x) * b - lbeta_ab) / a;
 
       /*Use Lentz's algorithm to evaluate the continued fraction.*/
       scalar_t f = 1.0, c = 1.0, d = 0.0;
 
-      scalar_t TINY = 1.0e-30, STOP = 1.0e-7, numerator, cd;
+      scalar_t TINY = 1.0e-30, STOP = 1.0e-8, numerator, cd;
       int i, m;
       for (i = 0; i <= 200; ++i) {
           m = i / 2;

@@ -714,16 +714,16 @@
   self: grad * log1p(other.toDouble())
 
 - name: special_betainc(Tensor self, Tensor a, Tensor b) -> Tensor
-  self: grad
+  self: not_implemented("special_betainc")
   a: not_implemented("special_betainc")
   b: not_implemented("special_betainc")
 
 - name: special_betainc.a_scalar(Tensor self, Scalar a, Tensor b) -> Tensor
-  self: grad
+  self: not_implemented("special_betainc")
   b: not_implemented("special_betainc")
 
 - name: special_betainc.b_scalar(Tensor self, Tensor a, Scalar b) -> Tensor
-  self: grad
+  self: not_implemented("special_betainc")
   a: not_implemented("special_betainc")
 
 - name: special_betainc.ab_scalar(Tensor self, Scalar a, Scalar b) -> Tensor
