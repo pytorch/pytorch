@@ -40,7 +40,7 @@ static PyObject * THCPStream_pynew(
     cdata ?
     at::cuda::CUDAStream::unpack(cdata) :
       stream_ptr ?
-      at::cuda::getStreamFromExternal(stream_ptr, current_device) :
+      at::cuda::getStreamFromExternal(reinterpret_cast<int64_t>(stream_ptr), current_device) :
       at::cuda::getStreamFromPool(
         /* isHighPriority */ priority < 0 ? true : false);
 

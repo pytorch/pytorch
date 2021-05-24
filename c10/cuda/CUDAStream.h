@@ -203,7 +203,7 @@ getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
  * purposes
  */
 TORCH_API CUDAStream
-getStreamFromExternal(uint64_t ext_stream, DeviceIndex device_index);
+getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
 
 /**
  * Get the default CUDA stream, for the passed CUDA device, or for the

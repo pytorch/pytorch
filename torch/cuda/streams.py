@@ -120,7 +120,8 @@ class ExternalStream(Stream):
     details.
 
     This class is used to wrap streams allocated in other libraries in order
-    to facilitate data exchange and multi-library interactions.
+    to facilitate data exchange and multi-library interactions. Be aware
+    that the stream life-cycle is managed by the owner.
 
     Args:
         stream_ptr(int): Integer representation of the `cudaStream_t` value.
@@ -130,7 +131,6 @@ class ExternalStream(Stream):
     """
 
     def __new__(cls, stream_ptr, device=None, **kwargs):
-        print('Creating new stream ', stream_ptr)
         with torch.cuda.device(device):
             return super(Stream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
