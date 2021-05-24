@@ -1,9 +1,8 @@
 from typing import Optional
 
-from .. import Linear as SparseLinear
+from torch.ao.nn.sparse.linear import Linear as SparseLinear
 
 import torch
-import torch.nn.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
 # TODO (zaf): Inherit from `quantized.LinearPackedParams` (T83294430)
