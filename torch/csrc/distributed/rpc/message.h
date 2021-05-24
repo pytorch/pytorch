@@ -109,9 +109,7 @@ enum MessageType {
 // and PythonResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
 class TORCH_API Message final : public torch::CustomClassHolder {
- private:
-  // Keep these private in order to force users to go through make_intrusive and
-  // thus prevent creating a Message that's not held by an intrusive_ptr.
+ public:
   Message();
 
   Message(
@@ -125,13 +123,11 @@ class TORCH_API Message final : public torch::CustomClassHolder {
       MessageType type,
       int64_t id);
 
-  friend c10::intrusive_ptr<Message>;
-
- public:
-  Message(const Message& other) = delete;
-  Message(Message&& other) = delete;
-  Message& operator=(Message const& rhs) = delete;
-  Message& operator=(Message&& rhs) = delete;
+  Message(const Message& other);
+  Message(Message&& other) noexcept;
+  Message& operator=(Message const& rhs) &;
+  Message& operator=(Message&& rhs) &;
+  void swap(Message& rhs) noexcept;
 
   // Destructively retrieves the payload.
   std::vector<char>&& movePayload() &&;
@@ -153,8 +149,6 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   int64_t id() const;
   void setId(int64_t id);
 
-  std::vector<std::reference_wrapper<const at::DataPtr>> getDataPtrs() const;
-
  private:
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;
@@ -166,25 +160,14 @@ class TORCH_API Message final : public torch::CustomClassHolder {
 // The exception string representation will be used as the message's payload.
 // A message ID corresponding to the request that resulted in this response can
 // be provided for matching requests/responses.
-TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
-    const std::exception& e,
-    int64_t id);
+TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
 
 // Create a response Message of type Exception.
 // The passed in string representation will be used as the message's payload.
 // A message ID corresponding to the request that resulted in this response can
 // be provided for matching requests/responses.
-TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
-    const std::string& exceptionStr,
-    int64_t id);
-
-inline std::tuple<
-    c10::intrusive_ptr<Message>,
-    std::vector<std::reference_wrapper<const at::DataPtr>>>
-withDataPtrs(c10::intrusive_ptr<Message> message) {
-  auto dataPtrs = message->getDataPtrs();
-  return std::make_tuple(std::move(message), std::move(dataPtrs));
-}
+TORCH_API Message
+createExceptionResponse(const std::string& exceptionStr, int64_t id);
 
 using JitFuture = c10::ivalue::Future;
 

@@ -3347,8 +3347,8 @@ class DistributedTest:
                     )
 
         @unittest.skipIf(
-            BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3463,8 +3463,8 @@ class DistributedTest:
                 )
 
         @unittest.skipIf(
-            BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3472,8 +3472,8 @@ class DistributedTest:
             self._test_ddp_hook_parity(state=None, hook=default.allreduce_hook)
 
         @unittest.skipIf(
-            BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3484,9 +3484,11 @@ class DistributedTest:
             process_group = torch.distributed.new_group(gpus)
             self._test_ddp_hook_parity(state=process_group, hook=default.allreduce_hook)
 
+        # FIXME: Multi-GPU test still fails on Gloo backend.
+        # Need to re-enable it once Gloo submodule picks up https://github.com/facebookincubator/gloo/pull/309.
         @unittest.skipIf(
             BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
+            "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm

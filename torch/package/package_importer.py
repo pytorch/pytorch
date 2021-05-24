@@ -286,7 +286,12 @@ class PackageImporter(Importer):
         self, name: str, filename: Optional[str], is_package: bool, parent: str
     ):
         mangled_filename = self._mangler.mangle(filename) if filename else None
-        spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore[arg-type]
+        spec = importlib.machinery.ModuleSpec(
+            name,
+            self,  # type: ignore[arg-type]
+            origin="<package_importer>",
+            is_package=is_package,
+        )
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
         module.__name__ = self._mangler.mangle(name)

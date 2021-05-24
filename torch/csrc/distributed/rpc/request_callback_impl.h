@@ -16,16 +16,13 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       const MessageType& messageType) const override;
 
   c10::intrusive_ptr<JitFuture> processPythonCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> lsctx) const override;
+      RpcCommandBase& rpc) const override;
 
   c10::intrusive_ptr<JitFuture> processScriptCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> lsctx) const override;
+      RpcCommandBase& rpc) const override;
 
   c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> lsctx) const override;
+      RpcCommandBase& rpc) const override;
 
   c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
@@ -52,12 +49,10 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   c10::intrusive_ptr<JitFuture> runJitFunction(
       const c10::QualifiedName& name,
       std::vector<at::IValue>& stack,
-      std::shared_ptr<LazyStreamContext> lsctx,
       bool isAsyncExecution) const;
 
   c10::intrusive_ptr<JitFuture> runPythonFunction(
       const py::object& function,
-      std::shared_ptr<LazyStreamContext> lsctx,
       bool isAsyncExecution) const;
 };
 

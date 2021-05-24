@@ -11,7 +11,7 @@ namespace autograd {
 class TORCH_API RRefBackwardResp : public rpc::RpcCommandBase {
  public:
   RRefBackwardResp() = default;
-  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
+  rpc::Message toMessageImpl() && override;
   static std::unique_ptr<RRefBackwardResp> fromMessage(
       const rpc::Message& message);
 };
