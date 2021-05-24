@@ -64,15 +64,14 @@ void s_addmm_out_csr_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n,
         } else if (!is_same_tensor(t, r_)) {
           r_.copy_(t);
         }
-
-        if(r_.stride(0) == 1 && r_.stride(1) == r_.size(0)) {
-          r__ = r_;
-        } else {
-          // TODO: how... strange
-          r__ = r_.transpose(0, 1).clone(at::MemoryFormat::Contiguous);
-          r__.transpose_(0, 1);
-        }
         if (nnz > 0) {
+          if(r_.stride(0) == 1 && r_.stride(1) == r_.size(0)) {
+            r__ = r_;
+          } else {
+            // TODO: how... strange
+            r__ = r_.transpose(0, 1).clone(at::MemoryFormat::Contiguous);
+            r__.transpose_(0, 1);
+          }
           Tensor dense_;
           char transpose_dense;
           if(dense.stride(0) == 1 && dense.stride(1) == dense.size(0)) {
@@ -158,7 +157,10 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   int64_t nnz = sparse._nnz();
   Tensor indices = sparse._indices();
   Tensor values = sparse._values();
-
+  if (nnz == 0) {
+    at::mul_out(r_, t, at::scalar_tensor(beta, r_.options()));
+    return r_;
+  }
   s_addmm_out_sparse_dense_cuda_worker(nnz, m, n, k, r_, beta, t, alpha, indices, values, dense);
   return r_;
 }

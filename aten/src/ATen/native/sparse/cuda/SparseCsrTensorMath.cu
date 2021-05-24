@@ -85,26 +85,16 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
       k,
       ", got ",
       dense.size(0));
-  TORCH_CHECK(
-      sparse.size(1) == k,
-      "addmm: Expected sparse matrix (sparse) size(1)=",
-      k,
-      ", got ",
-      sparse.size(1));
-  resize_output(r, {m, n});
 
-  if (sparse.crow_indices().scalar_type() != kInt) {
-    TORCH_WARN(
-        "Pytorch is compiled with MKL LP64 and will convert crow_indices to int32.");
-  }
-  if (sparse.col_indices().scalar_type() != kInt) {
-    TORCH_WARN(
-        "Pytorch is compiled with MKL LP64 and will convert col_indices to int32.");
+  resize_output(r, {m, n});
+  int64_t nnz = sparse._nnz();
+
+  if (nnz == 0) {
+    at::mul_out(r, t, at::scalar_tensor(beta, r.options()));
+    return r;
   }
   auto col_indices = sparse.col_indices().to(at::kInt);
   auto crow_indices = sparse.crow_indices().to(at::kInt);
-
-  int64_t nnz = sparse._nnz();
   auto values = sparse.values();
 
   s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, r, beta, t, alpha, crow_indices, col_indices, values, dense);

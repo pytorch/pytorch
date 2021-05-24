@@ -401,29 +401,45 @@ class TestSparseCSR(TestCase):
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz):
-            x = self.genSparseCSRTensor((di, dj), nnz, device=device, dtype=dtype, index_dtype=torch.int32)
-            t = torch.randn(di, dk, dtype=dtype, device=device)
-            y = torch.randn(dj, dk, dtype=dtype, device=device)
-            alpha = random.random()
-            beta = random.random()
+            for index_dtype in [torch.int32, torch.int64]:
+                x = self.genSparseCSRTensor((di, dj), nnz, device=device, dtype=dtype, index_dtype=index_dtype)
+                t = torch.randn(di, dk, dtype=dtype, device=device)
+                y = torch.randn(dj, dk, dtype=dtype, device=device)
+                alpha = random.random()
+                beta = random.random()
 
-            # res = beta * t  + alpha * (x @ y)
-            res = torch.addmm(t, x, y, beta=beta, alpha=alpha)
-            expected = torch.addmm(t, x.to_dense(), y, beta=beta, alpha=alpha)
-            self.assertEqual(res, expected)
+                # res = beta * t  + alpha * (x @ y)
+                res = torch.addmm(t, x, y, beta=beta, alpha=alpha)
+                expected = torch.addmm(t, x.to_dense(), y, beta=beta, alpha=alpha)
+                self.assertEqual(res, expected)
 
-            res = torch.addmm(t, x, y)
-            expected = torch.addmm(t, x.to_dense(), y)
-            self.assertEqual(res, expected)
+                res = torch.addmm(t, x, y)
+                expected = torch.addmm(t, x.to_dense(), y)
+                self.assertEqual(res, expected)
 
-            res = torch.mm(x, y)
-            expected = torch.mm(x.to_dense(), y)
-            self.assertEqual(res, expected)
+                res = torch.mm(x, y)
+                expected = torch.mm(x.to_dense(), y)
+                self.assertEqual(res, expected)
 
         for i in range(2, 5):
             for j in range(2, 8):
                 for k in range(2, 8):
                     test_shape(i, j, k, i * j // 2)
+        test_shape(4, 4, 4, 0)
+
+    @dtypes(*torch.testing.floating_types())
+    def test_sparse_mm(self, device, dtype):
+        def test_shape(d1, d2, d3, nnz, transposed):
+            if transposed:
+                D = torch.randn(d3, d2, dtype=dtype, device=device).t_()
+            else:
+                D = torch.randn(d2, d3, dtype=dtype, device=device)
+            S = self.genSparseCSRTensor((d1, d2), nnz, device=device, dtype=dtype, index_dtype=torch.int32)
+            S_dense = S.to_dense()
+            self.assertEqual(torch.sparse.mm(S, D), torch.mm(S_dense, D))
+
+        test_shape(7, 8, 9, 20, False)
+        test_shape(7, 8, 9, 20, True)
 
     @dtypes(*torch.testing.floating_types())
     def test_coo_csr_conversion(self, device, dtype):
