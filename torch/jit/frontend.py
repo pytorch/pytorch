@@ -905,7 +905,9 @@ class ExprBuilder(Builder):
                     # `col_offset` is an int, but `end_col_offset` is
                     # `Optional[int]`. The magic number is here to make
                     # sure we can parse `()` on any machine
-                    r = ctx.make_range(expr.lineno, expr.slice.value.col_offset, expr.slice.value.col_offset+2)
+                    r = ctx.make_range(expr.lineno,
+                                       expr.slice.value.col_offset,
+                                       expr.slice.value.col_offset + 2)
                     tup = TupleLiteral(r, [])
                     indices.append(tup)
                 return Subscript(base, indices)
