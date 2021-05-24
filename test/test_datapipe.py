@@ -8,15 +8,14 @@ import tarfile
 import zipfile
 import numpy as np
 import sys
-from PIL import Image
 from unittest import skipIf
 
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import \
-    (IterDataPipe, RandomSampler, DataLoader,
-     construct_time_validation, runtime_validation)
+    (IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
+     argument_validation, runtime_validation_disabled, runtime_validation)
 
 from typing import \
     (Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
@@ -33,6 +32,13 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
+
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+skipIfNoPIL = skipIf(not HAS_PIL, "no Pillow")
 
 
 T_co = TypeVar('T_co', covariant=True)
@@ -178,6 +184,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
 
 
+    @skipIfNoPIL
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
@@ -258,6 +265,19 @@ class IDP(IterDataPipe):
             yield i
 
     def __len__(self):
+        return self.length
+
+
+class MDP(MapDataPipe):
+    def __init__(self, input_dp):
+        super().__init__()
+        self.input_dp = input_dp
+        self.length = len(input_dp)
+
+    def __getitem__(self, index):
+        return self.input_dp[index]
+
+    def __len__(self) -> int:
         return self.length
 
 
@@ -576,6 +596,65 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(zipped_dp), exp)
 
 
+class TestFunctionalMapDataPipe(TestCase):
+    def test_picklable(self):
+        arr = range(10)
+        picklable_datapipes: List[
+            Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
+        ] = [
+            (dp.map.Map, MDP(arr), (), {}),
+            (dp.map.Map, MDP(arr), (_fake_fn, (0,), {'test': True}), {}),
+        ]
+        for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
+            p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+
+        unpicklable_datapipes: List[
+            Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
+        ] = [
+            (dp.map.Map, MDP(arr), (lambda x: x,), {}),
+        ]
+        for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
+            with warnings.catch_warnings(record=True) as wa:
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                self.assertEqual(len(wa), 1)
+                self.assertRegex(
+                    str(wa[0].message), r"^Lambda function is not supported for pickle"
+                )
+                with self.assertRaises(AttributeError):
+                    p = pickle.dumps(datapipe)
+
+    def test_map_datapipe(self):
+        arr = range(10)
+        input_dp = MDP(arr)
+
+        def fn(item, dtype=torch.float, *, sum=False):
+            data = torch.tensor(item, dtype=dtype)
+            return data if not sum else data.sum()
+
+        map_dp = input_dp.map(fn)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for index in arr:
+            self.assertEqual(
+                map_dp[index], torch.tensor(input_dp[index], dtype=torch.float)
+            )
+
+        map_dp = input_dp.map(fn=fn, fn_args=(torch.int,), fn_kwargs={'sum': True})
+        self.assertEqual(len(input_dp), len(map_dp))
+        for index in arr:
+            self.assertEqual(
+                map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
+            )
+
+        from functools import partial
+
+        map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
+        self.assertEqual(len(input_dp), len(map_dp))
+        for index in arr:
+            self.assertEqual(
+                map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
+            )
+
+
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9
 _generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
@@ -767,7 +846,7 @@ class TestTyping(TestCase):
 
     def test_construct_time(self):
         class DP0(IterDataPipe[Tuple]):
-            @construct_time_validation
+            @argument_validation
             def __init__(self, dp: IterDataPipe):
                 self.dp = dp
 
@@ -776,7 +855,7 @@ class TestTyping(TestCase):
                     yield d, str(d)
 
         class DP1(IterDataPipe[int]):
-            @construct_time_validation
+            @argument_validation
             def __init__(self, dp: IterDataPipe[Tuple[int, str]]):
                 self.dp = dp
 
@@ -792,12 +871,6 @@ class TestTyping(TestCase):
         dp = DP0(IDP(range(10)))
         with self.assertRaisesRegex(TypeError, r"Expected type of argument 'dp' as a subtype"):
             dp = DP1(dp)
-
-        with self.assertRaisesRegex(TypeError, r"Can not decorate"):
-            class InvalidDP1(IterDataPipe[int]):
-                @construct_time_validation
-                def __iter__(self):
-                    yield 0
 
     def test_runtime(self):
         class DP(IterDataPipe[Tuple[int, T_co]]):
@@ -822,6 +895,14 @@ class TestTyping(TestCase):
                [1, '1', 2, '2'])
         for ds in dss:
             dp = DP(ds)
+            with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
+                list(d for d in dp)
+
+            with runtime_validation_disabled():
+                self.assertEqual(list(d for d in dp), ds)
+                with runtime_validation_disabled():
+                    self.assertEqual(list(d for d in dp), ds)
+
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
                 list(d for d in dp)
 

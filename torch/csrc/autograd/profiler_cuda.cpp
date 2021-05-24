@@ -33,7 +33,9 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
 
 struct CUDAMethods : public CUDAStubs {
   void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const override {
-    TORCH_CUDA_CHECK(cudaGetDevice(device));
+    if (device) {
+      TORCH_CUDA_CHECK(cudaGetDevice(device));
+    }
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CUevent_st* cuda_event_ptr;
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
@@ -41,7 +43,9 @@ struct CUDAMethods : public CUDAStubs {
       TORCH_CUDA_CHECK(cudaEventDestroy(ptr));
     });
     auto stream = at::cuda::getCurrentCUDAStream();
-    *cpu_ns = getTime();
+    if (cpu_ns) {
+      *cpu_ns = getTime();
+    }
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }
 
