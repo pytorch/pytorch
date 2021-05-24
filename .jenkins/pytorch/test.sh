@@ -430,9 +430,9 @@ test_vec256() {
 }
 
 test_torch_deploy() {
-  python torch/csrc/deploy/example/generate_examples.py
-  build/bin/test_deploy
-  assert_git_not_dirty
+  # python torch/csrc/deploy/example/generate_examples.py
+  # build/bin/test_deploy
+  # assert_git_not_dirty
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
