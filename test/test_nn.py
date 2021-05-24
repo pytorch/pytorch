@@ -12867,55 +12867,56 @@ class TestNNDeviceType(NNTestCase):
         inp = torch.randn(0, 7, device=device)
         self._test_module_empty_input(mod, inp)
 
-    def test_one_hot(self, device):
+    @dtypes(torch.uint8, torch.long, torch.bool)
+    def test_one_hot(self, device, dtype):
         if self.device_type != 'cuda':  # cuda throws device assert for invalid data
             with self.assertRaises(RuntimeError):
-                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
+                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device, dtype=dtype), -1)
 
             with self.assertRaises(RuntimeError):
-                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
+                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device, dtype=dtype), 3)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1, dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6, dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
                                  [0, 1, 0, 0, 0, 0],
-                                 [1, 0, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([[3, 4], [1, 0]], device=device))
+        t = torch.nn.functional.one_hot(torch.tensor([[3, 4], [1, 0]], device=device), dtype=dtype)
         expected = torch.tensor([[[0, 0, 0, 1, 0],
                                   [0, 0, 0, 0, 1]],
                                  [[0, 1, 0, 0, 0],
-                                  [1, 0, 0, 0, 0]]], device=device)
+                                  [1, 0, 0, 0, 0]]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor(4, device=device))
-        expected = torch.tensor([0, 0, 0, 0, 1], device=device)
+        t = torch.nn.functional.one_hot(torch.tensor(4, device=device), dtype=dtype)
+        expected = torch.tensor([0, 0, 0, 0, 1], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100)
-        expected = torch.empty([4, 0, 100], dtype=torch.long)
+        t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100, dtype=dtype)
+        expected = torch.empty([4, 0, 100], dtype=dtype)
         self.assertEqual(t, expected)
 
         with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device))
+            torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), dtype=dtype)
 
         with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
+            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2, dtype=dtype)
 
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
