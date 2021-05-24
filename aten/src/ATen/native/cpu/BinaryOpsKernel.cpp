@@ -976,74 +976,7 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
 void betainc_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "betainc_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t x, scalar_t a, scalar_t b) -> scalar_t {
-      if (at::_isnan(x)){
-        return NAN;
-      }
-      if (at::_isnan(a)){
-        return NAN;
-      }
-      if (at::_isnan(b)){
-        return NAN;
-      }
-      if (x < 0.0 || x > 1.0 || a < 0.0 || b < 0.0){
-        return NAN;
-      }
-
-      /*The continued fraction converges nicely for x < (a+1)/(a+b+2)*/
-      /*Use the fact that beta is symmetrical.*/
-      bool return_inverse = false;
-      if (x > (a + 1.0) / (a + b + 2.0)) {
-        std::swap(a, b);
-        x = 1.0 - x;
-        return_inverse = true;
-      }
-
-      /*Find the first part before the continued fraction.*/
-      const scalar_t lbeta_ab = std::lgamma(a) + std::lgamma(b) - std::lgamma(a + b);
-      const scalar_t front = std::exp(std::log(x) * a + std::log(1.0 - x) * b - lbeta_ab) / a;
-
-      /*Use Lentz's algorithm to evaluate the continued fraction.*/
-      scalar_t f = 1.0, c = 1.0, d = 0.0;
-
-      scalar_t TINY = 1.0e-30, STOP = 1.0e-8, numerator, cd;
-      int i, m;
-      for (i = 0; i <= 200; ++i) {
-          m = i / 2;
-          
-          if (i == 0) {
-              numerator = 1.0; /*First numerator is 1.0.*/
-          } else if (i % 2 == 0) {
-              numerator = (m * (b - m) * x) / ((a + 2.0 * m - 1.0) * (a + 2.0 * m)); /*Even term.*/
-          } else {
-              numerator = - ((a + m) * (a + b + m) * x) / ((a + 2.0 * m) * (a + 2.0 * m + 1)); /*Odd term.*/
-          }
-
-          /*Do an iteration of Lentz's algorithm.*/
-          d = 1.0 + numerator * d;
-          if (std::abs(d) < TINY) {
-            d = TINY;
-          }
-          d = 1.0 / d;
-
-          c = 1.0 + numerator / c;
-          if (std::abs(c) < TINY) {
-            c = TINY;
-          }
-
-          cd = c * d;
-          f *= cd;
-
-          /*Check for stop.*/
-          if (std::abs(1.0 - cd) < STOP) {
-            if (return_inverse) {
-              return 1 - front * (f - 1.0);
-            } else {
-              return front * (f - 1.0);
-            }
-          }
-      }
-
-      return NAN; /*Needed more loops, did not converge.*/
+        return calc_betainc(x, a, b);
     });
   });
 }

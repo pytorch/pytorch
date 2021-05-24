@@ -727,7 +727,7 @@
   a: not_implemented("special_betainc")
 
 - name: special_betainc.ab_scalar(Tensor self, Scalar a, Scalar b) -> Tensor
-  self: grad
+  self: not_implemented("special_betainc")
 
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
