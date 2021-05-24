@@ -3265,8 +3265,8 @@ class TestONNXRuntime(unittest.TestCase):
                 self.dtype = dtype
 
             def forward(self, x):
-                return torch.nn.functional.one_hot(x, self.num_classes,
-                                                   self.dtype)
+                return torch.nn.functional.one_hot(x, self.num_classes, self.dtype)
+
         x = torch.arange(10)
         self.run_test(OneHot(15, torch.long), (x), check_dtypes=True)
         self.run_test(OneHot(15, torch.uint8), (x), check_dtypes=True)
