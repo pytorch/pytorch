@@ -4453,23 +4453,24 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
-        def check(equation, *operands):
-            ref = np.einsum(equation, *[operand.cpu().numpy() for operand in operands])
-            res = torch.einsum(equation, operands)
-            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+        def check(*args):
+            np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
+            ref = np.einsum(*np_args)
+            res = torch.einsum(*args)
+            self.assertEqual(torch.from_numpy(np.array(ref)), res)
 
         # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
-        x = torch.rand(5, device=device, dtype=dtype)
-        y = torch.rand(7, device=device, dtype=dtype)
-        A = torch.randn(3, 5, device=device, dtype=dtype)
-        B = torch.randn(2, 5, device=device, dtype=dtype)
-        C = torch.randn(2, 3, 5, device=device, dtype=dtype)
-        D = torch.randn(2, 5, 7, device=device, dtype=dtype)
-        E = torch.randn(7, 9, device=device, dtype=dtype)
-        F = torch.randn(2, 3, 3, 5, device=device, dtype=dtype)
-        G = torch.randn(5, 4, 6, device=device, dtype=dtype)
-        H = torch.randn(4, 4, device=device, dtype=dtype)
-        I = torch.rand(2, 3, 2, device=device, dtype=dtype)
+        x = make_tensor((5,), device, dtype)
+        y = make_tensor((7,), device, dtype)
+        A = make_tensor((3, 5), device, dtype)
+        B = make_tensor((2, 5), device, dtype)
+        C = make_tensor((2, 3, 5), device, dtype)
+        D = make_tensor((2, 5, 7), device, dtype)
+        E = make_tensor((7, 9), device, dtype)
+        F = make_tensor((2, 3, 3, 5), device, dtype)
+        G = make_tensor((5, 4, 6), device, dtype)
+        H = make_tensor((4, 4), device, dtype)
+        I = make_tensor((2, 3, 2), device, dtype)
 
         # Vector operations
         check('i->', x)                     # sum
@@ -4500,20 +4501,20 @@ class TestLinalg(TestCase):
         check("ii", H)                      # trace
         check("ii->i", H)                   # diagonal
         check('iji->j', I)                  # non-contiguous trace
-        check('ngrg...->nrg...', torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype))
+        check('ngrg...->nrg...', make_tensor((2, 1, 3, 1, 4), device, dtype))
 
         # Test ellipsis
         check("i...->...", H)
         check("ki,...k->i...", A.t(), B)
         check("k...,jk->...", A.t(), B)
         check('...ik, ...j -> ...ij', C, x)
-        check('Bik,k...j->i...j', C, torch.rand(5, 3, device=device, dtype=dtype))
-        check('i...j, ij... -> ...ij', C, torch.rand(2, 5, 2, 3, device=device, dtype=dtype))
+        check('Bik,k...j->i...j', C, make_tensor((5, 3), device, dtype))
+        check('i...j, ij... -> ...ij', C, make_tensor((2, 5, 2, 3), device, dtype))
 
         # torch.bilinear with noncontiguous tensors
-        l = torch.randn(10, 5, device=device, dtype=dtype).transpose(0, 1)
-        r = torch.randn(20, 5, device=device, dtype=dtype).transpose(0, 1)
-        w = torch.randn(15, 10, 20, device=device, dtype=dtype)
+        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
+        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
+        w = make_tensor((15, 10, 20), device, dtype)
         check("bn,anm,bm->ba", l, w, r)
 
         # with strided tensors
@@ -4553,7 +4554,7 @@ class TestLinalg(TestCase):
                     labels.insert(ell_index, "...")
 
                 equation += ''.join(labels) + ','
-                ops.append(torch.rand(sizes, device=device, dtype=dtype))
+                ops.append(make_tensor(sizes, device, dtype))
             equation = equation[:-1]
 
             # Test with implicit output
@@ -4571,8 +4572,8 @@ class TestLinalg(TestCase):
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
-            tensors = [torch.tensor(operand, dtype=torch.float32, device=device) if not isinstance(operand, tuple)
-                       else torch.rand(operand, dtype=torch.float32, device=device) for operand in operands]
+            tensors = [torch.tensor(operand, device=device, dtype=torch.float32) if not isinstance(operand, tuple)
+                       else make_tensor(operand, device, torch.float32) for operand in operands]
             output = torch.einsum(equation, tensors)
             self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
 
@@ -4610,33 +4611,68 @@ class TestLinalg(TestCase):
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
     def test_einsum_error_cases(self, device):
-        def check(equation, operands, regex, exception=RuntimeError):
-            with self.assertRaisesRegex(exception, r'einsum\(\): ' + regex):
-                torch.einsum(equation, operands)
+        def check(*args, regex, exception=RuntimeError):
+            with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
+                torch.einsum(*args)
 
-        x = torch.rand(2)
-        y = torch.rand(2, 3)
+        x = make_tensor((2,), device, torch.float32)
+        y = make_tensor((2, 3), device, torch.float32)
 
-        check('', [], r'must provide at least one operand')
-        check('. ..', [x], r'found \'.\' for operand 0 that is not part of any ellipsis')
-        check('... ...', [x], r'found \'.\' for operand 0 for which an ellipsis was already found')
-        check('1', [x], r'operand subscript must be in \[a-zA-Z\] but found 1 for operand 0')
-        check(',', [x], r'fewer operands were provided than specified in the equation')
-        check('', [x, x], r'more operands were provided than specified in the equation')
-        check('', [x], r'the number of subscripts in the equation \(0\) does not match the number '
-                       r'of dimensions \(1\) for operand 0 and no ellipsis was given')
-        check('ai', [x], r'the number of subscripts in the equation \(2\) does not match the number '
-                         r'of dimensions \(1\) for operand 0 and no ellipsis was given')
-        check('ai...', [x], r'the number of subscripts in the equation \(2\) is more than the number '
-                            r'of dimensions \(1\) for operand 0')
-        check('a->... .', [x], r'found \'.\' for output but an ellipsis \(...\) was already found')
-        check('a->..', [x], r'found \'.\' for output that is not part of any ellipsis \(...\)')
-        check('a->1', [x], r'subscripts must be in \[a-zA-Z\] but found 1 for the output')
-        check('a->aa', [x], r'output subscript a appears more than once in the output')
-        check('a->i', [x], r'output subscript i does not appear in the equation for any input operand')
-        check('aa', [y], r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
-        check('a, ba', [x, y], r'operands do not broadcast with remapped shapes \[original->remapped\]: '
-                               r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
+        check('', [], regex=r'at least one operand', exception=ValueError)
+        check('. ..', [x], regex=r'found \'.\' for operand 0 that is not part of any ellipsis')
+        check('... ...', [x], regex=r'found \'.\' for operand 0 for which an ellipsis was already found')
+        check('1', [x], regex=r'invalid subscript given at index 0')
+        check(',', [x], regex=r'fewer operands were provided than specified in the equation')
+        check('', [x, x], regex=r'more operands were provided than specified in the equation')
+        check('', [x], regex=r'the number of subscripts in the equation \(0\) does not match the number '
+              r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai', [x], regex=r'the number of subscripts in the equation \(2\) does not match the number '
+              r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai...', [x], regex=r'the number of subscripts in the equation \(2\) is more than the number '
+              r'of dimensions \(1\) for operand 0')
+        check('a->... .', [x], regex=r'found \'.\' for output but an ellipsis \(...\) was already found')
+        check('a->..', [x], regex=r'found \'.\' for output that is not part of any ellipsis \(...\)')
+        check('a->1', [x], regex=r'invalid subscript given at index 3')
+        check('a->aa', [x], regex=r'output subscript a appears more than once in the output')
+        check('a->i', [x], regex=r'output subscript i does not appear in the equation for any input operand')
+        check('aa', [y], regex=r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
+        check('a, ba', [x, y], regex=r'operands do not broadcast with remapped shapes \[original->remapped\]: '
+              r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
+
+        check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
+        check(x, [52], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
+
+    @dtypes(torch.double, torch.cdouble)
+    def test_einsum_sublist_format(self, device, dtype):
+        def check(*args):
+            np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
+            ref = np.einsum(*np_args)
+            res = torch.einsum(*args)
+            self.assertEqual(torch.from_numpy(np.array(ref)), res)
+
+        x = make_tensor((5,), device, dtype)
+        y = make_tensor((7,), device, dtype)
+        A = make_tensor((3, 5), device, dtype)
+        B = make_tensor((2, 5), device, dtype)
+        C = make_tensor((2, 1, 3, 1, 4), device, dtype)
+
+        check(x, [0])
+        check(x, [0], [])
+        check(x, [0], y, [1], [0, 1])
+        check(A, [0, 1], [1, 0])
+        check(A, [0, 1], x, [1], [0])
+        check(A, [0, 1], B, [2, 1])
+        check(A, [0, 1], B, [2, 1], [0, 2])
+        check(C, [0, 1, 2, 1, Ellipsis], [0, 2, 1, Ellipsis])
+        check(A.t(), [0, 1], B, [Ellipsis, 0])
+        check(A.t(), [0, 1], B, [Ellipsis, 0], [1, Ellipsis])
+        check(A.t(), [0, Ellipsis], B, [1, 0], [Ellipsis])
+
+        # torch.bilinear with noncontiguous tensors
+        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
+        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
+        w = make_tensor((15, 10, 20), device, dtype)
+        check(l, [40, 41], w, [2, 41, 50], r, [40, 50], [40, 2])
 
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):
