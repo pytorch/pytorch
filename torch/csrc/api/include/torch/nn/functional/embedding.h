@@ -6,8 +6,11 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-inline Tensor one_hot(const Tensor& tensor, int64_t num_classes = -1) {
-  return torch::one_hot(tensor, num_classes);
+inline Tensor one_hot(
+    const Tensor& tensor,
+    int64_t num_classes = -1,
+    ScalarType dtype = c10::kLong) {
+  return torch::one_hot(tensor, num_classes, dtype);
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
