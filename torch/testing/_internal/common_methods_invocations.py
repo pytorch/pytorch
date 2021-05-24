@@ -4,6 +4,7 @@ from operator import mul
 import collections
 import operator
 import random
+import contextlib
 
 import torch
 import numpy as np
@@ -77,32 +78,6 @@ class SkipInfo(DecorateInfo):
         super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
-
-
-class SampleInputCtx(object):
-    """Context manager wrapping a SampleInput.
-
-    The end user can get the underlying SampleInput by entering a with
-    statement, e.g.:
-
-        with ctx as sample:
-            print(sample.args)
-            print(sample.input)
-
-    If case of exception, the context manager will prepend the name of the
-    SampleInput to the error message, making it possible to know which is the
-    specific sample which caused the test to fail.
-    """
-    def __init__(self, sample):
-        assert isinstance(sample, SampleInput)
-        self._sample = sample
-
-    def __enter__(self):
-        return self._sample
-
-    def __exit__(self, etype, evalue, tb):
-        if etype:
-            evalue.args = (f'[SampleInput: {self._sample.name}] {evalue}',)
 
 
 class SampleInput(object):
@@ -263,6 +238,9 @@ class OpInfo(object):
         self.skips = skips
         self.decorators = decorators
         self.sample_inputs_func = sample_inputs_func
+        # the sample which is currently being iterted on by sample_inputs. See
+        # also decorate_errors()
+        self._current_sample = None
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -332,22 +310,29 @@ class OpInfo(object):
         return samples
 
     def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
-        """Returns a list of SampleInputCtxs.
+        """Generates a sequence of SampleInputs.
 
-        The SampleInputCtxs are constructed by wrapping the result of
-        generate_sample_inputs.
+        The OpInfo keeps track the the sample which is currently yielded: wrap
+        your code inside a with op.decorate_errors() to get better exception
+        messages which include the current sample.
 
         If subclasses want to customize the generation of inputs, they should
         override generate_sample_inputs(). On the contrary, end users should
         always call sample_inputs().
         """
+        if self._current_sample is not None:
+            raise ValueError('Cannot call op.sample_inputs() while another '
+                             'iteration is in progress')
         samples = self.generate_sample_inputs(device, dtype, requires_grad, **kwargs)
-        # make sure that every SampleInput has a sensible name: if the name
-        # was not given, use the index instead
         for i, sample in enumerate(samples):
+            assert isinstance(sample, SampleInput)
+            # make sure that every SampleInput has a sensible name: if the
+            # name was not given, use the index instead
             if sample.name is None:
                 sample.name = str(i)
-        return [SampleInputCtx(sample) for sample in samples]
+            self._current_sample = sample
+            yield sample
+        self._current_sample = None
 
     def get_one_sample_input(self, device, dtype, requires_grad=False, **kwargs):
         """Returns a single SampleInput if it exists, else None"""
@@ -355,6 +340,20 @@ class OpInfo(object):
         if len(samples) == 0:
             return None
         return samples[0]
+
+    @contextlib.contextmanager
+    def decorate_errors(self):
+        """Attach additional information to exceptions.
+
+        In particular, display also the name of the current SampleInput if the
+        code is in the middle of a loop "for sample in op.sample_inputs():"
+        """
+        try:
+            yield
+        except Exception as exc:
+            if self._current_sample:
+                exc.args = (f'[SampleInput: {self._current_sample.name}] {exc}',)
+            raise
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):

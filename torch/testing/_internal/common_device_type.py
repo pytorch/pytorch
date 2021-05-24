@@ -289,7 +289,8 @@ class DeviceTypeTestBase(TestCase):
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
-                    result = test_fn(self, *args)
+                    with op.decorate_errors():
+                        result = test_fn(self, *args)
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
                     self._stop_test_suite = self._should_stop_test_suite()
