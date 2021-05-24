@@ -371,6 +371,7 @@ From the ``torch.nn.utils`` module
     remove_weight_norm
     spectral_norm
     remove_spectral_norm
+    skip_init
 
 Parametrizations implemented using the new parametrization functionality
 in :func:`torch.nn.utils.parameterize.register_parametrization`.
