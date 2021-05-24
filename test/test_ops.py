@@ -7,7 +7,7 @@ from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck)
+     gradcheck, gradgradcheck, IS_PYTORCH_CI)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
@@ -737,14 +737,15 @@ instantiate_device_type_tests(TestGradients, globals())
 instantiate_device_type_tests(TestCommon, globals())
 
 if __name__ == '__main__':
-    # Assure no opinfo entry has dynamic_dtypes
-    filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
-    for op in filtered_ops:
-        fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
-        print(fmt_str)
+    if IS_PYTORCH_CI:
+        # Assure no opinfo entry has dynamic_dtypes
+        filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
+        for op in filtered_ops:
+            fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
+            print(fmt_str)
 
-    assert len(filtered_ops) == 0, \
-        ("The above operator/s is using dynamic_dtypes in the OpInfo entry!"
-         "Please set the dtypes manually")
+        assert len(filtered_ops) == 0, \
+            ("The above operator/s is using dynamic_dtypes in the OpInfo entry!"
+             "Please set the dtypes manually")
 
     run_tests()
