@@ -167,6 +167,9 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 )
 class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
     def setUp(self):
+        self.num_gpus = torch.cuda.device_count()
+        if self.num_gpus < 2:
+            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
         super(AbstractProcessGroupWrapperTest, self).setUp()
         self._spawn_processes()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
