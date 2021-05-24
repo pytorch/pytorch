@@ -14010,7 +14010,7 @@ dedent """
 
         class Point(NamedTuple):
             x: Optional[List[int]] = None
-            y: Optional[List[int]] = [1, 2, 3]
+            y: List[int] = [1, 2, 3]
             z: Optional[Dict[str, int]] = {"a": 1}
 
         make_global(Point)
@@ -14022,14 +14022,14 @@ dedent """
             def forward(self, point: Point):
                 return point
 
-        p = Point(x=[4, 5, 6], y=None, z={"b": 2})
+        p = Point(x=[4, 5, 6], y=[3, 2, 1], z={"b": 2})
 
         self.checkModule(M(), (p,))
         self.checkModule(M(), (Point(),))
 
         m = torch.jit.script(M())
 
-        first_line = r"NamedTuple(x : int[]? = None, y : int[]? = "    \
+        first_line = r"NamedTuple(x : int[]? = None, y : int[] = "    \
                      r"[1, 2, 3], z : Dict(str, int)? = {a: 1}))"
 
         FileCheck().check(first_line)   \

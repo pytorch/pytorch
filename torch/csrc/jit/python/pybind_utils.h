@@ -730,10 +730,7 @@ inline py::object toPyObject(IValue ivalue) {
       std::vector<IValue> defaults;
       auto it = std::find_if(
           tuple_args.begin(), tuple_args.end(), [](const Argument& arg) {
-            if (arg.default_value()) {
-              return true;
-            }
-            return false;
+            return arg.default_value().has_value();
           });
       std::transform(
           it,

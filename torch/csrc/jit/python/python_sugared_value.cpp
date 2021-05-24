@@ -960,9 +960,9 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
       auto type = tryToInferType(field_defaults[i]);
       ival = toIValue(field_defaults[i], type.type());
       TORCH_CHECK(
-          ival.tagKind() != "Tensor",
-          "Tensors are not "
-          "supported as default NamedTuple fields");
+          !ival.isTensor(),
+          "Tensors are not supported as default NamedTuple fields. "
+          "Using a Tensor is dangerous because it's a mutable object");
     }
     fields.emplace_back(std::pair<std::string, IValue>(field_names[i], ival));
   }
@@ -971,7 +971,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   if (auto type = get_python_cu()->get_type(qualifiedName)) {
     TORCH_CHECK(
         type->isSubtypeOf(tt),
-        "Can't redefine NamedTuple after creation: ",
+        "Can't redefine NamedTuple: ",
         tt->repr_str());
     return type;
   }

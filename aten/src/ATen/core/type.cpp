@@ -763,7 +763,7 @@ TupleTypePtr TupleType::createNamed(
         /*name=*/fields[i].first,
         /*type=*/field_types[i],
         /*N=*/i,
-        /*default_value*/fields[i].second);
+        /*default_value=*/fields[i].second);
   }
 
   auto schema = std::make_shared<FunctionSchema>(
