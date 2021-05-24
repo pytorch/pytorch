@@ -430,6 +430,7 @@ test_vec256() {
 }
 
 test_torch_deploy() {
+  true;
   # python torch/csrc/deploy/example/generate_examples.py
   # build/bin/test_deploy
   # assert_git_not_dirty
