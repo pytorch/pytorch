@@ -808,14 +808,6 @@ def assert_fns_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
 
 
 class TestAsserts(TestCase):
-    def test_sparse_support(self):
-        actual = torch.empty(())
-        expected = torch.sparse_coo_tensor(size=())
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
-                fn()
-
     def test_quantized_support(self):
         val = 1
         actual = torch.tensor([val], dtype=torch.int32)
@@ -832,6 +824,14 @@ class TestAsserts(TestCase):
 
         for fn in assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, "shape"):
+                fn()
+
+    def test_mismatching_is_sparse(self):
+        actual = torch.empty(())
+        expected = torch.sparse_coo_tensor(size=())
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "is_sparse"):
                 fn()
 
     def test_mismatching_dtype(self):
@@ -1145,6 +1145,70 @@ class TestAssertsMultiDevice(TestCase):
 
 
 instantiate_device_type_tests(TestAssertsMultiDevice, globals(), only_for="cuda")
+
+
+class TestAssertsSparse(TestCase):
+    def test_matching(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, (2, 2))
+        expected = actual.clone()
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            fn()
+
+    def test_matching_uncoalesced(self):
+        indices = (
+            (0, 1, 0,),
+            (1, 0, 1,),
+        )
+        values = (1, 1, 1)
+        actual = torch.sparse_coo_tensor(indices, values, (2, 2))
+        expected = actual.clone().coalesce()
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_indices_msg(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, (2, 2))
+
+        expected_indices = (
+            (0, 1),
+            (1, 1),
+        )
+        expected_values = (1, 2)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, (2, 2))
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, (2, 2))
+
+        expected_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        expected_values = (1, 3)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, (2, 2))
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+                fn()
 
 
 if __name__ == '__main__':

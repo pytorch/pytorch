@@ -102,6 +102,36 @@ def _check_complex_components_individually(
     return wrapper
 
 
+def _check_sparse_indices_and_values_individually(
+    check_tensors: Callable[..., Optional[Exception]]
+) -> Callable[..., Optional[Exception]]:
+    """Decorates dense tensor check functions to handle indices and values of sparse tensors individually.
+
+    If the inputs are not sparse, this decorator is a no-op.
+
+    Args:
+        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Tensor check function for dense
+        tensors.
+    """
+    @functools.wraps(check_tensors)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[Exception]:
+        if not actual.is_sparse:
+            return check_tensors(actual, expected, **kwargs)
+
+        actual = actual.coalesce()
+        expected = expected.coalesce()
+
+        exc = check_tensors(actual.indices(), expected.indices(), **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the indices.")
+
+        exc = check_tensors(actual.values(), expected.values(), **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the values.")
+
+    return wrapper
+
+
 def _check_supported_tensor(
     input: Tensor,
 ) -> Optional[UsageError]:  # type: ignore[valid-type]
@@ -114,8 +144,6 @@ def _check_supported_tensor(
     """
     if input.is_quantized:
         return UsageError("Comparison for quantized tensors is not supported yet.")
-    if input.is_sparse:
-        return UsageError("Comparison for sparse tensors is not supported yet.")
 
     return None
 
@@ -157,7 +185,9 @@ def _check_attributes_equal(
     if check_dtype and actual.dtype != expected.dtype:
         return AssertionError(msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
 
-    if check_stride and actual.stride() != expected.stride():
+    if actual.is_sparse != expected.is_sparse:
+        return AssertionError(msg_fmtstr.format("is_sparse", actual.is_sparse, expected.is_sparse))
+    elif not actual.is_sparse and check_stride and actual.stride() != expected.stride():
         return AssertionError(msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
 
     return None
@@ -246,6 +276,7 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
 
 
 @_check_complex_components_individually
+@_check_sparse_indices_and_values_individually
 def _check_values_equal(
     actual: Tensor,
     expected: Tensor,
@@ -283,6 +314,7 @@ def _check_values_equal(
 
 
 @_check_complex_components_individually
+@_check_sparse_indices_and_values_individually
 def _check_values_close(
     actual: Tensor,
     expected: Tensor,
@@ -649,8 +681,7 @@ def assert_equal(
     Raises:
         UsageError: If an array-or-scalar-like pair has different types.
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
-            future.
+        UsageError: If any tensor is quantized. This is a temporary restriction and will be relaxed in the future.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If a tensor pair does not have the same :attr:`~torch.Tensor.shape`.
@@ -751,8 +782,7 @@ def assert_close(
 
     Raises:
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
-            future.
+        UsageError: If any tensor is sparse. This is a temporary restriction and will be relaxed in the future.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If corresponding array-likes have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
