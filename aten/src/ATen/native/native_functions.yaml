@@ -9372,15 +9372,15 @@
 - func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   python_module: special
   device_check: NoCheck   # TensorIterator
-  variants: function, method
+  variants: function
   dispatch:
-    CompositeExplicitAutograd: logsumexp
+    CompositeExplicitAutograd: special_logsumexp
 
 - func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CompositeExplicitAutograd: logsumexp_out
+    CompositeExplicitAutograd: special_logsumexp_out
 
 - func: special_expit(Tensor self) -> Tensor
   python_module: special

@@ -1018,7 +1018,7 @@ Tensor special_logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   return self.logsumexp(dims, keepdim);
 }
 Tensor& special_logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
-  return at::logsumexp_out(self, dims, keepdim, result);
+  return at::logsumexp_out(result, self, dims, keepdim);
 }
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
