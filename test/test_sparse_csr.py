@@ -2,8 +2,9 @@ import torch
 import random
 import warnings
 import unittest
+from torch.testing._internal.common_utils import \
+    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 import itertools
-from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, IS_MACOS, IS_WINDOWS, coalescedonoff
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU, onlyCUDA)
 
@@ -222,6 +223,8 @@ class TestSparseCSR(TestCase):
                     t.col_indices().device == t.values().device
 
     def test_sparse_csr_print(self, device):
+        orig_maxDiff = self.maxDiff
+        self.maxDiff = None
         shape_nnz = [
             ((10, 10), 10),
             ((100, 10), 10),
@@ -254,6 +257,7 @@ class TestSparseCSR(TestCase):
                     printed.append('')
                 printed.append('')
         self.assertExpected('\n'.join(printed))
+        self.maxDiff = orig_maxDiff
 
     def test_sparse_csr_from_dense(self, device):
         dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], device=device)
@@ -394,7 +398,6 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, "mv: expected"):
                 csr.matmul(bad_vec)
 
-    @onlyCUDA
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz):
