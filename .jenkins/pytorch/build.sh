@@ -200,7 +200,7 @@ fi
 
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  git clone --recursive https://github.com/pytorch/xla.git
+  git clone --recursive https://github.com/pytorch/xla.git -b make_codegen_backend_agnostic_minus_fallbacks
   ./xla/scripts/apply_patches.sh
 fi
 
