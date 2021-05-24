@@ -5710,12 +5710,12 @@ else:
 
                 # empty tensor
                 dest = torch.empty((5, 0, 5), dtype=dt, device=device)
-                mask = torch.empty_like(dest, dtype=maskType, device=device)
+                mask = torch.ones_like(dest, dtype=maskType, device=device)
                 src = torch.empty((0,), dtype=dt, device=device)
                 dest.masked_scatter_(mask, src)
 
                 dest = torch.empty((5, 0, 5), dtype=dt, device=device)
-                mask = torch.empty((5, 1, 5), dtype=maskType, device=device)
+                mask = torch.ones((5, 1, 5), dtype=maskType, device=device)
                 src = torch.empty((0,), dtype=dt, device=device)
                 dest.masked_scatter_(mask, src)
 
