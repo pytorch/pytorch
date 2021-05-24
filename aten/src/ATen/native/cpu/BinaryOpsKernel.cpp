@@ -982,7 +982,7 @@ void betainc_kernel(TensorIteratorBase& iter) {
       if (x == 0){
         return 0;
       }
-      return x * 2;
+      return x;
     });
   });
 }
