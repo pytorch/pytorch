@@ -81,12 +81,15 @@ def run_ort(ort_sess, input):
     return inline_flatten_list(ort_outs, [])
 
 
-def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
+def ort_compare_with_pytorch(ort_outs, output, rtol, atol, check_dtypes=False):
     output, _ = torch.jit._flatten(output)
     outputs = [to_numpy(outp) for outp in output]
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
+    if check_dtypes:
+        assert all(l.dtype == r.dtype for l, r in zip(outputs, ort_outs)), \
+            "dtypes of outputs differ"
 
     # compare onnxruntime and PyTorch results
     [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
@@ -98,7 +101,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
                    fixed_batch_size=False, dict_check=True,
-                   training=None):
+                   training=None, check_dtypes=False):
     model.eval()
     if input is None:
         input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
@@ -133,7 +136,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    onnx_shape_inference=self.onnx_shape_inference)
         # compute onnxruntime output prediction
         ort_outs = run_ort(ort_sess, input)
-        ort_compare_with_pytorch(ort_outs, output, rtol, atol)
+        ort_compare_with_pytorch(ort_outs, output, rtol, atol, check_dtypes)
 
 
         # if additional test inputs are provided run the onnx
@@ -147,7 +150,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 if isinstance(output, torch.Tensor):
                     output = (output,)
                 ort_outs = run_ort(ort_sess, test_input)
-                ort_compare_with_pytorch(ort_outs, output, rtol, atol)
+                ort_compare_with_pytorch(ort_outs, output, rtol, atol, check_dtypes)
 
 def _init_test_generalized_rcnn_transform():
     min_size = 100
@@ -240,7 +243,7 @@ class TestONNXRuntime(unittest.TestCase):
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False, dict_check=True,
-                 training=None):
+                 training=None, check_dtypes=False):
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
@@ -248,7 +251,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size, dict_check=dict_check,
-                                  training=training)
+                                  training=training, check_dtypes=check_dtypes)
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -1551,6 +1554,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = 3
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
+
+    @disableScriptTest()
+    def test_tuple_with_none_outputs(self):
+        class TupleModel(torch.nn.Module):
+            def forward(self, x):
+                l = (x, None, (x, None))
+                return (x, l)
+
+        model = TupleModel()
+        x = torch.randn(3, 4)
+        self.run_test(TupleModel(), (x,))
 
     # In scripting the first transpose node do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
@@ -3245,15 +3259,17 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_one_hot(self):
         class OneHot(torch.nn.Module):
-            def __init__(self, num_classes):
+            def __init__(self, num_classes, dtype):
                 super().__init__()
                 self.num_classes = num_classes
+                self.dtype = dtype
 
             def forward(self, x):
-                return torch.nn.functional.one_hot(x, self.num_classes)
+                return torch.nn.functional.one_hot(x, self.num_classes, self.dtype)
 
         x = torch.arange(10)
-        self.run_test(OneHot(15), (x))
+        self.run_test(OneHot(15, torch.long), (x), check_dtypes=True)
+        self.run_test(OneHot(15, torch.uint8), (x), check_dtypes=True)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gather(self):
@@ -4263,6 +4279,16 @@ class TestONNXRuntime(unittest.TestCase):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    def test_item(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, i: int):
+                return int(x[y[i]].item())
+
+        x = torch.arange(6, dtype=torch.float)
+        y = torch.tensor([0, 1, 2, 3, 4], dtype=torch.long)
+        i = 3
+        self.run_test(torch.jit.script(M()), (x, y, i))
+
     @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_nonzero(self):
@@ -4429,6 +4455,17 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_dynamic_axes(self):
+        class Split(torch.nn.Module):
+            def forward(self, x):
+                return x.split(1, dim=-1)
+
+        x = torch.randn(4, 384, 2)
+        input_names = ["logits"]
+        self.run_test(Split(), x, input_names=input_names,
+                      dynamic_axes={input_names[0]: {0: 'batch'}})
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
@@ -8133,6 +8170,22 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_unpack(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                elem = torch.matmul(x[0], y)
+                for i in range(x.size(0)):
+                    res.append(torch.matmul(x[i], y))
+                a, b, c = res
+                return a, b
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(3, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_inplace_ops(self):
         @torch.jit.script
         def check_init(input_data, hidden_size):
@@ -8163,6 +8216,48 @@ class TestONNXRuntime(unittest.TestCase):
         model = Example(10)
         random_data = torch.rand((1, 5, 30, 30))
         self.run_test(model, (random_data))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_input_mask_model(self):
+        class InputMaskModel(torch.nn.Module):
+            def __init__(self, output_size):
+                super(InputMaskModel, self).__init__()
+                self.bias = torch.nn.Parameter(torch.empty(
+                    output_size,
+                    dtype=torch.float))
+                with torch.no_grad():
+                    self.bias.zero_()
+
+            def forward(self, model_input, y):
+                input_mask = (model_input <= 0) | (model_input > 25)
+                y[input_mask, :] = 0.0
+                output = y + self.bias
+                return output
+
+        output_size = 4
+        m = InputMaskModel(output_size)
+        x = torch.tensor([0, 4, 24, 25], dtype=torch.int64)
+        y = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4],
+                         [0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]], dtype=torch.float)
+        self.run_test(m, (x, y))
+
+        class InputMaskModel(torch.nn.Module):
+            def __init__(self, output_size):
+                super(InputMaskModel, self).__init__()
+
+            def forward(self, model_input_1, model_input_2, y):
+                input_mask_1 = (model_input_1 <= 0) | (model_input_1 > 25)
+                input_mask_2 = (model_input_2 < 1) | (model_input_2 >= 12)
+                y[input_mask_1, input_mask_2] = 0.0
+                return y
+
+        output_size = 4
+        m = InputMaskModel(output_size)
+        x1 = torch.tensor([0, 4, 24, 25], dtype=torch.int64)
+        x2 = torch.tensor([0, 3, 12, 15], dtype=torch.int64)
+        y = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4],
+                         [0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]], dtype=torch.float)
+        self.run_test(m, (x1, x2, y))
 
     @disableScriptTest()
     def test_unsafe_chunk(self):
@@ -8479,6 +8574,144 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x, y), test_with_inputs=[(new_x, new_y)],
                       input_names=['input_x', 'input_y'],
                       dynamic_axes={'input_x': [0, 1, 2, 3], 'input_y': [0, 1, 2, 3]})
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_to_device(self):
+        class M_ToDevice(torch.nn.Module):
+            def forward(self, x, y):
+                return x.to(y.device), y
+
+        class M_ToDeviceDtype(torch.nn.Module):
+            def forward(self, x, y):
+                return x.to(y.device, dtype=torch.long), y
+
+        x = torch.randn(6)
+        y = torch.randn(6)
+
+        self.run_test(M_ToDevice(), (x, y))
+        self.run_test(M_ToDeviceDtype(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
+    def test_fill(self):
+        class FillModule(torch.nn.Module):
+            def forward(self, x, filled_value: int):
+                return x.fill_(filled_value)
+
+        x = torch.randn((4, 5, 6))
+        filled_value = 7
+        self.run_test(FillModule(), (x, filled_value))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_add_normal(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim, index, updates):
+                super(M, self).__init__()
+                self.dim = dim
+                self.index = index
+                self.updates = updates
+
+            def forward(self, x):
+                x.index_add_(self.dim, self.index, self.updates)
+                return x
+
+        x = torch.ones(5, 4, 3)
+        updates = torch.tensor([[1], [4], [7], [3], [2]], dtype=torch.float)
+        index = torch.tensor([0, 2, 3, 1, 4])
+        self.run_test(M(0, index, updates), (x,))
+
+        updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float)
+        index = torch.tensor([0, 2, 3, 1])
+        self.run_test(M(1, index, updates), (x,))
+
+        updates = torch.tensor([[[1, 2, 3], [4, 5, 6], [7, 8, 9], [2, 3, 4]]], dtype=torch.float)
+        index = torch.tensor([0, 2, 1])
+        self.run_test(M(2, index, updates), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_add_dim_size_differ(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim, index, updates):
+                super(M, self).__init__()
+                self.dim = dim
+                self.index = index
+                self.updates = updates
+
+            def forward(self, x):
+                x.index_add_(self.dim, self.index, self.updates)
+                return x
+
+        x = torch.ones(5, 4, 3)
+        updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6]]], dtype=torch.float)
+        index = torch.tensor([0, 2, 1])
+        self.run_test(M(1, index, updates), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_add_in_loop(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim, index, updates, loop_count):
+                super(M, self).__init__()
+                self.dim = dim
+                self.index = index
+                self.updates = updates
+                self.loop_count = loop_count
+
+            def forward(self, x):
+                for i in range(self.loop_count):
+                    x.index_add_(self.dim, self.index, self.updates)
+                return x
+
+        x = torch.ones(5, 4, 3)
+        updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float)
+        index = torch.tensor([0, 2, 3, 1])
+        loop_count = torch.randint(20, (1, ))[0].item()
+        self.run_test(M(1, index, updates, loop_count), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_add_if(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim, updates, index_true, index_false):
+                super(M, self).__init__()
+                self.dim = dim
+                self.updates = updates
+                self.index_true = index_true
+                self.index_false = index_false
+
+            def forward(self, x, cond):
+                if cond:
+                    x.index_add_(self.dim, self.index_true, self.updates)
+                else:
+                    x.index_add_(self.dim, self.index_false, self.updates)
+                return x
+
+        x = torch.ones(5, 4, 3)
+        updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float)
+        index_true = torch.tensor([0, 2, 3, 1])
+        index_false = torch.tensor([1, 0, 2, 3])
+        cond = torch.tensor(1, dtype=torch.bool)
+        self.run_test(torch.jit.script(M(1, updates, index_true, index_false)), (x, cond))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_add_dynamic_axes(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim, index, updates):
+                super(M, self).__init__()
+                self.dim = dim
+                self.index = index
+                self.updates = updates
+
+            def forward(self, x):
+                x.index_add_(self.dim, self.index, self.updates)
+                return x
+
+        x = torch.ones(5, 4, 3)
+        y = torch.ones(7, 8, 3)
+        updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float)
+        index = torch.tensor([0, 2, 3, 1])
+
+        self.run_test(M(1, index, updates), (x,), test_with_inputs=[y],
+                      input_names=['input_1'],
+                      dynamic_axes={'input_1': [0, 1]})
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,

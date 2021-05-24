@@ -1194,6 +1194,10 @@ Arguments:
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_backend_name",
+              &::c10d::ProcessGroup::getBackendName,
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
@@ -1445,7 +1449,8 @@ Example::
                 >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
-                ``get_future`` API supports only NCCL backend.
+                ``get_future`` API supports NCCL, and partially GLOO and MPI backends
+                (no support for peer-to-peer operations like send/recv).
                 The ``torch._C.Future`` object returned by this API can be used in
                 ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
                 features on top of ``torch.futures.Future``.
@@ -1461,7 +1466,12 @@ Example::
                 ``fut.then()`` will return another ``CUDAFuture`` that holds the return value of the
                 callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
+                    1. For CPU work, ``fut.done()`` returns true when work has been complted and value()
+                       tensors are ready.
+                    2. For GPU work, ``fut.done()`` returns true only whether the operation has been enqueued.
+                    3. For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns
+                       true when tensors have arrived on respective nodes, but not yet necessarily synched on
+                       respective GPUs (similarly to GPU work).
            )");
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")

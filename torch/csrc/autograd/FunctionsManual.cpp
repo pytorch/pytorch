@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/BatchedTensorImpl.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
@@ -13,6 +14,7 @@
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/core/grad_mode.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -349,7 +351,7 @@ Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   return handle_r_to_c(self_st, out);
 }
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, const c10::optional<std::string>& rounding_mode) {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(self_st));
   }
@@ -362,7 +364,7 @@ Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
   return div_tensor_self_backward(grad, other, self_st, c10::nullopt);
 }
 
-Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, const c10::optional<std::string>& rounding_mode) {
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(other.scalar_type()));
   }
@@ -2326,52 +2328,157 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return at::linalg_solve(Uh, at::matmul(U_contrib, Uh) + D_contrib * Uh);
 }
 
-// http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
-Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                    bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
-  // This gradient is symmetric, and not triangular.
-  // symeig operates only on symmetric inputs, which is a subspace of
-  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
-  // elements. We resolve this by taking the gradient of the functionally independent
-  // elements of the matrix (i.e., the lower triangular portion of the input) and then
-  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
-  // the symeig operation. The motivation behind this choice is that symmetric gradient
-  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
-  // were updated by a gradient based algorithm.
-  TORCH_CHECK(eigenvectors,
-           "symeig_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
-           "Use torch.linalg.eigvalsh(A) instead.");
+Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
+                           const Tensor& self,
+                           const Tensor& L,
+                           const Tensor& V) {
+  // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
+  // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
+  // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
+  // Where:
+  //   - E_ij = L_i - L_j if i != j
+  //   - diag_embed takes a vector into a diagonal matrix
+  //   - diag zeroes out elements outside of the diagonal
+  //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
 
-  auto glambda = grads[0];
-  auto gv = grads[1];
+  // Note: the term '-V^HV diag(real(V^H gV))' comes from the fact that the eigenvalue
+  // decomposition is returned with eigenvectors normalized to have norm one.
 
-  auto vh = v.conj().transpose(-2, -1);
+  const auto gL = grads[0];
+  const auto gV = grads[1];
+  const auto Vh = V.transpose(-2, -1).conj();
 
-  Tensor result;
-  if (gv.defined()) {
-      Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
-      F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-      F.pow_(-1);
-      result = at::matmul(v, at::matmul(F * at::matmul(vh, gv), vh));
-  } else {
-      result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  if (gV.defined()) {
+    const auto Lconj = L.conj();
+    auto Econj = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
+    if (at::GradMode::is_enabled()) {
+      // Avoids differentiating through at infinity when doing gradgrad
+      // 1 could be any number, as we are going to overwrite the diagonal
+      Econj.diagonal(0, -2, -1).fill_(1.);
+    }
+
+    const auto VhgV = at::matmul(Vh, gV);
+
+    const auto diag_re_VhgV = at::real(VhgV).diagonal(0, -2, -1);
+    auto result = VhgV - at::matmul(Vh, V * diag_re_VhgV.unsqueeze(-2));
+
+    result.div_(Econj);
+
+    // Copy gL into the diagonal
+    if (gL.defined()) {
+      result.diagonal(0, -2, -1).copy_(gL);
+    }
+    else {
+      result.diagonal(0, -2, -1).zero_();
+    }
+
+    // Conjugate by V^{-H}
+    result = at::linalg_solve(Vh, at::matmul(result, Vh));
+    // If it is real, we have to project the derivative onto the real numbers
+    return self.is_complex() ? result : at::real(result);
   }
-
-  if (glambda.defined()) {
-    glambda = glambda.to(self.dtype());
-    // computes v @ diag(glambda) @ vh
-    Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
-    if (at::inplaceIsVmapCompatible(result, glambda_term)) {
-      result.add_(glambda_term);
+  else {
+    if (gL.defined()) {
+      // Compute V^-H gL V^H
+      const auto result = at::linalg_solve(Vh, gL.unsqueeze(-1) * Vh);
+      // If it is real, we have to project the derivative onto the real numbers
+      return self.is_complex() ? result : at::real(result);
     } else {
-      result = result + glambda_term;
+      // If neither is defined, there's nothing to do
+      return at::zeros_like(self, at::MemoryFormat::Contiguous);
     }
   }
-  return result.add(result.conj().transpose(-2, -1)).mul_(0.5);
+}
+
+Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                     bool eigenvectors, const Tensor& L, const Tensor& V) {
+  // This function is used for both torch.symeig and torch.linalg.eigh.
+  // eigh (and torch.symeig) operates only on symmetric (resp. Hermitian) inputs.
+
+  // General considerations of the differential and adjoint
+  // Let U(n) = {U \in C^{n x n} | U^H U = I} by the unitary group and
+  // Her(n) = {A \in C^{n x n} | A^H = A} be the Hermitian matrices
+  // eigh : Her(n) -> U(n) x R^n
+  // Denoting the tangent spaces as T, the differential of eigh at A = VLV^H
+  // (i.e. forward differentiation) is a linear map
+  // (d eigh)_A : T_A Her(n) -> T_V U(n) x T_L R^n
+  // R^n is a linear space, so it is canonically isomorphic to its tangent space
+  // Since X, Y \in Her(n) => X + Y \in Her(n), Her(n) is also linear. For this reason, we can write
+  // (d eigh)_A : Her(n) -> T_V U(n) x R^n
+  // Differentiating the equation U^H U = I, the tangent space of U(n) is given by
+  // T_V U(n) = {X \in C^{n x n} | X^H V = -V^H X}. That is, matrices such that V^HX is skew-Hermitian.
+  // We then have that the adjoint of the differential (i.e. reverse differentiation) is a map
+  // (d eigh)*_A : T_V U(n) x Her(n) -> Her(n)
+  // Since the adjoint is defined on T_V U(n), we need to project the input gradient onto T_V U(n)
+
+  // Orthogonal projection \pi_V : C^{n x n} -> T_V U(n)
+  // We have that an element gV \in T_V U(n) can be represented as gV = VX for a skew-Hermitian
+  // matrix X := V^H gV.
+  // Using that V \in U(n) is an isometry of C^{n x n}, we have that
+  // \pi_V(gV) := \pi_V(VX) = V\pi_I(X) = V\pi_I(V^H gV)
+  // pi_I (X) = (X - X^H) / 2 is the orthogonal projection from C^{n x n} into the skew-Hermitian matrices
+
+  // The formula
+  // Following the derivation in
+  // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf (Sec 3.1)
+  // For A = VLV^H, with V with unitary and L real,
+  // denoting the gradients gA \in Her(n), gV \in C^{n x n} and gL \in R^n, we have
+  // gA = (d eigh)*_A(\pi_V(gV), gL)
+  //    = V(diag_embed(gL) + \pi_I(V^H gV) / E)V^H
+  // where:
+  //   - E_ij = L_i - L_j if i != j
+  //   - diag_embed takes a vector into a diagonal matrix
+  //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
+
+  // This check just can be triggered in the backwards of torch.symeig
+  TORCH_CHECK(eigenvectors,
+           "eigh_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
+           "Use torch.linalg.eigvalsh(A) instead.");
+
+  const auto gL = grads[0];
+  const auto gV = grads[1];
+
+  const auto Vh = V.conj().transpose(-2, -1);
+
+  if (gV.defined()) {
+    auto E = L.unsqueeze(-2) - L.unsqueeze(-1);
+    if (at::GradMode::is_enabled()) {
+      // Avoids differentiating through at infinity when doing gradgrad
+      // 1 could be any number, as we are going to overwrite the diagonal
+      E.diagonal(0, -2, -1).fill_(1);
+    }
+
+    Tensor result =  at::matmul(Vh, gV);
+    // Project
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    result = result.sub(result.transpose(-2, -1).conj()).mul_(0.5);
+    // E is skew-symmetric. Multiplying entrywise a skew-Hermitian matrix by a
+    // skew-symmetric matrix gives a Hermitian matrix, as we expected.
+    result.div_(E);
+
+    if (gL.defined()) {
+      result.diagonal(0, -2, -1).copy_(gL);
+    }
+    else {
+      result.diagonal(0, -2, -1).zero_();
+    }
+
+    // Conjugating a Hermitian matrix by a unitary matrix gives a Hermitian matrix
+    return at::matmul(V, at::matmul(result, Vh));
+  }
+  else {
+    if (gL.defined()) {
+      // If we just gL is defined, one matmul suffices
+      return at::matmul(V * gL.unsqueeze(-2), Vh);
+    } else {
+      // If neither is defined, there's nothing to do
+      return at::zeros_like(self, at::MemoryFormat::Contiguous);
+    }
+  }
 }
 
 Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                          std::string mode, const Tensor& q, const Tensor& r){
+                          c10::string_view mode, const Tensor& q, const Tensor& r){
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);

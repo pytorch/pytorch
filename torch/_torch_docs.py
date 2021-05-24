@@ -3676,6 +3676,20 @@ batched outputs `solution, LU`.
 
 Supports real-valued and complex-valued inputs.
 
+.. warning::
+
+    :func:`torch.solve` is deprecated in favor of :func:`torch.linalg.solve`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.solve` has its arguments reversed and does not return the
+    LU factorization of the input. To get the LU factorization see :func:`torch.lu`,
+    which may be used with :func:`torch.lu_solve` and :func:`torch.lu_unpack`.
+
+    ``X = torch.solve(B, A).solution`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.solve(A, B)
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
@@ -10405,6 +10419,9 @@ Args:
     dim (int, optional): The dimension along which to repeat values.
         By default, use the flattened input array, and return a flat output
         array.
+    output_size (int, optional): Total output size for the given axis
+        ( e.g. sum of repeats). If given, it will avoid stream syncronization
+        needed to calculate output shape of the tensor.
 
 Returns:
     Tensor: Repeated tensor which has the same shape as input, except along the given axis.
@@ -10421,6 +10438,10 @@ Example::
     tensor([[1, 1, 1, 2, 2, 2],
             [3, 3, 3, 4, 4, 4]])
     >>> torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0)
+    tensor([[1, 2],
+            [3, 4],
+            [3, 4]])
+    >>> torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0, output_size=3)
     tensor([[1, 2],
             [3, 4],
             [3, 4]])

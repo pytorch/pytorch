@@ -371,12 +371,24 @@ From the ``torch.nn.utils`` module
     remove_weight_norm
     spectral_norm
     remove_spectral_norm
+    skip_init
+
+Parametrizations implemented using the new parametrization functionality
+in :func:`torch.nn.utils.parameterize.register_parametrization`.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    parametrizations.spectral_norm
 
 Utility functions to parametrize Tensors on existing Modules.
 Note that these functions can be used to parametrize a given Parameter
 or Buffer given a specific function that maps from an input space to the
 parametrized space. They are not parameterizations that would transform
-an object into a parameter.
+an object into a parameter. See the
+`Parametrizations <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`__ tutorial
+for more information on how to implement your own parametrizations.
 
 .. autosummary::
     :toctree: generated
