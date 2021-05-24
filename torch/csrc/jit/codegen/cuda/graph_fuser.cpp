@@ -898,6 +898,16 @@ struct CudaGraphFuser {
         shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
         continue;
       }
+      // TODO: output(1) & output(2) should also be marked
+      if (n->kind() == aten::native_batch_norm) {
+        shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
+        continue;
+      }
+      // TODO: output(1) & output(2) should also be marked
+      if (n->kind() == aten::native_batch_norm_backward) {
+        shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
+        continue;
+      }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
         return v->type()->isSubtypeOf(TensorType::get());
       });
@@ -918,9 +928,9 @@ struct CudaGraphFuser {
 
     // TODO: failure in buildShapeExpressions should not break fusion execution,
     // we can add a try/catch here to bailout from removeOutputsUsedOnlyInSize.
-    GRAPH_DUMP("before build shape expression: ", graph_);
+    GRAPH_DEBUG("before build shape expression: ", *graph_);
     auto shape_of = buildShapeExpressions(fusion_group);
-    GRAPH_DUMP("after build shape expression: ", graph_);
+    GRAPH_DEBUG("after build shape expression: ", *graph_);
     auto outputs = fusion_group->outputs().vec();
     auto soutputs = subgraph->outputs().vec();
     // XXX: Iterating in this order is not only good for performance reasons!
@@ -940,7 +950,7 @@ struct CudaGraphFuser {
         subgraph->eraseOutput(i);
       }
     }
-    GRAPH_DUMP("after build shape expression and re-wiring: ", graph_);
+    GRAPH_DEBUG("after build shape expression and re-wiring: ", *graph_);
   }
 
   void refreshAliasDb() {
@@ -987,7 +997,7 @@ struct CudaGraphFuser {
       }
     }
 
-    GRAPH_DUMP("after scan and merge", graph_);
+    GRAPH_DEBUG("after scan and merge", *graph_);
     refreshAliasDb();
 
     // fuseConcats();
@@ -1255,7 +1265,7 @@ void guardFusionGroup(Node* fusion) {
 
     // 1. RESTORE conditional constant dependency in fallback group;
     fb_graph = fusion_graph->copy();
-    GRAPH_DUMP("re-wiring fallback graph", fb_graph);
+    GRAPH_DEBUG("re-wiring fallback graph", *fb_graph);
 
     for (const auto& offset : profiled_ivalue_indices) {
       auto val = fb_graph->inputs()[offset];
@@ -1408,8 +1418,143 @@ void guardFusionGroups(Block* block) {
     //         c. restore conditional constant to non-constant for fallback
     guardFusionGroup(fusion);
   }
+}
 
-  // step 2: restore conditional constant to non-constant outside of
+// rewire const integer index & empty byte-typed reserve space tensor outputs,
+// so `CudaFusionGroup` doesn't have to handle those
+void alterBatchNormImplIndex(Node* node) {
+  std::set<size_t> bn_index_out_indices;
+  std::set<size_t> bn_buffer_out_indices;
+
+  auto subgraph = node->g(attr::Subgraph);
+  for (size_t i = 0; i < subgraph->outputs().size(); i++) {
+    auto val = subgraph->outputs()[i];
+    if (val->node()->kind() == aten::_batch_norm_impl_index &&
+        val->offset() == 4) {
+      bn_index_out_indices.emplace(i);
+    } else if (
+        val->node()->kind() == aten::_batch_norm_impl_index &&
+        val->offset() == 3) {
+      bn_buffer_out_indices.emplace(i);
+    }
+  }
+
+  if (!bn_index_out_indices.empty()) {
+    auto graph = node->owningGraph();
+    // we output index to 0 so backwards go through native_batch_norm, which is
+    // what we support;
+    auto const_1 = node->owningGraph()->insertConstant(IValue(0));
+    const_1->node()->moveBefore(node);
+    for (auto i : bn_index_out_indices) {
+      node->outputs()[i]->replaceAllUsesWith(const_1);
+    }
+  }
+
+  if (!bn_buffer_out_indices.empty()) {
+    auto graph = node->owningGraph();
+    std::vector<int64_t> sizes{0}; // empty tensor with no size;
+    // std::vector<int64_t> sizes; // empty tensor with no size;
+    auto const_size_0 = node->owningGraph()->insertConstant(IValue(sizes));
+    const_size_0->node()->moveBefore(node);
+    auto const_0 = node->owningGraph()->insertConstant(IValue(0));
+    const_0->node()->moveBefore(node);
+    auto none_val = node->owningGraph()->insertConstant(IValue());
+    none_val->node()->moveBefore(node);
+    auto device =
+        graph->insertNode(graph->create(prim::device, {node->inputs()[0]}, 1));
+    device->moveBefore(node);
+    device->output()->setType(DeviceObjType::get());
+    auto empty_tensor = graph->insertNode(graph->create(
+        aten::empty,
+        {const_size_0, const_0, none_val, device->output(), none_val, none_val},
+        1));
+    empty_tensor->moveBefore(node);
+    for (auto i : bn_buffer_out_indices) {
+      node->outputs()[i]->replaceAllUsesWith(empty_tensor->output());
+    }
+  }
+
+  bn_index_out_indices.insert(
+      bn_buffer_out_indices.begin(), bn_buffer_out_indices.end());
+  for (auto iter = bn_index_out_indices.crbegin();
+       iter != bn_index_out_indices.crend();
+       ++iter) {
+    subgraph->eraseOutput(*iter);
+    node->eraseOutput(*iter);
+  }
+}
+
+// rewire empty byte-typed reserve space tensor input to an empty float-typed
+// tensor, because `CudaFusionGroup` doesn't support byte-typed tensor, nor does
+// it use reserve space.
+void alterBatchNormImplIndexBackward(Node* node) {
+  std::set<size_t> bn_buffer_in_indices;
+
+  auto subgraph = node->g(attr::Subgraph);
+  for (auto n : subgraph->nodes()) {
+    if (n->kind() == aten::_batch_norm_impl_index_backward) {
+      // 11th inputs are `reserve`, which is not used by codegen kernel and its
+      // type is not supported `Byte`. So we disconnect it here to avoid codegen
+      // error
+      auto byte_input = n->inputs()[11];
+      // TODO: let's check the data type for buffer and skip if it's good
+      // TODO: we can actually support it by adding an extra inputs to the
+      // subgraph
+      // TODO: assert on empty buffer
+      TORCH_INTERNAL_ASSERT(
+          byte_input->node() == subgraph->param_node(),
+          "Assumption that reserve input to aten::_batch_norm_impl_index_backward comes from forward graph is broken");
+      bn_buffer_in_indices.emplace(byte_input->offset());
+    }
+  }
+
+  if (!bn_buffer_in_indices.empty()) {
+    auto graph = node->owningGraph();
+    std::vector<int64_t> sizes{0}; // empty tensor with no size;
+    // std::vector<int64_t> sizes{}; // empty tensor with no size;
+    auto const_size_0 = node->owningGraph()->insertConstant(IValue(sizes));
+    const_size_0->node()->moveBefore(node);
+    auto const_0 = node->owningGraph()->insertConstant(IValue(6));
+    const_0->node()->moveBefore(node);
+    auto none_val = node->owningGraph()->insertConstant(IValue());
+    none_val->node()->moveBefore(node);
+    auto device =
+        graph->insertNode(graph->create(prim::device, {node->inputs()[1]}, 1));
+    device->moveBefore(node);
+    device->output()->setType(DeviceObjType::get());
+    auto empty_tensor = graph->insertNode(graph->create(
+        aten::empty,
+        {const_size_0, const_0, none_val, device->output(), none_val, none_val},
+        1));
+    empty_tensor->moveBefore(node);
+
+    for (auto iter = bn_buffer_in_indices.begin();
+         iter != bn_buffer_in_indices.end();
+         ++iter) {
+      subgraph->inputs()[*iter]->setType(
+          node->inputs()[*iter]->type()->cast<TensorType>()->withScalarType(
+              at::ScalarType::Float));
+      node->replaceInput(*iter, empty_tensor->output());
+    }
+  }
+}
+
+void alterBatchNormImpls(Block* block) {
+  std::vector<Node*> fusions;
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      alterBatchNormImpls(b);
+    }
+    if (n->kind() == prim::CudaFusionGroup) {
+      fusions.push_back(n);
+    }
+  }
+  for (Node* fusion : fusions) {
+    // remove index & reserve from outputs;
+    alterBatchNormImplIndex(fusion);
+    // remove reserve from inputs;
+    alterBatchNormImplIndexBackward(fusion);
+  }
 }
 
 void RemoveProfileIValue(Node* profile_ivalue) {
@@ -1536,35 +1681,41 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // dependency and add inputs to conditional constant generated by
   // aten::profile_ivalue
   traverseProfileIValues(graph->block(), ExtractProfileIValue);
-  GRAPH_DUMP("insert conditional constant from profile_ivalue: ", graph);
+  GRAPH_DEBUG("insert conditional constant from profile_ivalue: ", *graph);
 
   // TODO: we need to properly restore shape information after fusion.
   // shamelessly use tool from NNC.
   RemoveProfileNodesAndSpecializeTypes(graph);
-  GRAPH_DUMP("After Profiling Nodes Removed: ", graph);
+  GRAPH_DEBUG("After Profiling Nodes Removed: ", *graph);
 
   markMissingType(graph->block());
-  GRAPH_DUMP("After mark missing type: ", graph);
+  GRAPH_DEBUG("After mark missing type: ", *graph);
 
   // TODO: separate passes into different file;
   // TODO: restore decomposition after fusion, in case we are decomposing
   //       operation that can't be fused;
   decomposeLinearOps(graph->block());
-  GRAPH_DUMP("decompose operations by nvfuser: ", graph);
+  GRAPH_DEBUG("decompose operations by nvfuser: ", *graph);
 
   CudaGraphFuser(graph->block(), graph).run();
-  GRAPH_DUMP("After Fusion: ", graph);
+  GRAPH_DEBUG("After Fusion: ", *graph);
 
   // guard input types as well as conditional constants from
   // aten::profile_ivalue
   guardFusionGroups(graph->block());
-  GRAPH_DUMP("After Guard Fusion: ", graph);
+  GRAPH_DEBUG("After Guard Fusion: ", *graph);
+
+  // mutate `aten::_batch_norm_impl_index` and
+  // `aten::_batch_norm_impl_index_backward` node in the fusion group to WAR
+  // the lack of fusion support on integer output as well as byte-typed tensor.
+  alterBatchNormImpls(graph->block());
+  GRAPH_DEBUG("After _batch_norm_impl_index: ", *graph);
 
   traverseProfileIValues(graph->block(), RemoveProfileIValue);
 
-  GRAPH_DUMP("Before remove missing profiling: ", graph);
+  GRAPH_DEBUG("Before remove missing profiling: ", *graph);
   removeFusionWithMissingProfilingInformation(graph->block());
-  GRAPH_DUMP("After remove missing profiling: ", graph);
+  GRAPH_DEBUG("After remove missing profiling: ", *graph);
 
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);

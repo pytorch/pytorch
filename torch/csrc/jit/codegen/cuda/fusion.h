@@ -214,6 +214,17 @@ class TORCH_CUDA_CU_API Fusion final {
   bool hasInput(const Val* val) const;
   bool hasOutput(const Val* val) const;
 
+  // Aliasing output to input value, this is a WAR to allow inplace update on
+  // input tensor.
+  // Note: this is not always safe and should be used with extra caution.
+  // Currently the only place it's used is in the running stats update for batch
+  // normalization.
+  // TODO: alias should be made aware to segmentation, so we'll always include
+  // the input tensor to the section where output is produced.
+  void aliasOutputToInput(Val* output, Val* input);
+  std::unordered_set<int> getOutputAliasIndices() const;
+  std::vector<std::pair<int, int>> getInputAliasIndices() const;
+
  protected:
   friend SegmentCandidateFinder;
   friend SegmentedFusion;
@@ -242,6 +253,9 @@ class TORCH_CUDA_CU_API Fusion final {
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
+
+  // io alias pointing from output to input
+  std::unordered_map<Val*, Val*> io_alias_;
 };
 
 } // namespace cuda

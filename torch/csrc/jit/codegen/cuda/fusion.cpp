@@ -48,6 +48,8 @@ TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept {
   swap(a.inputs_, b.inputs_);
   swap(a.outputs_, b.outputs_);
 
+  swap(a.io_alias_, b.io_alias_);
+
   // Fixup the Statement::fusion_ links for a
   for (auto val : a.val_set_) {
     val->fusion_ = &a;
@@ -103,6 +105,13 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
   to->inputs_ = ir_cloner.clone(from->inputs_);
   to->outputs_ = ir_cloner.clone(from->outputs_);
 
+  // TODO: put this into ir_cloner instead
+  for (const auto& entry : from->io_alias_) {
+    Val* copied_output = ir_cloner.clone(entry.first);
+    Val* copied_input = ir_cloner.clone(entry.second);
+    to->io_alias_[copied_output] = copied_input;
+  }
+
   return ir_cloner;
 }
 
@@ -155,6 +164,8 @@ void Fusion::clear() noexcept {
 
   inputs_.clear();
   outputs_.clear();
+
+  io_alias_.clear();
 }
 
 void Fusion::removeExpr(Expr* expr) {
@@ -600,6 +611,55 @@ std::vector<Val*> Fusion::getTerminatingOutputs() {
   }
 
   return terminating_outputs;
+}
+
+void Fusion::aliasOutputToInput(Val* output, Val* input) {
+  TORCH_INTERNAL_ASSERT(
+      hasInput(input) && hasOutput(output),
+      "alias only allows from output to input");
+  io_alias_[output] = input;
+}
+
+std::unordered_set<int> Fusion::getOutputAliasIndices() const {
+  if (io_alias_.empty()) {
+    return {};
+  }
+
+  std::unordered_set<int> alias_indices;
+
+  for (int i = 0; i < outputs_.size(); i++) {
+    if (io_alias_.count(outputs_[i]) != 0) {
+      alias_indices.insert(i);
+    }
+  }
+  return alias_indices;
+}
+
+std::vector<std::pair<int, int>> Fusion::getInputAliasIndices() const {
+  if (io_alias_.empty()) {
+    return {};
+  }
+
+  std::vector<std::pair<int, int>> alias_indices;
+  for (int i = 0; i < outputs_.size(); i++) {
+    if (io_alias_.count(outputs_[i]) != 0) {
+      bool found = false;
+      for (int j = 0; j < inputs_.size(); j++) {
+        if (io_alias_.at(outputs_[i]) == inputs_[j]) {
+          alias_indices.emplace_back(i, j);
+          found = true;
+          break;
+        }
+      }
+      TORCH_INTERNAL_ASSERT(
+          found,
+          "io_alias_ mapping failure, alias output is not present in inputs");
+    }
+  }
+  // can't assert here, we could have segmented fusion where not all alias
+  // outputs are present
+
+  return alias_indices;
 }
 
 } // namespace cuda

@@ -1158,15 +1158,18 @@ class TestCudaFuser(JitTestCase):
         jit_running_var = running_var.clone()
 
         jit_o = t_jit(x, y, running_mean.clone(), running_var.clone())
+
+        self.assertTrue(self._compare("prerun comparing running_mean failed", eager_running_mean, jit_running_mean, error))
+        self.assertTrue(self._compare("prerun comparing running_var failed", eager_running_var, jit_running_var, error))
+
         jit_o = t_jit(x, y, jit_running_mean, jit_running_var)
         o = t(x, y, eager_running_mean, eager_running_var)
         self.assertEqual(o.dtype, jit_o.dtype)
         # numerical issues here due to our scheduling.
         # can't use `self.assertEqual(o, jit_o)`
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
-        # TODO: enable checks when we support in-place updates for batch_norm tensors
-        # self.assertTrue(self._compare("comparing output failed", eager_running_mean, jit_running_mean, error))
-        # self.assertTrue(self._compare("comparing output failed", eager_running_var, jit_running_var, error))
+        self.assertTrue(self._compare("comparing running_mean failed", eager_running_mean, jit_running_mean, error))
+        self.assertTrue(self._compare("comparing running_var failed", eager_running_var, jit_running_var, error))
         self.assertGraphContains(t_jit.graph_for(x, y, running_mean, running_var), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -1176,12 +1179,13 @@ class TestCudaFuser(JitTestCase):
         output_elements = 10000
         channel_sizes = [67, 457, 1024, 4096]
 
-        for dims in range(3, 6):
-            output_size = int(pow(output_elements, 1. / (dims - 1)))
-            for C in channel_sizes:
-                x = [output_size for idx in range(dims)]
-                x[1] = C
-                self._batch_norm_helper(x, torch.float32, "cuda", 1e-4)
+        with torch.backends.cudnn.flags(enabled=False):
+            for dims in range(3, 6):
+                output_size = int(pow(output_elements, 1. / (dims - 1)))
+                for C in channel_sizes:
+                    x = [output_size for idx in range(dims)]
+                    x[1] = C
+                    self._batch_norm_helper(x, torch.float32, "cuda", 1e-4)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -1190,12 +1194,13 @@ class TestCudaFuser(JitTestCase):
         output_elements = 10000
         channel_sizes = [67, 457, 1024, 4096]
 
-        for dims in range(3, 6):
-            output_size = int(pow(output_elements, 1. / (dims - 1)))
-            for C in channel_sizes:
-                x = [output_size for idx in range(dims)]
-                x[1] = C
-                self._batch_norm_helper(x, torch.float16, "cuda", 5e-3)
+        with torch.backends.cudnn.flags(enabled=False):
+            for dims in range(3, 6):
+                output_size = int(pow(output_elements, 1. / (dims - 1)))
+                for C in channel_sizes:
+                    x = [output_size for idx in range(dims)]
+                    x[1] = C
+                    self._batch_norm_helper(x, torch.float16, "cuda", 5e-3)
 
     def _softmax_helper(self, shape, reduction_axis, dtype, device, error):
         class MySoftmax(torch.nn.Module):
@@ -2119,6 +2124,125 @@ class TestCudaFuser(JitTestCase):
 
         # If replay() updated RNG state correctly, graph_out should now equal eager_out
         self.assertEqual(graph_out, eager_out)
+
+    def _test_batch_norm_impl_index_helper(self, batch, c, hw, affine=True, track_running_stats=True, train=True):
+        # enabling inlining to avoid counter increment in BN forward
+        torch._C._debug_set_autodiff_subgraph_inlining(True)
+        dtype = torch.float32
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, num_features=10, affine=True, track_running_stats=True):
+                super(MyModule, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(num_features,
+                                               1e-5,
+                                               affine=affine,
+                                               track_running_stats=track_running_stats).to(dtype=dtype)
+
+            def forward(self, x):
+                o = x * 1.0
+                o = self.bn(o)
+                return o
+
+        x = torch.randn(batch, c, hw, hw, dtype=torch.float, device="cuda").to(dtype=dtype).requires_grad_()
+        grad = torch.randint(-20, 20, (batch, c, hw, hw), device="cuda").to(dtype=dtype).div(-10)
+
+        my_module = MyModule(c, affine, track_running_stats).cuda()
+        ref_module = MyModule(c, affine, track_running_stats).cuda()
+
+        if not train:
+            my_module.eval()
+            ref_module.eval()
+
+        t_jit = torch.jit.script(my_module)
+        ref_module.load_state_dict(my_module.state_dict())
+
+        ref_x = x.detach().requires_grad_()
+
+        for i in range(0, 3):
+            jit_o = t_jit(x)
+            jit_o.backward(grad)
+
+        # TODO: remove this run?
+        o = ref_module(ref_x)
+        o.backward(grad)
+
+        has_affine = ref_module.bn.weight is not None
+        has_running_stats = ref_module.bn.running_mean is not None
+
+        if has_running_stats:
+            my_module.bn.running_mean.zero_()
+            my_module.bn.running_var.fill_(1.0)
+            ref_module.bn.running_mean.zero_()
+            ref_module.bn.running_var.fill_(1.0)
+
+        # Verify that when train is False, we don't have grad for weight/bias.
+        if has_affine and train:
+            my_module.bn.weight.grad.zero_()
+            my_module.bn.bias.grad.zero_()
+            ref_module.bn.weight.grad.zero_()
+            ref_module.bn.bias.grad.zero_()
+
+        x.grad.zero_()
+        ref_x.grad.zero_()
+
+        # real runs
+        jit_o = t_jit(x)
+        jit_o.backward(grad)
+
+        o = ref_module(ref_x)
+        o.backward(grad)
+
+        # assert forward graph fusion
+        self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1, consider_subgraphs=True)
+        # assert backward graph fusion
+        bwd_graph = list(
+            list(t_jit.get_debug_state().execution_plans.values())[0].code.grad_executor_states()[0]
+            .execution_plans.values())[0].graph
+        self.assertGraphContainsExactly(bwd_graph, FUSION_GUARD, 1, consider_subgraphs=True)
+
+        self.assertTrue(self._compare("comparing output failed", jit_o, o, 1e-5))
+        self.assertTrue(self._compare("comparing input grad failed", x.grad, ref_x.grad, 1e-4))
+        # TODO: switch to welford and reduce this to 1e-5
+        # The 1e-3 looks bad, but we don't have welford in codegen, so numeric
+        # is very different between reference and codegen.
+        if has_affine and train:
+            self.assertTrue(self._compare("comparing weight grad failed",
+                                          my_module.bn.weight.grad,
+                                          ref_module.bn.weight.grad,
+                                          1e-3))
+            self.assertTrue(self._compare("comparing bias grad failed",
+                                          my_module.bn.bias.grad,
+                                          ref_module.bn.bias.grad,
+                                          1e-5))
+        if has_running_stats:
+            self.assertTrue(self._compare("comparing running_mean failed",
+                                          my_module.bn.running_mean,
+                                          ref_module.bn.running_mean,
+                                          1e-5))
+            self.assertTrue(self._compare("comparing running_var failed",
+                                          my_module.bn.running_var,
+                                          ref_module.bn.running_var,
+                                          1e-5))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_batch_norm_impl_index_correctness(self):
+        batch = [2, 7, 16]
+        channels = [4, 19, 32]
+        hw = [1, 8, 17, 32]
+
+        # failing sizes (2, 1, 1, 1)
+        # failing sizes (2, 89, 8, 8) training False, track True, affine: False
+        for b, c, hw in itertools.product(batch, channels, hw):
+            setups = [
+                [True, True],
+                [False, False],
+                [True, False],
+                [False, True]]
+            for training_and_track, affine in itertools.product(setups, [True, False]):
+                training, track_running_stats = training_and_track
+                self._test_batch_norm_impl_index_helper(b, c, hw, affine, track_running_stats, training)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

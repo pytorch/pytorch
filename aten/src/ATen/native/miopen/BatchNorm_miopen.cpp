@@ -120,6 +120,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
       save_mean.data_ptr(),
       save_var.data_ptr()));
   } else {
+    save_mean = at::empty({0}, weight_t.options());
+    save_var = at::empty({0}, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
       idesc.desc(), input->data_ptr(),

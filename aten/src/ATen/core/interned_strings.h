@@ -342,6 +342,8 @@ namespace c10 {
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
   _(aten, hardtanh_)                 \
+  _(aten, _batch_norm_impl_index)    \
+  _(aten, _batch_norm_impl_index_backward)\
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

@@ -71,6 +71,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   struct ExecutorEntry {
     bool init = false;
     LaunchParams launch_params;
+    std::vector<std::pair<int, int>> io_alias_indices;
     std::vector<std::vector<int64_t>> output_sizes;
     std::vector<at::ScalarType> output_types;
     std::vector<std::vector<int64_t>> empty_buffer_sizes;
@@ -149,7 +150,12 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // not initialized, while the second vector contains zero-initiliazed tensors
   GlobalBuffers allocGlobalVals(kir::ExpressionEvaluator& expr_eval);
 
-  std::vector<at::Tensor> allocOutputs(kir::ExpressionEvaluator& expr_eval);
+  // alias_index: index of outputs that are aliases to inputs, hence we should
+  // skip allocating real storage for those, but still maintain its spot to
+  // maintain the indexing from output aliases to inputs
+  std::vector<at::Tensor> allocOutputs(
+      kir::ExpressionEvaluator& expr_eval,
+      const std::unordered_set<int>& alias_indices = {});
 
   void setUsedTVs();
 

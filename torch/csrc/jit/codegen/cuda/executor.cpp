@@ -437,16 +437,23 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
 }
 
 std::vector<at::Tensor> FusionExecutor::allocOutputs(
-    kir::ExpressionEvaluator& expr_eval) {
+    kir::ExpressionEvaluator& expr_eval,
+    const std::unordered_set<int>& alias_indices) {
   FUSER_PERF_SCOPE("allocOutputs");
   const auto kernel = lowered_.kernel();
   std::vector<at::Tensor> outputs;
-  for (auto output : kernel->outputs()) {
+  for (int i = 0; i < kernel->outputs().size(); ++i) {
     TORCH_INTERNAL_ASSERT(
-        output->isA<kir::TensorView>(),
+        kernel->outputs()[i]->isA<kir::TensorView>(),
         "Cannot allocate outputs that are not tensors.");
-    outputs.push_back(inferAndAllocOutput(
-        output->as<kir::TensorView>(), expr_eval, options_, false));
+    auto output = kernel->outputs()[i]->as<kir::TensorView>();
+    if (alias_indices.count(i) == 0) {
+      outputs.push_back(
+          inferAndAllocOutput(output, expr_eval, options_, false));
+    } else {
+      // aliasing to inputs, no need to allocate real output
+      outputs.push_back(inferAndAlloc(output, {}, expr_eval, options_, false));
+    }
   }
   return outputs;
 }
@@ -494,13 +501,26 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       at::AutoNonVariableTypeMode non_variable_type_mode;
       // take the short-cut for launch if we see a recorded input set again
       launch_params = executor_entry->launch_params;
-      for (size_t i = 0; i < executor_entry->output_sizes.size(); i++) {
-        allocated_outputs.push_back(at::native::empty_cuda(
-            executor_entry->output_sizes[i],
-            executor_entry->output_types[i],
-            c10::nullopt,
-            options_.device,
-            c10::nullopt));
+      // only allocate outputs when not given
+      if (outputs.empty()) {
+        for (size_t i = 0; i < executor_entry->output_sizes.size(); i++) {
+          allocated_outputs.push_back(at::native::empty_cuda(
+              executor_entry->output_sizes[i],
+              executor_entry->output_types[i],
+              c10::nullopt,
+              options_.device,
+              c10::nullopt));
+        }
+        for (const auto& entry : executor_entry->io_alias_indices) {
+          TORCH_INTERNAL_ASSERT(
+              inputs[entry.second].isTensor(), "alias io only supports tensor");
+          allocated_outputs[entry.first] = inputs[entry.second].toTensor();
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            outputs.size() == fusion_.outputs().size(),
+            __func__,
+            " provided number of outputs does match fusion output");
       }
       for (size_t i = 0; i < executor_entry->empty_buffer_sizes.size(); i++) {
         global_buffers.empty_buffers.push_back(at::native::empty_cuda(
@@ -537,9 +557,20 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     executor_utils::validateVectorizedTensors(
         &fusion_, inputs, outputs, lowered_, expr_eval);
 
-    if (outputs.empty() || outputs.size() != fusion_.outputs().size()) {
-      allocated_outputs = allocOutputs(expr_eval);
+    auto alias_indices = fusion_.getInputAliasIndices();
+
+    // ditch pre-allocated outputs if the number doesn't match.
+    if (outputs.empty()) {
+      allocated_outputs =
+          allocOutputs(expr_eval, fusion_.getOutputAliasIndices());
+
+      for (const auto& entry : alias_indices) {
+        TORCH_INTERNAL_ASSERT(
+            inputs[entry.second].isTensor(), "alias io only supports tensor");
+        allocated_outputs[entry.first] = inputs[entry.second].toTensor();
+      }
     } else {
+      // TODO: Update this as well;
       executor_utils::validateKernelOutputs(
           &fusion_, allocated_outputs, options_.device);
     }
@@ -565,6 +596,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     if (executor_entry) {
       // record the the short-cut executor entry for the given input set;
       executor_entry->launch_params = launch_params;
+      executor_entry->io_alias_indices = alias_indices;
       for (const auto& output : allocated_outputs) {
         executor_entry->output_sizes.push_back(output.sizes().vec());
         executor_entry->output_types.push_back(output.scalar_type());

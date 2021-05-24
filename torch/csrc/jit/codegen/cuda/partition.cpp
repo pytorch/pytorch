@@ -53,19 +53,51 @@ static bool isFusibleDevice(const Node* node) {
   return device->is_cuda();
 }
 
-bool allCompatableTensorTypes(c10::ArrayRef<const torch::jit::Value*> values) {
-  return std::all_of(
-      values.begin(), values.end(), [](const torch::jit::Value* val) {
-        if (auto tensor_type = val->type()->cast<c10::TensorType>()) {
-          if (tensor_type->scalarType().has_value()) {
-            if (aten_to_data_type(tensor_type->scalarType().value()) ==
-                DataType::Null) {
-              return false;
-            }
-          }
-        }
-        return true;
-      });
+bool compatibleType(const torch::jit::Value* val) {
+  if (auto tensor_type = val->type()->cast<c10::TensorType>()) {
+    if (tensor_type->scalarType().has_value()) {
+      if (aten_to_data_type(tensor_type->scalarType().value()) ==
+          DataType::Null) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool checkInputTensorTypes(const Node* node) {
+  for (size_t i = 0; i < node->inputs().size(); i++) {
+    const auto& val = node->inputs()[i];
+    if (!compatibleType(val)) {
+      // special case on aten::_batch_norm_impl_index_backward, the 11th output
+      // is going to be discarded, so no need to check data type there.
+      if (node->kind() ==
+              c10::Symbol::fromQualString(
+                  "aten::_batch_norm_impl_index_backward") &&
+          i == 11) {
+        continue;
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+bool checkOutputTensorTypes(const Node* node) {
+  for (size_t i = 0; i < node->outputs().size(); i++) {
+    const auto& val = node->outputs()[i];
+    if (!compatibleType(val)) {
+      // special case on aten::_batch_norm_impl_index, the 4th output
+      // is going to be discarded, so no need to check data type there.
+      if (node->kind() ==
+              c10::Symbol::fromQualString("aten::_batch_norm_impl_index") &&
+          i == 3) {
+        continue;
+      }
+      return false;
+    }
+  }
+  return true;
 }
 
 inline bool isFusibleNode(const Node* node) {
@@ -74,8 +106,8 @@ inline bool isFusibleNode(const Node* node) {
   // Check we have a parsing rule
   bool isFusible = isNodeParsible(node);
   // Check if we have a tensor type it's one we support
-  isFusible = isFusible && allCompatableTensorTypes(node->inputs());
-  isFusible = isFusible && allCompatableTensorTypes(node->outputs());
+  isFusible = isFusible && checkInputTensorTypes(node);
+  isFusible = isFusible && checkOutputTensorTypes(node);
   // Check if already part of a fusion group
   return isFusible;
 }
@@ -353,23 +385,27 @@ bool isFusibleCudaFusionGroup(const Node* node) {
   FUSER_PERF_SCOPE("isFusibleCudaFusionGroup");
 
   if (isFusibleNode(node)) {
-    return isFusibleDevice(node);
+    auto ret = isFusibleDevice(node);
+    return ret;
   }
   return false;
 }
 
 bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
   FUSER_PERF_SCOPE("isFusibleCudaFusionGroup");
-
+  bool fused = false;
+  // TODO: lift the restriction of not fusing producer containing reduction when
+  //       we have proper scheduling.
   if (isFusibleCudaFusionGroup(node)) {
     // ensure if the node has a designated device, it's on the same device with
     // fusion.
     // TODO: is there a danger of us fusing operations that's supposed to be on
     //       separate GPUs? And is that necessarily bad?
     auto device = getDevice(fusion);
-    return (!device.has_value() || isFusibleDevice(node, device.value()));
+    fused = (!device.has_value() || isFusibleDevice(node, device.value()));
   }
-  return false;
+
+  return fused;
 }
 
 } // namespace cuda

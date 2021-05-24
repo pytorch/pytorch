@@ -14986,6 +14986,7 @@ TEST(NVFuserTest, FusionBNRepro_CUDA) {
   auto mean_hat = mul(running_mean, rev_momentum_ptr);
   auto new_mean_hat = add(mean_hat, current_mean_hat);
   fusion.addOutput(new_mean_hat);
+  fusion.aliasOutputToInput(new_mean_hat, running_mean);
 
   auto x_mean_sub = sub(input, x_mean_bcast);
   auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
@@ -14998,6 +14999,7 @@ TEST(NVFuserTest, FusionBNRepro_CUDA) {
   auto var_hat = mul(running_var, rev_momentum_ptr);
   auto new_var_hat = add(var_hat, current_var_hat);
   fusion.addOutput(new_var_hat);
+  fusion.aliasOutputToInput(new_var_hat, running_var);
 
   auto var = div(var_sum, num_features);
   auto var_eps = add(var, eps_ptr);
