@@ -64,13 +64,10 @@ static LeakyStreamInternals default_streams[C10_COMPILE_TIME_MAX_GPUS];
 static std::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> high_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
-static std::atomic<uint32_t> external_counters[C10_COMPILE_TIME_MAX_GPUS];
 static std::array<LeakyStreamInternals, kStreamsPerPool>
     low_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
 static std::array<LeakyStreamInternals, kStreamsPerPool>
     high_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
-static std::array<LeakyStreamInternals, kStreamsPerPool>
-    external_streams[C10_COMPILE_TIME_MAX_GPUS];
 
 // Note [StreamId assignment]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -83,7 +80,7 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
 //  000 = default stream
 //  001 = low priority stream
 //  010 = high priority stream
-//  100 = externally allocated stream
+//  011 = externally allocated stream
 //
 // This is not really for efficiency; it's just easier to write the code
 // to extract the index if we do this with bitmasks :)
@@ -104,7 +101,7 @@ enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
   LOW = 0x1,
   HIGH = 0x2,
-  EXT = 0x4,
+  EXT = 0x3,
 };
 
 std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
@@ -133,7 +130,13 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
 // see Note [Hazard when concatenating signed integers]
 
 static inline StreamIdType streamIdType(StreamId s) {
-  return static_cast<StreamIdType>(s >> kStreamsPerPoolBits);
+  if (s > 256) {
+    // Externally allocated streams have their id being the cudaStream_ptr
+    // while pool managed ones have their id being a byte
+    return StreamIdType::EXT;
+  } else {
+    return static_cast<StreamIdType>(s >> kStreamsPerPoolBits);
+  }
 }
 
 static inline size_t streamIdIndex(StreamId s) {
@@ -163,13 +166,6 @@ static StreamId CUDAStream_getStreamId(const LeakyStreamInternals* ptr) {
   // Check if it's the default stream
   if (ptr == &default_streams[device_index]) {
     return makeStreamId(StreamIdType::DEFAULT, 0);
-  }
-
-  // Check if it was a externally allocated stream
-  if (pointer_within<LeakyStreamInternals>(
-          ptr, external_streams[device_index])) {
-    return makeStreamId(
-        StreamIdType::EXT, ptr - external_streams[device_index].data());
   }
 
   // Check if it's a low priority stream
@@ -297,8 +293,6 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
       return &low_priority_streams[device_index][si];
     case StreamIdType::HIGH:
       return &high_priority_streams[device_index][si];
-    case StreamIdType::EXT:
-      return &external_streams[device_index][si];
     default:
       TORCH_INTERNAL_ASSERT(
           0,
@@ -322,9 +316,19 @@ CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
 } // anonymous namespace
 
 cudaStream_t CUDAStream::stream() const {
-  auto ptr = CUDAStream_internals(*this);
-  AT_ASSERT(ptr);
-  return ptr->stream;
+  int64_t stream_id = unwrap().id();
+  // the stream_ids managed from the pool have only 8 bits
+  // so any value higher than that can be reinterpreted
+  // as an externally allocated stream
+  if (streamIdType(stream_id) == StreamIdType::EXT) {
+    // In this case this is a externally allocated stream
+    // we don't need to manage its life cycle
+    return reinterpret_cast<cudaStream_t>(stream_id);
+  } else {
+    auto ptr = CUDAStream_internals(*this);
+    AT_ASSERT(ptr);
+    return ptr->stream;
+  }
 }
 
 // Returns a stream from the requested pool
@@ -352,18 +356,15 @@ CUDAStream getStreamFromPool(
 }
 
 CUDAStream getStreamFromExternal(
-    uint64_t ext_stream,
+    cudaStream_t ext_stream,
     DeviceIndex device_index) {
-  uint32_t idx = get_idx(external_counters[device_index]);
-  external_streams[device_index][idx].stream =
-      reinterpret_cast<cudaStream_t>(ext_stream);
-  external_streams[device_index][idx].device_index = device_index;
   return CUDAStream(
       CUDAStream::UNCHECKED,
+      // The stream pointer will be the actual id
       Stream(
           Stream::UNSAFE,
           c10::Device(DeviceType::CUDA, device_index),
-          CUDAStream_getStreamId(&external_streams[device_index][idx])));
+          reinterpret_cast<int64_t>(ext_stream)));
 }
 
 CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
