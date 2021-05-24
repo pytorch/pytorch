@@ -1947,9 +1947,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, start, end):
-                out = torch.arange(start.size(0), end, 1.5, dtype=torch.int64)
-                print(out)
-                return out
+                return torch.arange(start.size(0), end, 1.5, dtype=torch.int64)
 
         x = torch.randn(2, 3, 4)
         y = torch.tensor(8.5, dtype=torch.float)
