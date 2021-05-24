@@ -20,7 +20,7 @@
 //
 //   cpu_kernel_vec(iter,
 //     [](float a, float b) { return a * b; },
-//     [](Vec256<float> a, Vec256<float> b) { return a * b; });
+//     [](Vectorized<float> a, Vectorized<float> b) { return a * b; });
 //
 // See BinaryOpsKernel.cpp for the complete implementation
 //
@@ -32,7 +32,7 @@
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -41,7 +41,7 @@
 
 namespace at { namespace native { namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
@@ -200,7 +200,7 @@ static inline void
 vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   constexpr int ntensors = traits::arity + 1;
 
   char* C10_RESTRICT data[ntensors];
