@@ -295,12 +295,20 @@ Tensor special_betainc(const Tensor& self, const Scalar& a, const Tensor& b) {
   return at::special_betainc(self, wrapped_scalar_tensor(a), b);
 }
 
+Tensor special_betainc(const Tensor& self, const Tensor& a, const Scalar& b) {
+  return at::special_betainc(self, a, wrapped_scalar_tensor(b));
+}
+
 Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Scalar& b, Tensor& result) {
   return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), wrapped_scalar_tensor(b));
 }
 
 Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Tensor& b, Tensor& result) {
   return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), b);
+}
+
+Tensor& special_betainc_out(const Tensor& self, const Tensor& a, const Scalar& b, Tensor& result) {
+  return at::special_betainc_out(result, self, a, wrapped_scalar_tensor(b));
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {

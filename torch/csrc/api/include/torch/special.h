@@ -185,7 +185,7 @@ inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& oth
 /// Computes betainc
 /// ```
 inline Tensor betainc(const Tensor& self, const Tensor& a, const Tensor& b) {
-  return torch::special_xlog1py(self, a, b);
+  return torch::special_betainc(self, a, b);
 }
 
 inline Tensor betainc(const Tensor& self, const Tensor& a, const Scalar& b) {
@@ -193,6 +193,10 @@ inline Tensor betainc(const Tensor& self, const Tensor& a, const Scalar& b) {
 }
 
 inline Tensor betainc(const Tensor& self, const Scalar& a, const Tensor& b) {
+  return torch::special_betainc(self, a, b);
+}
+
+inline Tensor betainc(const Tensor& self, const Scalar& a, const Scalar& b) {
   return torch::special_betainc(self, a, b);
 }
 
@@ -205,6 +209,10 @@ inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Tensor& a, 
 }
 
 inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Scalar& a, const Tensor& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Scalar& a, const Scalar& b) {
   return torch::special_betainc_out(result, self, a, b);
 }
 

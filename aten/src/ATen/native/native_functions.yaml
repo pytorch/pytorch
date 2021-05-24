@@ -9347,6 +9347,12 @@
   dispatch:
     CompositeExplicitAutograd: special_betainc
 
+- func: special_betainc.ab_scalar(Tensor self, Scalar a, Scalar b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc
+
 - func: special_betainc.out(Tensor self, Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
@@ -9356,14 +9362,21 @@
   dispatch:
     CPU, CUDA: special_betainc_out
 
-- func: special_betainc.a_scalar(Tensor self, Scalar a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+- func: special_betainc.a_scalar_out(Tensor self, Scalar a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_betainc_out
 
-- func: special_betainc.b_scalar(Tensor self, Tensor a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
+- func: special_betainc.b_scalar_out(Tensor self, Tensor a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc_out
+
+- func: special_betainc.ab_scalar_out(Tensor self, Scalar a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
