@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests, _DYNAMIC_DTYPES)
+    (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -17,18 +17,10 @@ from torch.testing._internal.common_jit import JitCommonTestCase, check_against_
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
-
+import torch.testing._internal.opinfo_helper as opinfo_helper
 
 # Get names of all the operators which have entry in `method_tests` (legacy testing infra)
 method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
-
-# Assure no operator has `dtypes=_DYNAMIC_DTYPES`
-def is_dynamic_dtype_set(op):
-    dyn_dtype = set(_DYNAMIC_DTYPES)
-    return (op.dtypes == dyn_dtype) or (op.dtypesIfCPU == dyn_dtype) or (op.dtypesIfCUDA == dyn_dtype)
-
-filtered_ops = list(filter(is_dynamic_dtype_set, op_db))
-assert len(filtered_ops) == 0, "One of the operator has dtypes=`DYNAMIC_DTYPES`"
 
 # Tests that apply to all operators
 
@@ -745,4 +737,14 @@ instantiate_device_type_tests(TestGradients, globals())
 instantiate_device_type_tests(TestCommon, globals())
 
 if __name__ == '__main__':
+    # Assure no opinfo entry has dynamic_dtypes
+    filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
+    for op in filtered_ops:
+        fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
+        print(fmt_str)
+
+    assert len(filtered_ops) == 0, \
+        ("The above operator/s is using dynamic_dtypes in the OpInfo entry!"
+         "Please set the dtypes manually")
+
     run_tests()

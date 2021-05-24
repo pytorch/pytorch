@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once,
      GRADCHECK_NONDET_TOL,)
+import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
 
@@ -131,8 +132,6 @@ class AliasInfo(object):
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
 
-_DYNAMIC_DTYPES = _dispatch_dtypes(tuple())
-
 
 # Extension of getattr to support qualified names
 # e.g. _getattr_qual(torch, 'linalg.norm') -> torch.linalg.norm
@@ -205,6 +204,16 @@ class OpInfo(object):
         self.name = name
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
+
+        # Attribute to verify dynamic_dtypes are used.
+        self.dynamic_dtypes = any(map(lambda dtypes: isinstance(
+            dtypes, opinfo_helper._dynamic_dispatch_dtypes), (dtypes, dtypesIfCUDA)))
+
+        if self.dynamic_dtypes:
+            assert all(map(lambda dtypes: isinstance(
+                dtypes, opinfo_helper._dynamic_dispatch_dtypes), (dtypes, dtypesIfCUDA))), \
+                (f"To use dynamic dypes for operator {name}, "
+                 "use the helper function for arguments `dtypes`, `dtypesIfCUDA`")
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
@@ -4108,7 +4117,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_atan2,
            ),
     OpInfo('atan2',
-           dtypes=_DYNAMIC_DTYPES,
+           dtypes=opinfo_helper.get_supported_dtypes(torch.atan2, sample_inputs_atan2, 'cpu'),
+           dtypesIfCUDA=opinfo_helper.get_supported_dtypes(torch.atan2, sample_inputs_atan2, 'cuda'),
            variant_test_name='1',
            sample_inputs_func=sample_inputs_atan2,
            ),
@@ -5069,6 +5079,15 @@ op_db: List[OpInfo] = [
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+           sample_inputs_func=sample_inputs_topk,
+           skips=(
+               # Topk is not raising a warning when the out is resized
+               SkipInfo('TestCommon', 'test_out'),
+           )),
+    OpInfo('topk',
+           dtypes=opinfo_helper.get_supported_dtypes(torch.topk, sample_inputs_topk, 'cpu'),
+           dtypesIfCUDA=opinfo_helper.get_supported_dtypes(torch.topk, sample_inputs_topk, 'cuda'),
+           variant_test_name='1',
            sample_inputs_func=sample_inputs_topk,
            skips=(
                # Topk is not raising a warning when the out is resized
