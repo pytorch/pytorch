@@ -23,11 +23,11 @@ using namespace at::sparse;
 
 static constexpr bool is_mkl_supported() {
 #ifdef _MSC_VER
-  return true;
-#elif  __APPLE__ || __MACH__
-  return true;
-#else
   return false;
+#elif  __APPLE__ || __MACH__
+  return false;
+#else
+  return true;
 #endif
 }
 
