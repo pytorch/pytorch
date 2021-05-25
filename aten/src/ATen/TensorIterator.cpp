@@ -640,6 +640,9 @@ int TensorIteratorBase::num_reduce_dims() const {
 
 void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
+  // If grain size is set differently via TensorIterator API
+  // set_grain_size_for_mt then use that value.
+  grain_size = (grain_size_for_mt_ == std::numeric_limits<int64_t>::max()) ? grain_size : grain_size_for_mt_;
   if (numel == 0) {
     return;
   } else if (numel < grain_size || at::get_num_threads() == 1) {
