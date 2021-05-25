@@ -61,6 +61,11 @@ def createResolutionCallbackFromEnv(lookup_base):
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
 
+        # Special case logic for the empty Tuple as a subscript (used
+        # in the type annotation `Tuple[()]`)
+        if expr[:i] == '()':
+            return (), i
+
         base = lookupInModule(expr[:i].strip(), module)
         assert base is not None, f"Unresolvable type {expr[:i]}"
         if i == len(expr) or expr[i] != '[':
