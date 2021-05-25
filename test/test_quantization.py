@@ -41,19 +41,20 @@ from quantization.test_workflow_module import TestHistogramObserver  # noqa: F40
 from quantization.test_workflow_module import TestDistributed  # noqa: F401
 
 # Workflow
-# 1. Eager mode quantization
-from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
-from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
-from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
-from quantization.test_quantize import TestEagerModeOps  # noqa: F401
-from quantization.test_quantize import TestEagerModeQATOps  # noqa: F401
+# 1. Eager mode post training quantization
+from quantization.test_quantize_eager_ptq import TestPostTrainingStatic  # noqa: F401
+from quantization.test_quantize_eager_ptq import TestPostTrainingDynamic  # noqa: F401
+from quantization.test_quantize_eager_ptq import TestEagerModeOps  # noqa: F401
+from quantization.test_quantize_eager_ptq import TestFunctionalModule  # noqa: F401
+from quantization.test_quantize_eager_ptq import TestModelNumerics  # noqa: F401
+from quantization.test_quantize_eager_ptq import TestQuantizeONNXExport  # noqa: F401
 
-# TODO: merge with other tests in test_quantize.py?
-from quantization.test_quantize import TestFunctionalModule  # noqa: F401
-from quantization.test_quantize import TestFusion  # noqa: F401
-from quantization.test_quantize import TestModelNumerics  # noqa: F401
-from quantization.test_quantize import TestQuantizeONNXExport  # noqa: F401
-from quantization.test_quantize import TestDeprecatedJitQuantized  # noqa: F401
+# Eager mode quantization aware training
+from quantization.test_quantize_eager_qat import TestQuantizationAwareTraining  # noqa: F401
+from quantization.test_quantize_eager_qat import TestEagerModeQATOps  # noqa: F401
+
+# Eager mode fusion passes
+from quantization.test_fusion import TestFusion  # noqa: F401
 
 # 2. Graph mode quantization
 from quantization.test_quantize_jit import TestQuantizeJit  # noqa: F401
