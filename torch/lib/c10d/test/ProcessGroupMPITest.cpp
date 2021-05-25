@@ -53,13 +53,13 @@ std::vector<std::vector<at::Tensor>> waitFuture(
   return outputTensors;
 }
 
-void testAllreduce(int iter = 1000) {
+void testAllreduce(const at::DeviceType device, int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
 
   // Generate inputs
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (auto i = 0; i < iter; ++i) {
-    auto tensor = at::ones({16, 16}) * i;
+    auto tensor = at::ones({16, 16}, device) * i;
     std::vector<at::Tensor> tensors = {tensor};
 
     // Queue the work.
@@ -359,7 +359,9 @@ int main(int argc, char** argv) {
     execl(STR(MPIEXEC), "-np 2", argv[0], (char*)nullptr);
   }
 
-  testAllreduce();
+  testAllreduce(at::DeviceType::CPU);
+  std::cerr << "cuda test";
+  testAllreduce(at::DeviceType::CUDA);
   testBroadcast();
   testReduce();
   testAllgather();
