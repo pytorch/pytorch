@@ -76,6 +76,28 @@ TORCH_META_FUNC(leaky_relu) (
   build_unary_op(maybe_get_output(), self);
 }
 
+// Note: leakyReLu backward calculation doesn't support in-place call with negative slope.
+// The reason is that for in-place forward call, the forward result will be saved into autograd
+// node instead of the input itself, when calculating backward gradient, there is no way to know
+// whether the original input for current node is positive or not if the input slope is
+// negative. eg. forward is 2, slope is -0.2, the original input for this node could be
+// either 2, or -10, so no way to get a correct backward gradient in this case.
+TORCH_META_FUNC(leaky_relu_backward) (
+  const Tensor& grad_output,
+  const Tensor& self_or_result,
+  const Scalar& negval,
+  bool is_result
+) {
+  TORCH_CHECK(
+    !is_result || negval.to<double>() >= 0.0,
+    "In-place leakyReLu backward calculation is triggered with a negative slope which is not supported. "
+    "This is caused by calling in-place forward function with a negative slope, "
+    "please call out-of-place version instead. File an issue at https://github.com/pytorch/pytorch if you do "
+    "require supporting in-place leakRelu backward calculation with negative slope");
+
+  build_borrowing_binary_op(maybe_get_output(), self_or_result, grad_output);
+}
+
 TORCH_META_FUNC(hardsigmoid) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
@@ -171,6 +193,16 @@ TORCH_IMPL_FUNC(leaky_relu_out) (
   const Tensor& self, const Scalar& negval, const Tensor& result
 ) {
   leaky_relu_stub(device_type(), *this, negval);
+}
+
+TORCH_IMPL_FUNC(leaky_relu_backward_out) (
+  const Tensor& grad_output,
+  const Tensor& self_or_result,
+  const Scalar& negval,
+  bool is_result,
+  const Tensor& grad_input
+) {
+  leaky_relu_backward_stub(device_type(), *this, negval);
 }
 
 TORCH_IMPL_FUNC(hardsigmoid_out) (
@@ -753,30 +785,6 @@ Tensor infinitely_differentiable_gelu_backward(
   Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
   Tensor pdf = (-0.5 * self * self).exp_();
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
-}
-
-// Note: leakyReLu backward calculation doesn't support in-place call with negative slope.
-// The reason is that for in-place forward call, the forward result will be saved into autograd
-// node instead of the input itself, when calculating backward gradient, there is no way to know
-// whether the original input for current node is positive or not if the input slope is
-// negative. eg. forward is 2, slope is -0.2, the original input for this node could be
-// either 2, or -10, so no way to get a correct backward gradient in this case.
-Tensor leaky_relu_backward(
-    const Tensor& grad_output,
-    const Tensor& self_or_result,
-    const Scalar& negval,
-    bool is_result) {
-  TORCH_CHECK(
-    !is_result || negval.to<double>() >= 0.0,
-    "In-place leakyReLu backward calculation is triggered with a negative slope which is not supported. "
-    "This is caused by calling in-place forward function with a negative slope, "
-    "please call out-of-place version instead. File an issue at https://github.com/pytorch/pytorch if you do "
-    "require supporting in-place leakRelu backward calculation with negative slope");
-
-  Tensor result;
-  auto iter = TensorIterator::borrowing_binary_op(result, self_or_result, grad_output);
-  leaky_relu_backward_stub(iter.device_type(), iter, negval);
-  return iter.output();
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
