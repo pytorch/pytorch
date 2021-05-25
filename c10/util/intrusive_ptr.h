@@ -88,23 +88,7 @@ class C10_API intrusive_ptr_target {
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
   // directly.
-  virtual ~intrusive_ptr_target() {
-// Disable -Wterminate and -Wexceptions so we're allowed to use assertions
-// (i.e. throw exceptions) in a destructor.
-// We also have to disable -Wunknown-warning-option and -Wpragmas, because
-// some other compilers don't know about -Wterminate or -Wexceptions and
-// will show a warning about unknown warning options otherwise.
-#if defined(_MSC_VER) && !defined(__clang__)
-#pragma warning(push)
-#pragma warning( \
-    disable : 4297) // function assumed not to throw an exception but does
-#else
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wterminate"
-#pragma GCC diagnostic ignored "-Wexceptions"
-#endif
+  virtual ~intrusive_ptr_target() noexcept(!kTorchInternalAssertIsDebugging) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
@@ -113,11 +97,6 @@ class C10_API intrusive_ptr_target {
         // at destruction time.
         weakcount_.load() == 1 || weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
-#if defined(_MSC_VER) && !defined(__clang__)
-#pragma warning(pop)
-#else
-#pragma GCC diagnostic pop
-#endif
   }
 
   constexpr intrusive_ptr_target() noexcept : refcount_(0), weakcount_(0) {}

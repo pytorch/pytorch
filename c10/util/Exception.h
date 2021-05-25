@@ -445,19 +445,23 @@ namespace detail {
 #define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, ##__VA_ARGS__)
 #endif
 
+namespace c10 {
 // Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
 // build, and does nothing in release build.  It is appropriate to use
 // in situations where you want to add an assert to a hotpath, but it is
 // too expensive to run this assert on production builds.
 #ifdef NDEBUG
+constexpr bool kTorchInternalAssertIsDebugging = false;
 // Optimized version - generates no code.
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   while (false)                               \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
 #else
+constexpr bool kTorchInternalAssertIsDebugging = true;
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
 #endif
+} // namespace c10
 
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
