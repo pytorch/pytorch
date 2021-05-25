@@ -11,6 +11,13 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 # XXX: still in prototype
 class TestSymbolicShapeAnalysis(JitTestCase):
     def setUp(self):
@@ -95,6 +102,16 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             ten_input.setType(ten_input.type().with_sizes([2, 2]))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [2, 2])
+
+    @skipIfNoTorchVision
+    def test_mobilenet(self):
+        model = torch.jit.freeze(torch.jit.script(torchvision.models.mobilenet_v2().eval()))
+        inputs = list(model.graph.inputs())
+        inputs[1].setType(inputs[1].type().with_sizes([1, 3, 224, 224]))
+        torch._C._jit_pass_remove_mutation(model.graph)
+        torch._C._jit_pass_propagate_shapes_on_graph(model.graph)
+        out = model(torch.rand([1, 3, 224, 224]))
+        self.assertEqual(next(model.graph.outputs()).type().symbolic_sizes(), out.size())
 
     def test_binary_shape_functions(self):
         def apply(fn):
