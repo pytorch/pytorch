@@ -349,7 +349,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
         values_ptr += n;
         indices_ptr += n;
       }
-    });
+    }, [&](auto _){ TORCH_CHECK(_(false), "BFloat16 is not supported on ROCm"); });
   });
 
   if (values_tmp.defined()) {
