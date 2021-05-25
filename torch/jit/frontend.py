@@ -19,7 +19,7 @@ from torch._C._jit_tree_views import (
 )
 from torch._utils_internal import get_source_lines_and_file
 from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
-from torch._jit_internal import SourceContext, should_drop, is_static_fn, FunctionModifiers  # noqa: F401
+from torch._jit_internal import make_source_context, should_drop, is_static_fn, FunctionModifiers  # noqa: F401
 import torch.jit.annotations
 
 _IS_ASTUNPARSE_INSTALLED = False
@@ -207,7 +207,7 @@ def get_jit_class_def(cls, self_name):
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
-    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
+    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, False)
     class_ast = py_ast.body[0]
     assert isinstance(class_ast, ast.ClassDef)
     assigns = get_class_assigns(ctx, class_ast)
@@ -275,7 +275,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
         raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
+    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, True)
     fn_def = py_ast.body[0]
 
     if is_classmethod:
