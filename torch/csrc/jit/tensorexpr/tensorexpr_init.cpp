@@ -413,9 +413,9 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "split_with_tail",
           [](const LoopNest& self, For* f, int factor) {
-            For *outer = nullptr, *inner = nullptr, *tail = nullptr;
-            self.splitWithTail(f, factor, &outer, &inner, &tail);
-            return std::make_tuple(outer, inner, tail);
+            For *inner = nullptr, *tail = nullptr;
+            self.splitWithTail(f, factor, &inner, &tail);
+            return std::make_tuple(inner, tail);
           },
           py::return_value_policy::reference)
       .def(
