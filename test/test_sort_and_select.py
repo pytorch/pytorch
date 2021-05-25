@@ -260,6 +260,7 @@ class TestSortAndSelect(TestCase):
     def test_msort(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
+
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
             if tensor.size() != torch.Size([]):
