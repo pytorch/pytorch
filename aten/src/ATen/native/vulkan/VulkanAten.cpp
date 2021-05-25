@@ -622,7 +622,7 @@ Tensor& copy_to_vulkan_(Tensor& self, const Tensor& src) {
   return self;
 }
 
-Tensor& vulkan_copy_impl_(Tensor& self, const Tensor& src) {
+const Tensor& vulkan_copy_impl_(const Tensor& self, const Tensor& src) {
   if (src.device().type() == at::kVulkan && self.device().type() == at::kCPU) {
     return copy_from_vulkan_(self, src);
   }
@@ -640,7 +640,7 @@ struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
     return at::native::vulkan::detail::is_available();
   }
 
-  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
+  const Tensor& vulkan_copy_(const Tensor& self, const Tensor& src) const override {
     return vulkan_copy_impl_(self, src);
   }
 };

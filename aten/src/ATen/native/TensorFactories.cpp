@@ -95,11 +95,11 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_out(const Scalar& end, Tensor& result) {
+const Tensor& arange_out(const Scalar& end, const Tensor& result) {
   return at::arange_out(result, /*start=*/0, end);
 }
 
-Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
+const Tensor& arange_out(const Tensor& result, const Scalar& start, const Scalar& end) {
   return at::arange_out(result, start, end, /*step=*/1);
 }
 

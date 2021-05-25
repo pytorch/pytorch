@@ -17,6 +17,10 @@ namespace impl {
 // utils
 //
 
+// is_const_tensor_ref
+template <class T> struct is_const_tensor_ref : std::false_type {};
+template <> struct is_const_tensor_ref<const at::Tensor&> : std::true_type {};
+
 // is_mutable_tensor_ref
 template <class T> struct is_mutable_tensor_ref : std::false_type {};
 template <> struct is_mutable_tensor_ref<at::Tensor&> : std::true_type {};
@@ -295,6 +299,46 @@ struct BoxedKernelWrapper<
     return std::get<sizeof...(RestArgs) - 1>(std::tuple<RestArgs...>{restArgs...});
   }
 };
+
+//
+// 4.5. Again, in-progress migration to take and return const Tensor
+// references instead.
+// Note: all signatures matching this pattern are are assumed to be for such ops.
+// This assumption permits the generated BoxedKernelWrapper specializations to simply
+// return out arguments.
+//
+template <class FirstArg, class... RestArgs>
+struct BoxedKernelWrapper<
+  const at::Tensor&(FirstArg, RestArgs...),
+  std::enable_if_t<
+    can_box_all<FirstArg, RestArgs...>::value
+    // this skips over in-place kernels with a const Tensor
+    // arg at the front, so those can unambiguously trigger the preceding specialization.
+    && !is_const_tensor_ref<FirstArg>::value,
+    void
+  >
+> {
+  static const at::Tensor& call(
+    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
+    OperatorKernel* functor,
+    const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
+    FirstArg firstArg, RestArgs... restArgs
+  ) {
+    torch::jit::Stack stack = boxArgs<FirstArg, RestArgs...>(std::forward<FirstArg>(firstArg), std::forward<RestArgs>(restArgs)...);
+    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return a single value on the stack, ",
+      "but instead returned ", stack.size(), " values."
+    );
+
+    // reusing restArgs after it has been forwarded here is ok because we know
+    // that the last element is of type `Tensor&`.
+    return std::get<sizeof...(RestArgs) - 1>(std::tuple<RestArgs...>{restArgs...});
+  }
+};
+
 
 //
 // 5. out of place ops that take multiple non-const Tensor references as their

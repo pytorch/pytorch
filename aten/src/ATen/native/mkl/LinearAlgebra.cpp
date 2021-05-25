@@ -6,7 +6,7 @@
 
 namespace at { namespace native {
 
-Tensor& _baddbmm_mkl_(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+Tensor& _baddbmm_mkl_(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   AT_ERROR("bmm: ATen not compiled with MKL support");
 }
 
@@ -187,7 +187,7 @@ static inline void baddbmm_mkl_template(const Tensor& res, const Tensor& mat1, c
   gemm_batched(trans_A, trans_B, batch_size, M, N, K, alpha, A.data(), lda, B.data(), ldb, beta, C.data(), ldc);
 }
 
-Tensor& _baddbmm_mkl_(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+const Tensor& _baddbmm_mkl_(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   // checks are done in native/LinearAlgebra.cpp
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "baddbmm__mkl", [&] {
       baddbmm_mkl_template<scalar_t>(self, batch1, batch2, beta, alpha);

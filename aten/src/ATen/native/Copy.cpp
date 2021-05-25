@@ -33,7 +33,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
-void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
+void copy_same_type_transpose_(const Tensor& self, const Tensor& src) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t BLOCK_SZ;
   if (self.scalar_type() == kByte) {
@@ -98,7 +98,7 @@ bool is_supported_device(Device device) {
 namespace at {
 namespace native {
 
-static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
+static const Tensor & copy_impl(const Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
@@ -243,7 +243,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   return self;
 }
 
-Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
+const Tensor& copy_(const Tensor& self, const Tensor& src, bool non_blocking) {
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;

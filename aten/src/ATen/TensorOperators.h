@@ -9,10 +9,12 @@
 namespace at {
 
 inline Tensor & Tensor::operator=(Tensor const & rhs) && {
-  return copy_(rhs);
+  copy_(rhs);
+  return *this;
 }
 inline Tensor & Tensor::operator=(Tensor && rhs) && {
-  return copy_(rhs);
+  copy_(rhs);
+  return *this;
 }
 inline Tensor & Tensor::operator=(Scalar v) && {
   return fill_(v);
@@ -24,22 +26,28 @@ inline Tensor Tensor::operator-() const {
   return neg();
 }
 inline Tensor& Tensor::operator+=(const Tensor & other) {
-  return add_(other);
+  add_(other);
+  return *this;
 }
 inline Tensor& Tensor::operator+=(Scalar other) {
-  return add_(other);
+  add_(other);
+  return *this;
 }
 inline Tensor& Tensor::operator-=(const Tensor & other) {
-  return sub_(other);
+  sub_(other);
+  return *this;
 }
 inline Tensor& Tensor::operator-=(Scalar other) {
-  return sub_(other);
+  sub_(other);
+  return *this;
 }
 inline Tensor& Tensor::operator*=(const Tensor & other) {
-  return mul_(other);
+  mul_(other);
+  return *this;
 }
 inline Tensor& Tensor::operator*=(Scalar other) {
-  return mul_(other);
+  mul_(other);
+  return *this;
 }
 inline Tensor& Tensor::operator/=(const Tensor & other) {
   return div_(other);

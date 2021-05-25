@@ -11,7 +11,7 @@ namespace metal {
 struct MetalInterface {
   virtual ~MetalInterface() = default;
   virtual bool is_metal_available() const = 0;
-  virtual at::Tensor& metal_copy_(at::Tensor& self, const at::Tensor& src)
+  virtual const at::Tensor& metal_copy_(const at::Tensor& self, const at::Tensor& src)
       const = 0;
 };
 
@@ -22,7 +22,7 @@ class MetalImplRegistrar {
   explicit MetalImplRegistrar(MetalInterface*);
 };
 
-at::Tensor& metal_copy_(at::Tensor& self, const at::Tensor& src);
+const at::Tensor& metal_copy_(const at::Tensor& self, const at::Tensor& src);
 
 } // namespace metal
 } // namespace at

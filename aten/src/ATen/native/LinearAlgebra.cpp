@@ -697,7 +697,7 @@ Tensor linalg_multi_dot(TensorList tensors) {
   return multi_dot_impl(tensors, c10::nullopt);
 }
 
-Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
+const Tensor& linalg_multi_dot_out(TensorList tensors, const Tensor& result) {
   multi_dot_impl(tensors, result);
   return result;
 }
@@ -720,7 +720,7 @@ Tensor chain_matmul(TensorList matrices) {
   return at::native::linalg_multi_dot(matrices);
 }
 
-Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
+const Tensor& chain_matmul_out(TensorList matrices, const Tensor& result) {
   TORCH_WARN_ONCE(
       "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
       "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
@@ -935,7 +935,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 }
 
 static void addmm_impl_cpu_(
-    Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
+    const Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
 
   // Array access is faster than .size(n) and .stride(n)
@@ -1179,7 +1179,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
 // optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
 // but this seems to be a first starting point.
 
-static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
+static inline const Tensor& bmm_out_or_baddbmm_(const Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
   CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
@@ -1276,14 +1276,14 @@ Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch
   return at::native::baddbmm_out_cpu(self, batch1, batch2, beta, alpha, result);
 }
 
-Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
+const Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
   auto self = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   result.resize_(self->sizes());
   result.copy_(*self);
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
 }
 
-Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+const Tensor& baddbmm__cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
 }
 
@@ -1292,7 +1292,7 @@ Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
   return at::native::bmm_out_cpu(self, mat2, result);
 }
 
-Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
+const Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, const Tensor &result) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
@@ -1305,7 +1305,7 @@ Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) 
   return result;
 }
 
-Tensor& dot_out(const Tensor& self, const Tensor& other, Tensor& result) {
+const Tensor& dot_out(const Tensor& self, const Tensor& other, const Tensor& result) {
   auto output_device = result.device();
   auto input1_device = self.device();
   auto input2_device = other.device();

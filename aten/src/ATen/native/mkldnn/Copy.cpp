@@ -7,7 +7,7 @@
 namespace at {
 namespace native {
 
-Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
+const Tensor& copy_mkldnn_(const Tensor& self, const Tensor& src, bool non_blocking) {
   TORCH_CHECK(false, "copy_mkldnn_: ATen not compiled with MKLDNN support");
 }
 
@@ -21,7 +21,7 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
 namespace at {
 namespace native {
 
-Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
+const Tensor& copy_mkldnn_(const Tensor& self, const Tensor& src, bool non_blocking) {
   TORCH_CHECK(
       self.sizes() == src.sizes(),
       "copy_mkldnn_: only support same size tensor.");

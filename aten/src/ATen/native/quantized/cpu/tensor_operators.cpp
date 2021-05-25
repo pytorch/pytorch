@@ -18,8 +18,8 @@ TODO: This is an inefficient implementation that uses `.dequantize`.
 */
 
 #define DEFINE_COMPARATOR(at_op) \
-Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
-                                const Scalar& other, Tensor& out) { \
+const Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
+                                        const Scalar& other, const Tensor& out) { \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
   auto self_dq = self.dequantize(); \
@@ -29,8 +29,8 @@ Tensor at_op##_quantized_cpu(const Tensor& self, const Scalar& other) { \
   auto self_dq = self.dequantize(); \
   return at:: at_op(self_dq, other); \
 } \
-Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
-                                const Tensor& other, Tensor& out) { \
+const Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
+                                        const Tensor& other, const Tensor& out) { \
   /* We infer size to make sure the tensors are compatible. */\
   infer_size_dimvector(self.sizes(), other.sizes()); \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \

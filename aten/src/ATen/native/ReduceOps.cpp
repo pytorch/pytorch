@@ -597,7 +597,7 @@ Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tens
   }
 }
 
-static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
+static inline const Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, const Tensor& result) {
   auto out_len = self.size(dim) - 1;
   if (self.dtype() == at::kBool) {
     return at::logical_xor_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
@@ -605,7 +605,7 @@ static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim
   return at::sub_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
 }
 
-Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, Tensor& result) {
+const Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, const Tensor& result) {
   diff_check(self, n, dim, prepend, append);
   if (!prepend.has_value() && !append.has_value()) {
     return diff_out_helper(self, n, dim, result);

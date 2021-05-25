@@ -208,7 +208,7 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
   return result;
 }
 
-Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
+const Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, const Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();

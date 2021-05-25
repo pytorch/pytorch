@@ -24,6 +24,7 @@ import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
+from tools.codegen import local
 
 # Generates Register{dispatch}.cpp (e.g., RegisterCPU.cpp).
 #
@@ -401,13 +402,14 @@ if (resized) {{
     # returns the definition of a ctor, as well as how to construct
     # this class to a variable named op
     def gen_class_ctor(self, k: SchemaKind, class_name: str, returns: int) -> str:
+        maybe_const = "const " if local.use_const_ref_for_mutable_tensors() else ""
         if k is SchemaKind.functional:
             return ""
         elif k is SchemaKind.inplace:
             # TODO: Make sure out argument is guaranteed to be self
-            return f"{class_name}(Tensor& self) : outputs_{{std::ref(self)}} {{}}"
+            return f"{class_name}({maybe_const}Tensor& self) : outputs_{{std::ref(self)}} {{}}"
         elif k is SchemaKind.out:
-            out_args = ', '.join(f"Tensor& out{i}" for i in range(returns))
+            out_args = ', '.join(f"{maybe_const}Tensor& out{i}" for i in range(returns))
             out_refs = ', '.join(f"std::ref(out{i})" for i in range(returns))
             return f"{class_name}({out_args}) : outputs_{{ {out_refs} }} {{}}"
         else:
@@ -416,12 +418,13 @@ if (resized) {{
     def gen_class(
         self, f: NativeFunction, k: SchemaKind, *, class_name: str, parent_class: str, generate_super: bool
     ) -> str:
+        maybe_const = "const " if local.use_const_ref_for_mutable_tensors() else ""
         if k is SchemaKind.functional:
             output_type = "Tensor"
         elif k is SchemaKind.inplace:
-            output_type = "std::reference_wrapper<Tensor>"
+            output_type = f"std::reference_wrapper<{maybe_const}Tensor>"
         elif k is SchemaKind.out:
-            output_type = "std::reference_wrapper<Tensor>"
+            output_type = f"std::reference_wrapper<{maybe_const}Tensor>"
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:

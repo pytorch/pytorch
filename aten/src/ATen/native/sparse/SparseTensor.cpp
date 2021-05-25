@@ -511,8 +511,8 @@ Tensor sparse_to_dense(
   return dst.add_(self);
 }
 
-SparseTensor& copy_sparse_(
-    SparseTensor& self,
+const SparseTensor& copy_sparse_(
+    const SparseTensor& self,
     const SparseTensor& src,
     bool non_blocking) {
   if (is_same_tensor(self, src))

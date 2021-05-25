@@ -13,7 +13,7 @@ MetalImplRegistrar::MetalImplRegistrar(MetalInterface* impl) {
   g_metal_impl_registry.store(impl);
 }
 
-at::Tensor& metal_copy_(at::Tensor& self, const at::Tensor& src) {
+const at::Tensor& metal_copy_(const at::Tensor& self, const at::Tensor& src) {
   auto p = at::metal::g_metal_impl_registry.load();
   if (p) {
     return p->metal_copy_(self, src);

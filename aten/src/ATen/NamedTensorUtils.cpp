@@ -511,7 +511,7 @@ std::vector<Dimname> compute_cdist_outnames(
 }
 
 std::vector<Dimname> compute_bmm_outnames(
-    Tensor& result,
+    const Tensor& result,
     const Tensor& self,
     const Tensor& other) {
   if (!result.has_names() && !self.has_names() && !other.has_names()) {
@@ -521,7 +521,7 @@ std::vector<Dimname> compute_bmm_outnames(
 }
 
 std::vector<Dimname> compute_baddbmm_outnames(
-    Tensor& result,
+    const Tensor& result,
     const Tensor& self,
     const Tensor& other,
     const Tensor& bias) {

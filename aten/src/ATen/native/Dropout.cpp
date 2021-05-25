@@ -7,7 +7,7 @@ namespace at { namespace native {
 namespace {
 
 template<bool inplace>
-using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
+using Ctype = typename std::conditional<inplace, const Tensor&, Tensor>::type;
 
 Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
@@ -25,29 +25,29 @@ bool is_fused_kernel_acceptable(const Tensor& input, double p) {
   return input.is_cuda() && p > 0 && p < 1 && input.numel() > 0;
 }
 
-// NB: sure, we could have used different overloads here, but I would feel insecure
-// knowing that this dispatch depends only on the constness of the references
 template<bool inplace>
-Tensor& multiply(Tensor& input, const Tensor& noise) {
-  static_assert(inplace, "Wrong multiply overload triggered in Dropout.cpp");
-  return input.mul_(noise);
-}
+struct multiply {
+  static const Tensor& call(const Tensor& input, const Tensor& noise) {
+    return input.mul_(noise);
+  }
+};
 
-template<bool inplace>
-Tensor multiply(const Tensor& input, const Tensor& noise) {
-  static_assert(!inplace, "Wrong multiply overload triggered in Dropout.cpp");
-  return input.mul(noise);
-}
+template<>
+struct multiply<false> {
+  static Tensor call(const Tensor& input, const Tensor& noise) {
+    return input.mul(noise);
+  }
+};
 
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
-Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
+Ctype<inplace> _dropout_impl(const T& input, double p, bool train) {
   TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
   if (p == 0 || !train || input.numel() == 0) {
     return input;
   }
 
   if (p == 1) {
-    return multiply<inplace>(input, at::zeros({}, input.options()));
+    return multiply<inplace>::call(input, at::zeros({}, input.options()));
   }
 
   at::Tensor b; // used for alpha_dropout only
@@ -63,9 +63,9 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   }
 
   if (!alpha_dropout) {
-    return multiply<inplace>(input, noise);
+    return multiply<inplace>::call(input, noise);
   } else {
-    return multiply<inplace>(input, noise).add_(b);
+    return multiply<inplace>::call(input, noise).add_(b);
   }
 }
 
@@ -94,7 +94,7 @@ Tensor dropout(const Tensor& input, double p, bool train) {
   return result;
 }
 
-Tensor& dropout_(Tensor& input, double p, bool train) {
+const Tensor& dropout_(const Tensor& input, double p, bool train) {
   return _dropout<true>(input, p, train);
 }
 
@@ -102,7 +102,7 @@ Tensor feature_dropout(const Tensor& input, double p, bool train) {
   return _feature_dropout<false>(input, p, train);
 }
 
-Tensor& feature_dropout_(Tensor& input, double p, bool train) {
+const Tensor& feature_dropout_(const Tensor& input, double p, bool train) {
   return _feature_dropout<true>(input, p, train);
 }
 
@@ -110,7 +110,7 @@ Tensor alpha_dropout(const Tensor& input, double p, bool train) {
   return _alpha_dropout<false>(input, p, train);
 }
 
-Tensor& alpha_dropout_(Tensor& input, double p, bool train) {
+const Tensor& alpha_dropout_(const Tensor& input, double p, bool train) {
   return _alpha_dropout<true>(input, p, train);
 }
 
@@ -118,7 +118,7 @@ Tensor feature_alpha_dropout(const Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<false>(input, p, train);
 }
 
-Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
+const Tensor& feature_alpha_dropout_(const Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 

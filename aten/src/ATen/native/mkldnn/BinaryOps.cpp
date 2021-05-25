@@ -8,11 +8,11 @@
 namespace at {
 namespace native {
 
-Tensor& mkldnn_add_out(
+const Tensor& mkldnn_add_out(
     const Tensor& self,
     const Tensor& other,
     const Scalar& alpha,
-    Tensor& result
+    const Tensor& result
     ) {
   TORCH_CHECK(false, "mkldnn_add_out: ATen not compiled with MKLDNN support");
 }
@@ -21,11 +21,11 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) 
   TORCH_CHECK(false, "mkldnn_add: ATen not compiled with MKLDNN support");
 }
 
-Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
+const Tensor& mkldnn_add_(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   TORCH_CHECK(false, "mkldnn_add_: ATen not compiled with MKLDNN support");
 }
 
-Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) {
+const Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, const Tensor& result) {
   TORCH_CHECK(false, "mkldnn_mul_out: ATen not compiled with MKLDNN support");
 }
 
@@ -33,7 +33,7 @@ Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(false, "mkldnn_mul: ATen not compiled with MKLDNN support");
 }
 
-Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
+const Tensor& mkldnn_mul_(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(false, "mkldnn_mul_: ATen not compiled with MKLDNN support");
 }
 
@@ -69,11 +69,11 @@ Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor& mkldnn_add_out(
+const Tensor& mkldnn_add_out(
     const Tensor& self,
     const Tensor& other,
     const Scalar& alpha,
-    Tensor& result
+    const Tensor& result
     ) {
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& y = itensor_from_mkldnn(other);
@@ -106,11 +106,11 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) 
                                  self.options().device_opt());
 }
 
-Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
+const Tensor& mkldnn_add_(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return native::mkldnn_add_out(self, other, alpha, self);
 }
 
-Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) {
+const Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, const Tensor& result) {
   TORCH_CHECK(result.sizes() == self.sizes(),
              "mkldnn_mul_out: the output size should be same as input size");
   ideep::tensor& z = itensor_from_mkldnn(result);
@@ -143,7 +143,7 @@ Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
   return native::mkldnn_mul_out(self, other, result);
 }
 
-Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
+const Tensor& mkldnn_mul_(const Tensor& self, const Tensor& other) {
   return native::mkldnn_mul_out(self, other, self);
 }
 

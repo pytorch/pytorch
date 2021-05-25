@@ -187,18 +187,22 @@
 - func: dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: abs(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -356,6 +360,7 @@
     MkldnnCPU: mkldnn_add
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   structured_delegate: add.out
@@ -365,6 +370,7 @@
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
@@ -398,6 +404,7 @@
     CompositeExplicitAutograd: add
 
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -412,6 +419,7 @@
   variants: function, method
 
 - func: addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   structured: True
   dispatch:
     CPU: addmv_out_cpu
@@ -487,8 +495,10 @@
 - func: arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: arange.out(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: arange.start_out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   dispatch:
     CPU: arange_cpu_out
     CUDA: arange_cuda_out
@@ -686,15 +696,18 @@
     CUDA: baddbmm_cuda
 
 - func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
     CPU: baddbmm__cpu
     CUDA: baddbmm__cuda
 
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
 
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     CPU: baddbmm_out_cpu
@@ -859,10 +872,12 @@
   variants: function, method
 
 - func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
 
 - func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_xor_out
@@ -872,10 +887,12 @@
   variants: function, method
 
 - func: logical_and_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
 
 - func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_and_out
@@ -885,10 +902,12 @@
   variants: function, method
 
 - func: logical_or_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
 
 - func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_or_out
@@ -911,6 +930,7 @@
     SparseCUDA: _bmm_sparse_cuda
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     CPU: bmm_out_cpu
@@ -919,6 +939,7 @@
     SparseCUDA: bmm_out_sparse_cuda
 
 - func: _bmm.out(Tensor self, Tensor mat2, *, bool deterministic=False, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     SparseCUDA: _bmm_out_sparse_cuda
@@ -972,6 +993,7 @@
 
 # alias for torch.linalg.multi_dot
 - func: chain_matmul.out(Tensor[] matrices, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
   variants: function, method
@@ -1190,6 +1212,7 @@
 - func: conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -1487,6 +1510,7 @@
   variants: function, method
 
 - func: diff.out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
 
 - func: gradient.scalarint(Tensor self, *, Scalar? spacing=None, int? dim=None, int edge_order=1) -> Tensor[]
@@ -1633,6 +1657,7 @@
     CUDA: dot_cuda
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   dispatch:
     CompositeExplicitAutograd: dot_out
 
@@ -2116,6 +2141,7 @@
     CUDA: _fft_r2c_cufft
 
 - func: _fft_r2c.out(Tensor self, int[] dim, int normalization, bool onesided, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     CPU: _fft_r2c_mkl_out
@@ -2129,6 +2155,7 @@
     CUDA: _fft_c2r_cufft
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, int last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     CPU: _fft_c2r_mkl_out
@@ -2142,6 +2169,7 @@
     CUDA: _fft_c2c_cufft
 
 - func: _fft_c2c.out(Tensor self, int[] dim, int normalization, bool forward, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     CPU: _fft_c2c_mkl_out
@@ -2362,9 +2390,11 @@
   variants: function, method
 
 - func: ldexp_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
 
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2886,6 +2916,7 @@
     SparseCPU, SparseCUDA, SparseCsrCPU: _sparse_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   structured: True
   dispatch:
     CPU: mm_out_cpu
@@ -2920,6 +2951,7 @@
 - func: mode.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   structured_delegate: mul.out
   variants: function, method
@@ -2928,6 +2960,7 @@
     MkldnnCPU: mkldnn_mul
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   structured_delegate: mul.out
   variants: method
@@ -2936,6 +2969,7 @@
     MkldnnCPU: mkldnn_mul_
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
@@ -2947,12 +2981,14 @@
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: mul
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -2960,17 +2996,22 @@
 
 # multiply, alias for mul
 - func: multiply.Tensor(Tensor self, Tensor other) -> Tensor
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
 
 - func: multiply_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: multiply.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: multiply.Scalar(Tensor self, Scalar other) -> Tensor
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
 
 - func: multiply_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
@@ -2980,6 +3021,7 @@
     SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   dispatch:
     CompositeExplicitAutograd: mv_out
 
@@ -2990,6 +3032,7 @@
     CompositeExplicitAutograd: mvlgamma
 
 - func: mvlgamma_(Tensor(a!) self, int p) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -3178,11 +3221,13 @@
     CompositeExplicitAutograd: rad2deg
 
 - func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: rad2deg_
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   dispatch:
     CompositeExplicitAutograd: rad2deg_out
 
@@ -3192,11 +3237,13 @@
     CompositeExplicitAutograd: deg2rad
 
 - func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: deg2rad_
 
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   dispatch:
     CompositeExplicitAutograd: deg2rad_out
 
@@ -4568,6 +4615,7 @@
     MkldnnCPU: mkldnn_zero_
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
@@ -4583,6 +4631,7 @@
     SparseCPU, SparseCUDA: sub_sparse
 
 - func: sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   structured_delegate: sub.out
@@ -4597,6 +4646,7 @@
     CompositeExplicitAutograd: sub
 
 - func: sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -4604,11 +4654,13 @@
 
 # subtract, alias for sub
 - func: subtract.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: subtract.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
 
 - func: subtract_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -4616,6 +4668,7 @@
   variants: function, method
 
 - func: subtract_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -4655,6 +4708,7 @@
     CompositeExplicitAutograd: _sparse_addmm
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   structured: True
   dispatch:
     CPU: addmm_out_cpu
@@ -4672,6 +4726,7 @@
     SparseCsrCPU: addmm_sparse_csr_dense_cpu
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   structured_delegate: addmm.out
   variants: method
   dispatch:
@@ -4964,6 +5019,7 @@
     SparseCUDA: hspmm_sparse_cuda
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck  # Allows copy into different device
   variants: function
   dispatch:
@@ -5463,12 +5519,14 @@
   variants: function, method
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CompositeExplicitAutograd: eq_
 
 - func: eq_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -5856,6 +5914,7 @@
   device_guard: False
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: ne_out
@@ -5869,6 +5928,7 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: ne_out
@@ -5882,12 +5942,14 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CompositeExplicitAutograd: ne_
 
 - func: ne_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -5895,22 +5957,27 @@
 
 # not_equal, alias for torch.ne
 - func: not_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: not_equal.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: not_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: not_equal.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: not_equal_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: not_equal_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: eq_out
@@ -5924,6 +5991,7 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: eq_out
@@ -5937,6 +6005,7 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: ge_out
@@ -5950,6 +6019,7 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: ge_out
@@ -5963,12 +6033,14 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CompositeExplicitAutograd: ge_
 
 - func: ge_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -5976,22 +6048,27 @@
 
 # greater_equal, alias for torch.ge
 - func: greater_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: greater_equal.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: greater_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: greater_equal.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: greater_equal_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: greater_equal_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: le_out
@@ -6005,6 +6082,7 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: le_out
@@ -6018,12 +6096,14 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CompositeExplicitAutograd: le_
 
 - func: le_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -6031,22 +6111,27 @@
 
 # less_equal, alias for torch.le
 - func: less_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: less_equal.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: less_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: less_equal.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: less_equal_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: less_equal_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: gt_out
@@ -6060,6 +6145,7 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: gt_out
@@ -6073,12 +6159,14 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CompositeExplicitAutograd: gt_
 
 - func: gt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -6086,22 +6174,27 @@
 
 #  greater, alias for torch.gt
 - func: greater.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: greater.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: greater.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: greater.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: greater_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: greater_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: lt_out
@@ -6115,6 +6208,7 @@
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: lt_out
@@ -6128,12 +6222,14 @@
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CompositeExplicitAutograd: lt_
 
 - func: lt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -6141,19 +6237,23 @@
 
 #  less, alias for torch.lt
 - func: less.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: less.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: less.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: less.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
 - func: less_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: less_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
@@ -7820,6 +7920,7 @@
     CompositeExplicitAutograd: l1_loss
 
 - func: l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   python_module: nn
   dispatch:
     CPU, CUDA: l1_loss_backward_out
@@ -7960,6 +8061,7 @@
     CPU, CUDA: smooth_l1_loss
 
 - func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   python_module: nn
   dispatch:
     CPU: smooth_l1_loss_backward_out
@@ -9524,6 +9626,7 @@
   variants: function
 
 - func: fft_fftfreq.out(int n, float d=1.0, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
 
@@ -9532,6 +9635,7 @@
   variants: function
 
 - func: fft_rfftfreq.out(int n, float d=1.0, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
 
@@ -9866,6 +9970,7 @@
   python_module: linalg
 
 - func: linalg_multi_dot.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   python_module: linalg
 
 ## Functions that are only for testing

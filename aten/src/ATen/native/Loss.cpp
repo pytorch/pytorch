@@ -358,7 +358,7 @@ Tensor& smooth_l1_loss_out(const Tensor& input, const Tensor& target, int64_t re
   return result;
 }
 
-Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& grad_input) {
+const Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta, const Tensor& grad_input) {
   if (beta <= 0)
     return at::native::l1_loss_backward_out(
         grad_output, input, target, reduction, grad_input);
@@ -485,8 +485,8 @@ Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Te
   return at::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
 }
 
-Tensor& l1_loss_backward_out(const Tensor& grad_output,
-    const Tensor& input, const Tensor& target, int64_t reduction, Tensor& grad_input) {
+const Tensor& l1_loss_backward_out(const Tensor& grad_output,
+    const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& grad_input) {
   auto norm = reduction == Reduction::Mean ? grad_output / input.numel() : grad_output;
   return at::sub_out(grad_input, input, target).sgn_().mul_(norm);
 }

@@ -10,7 +10,7 @@ namespace vulkan {
 struct VulkanImplInterface {
   virtual ~VulkanImplInterface() = default;
   virtual bool is_vulkan_available() const = 0;
-  virtual at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src)
+  virtual const at::Tensor& vulkan_copy_(const at::Tensor& self, const at::Tensor& src)
       const = 0;
 };
 
@@ -21,7 +21,7 @@ class VulkanImplRegistrar {
   VulkanImplRegistrar(VulkanImplInterface*);
 };
 
-at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src);
+const at::Tensor& vulkan_copy_(const at::Tensor& self, const at::Tensor& src);
 
 } // namespace vulkan
 } // namespace at

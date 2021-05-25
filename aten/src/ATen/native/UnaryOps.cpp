@@ -266,12 +266,17 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
+template <typename OutImpl>
+static inline const Tensor& unary_op_impl_(const Tensor& self, OutImpl& out_impl) {
+  return out_impl(self, self);
+}
+
 // arccos, alias for acos
 Tensor& arccos_out(const Tensor& self, Tensor& result) { return at::acos_out(result, self); }
 Tensor arccos(const Tensor& self) { return self.acos(); }
 Tensor& arccos_(Tensor& self) { return self.acos_(); }
 
-Tensor& rad2deg_out(const Tensor& self, Tensor& result) {
+const Tensor& rad2deg_out(const Tensor& self, const Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_180_PI)));
@@ -287,9 +292,9 @@ Tensor rad2deg(const Tensor& self) {
   at::rad2deg_out(result, self);
   return result;
 }
-Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
+const Tensor& rad2deg_(const Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
-Tensor& deg2rad_out(const Tensor& self, Tensor& result) {
+const Tensor& deg2rad_out(const Tensor& self, const Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_PI_180)));
@@ -305,7 +310,7 @@ Tensor deg2rad(const Tensor& self) {
   at::deg2rad_out(result, self);
   return result;
 }
-Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
+const Tensor& deg2rad_(const Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
 // arcsin, alias of asin
 Tensor& arcsin_out(const Tensor& self, Tensor& result) { return at::asin_out(result, self); }
@@ -589,7 +594,7 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
   return args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER);
 }
 
-Tensor& mvlgamma_(Tensor& self, int64_t p) {
+const Tensor& mvlgamma_(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
   Tensor args = native::arange(
       -p *HALF  + HALF,

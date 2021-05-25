@@ -5,6 +5,6 @@
 namespace at {
 namespace native {
 
-Tensor& quantized_copy_from_float_cpu_(Tensor& self, const Tensor& src);
+const Tensor& quantized_copy_from_float_cpu_(const Tensor& self, const Tensor& src);
 }
 } // namespace at

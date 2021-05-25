@@ -183,10 +183,10 @@ Tensor addmm_sparse_csr_dense_cpu(
   return r;
 }
 
-SparseCsrTensor& _sparse_csr_mm_out(
+const SparseCsrTensor& _sparse_csr_mm_out(
     const SparseCsrTensor& sparse,
     const Tensor& dense,
-    SparseCsrTensor& result) {
+    const SparseCsrTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0.0, 1.0); // redispatch!
 }
@@ -211,7 +211,7 @@ Tensor add_sparse_csr(const Tensor& self, const Tensor& other, const Scalar& alp
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
-Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, const Scalar& alpha) {
+const Tensor& add_sparse_csr_(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 

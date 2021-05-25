@@ -84,7 +84,7 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
   }
 }
 
-Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
+const Tensor &mv_out(const Tensor &self, const Tensor &vec, const Tensor& result) {
   //self arg sent to addmv_out cannot be resized
   //here we use result as self argument for addmv, and result is user supplied and can be wrong size
   //it's not a hard error, because we allow resizing result, but it becomes a hard error

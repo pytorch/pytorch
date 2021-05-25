@@ -9,7 +9,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
+const at::Tensor& copy_from_metal_(const at::Tensor& dst, const at::Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::Metal,
       "copy_from_metal input tensor's device is not metal");
@@ -32,7 +32,7 @@ at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
   return dst;
 }
 
-at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
+const at::Tensor& copy_to_metal_(const at::Tensor& dst, const at::Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       dst.device().type() == DeviceType::Metal,
       "copy_to_metal_ output tensor's device is not metal");
@@ -52,7 +52,7 @@ at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
   return dst;
 }
 
-at::Tensor& metal_copy_impl_(at::Tensor& dst, const at::Tensor& src) {
+const at::Tensor& metal_copy_impl_(const at::Tensor& dst, const at::Tensor& src) {
   if (src.device().type() == at::kMetal && dst.device().type() == at::kCPU) {
     return copy_from_metal_(dst, src);
   }

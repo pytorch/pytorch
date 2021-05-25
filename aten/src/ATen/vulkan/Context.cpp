@@ -17,7 +17,7 @@ VulkanImplRegistrar::VulkanImplRegistrar(VulkanImplInterface* impl) {
   g_vulkan_impl_registry.store(impl);
 }
 
-at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src) {
+const at::Tensor& vulkan_copy_(const at::Tensor& self, const at::Tensor& src) {
   auto p = at::vulkan::g_vulkan_impl_registry.load();
   if (p) {
     return p->vulkan_copy_(self, src);
