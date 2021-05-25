@@ -134,6 +134,49 @@ PyObject * THPVariable_Wrap(Variable var)
       (PyTypeObject*)THPVariableClass, std::move(var), status);
 }
 
+
+/// NOTE [ PyObject Traversal ]
+///
+/// PyObjects that are wrapping c++ objects can lead to non-trivial traverse logic
+/// and it can be tricky to know what to traverse and when. This note tries to
+/// clarify what is the danger here and a simple algorithm to choose how to write
+/// the tp_traverse and tp_clear functions.
+/// If you're not already familiar with how the CPython GC works, you should read this
+/// in-depth description: https://devguide.python.org/garbage_collector/
+///
+/// The complexity for us comes from the fact that some c++ shared_ptr objects
+/// own references to python objects and are also owned both by other python objects
+/// and c++ objects. This means that to allow the GC to collect all cycles, we need to
+/// properly implement the traverse/clear methods that take into account these C++
+/// ownership links.
+///
+/// The main danger here comes from the fact that, while all python-related code is
+/// thread safe wrt the GC execution (thanks to the GIL), other threads might be using
+/// our C++ objects arbitrarily which can lead to shared_ptr ref count going up or down
+/// in between the different traverse/clear invocations.
+/// The one constraint we add here that is not explicitly mentioned in the GC description
+/// above is that for a given GC run (meaning while the GIL is held), the traverse/clear
+/// pair should never report different ownership relations: if traverse visited a given
+/// PyObject, then the clear within that same GC run must still be the sole owner and
+/// clear that PyObject.
+///
+/// A more mechanical algorithm to know what to traverse/clear is as follows:
+///   - Any field on this PyObject that contains a strong reference to another PyObject
+///     must be visited and cleared. An example of that is the "backward_hooks" field of
+///     the THPVariable.
+///   - Any field that contains a C++ object that is uniquely owned by this PyObject (either
+///     a unique_ptr or a shared_ptr with use_count==1) should have all the PyObject it owns
+///     visited and cleared. An example would be here the tensor hooks.
+///   - If that uniquely owned C++ object also uniquely owns other C++ objects, these should be
+///     visited and cleared as well if they contain any PyObject.
+///
+/// Caveat: to avoid slow runtime, we limit the depth of this exploration of C++ objects in
+/// practice and we do not, for example, go through the whole autograd graph, even if it is
+/// uniquely owned. This is a known place where users can create noncollectable cycles as described
+/// in: https://github.com/pytorch/pytorch/issues/7343
+///
+
+
 static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->backward_hooks);
@@ -145,14 +188,9 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
     // be very careful not to re-introduce this bug:
     // https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
 
-    // We want to be conservative here and make sure that we only traverse the
-    // grad_fn if this python object is the sole owner of the grad_fn and no
-    // other thread can create another owner without taking the GIL first.
-    // This is because we need to ensure that the "owning or not" of the grad_fn
-    // doesn't change between this traverse and the clear below.
-
-    // We ensure this is true by checking that this python object is the sole owner
-    // of the underlying Tensor and that this Tensor is the sole owner of its grad_fn.
+    // We ensure that we follow NOTE [ PyObject Traversal ] he by checking that this
+    // python object is the sole owner of the underlying Tensor and that this Tensor
+    // is the sole owner of its grad_fn.
     // In this case, the only way to get a new reference to the grad_fn is by using
     // this python object, which requires the GIL to be accessed.
     // Note that this is only valid as long as user don't share non-owning references
