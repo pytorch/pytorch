@@ -51,8 +51,7 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
     }
   }
   // check output types
-  // Static Runtime supports output types include None, Tensor,  List/Tuple
-  // of Tensor, or Dict
+  // Static Runtime doesn't support complex outputs such as List of Lists
   for (Value* output : graph->outputs()) {
     VLOG(1) << "output: %" << output->debugName()
             << " has type: " << output->type()->repr_str();
@@ -461,13 +460,11 @@ GenerateSameStorageValues(
   return same_storage_values;
 }
 
-} // namespace
-
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
-  OptimizeGraph(graph, opts);
   CheckGraphEligibility(graph);
+  OptimizeGraph(graph, opts);
   RemoveSelfFromGraphInput(graph);
 }
 
@@ -502,6 +499,8 @@ PrepareForStaticModule(
   return std::make_pair(graph, c10::nullopt);
 }
 
+} // namespace
+
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
@@ -522,17 +521,16 @@ StaticModule::StaticModule(
       schema_(std::move(graph_and_schema.second)) {
   // check opt flags
   if (opts.optimize_graph_output_memory) {
-    if (!(opts_.optimize_memory && opts_.enable_out_variant)) {
-      throw std::runtime_error(
-          "When optimize_graph_output_memory is true, optimize_memory and enable_out_variant must be set to true");
-    }
+    TORCH_CHECK(
+        opts_.enable_out_variant && opts_.optimize_memory,
+        "When optimize_graph_output_memory is true, enable_out_variant and optimize_memory must be set to true");
   }
   if (opts_.optimize_memory) {
-    if (!opts_.enable_out_variant) {
-      throw std::runtime_error(
-          "When optimize_memory is true, enable_out_variant must be set to true");
-    }
+    TORCH_CHECK(
+        opts_.enable_out_variant,
+        "When optimize_memory is true, enable_out_variant must be set to true");
   }
+
   // map Value* to IValue (from inputs or prim::Constant) or null
   std::unordered_map<Value*, IValue*> value_to_ivalue;
   // map Value* to its SSA definition IR
@@ -598,18 +596,12 @@ StaticModule::StaticModule(
     output_ssa_defs_.emplace_back(value_to_ssa_def[output]);
   }
 
+  // Prepare for memory planning
   AliasDb alias_db(graph_);
   auto lm = GetLivenessInformation(graph_, alias_db);
   external_values_ = lm.second;
   if (opts_.optimize_memory) {
     auto values = GetMemoryPlanningCandidates(graph_);
-    // Note (penguin): since it does not make sense to have optimize_memory
-    // enabled but enable_out_variant disabled, we check the flag dependence
-    // during initialization of StaticModule so that the following condition
-    // would not be true. This would make the code easier to understand
-    // if (!opts_.enable_out_variant) {
-    //   values.first = {};
-    // }
     value_to_same_storage_values_ =
         GenerateSameStorageValues(lm, values, alias_db);
   }
@@ -657,10 +649,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < n.inputs().size(); ++i) {
       if (n.inputs()[i] == nullptr) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int node_idx;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int out_idx;
+        int node_idx = 0;
+        int out_idx = 0;
         std::tie(node_idx, out_idx) = sm.index_map().at(idx)[i];
         DCHECK(out_idx >= 0);
         // input
@@ -669,6 +659,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
         } else if (node_idx == StaticModule::CONSTANT_VALUE) {
           n.set_input(i, &sm.constants()[out_idx]);
         } else {
+          DCHECK(node_idx >= 0);
           n.set_input(i, &(nodes_[node_idx].Output(out_idx)));
         }
       }
@@ -676,10 +667,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   }
 
   for (const auto& index_pair : sm.output_indices()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int node_idx;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int out_idx;
+    int node_idx = 0;
+    int out_idx = 0;
     std::tie(node_idx, out_idx) = index_pair;
     if (node_idx == StaticModule::INPUT_VALUE) {
       outputs_.emplace_back(&inputs_[out_idx]);
@@ -690,8 +679,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       outputs_.emplace_back(const_cast<IValue*>(&sm.constants()[out_idx]));
     } else {
-      auto& n = nodes_.at(node_idx);
-      auto* out = &n.Output(out_idx);
+      auto* out = &nodes_[node_idx].Output(out_idx);
       outputs_.emplace_back(out);
     }
   }
@@ -760,9 +748,8 @@ c10::IValue StaticRuntime::operator()(
 
   if (static_module_.opts().cleanup_activations) {
     // MemoryPlanner is created after the first invocation of `run()`. This is
-    // done intentionally because MemoryPlanner uses `TensorStorageImpl`
-    // object sizes of the previous `run()` for memory planning of subsequent
-    // runs
+    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
+    // previous `run()` for memory planning of subsequent runs
     if (!planner_) {
       planner_ = std::make_unique<MemoryPlanner>(
           this,
