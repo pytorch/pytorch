@@ -346,7 +346,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void hardsigmoid_backward_kernel(TensorIterator& iter) {
+void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
