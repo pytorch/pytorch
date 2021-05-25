@@ -1,6 +1,9 @@
 import torch
 import warnings
-from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, coalescedonoff
+import unittest
+import random
+from torch.testing._internal.common_utils import \
+    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU)
 
@@ -81,7 +84,10 @@ class TestSparseCSR(TestCase):
                                     size, dtype=dtype, device=device)
 
     @onlyCPU
+    @unittest.skip("see: https://github.com/pytorch/pytorch/issues/58762")
     def test_sparse_csr_print(self, device):
+        orig_maxDiff = self.maxDiff
+        self.maxDiff = None
         shape_nnz = [
             ((10, 10), 10),
             ((100, 10), 10),
@@ -112,6 +118,7 @@ class TestSparseCSR(TestCase):
                     printed.append('')
                 printed.append('')
         self.assertExpected('\n'.join(printed))
+        self.maxDiff = orig_maxDiff
 
     @onlyCPU
     def test_sparse_csr_from_dense(self, device):
@@ -185,6 +192,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(coo.matmul(vec), csr.matmul(vec))
 
     @onlyCPU
+    @unittest.skipIf(IS_MACOS or IS_WINDOWS, "MKL doesn't work on windows or mac")
     @dtypes(torch.float, torch.double)
     def test_mkl_matvec_warnings(self, device, dtype):
         if torch.has_mkl:
@@ -225,6 +233,34 @@ class TestSparseCSR(TestCase):
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, "mv: expected"):
                 csr.matmul(bad_vec)
+
+    @onlyCPU
+    @dtypes(torch.double)
+    def test_mm(self, device, dtype):
+        def test_shape(di, dj, dk, nnz):
+            x = self.genSparseCSRTensor((di, dj), nnz, device=device, dtype=dtype, index_dtype=torch.int32)
+            t = torch.randn(di, dk, dtype=dtype, device=device)
+            y = torch.randn(dj, dk, dtype=dtype, device=device)
+            alpha = random.random()
+            beta = random.random()
+
+            # res = beta * t  + alpha * (x @ y)
+            res = torch.addmm(t, x, y, beta=beta, alpha=alpha)
+            expected = torch.addmm(t, x.to_dense(), y, beta=beta, alpha=alpha)
+            self.assertEqual(res, expected)
+
+            res = torch.addmm(t, x, y)
+            expected = torch.addmm(t, x.to_dense(), y)
+            self.assertEqual(res, expected)
+
+            res = torch.mm(x, y)
+            expected = torch.mm(x.to_dense(), y)
+            self.assertEqual(res, expected)
+
+        for i in range(2, 5):
+            for j in range(2, 8):
+                for k in range(2, 8):
+                    test_shape(i, j, k, i * j // 2)
 
     @onlyCPU
     @dtypes(*torch.testing.floating_types())

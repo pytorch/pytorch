@@ -258,14 +258,9 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
+    // basic loop can handle 1d slices with arbitrary strides, and 1d slices is all that
+    // iter.for_each is ever sending to the loop lambda
       basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
-    }
   });
   iter.cast_outputs();
 }
@@ -285,14 +280,7 @@ void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op) {
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
-    }
+    multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
   });
   iter.cast_outputs();
 }
@@ -336,14 +324,7 @@ void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op, const Range& range
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-      });
-    }
+    basic_loop(data, strides, 0, n, std::forward<func_t>(op));
   }, range);
   iter.cast_outputs();
 }

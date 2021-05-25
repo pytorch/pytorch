@@ -1,3 +1,5 @@
+from io import BytesIO
+
 from torch.package import PackageExporter, PackageImporter
 from torch.package._mangling import (
     PackageMangler,
@@ -6,8 +8,6 @@ from torch.package._mangling import (
     is_mangled,
 )
 from torch.testing._internal.common_utils import run_tests
-
-from io import BytesIO
 
 try:
     from .common import PackageTestCase

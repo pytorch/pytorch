@@ -31,7 +31,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   bool hasOp() const;
   std::shared_ptr<Operator> op() const;
   bool hasQualifiedName() const;
-  const c10::QualifiedName qualifiedName() const;
+  const c10::QualifiedName& qualifiedName() const;
   // return the argument stack of this builtin operator
   const std::vector<at::IValue>& stack() const;
   std::vector<at::IValue>& stackRef();
