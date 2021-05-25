@@ -6,10 +6,12 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/EmbeddingBag.h>
+#include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/layer_norm.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -1069,6 +1071,10 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
     if (n->inputs().size() != 2) {
       return nullptr;
     }
+    // TODO: make __getitem__ work for other container types
+    if (n->input(0)->type()->castRaw<DictType>() == nullptr) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       auto dict = p_node->Input(0).toGenericDict();
       auto key = p_node->Input(1);
@@ -1327,9 +1333,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
-    c10::optional<std::string> rounding_mode = c10::nullopt;
+    c10::optional<c10::string_view> rounding_mode = c10::nullopt;
     if (p_node->inputs().size() > 2) {
-      rounding_mode = p_node->Input(2).toOptional<std::string>();
+      rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
     }
 
     if (p_node->Output(0).isNone()) {
@@ -1543,6 +1549,78 @@ REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
     at::native::matmul_out(in0_t, in1_t, out_t);
   };
 });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::linear,
+    quantized_linear,
+    [](Node* n) -> SROperator {
+      if (n->inputs().size() != 4) {
+        return nullptr;
+      }
+      const auto w = toIValue(n->inputs()[1]);
+      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+      if (w) {
+        packed_weight = w->toCustomClass<LinearPackedParamsBase>();
+      }
+      return [packed_weight](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        const auto output_scale = p_node->Input(2).toDouble();
+        const auto output_zero_point = p_node->Input(3).toInt();
+
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::empty_affine_quantized(
+              {0},
+              c10::kQUInt8,
+              c10::nullopt,
+              c10::kCPU,
+              false,
+              output_scale,
+              output_zero_point,
+              c10::nullopt);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+
+        if (!packed_weight) {
+          packed_weight->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        } else {
+          // Weights could be quantized on the fly
+          auto packed_weight_tmp =
+              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+          packed_weight_tmp->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        }
+      };
+    });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    aten::full_like,
+    aten_full_like,
+    [](Node* n) -> SROperator {
+      if (n->inputs().size() != 7) {
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto in1_s = p_node->Input(1).toScalar();
+        if (p_node->Output(0).isNone()) {
+          const auto& in0_t = p_node->Input(0).toTensor();
+          const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+          const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+          const auto device = p_node->Input(4).toOptional<c10::Device>();
+          const auto pin_memory = p_node->Input(5).toOptional<bool>();
+          const auto memory_format =
+              p_node->Input(6).toOptional<c10::MemoryFormat>();
+
+          p_node->Output(0) = at::native::empty_like(
+              in0_t, dtype, layout, device, pin_memory, memory_format);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        at::native::fill_out(out_t, in1_s);
+      };
+    });
 
 } // namespace jit
 } // namespace torch
