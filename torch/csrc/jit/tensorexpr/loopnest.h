@@ -117,7 +117,6 @@ class TORCH_API LoopNest {
   static void splitWithTail(
       For* f,
       int factor,
-      For** outer,
       For** inner,
       For** tail);
 
