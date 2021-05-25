@@ -1233,6 +1233,23 @@ void nnc_aten_silu(
   } catch (...) {
   }
 }
+void nnc_aten_mish(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+  at::Tensor& r = tensors[0];
+  const at::Tensor& self = tensors[1];
+  try {
+    at::mish_out(r, self);
+  } catch (...) {
+  }
+}
 void nnc_aten_sigmoid(
     int64_t bufs_num,
     void** buf_data,
@@ -2913,6 +2930,9 @@ const static RegisterNNCExternalFunction nnc_rsqrt(
 const static RegisterNNCExternalFunction nnc_silu(
     "nnc_aten_silu",
     nnc_aten_silu);
+const static RegisterNNCExternalFunction nnc_mish(
+    "nnc_aten_mish",
+    nnc_aten_mish);
 const static RegisterNNCExternalFunction nnc_sigmoid(
     "nnc_aten_sigmoid",
     nnc_aten_sigmoid);

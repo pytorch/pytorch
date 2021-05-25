@@ -3358,6 +3358,24 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+    def test_mish_reference(self):
+        module = torch.nn.Mish
+        functional = torch.nn.functional.mish
+        qconfig = float16_static_qconfig
+        is_reference = True
+        node_list = [
+            ns.call_method("to"),
+            ns.call_method("dequantize"),
+            ns.call_module(module),
+            ns.call_method("to"),
+            ns.call_method('dequantize'),
+            ns.call_function(functional),
+            ns.call_method("to"),
+            ns.call_method('dequantize')
+        ]
+        self._test_default_node_quant_handler_ops(
+            module, functional, qconfig, is_reference, node_list)
+
     def test_bmm_int_reference(self):
         class M(torch.nn.Module):
             def __init__(self):

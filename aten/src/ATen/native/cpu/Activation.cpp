@@ -632,6 +632,40 @@ void silu_backward_kernel(TensorIterator& iter) {
       });
 }
 
+void mish_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
+        using Vec = Vectorized<scalar_t>;
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) -> scalar_t{
+              return static_cast<scalar_t>(x * std::tanh(std::log1p(std::exp(x))));
+            },
+            [](Vec x_vec) -> Vec {
+              return x_vec * x_vec.exp().log1p().tanh();
+            });
+      });
+}
+
+void mish_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_backward_cpu", [&]() {
+        using Vec = Vectorized<scalar_t>;
+        const Vec kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t dy, scalar_t x) -> scalar_t {
+              const scalar_t sigmoid =
+                  scalar_t(1) / (scalar_t(1) + std::exp(-x));
+              const scalar_t tanh_softplus = std::tanh(std::log1p(std::exp(x)));
+              return dy * (tanh_softplus + x * sigmoid * (scalar_t(1) - tanh_softplus * tanh_softplus));
+            },
+            [kOneVec](Vec dy_vec, Vec x_vec) -> Vec {
+              const Vec sigmoid = kOneVec / (kOneVec + x_vec.neg().exp());
+              const Vec tanh_softplus = x_vec.exp().log1p().tanh();
+              return dy_vec * (tanh_softplus + x_vec * sigmoid * (kOneVec - tanh_softplus * tanh_softplus));
+            });
+      });
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -680,6 +714,10 @@ REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, &silu_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(mish_stub, &mish_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
 
 } // namespace native
 } // namespace at

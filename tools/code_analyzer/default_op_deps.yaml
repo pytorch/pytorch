@@ -7433,6 +7433,45 @@
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
+- name: aten::mish
+  depends:
+    - name: aten::as_strided_
+    - name: aten::copy_
+    - name: aten::empty
+    - name: aten::empty_like
+    - name: aten::empty_meta
+    - name: aten::empty_strided
+    - name: aten::eq
+    - name: aten::is_nonzero
+    - name: aten::resize_
+    - name: aten::resize_as_
+    - name: aten::mish
+    - name: aten::to
+- name: aten::mish_
+  depends:
+    - name: aten::eq
+    - name: aten::is_nonzero
+    - name: aten::mish
+- name: aten::mish_backward
+  depends:
+    - name: aten::add
+    - name: aten::as_strided_
+    - name: aten::copy_
+    - name: aten::empty
+    - name: aten::empty_like
+    - name: aten::empty_meta
+    - name: aten::empty_strided
+    - name: aten::eq
+    - name: aten::fill_
+    - name: aten::is_nonzero
+    - name: aten::mul
+    - name: aten::resize_
+    - name: aten::resize_as_
+    - name: aten::sigmoid
+    - name: aten::softplus
+    - name: aten::sub_
+    - name: aten::to
+    - name: aten::tanh
 - name: aten::mkldnn_adaptive_avg_pool2d
   depends:
   - name: aten::eq

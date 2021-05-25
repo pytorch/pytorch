@@ -887,6 +887,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.InstanceNorm3d)
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
+@register_quant_pattern(torch.nn.Mish)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
@@ -896,6 +897,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
+@register_quant_pattern(torch.nn.functional.mish)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
@@ -943,6 +945,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.InstanceNorm3d: int8_dtypes,
             torch.nn.LayerNorm: all_dtypes,
             torch.nn.SiLU: fp16_dtypes,
+            torch.nn.Mish: fp16_dtypes,
             torch.nn.GELU: int8_dtypes,
             torch.nn.Softmax: int8_dtypes,
             torch.nn.functional.hardswish: int8_dtypes,
@@ -950,6 +953,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.functional.layer_norm: all_dtypes,
             torch.nn.functional.leaky_relu: int8_dtypes,
             torch.nn.functional.silu: fp16_dtypes,
+            torch.nn.functional.mish: fp16_dtypes,
             torch.nn.functional.gelu: int8_dtypes,
             torch.nn.functional.softmax: int8_dtypes,
         }

@@ -1140,6 +1140,15 @@ Tensor infinitely_differentiable_silu_backward(
   return grad_output * sigmoid * (1.0 + input * (1.0 - sigmoid));
 }
 
+Tensor infinitely_differentiable_mish_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  const Tensor sigmoid = input.sigmoid();
+  const Tensor softplus = input.exp().log1p();
+  const Tensor tanh_softplus = softplus.tanh();
+  return grad_output * (tanh_softplus + input * sigmoid * (1.0 - tanh_softplus * tanh_softplus));
+}
+
 Tensor infinitely_differentiable_logit_backward(
     const Tensor& grad,
     const Tensor& self,
