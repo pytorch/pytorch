@@ -113,15 +113,66 @@ class TORCH_API LoopNest {
   //     TODO: Remove this constraint.
   bool optimizeConditionals();
 
-  static void splitWithTail(For* f, int factor);
+  // Splits the given loop into 2 nested loops with the given factor as the
+  // inner loop bound. If the factor does not evenly divide the loop bound,
+  // then the remainining iterations are extracted into a tail loop that is
+  // added after the given loop.
+  //
+  // For example, consider the following code:
+  //   for (int i = 0; i < 100; ++i) {
+  //     A[i] =
+  //   }
+  //
+  // splitWithTail(i, 8, ...) will result in:
+  //   for (int i_outer = 0; i_outer < 12; ++i_outer) {
+  //     for (int i_inner = 0; i_inner < 8; ++i_inner) {
+  //       A[i_outer * 8 + i_inner] =
+  //     }
+  //   }
+  //   for (int i_tail = 0; i_tail < 4; ++i_tail) {
+  //     A[i_tail + 96] =
+  //   }
+  //
+  // The given loop will be transformed to the outer loop after splitting.
+  // So, the pointer to the input loop should be valid after splitting and
+  // will point to the outer loop. The `inner` and `tail` parameters will be
+  // set to point to the inner and tail loops that are generated.
   static void splitWithTail(
       For* f,
       int factor,
       For** inner,
       For** tail);
+  // A convenience wrapper when the caller does not need to access the
+  // split loops.
+  static void splitWithTail(For* f, int factor);
 
-  static void splitWithMask(For* f, int factor);
+  // Splits the given loop into 2 nested loops with the given factor as the
+  // inner loop bound. If the factor does not evenly divide the loop bound,
+  // then a conditional is inserted into the body to handle the remaining
+  // iterations appropriately.
+  //
+  // For example, consider the following code:
+  //   for (int i = 0; i < 100; ++i) {
+  //     A[i] =
+  //   }
+  //
+  // splitWithMask(i, 8, ...) will result in:
+  //   for (int i_outer = 0; i_outer < 13; ++i_outer) {
+  //     for (int i_inner = 0; i_inner < 8; ++i_inner) {
+  //       if (i_outer * 8 + i_inner < 100) {
+  //         A[i_outer * 8 + i_inner] =
+  //       }
+  //     }
+  //   }
+  //
+  // The given loop will be transformed to the outer loop after splitting.
+  // So, the pointer to the input loop should be valid after splitting and
+  // will point to the outer loop. The `inner` parameter will be set to point
+  // to the inner loop that is generated.
   static void splitWithMask(For* f, int factor, For** inner);
+  // A convenience wrapper when the caller does not need to access the
+  // split loops.
+  static void splitWithMask(For* f, int factor);
 
   // The following methods support loop distribution.
   // For example, consider the following code. This will be used to
