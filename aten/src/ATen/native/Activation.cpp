@@ -50,6 +50,23 @@ TORCH_META_FUNC(elu) (
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(elu_backward) (
+  const Tensor& grad_output,
+  const Scalar& alpha,
+  const Scalar& scale,
+  const Scalar& input_scale,
+  bool is_result,
+  const Tensor& self_or_result
+) {
+  TORCH_CHECK(
+    !is_result || alpha.to<double>() >= 0.0,
+    "In-place elu backward calculation is triggered with a negative slope which is not supported. "
+    "This is caused by calling in-place forward function with a negative slope, "
+    "please call out-of-place version instead.");
+
+  build_borrowing_binary_op(maybe_get_output(), grad_output, self_or_result);
+}
+
 TORCH_META_FUNC(silu) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
@@ -170,6 +187,18 @@ TORCH_IMPL_FUNC(elu_out) (
   elu_stub(device_type(), *this, alpha, scale, input_scale);
 }
 
+TORCH_IMPL_FUNC(elu_backward_out) (
+  const Tensor& grad_output,
+  const Scalar& alpha,
+  const Scalar& scale,
+  const Scalar& input_scale,
+  bool is_result,
+  const Tensor& self_or_result,
+  const Tensor& grad_input
+) {
+  elu_backward_stub(device_type(), *this, alpha, scale, input_scale, is_result);
+}
+
 TORCH_IMPL_FUNC(silu_out) (
   const Tensor& self, const Tensor& result
 ) {
@@ -249,25 +278,6 @@ Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, const Sc
   Tensor result;
   auto iter = TensorIterator::borrowing_binary_op(result, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
-  return iter.output();
-}
-
-Tensor elu_backward(
-    const Tensor& grad_output,
-    const Scalar& alpha,
-    const Scalar& scale,
-    const Scalar& input_scale,
-    bool is_result,
-    const Tensor& self_or_result) {
-  TORCH_CHECK(
-    !is_result || alpha.to<double>() >= 0.0,
-    "In-place elu backward calculation is triggered with a negative slope which is not supported. "
-    "This is caused by calling in-place forward function with a negative slope, "
-    "please call out-of-place version instead.");
-
-  Tensor result;
-  auto iter = TensorIterator::borrowing_binary_op(result, grad_output, self_or_result);
-  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale, is_result);
   return iter.output();
 }
 
