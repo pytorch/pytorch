@@ -1493,7 +1493,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       auto tid = at::get_thread_num();
       // Work needs to be distributed the same on both passes
-      TORCH_INTERNAL_ASSERT(begin == thread_begin[tid]);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(begin == thread_begin[tid]);
 
       // +1 faster than additional condition check inside loop
       c10::SmallVector<int64_t, 33> sizes(ndim + 1, -1);
@@ -1511,6 +1511,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
       auto out_ptr = out_accessor[thread_count_nonzero[tid]].data();
 
       auto loop = [&](char** data, const int64_t* strides, int64_t n1, int64_t n2) {
+        // Copy into local variables to improve compiler alias analysis
         int64_t* C10_RESTRICT local_idx = current_idx.data() + 1;
         const int64_t* C10_RESTRICT local_sizes = sizes.data() + 1;
         const auto in_stride = strides[0];
