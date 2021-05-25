@@ -17,8 +17,8 @@ namespace {
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 static inline void cvtbf16_fp32(const __m512i& a, __m512& o1, __m512& o2) {
-  __m256i lo = _mm256_castps_si256(_mm512_extractf32x8_ps(_mm512_castsi512_ps(a), 0));
-  __m256i hi = _mm256_castps_si256(_mm512_extractf32x8_ps(_mm512_castsi512_ps(a), 1));
+  __m256i lo = _mm512_extracti32x8_epi32(a, 0);
+  __m256i hi = _mm512_extracti32x8_epi32(a, 1);
   o1 = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(lo), 16));
   o2 = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(hi), 16));
 }
@@ -27,8 +27,8 @@ static inline __m512i cvtfp32_bf16(const __m512& a, const __m512& b) {
   __m512i lo = _mm512_castps_si512(a);
   __m512i hi = _mm512_castps_si512(b);
   __m512i nan = _mm512_set1_epi32(0xffff);
-  auto mask_lo =  _mm512_cmp_ps_mask(a, a, _CMP_ORD_Q);
-  auto mask_hi = _mm512_cmp_ps_mask(b, b, _CMP_ORD_Q);
+  auto mask_lo = _mm512_cmp_epi8_mask(a, a, _CMP_ORD_Q);
+  auto mask_hi = _mm512_cmp_epi8_mask(b, b, _CMP_ORD_Q);
   __m512i ones = _mm512_set1_epi32(0x1);
   __m512i vec_bias = _mm512_set1_epi32(0x7fff);
   // uint32_t lsb = (input >> 16) & 1;
@@ -47,8 +47,9 @@ static inline __m512i cvtfp32_bf16(const __m512& a, const __m512& b) {
   t_lo = _mm512_mask_blend_epi8(mask_lo, nan, t_lo);
   t_hi = _mm512_mask_blend_epi8(mask_hi, nan, t_hi);
 
-  t_lo = _mm512_packus_epi32(t_lo, t_hi);      // t_hi[4-7] t_lo[4-7] t_hi[0-4] t_lo[0-4]
-  return _mm512_permutex_epi64(t_lo, 0xd8); // 11        01        10        00
+  t_lo = _mm512_packus_epi32(t_lo, t_hi); // t_hi[4-7] t_lo[4-7] t_hi[0-4] t_lo[0-4]
+  __m512i idx = _mm512_set_epi64(7, 5, 3, 1, 6, 4, 2, 0);
+  return _mm512_permutexvar_epi64(idx, t_lo);
 }
 
 static inline __m512i merge_compare_result(const __m512& a, const __m512& b) {
@@ -57,7 +58,8 @@ static inline __m512i merge_compare_result(const __m512& a, const __m512& b) {
   lo = _mm512_srli_epi32(lo, 16);
   hi = _mm512_srli_epi32(hi, 16);
   auto out = _mm512_packus_epi32(lo, hi);
-  return _mm512_permutex_epi64(out, 0xd8);
+  __m512i idx = _mm512_set_epi64(7, 5, 3, 1, 6, 4, 2, 0);
+  return _mm512_permutexvar_epi64(idx, out);
 }
 
 template <> class Vectorized<BFloat16> {
@@ -187,8 +189,8 @@ public:
   }
   static Vectorized<BFloat16> blendv(const Vectorized<BFloat16>& a,
       const Vectorized<BFloat16>& b, const Vectorized<BFloat16>& mask) {
-    auto msb_one = _mm512_set1_epi16(0x8000);
-    auto mask_ = _mm512_cmp_epi16_mask(mask, msb_one, _MM_CMPINT_EQ);
+    auto all_ones = _mm512_set1_epi16(0xFFFF);
+    auto mask_ = _mm512_cmp_epi16_mask(mask, all_ones, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi16(mask_, a.values, b.values);
   }
   template<typename step_t>
@@ -579,7 +581,7 @@ public:
 
 template<typename Op>
 Vectorized<BFloat16> static inline bfloat16_binary_op_as_fp32(const Vectorized<BFloat16>& a,
-                                                          const Vectorized<BFloat16>& b, Op op) {
+                                                              const Vectorized<BFloat16>& b, Op op) {
   __m512 a_lo, a_hi;
   __m512 b_lo, b_hi;
   cvtbf16_fp32(__m512i(a), a_lo, a_hi);
@@ -591,7 +593,7 @@ Vectorized<BFloat16> static inline bfloat16_binary_op_as_fp32(const Vectorized<B
 
 template<typename Op>
 Vectorized<BFloat16> static inline bfloat16_compare_as_fp32(const Vectorized<BFloat16>& a,
-                                                        const Vectorized<BFloat16>& b, Op op) {
+                                                            const Vectorized<BFloat16>& b, Op op) {
   __m512 a_lo, a_hi;
   __m512 b_lo, b_hi;
   cvtbf16_fp32(__m512i(a), a_lo, a_hi);
