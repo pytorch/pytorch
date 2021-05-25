@@ -3462,10 +3462,8 @@ class DistributedTest:
             process_group = torch.distributed.new_group(gpus)
             self._test_ddp_hook_parity(state=process_group, hook=default.allreduce_hook)
 
-        # FIXME: Multi-GPU test still fails on Gloo backend.
-        # Need to re-enable it once Gloo submodule picks up https://github.com/facebookincubator/gloo/pull/309.
         @unittest.skipIf(
-            BACKEND != "nccl",
+            BACKEND != "nccl" and BACKEND != "gloo",
             "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
@@ -6456,7 +6454,10 @@ class DistributedTest:
 
             # SyncBN allgathers stats across all ranks, so verify call to
             # all_gather in profiler.
-            all_gather_calls = get_profiling_event("all_gather", prof)
+            if BACKEND == 'nccl':
+                all_gather_calls = get_profiling_event("_all_gather_base", prof)
+            else:
+                all_gather_calls = get_profiling_event("all_gather", prof)
             self.assertNotEqual([], all_gather_calls)
 
             # Only do inference on one rank. If SyncBN did collective stats sync,
@@ -6472,7 +6473,10 @@ class DistributedTest:
                         loss.backward()
 
                 # Ensure sync does not occur in eval() mode.
-                all_gather_calls = get_profiling_event("all_gather", prof)
+                if BACKEND == 'nccl':
+                    all_gather_calls = get_profiling_event("_all_gather_base", prof)
+                else:
+                    all_gather_calls = get_profiling_event("all_gather", prof)
                 self.assertEqual([], all_gather_calls)
 
         @skip_if_lt_x_gpu(2)
