@@ -54,12 +54,16 @@ static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
     const auto thread_num = at::get_thread_num();
     auto shape = first_reduce.shape();
     auto strides = first_reduce.get_strides();
+    if (iter.ndim() <= 2) {
+      strides.resize(2 * iter.ntensors());
+    }
 
     // Bump output ptr so each thread has its own ouput slice
     auto base_ptrs = first_reduce.get_base_ptrs();
     base_ptrs[0] += buffer_stride * thread_num;
 
-    at::internal::serial_for_each(shape, strides, base_ptrs, loop, {begin, end});
+    at::internal::serial_for_each(shape, strides, base_ptrs.data(),
+                                  base_ptrs.size(), loop, {begin, end});
   });
 
   auto final_reduce = TensorIterator::reduce_op(unsqueezed, buffer);
