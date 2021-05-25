@@ -331,12 +331,12 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     loadFunctions();
   }
 
-  // GRAPH_DEBUG("Trying to find schema: " + schema);
+  GRAPH_DEBUG("Trying to find schema: ", schema);
   auto cache_it = cached_schema_to_graph.find(&schema);
   if (cache_it != cached_schema_to_graph.end()) {
     return cache_it->second;
   }
-  // GRAPH_DEBUG("Could not find schema: ", schema);
+  GRAPH_DEBUG("Could not find schema: ", schema);
 
   return c10::nullopt;
 }
