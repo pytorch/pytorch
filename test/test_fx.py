@@ -2461,8 +2461,6 @@ class TestFX(JitTestCase):
 
         scripted = torch.jit.script(traced)
 
-        print(scripted.code)
-
         scripted(x, y)
 
         FileCheck().check("Tuple[()]")   \

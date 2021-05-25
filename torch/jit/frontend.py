@@ -893,7 +893,6 @@ class ExprBuilder(Builder):
                                             "slicing multiple dimensions with "
                                             "{} not supported".format(sub_type))
             return sub_exprs
-
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
@@ -926,6 +925,14 @@ class ExprBuilder(Builder):
                         indices.append(build_SliceExpr(ctx, base, index_expr))
                     else:
                         indices.append(build_expr(ctx, index_expr))
+                # Special-case logic for `typing.Tuple[()]`
+                if not indices:
+                    # See note above r.e. magic number
+                    r = ctx.make_range(expr.lineno,
+                                       expr.slice.col_offset,
+                                       expr.slice.col_offset + 2)
+                    tup = TupleLiteral(r, [])
+                    indices.append(tup)
                 return Subscript(base, indices)
             return Subscript(base, [build_expr(ctx, expr.slice)])
         else:  # Ellipsis (can only happen in Python 2)
