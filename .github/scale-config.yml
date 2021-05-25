@@ -32,3 +32,8 @@ runner_types:
     os: windows
     max_available: 200
     disk_size: 256
+  windows.8xlarge.nvidia.gpu:
+    instance_type: g3.8xlarge
+    os: windows
+    max_available: 25
+    disk_size: 256
