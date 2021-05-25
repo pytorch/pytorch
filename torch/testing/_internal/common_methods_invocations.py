@@ -964,7 +964,7 @@ def sample_inputs_xlog1py(self, device, dtype, requires_grad):
 def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases = ((), (S, S, S), (S, S), (S,))
+    cases = ((), (S, S, S), (S,))
 
     def generator():
         for shape in cases:
@@ -6221,6 +6221,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_xlogy),
     OpInfo('zero_',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           # zero_ supports autograd but tests don't correctly deal with this case (inplace op)
+           # See: https://github.com/pytorch/pytorch/issues/58900
            supports_autograd=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_zero_),
