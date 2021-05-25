@@ -343,6 +343,9 @@ public:
 
   void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  void set_grain_size_for_mt(int64_t grain_size) { grain_size_for_mt_ = grain_size;}
+  int64_t get_grain_size_for_mt() { return grain_size_for_mt_;}
+
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_unary_float_op(const Tensor& out, const Tensor& a);
@@ -457,6 +460,8 @@ protected:
 
   /// Set by populate_operands(), says if we're handling meta tensors
   bool is_meta_ = false;
+
+  int64_t grain_size_for_mt_ = std::numeric_limits<int64_t>::max();
 };
 
 struct TORCH_API TensorIterator final : public TensorIteratorBase {
