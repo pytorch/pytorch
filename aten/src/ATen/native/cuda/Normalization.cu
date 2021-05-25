@@ -166,14 +166,14 @@ Tensor batch_norm_elementwise_backward_train(
 
     Tensor grad_input = at::empty(input.sizes(), grad_out.options());
     auto iter = TensorIteratorConfig()
-        .add_output(grad_input)
-        .add_input(grad_out)
-        .add_input(input)
-        .add_input(weight_nd)
-        .add_input(mean_nd)
-        .add_input(invstd_nd)
-        .add_input(sum_dy_xmu_nd)
-        .add_input(sum_dy_nd)
+        .add_borrowed_output(grad_input)
+        .add_borrowed_input(grad_out)
+        .add_borrowed_input(input)
+        .add_borrowed_input(weight_nd)
+        .add_borrowed_input(mean_nd)
+        .add_borrowed_input(invstd_nd)
+        .add_borrowed_input(sum_dy_xmu_nd)
+        .add_borrowed_input(sum_dy_nd)
         .check_all_same_dtype(false)
         .promote_inputs_to_common_dtype(false)
         .build();
@@ -211,10 +211,10 @@ Tensor batch_norm_elementwise_backward_eval(
     strides[1] = weight.strides()[0];
     auto weight_nd = weight.as_strided(shape, strides);
     auto iter = TensorIteratorConfig()
-        .add_output(grad_input)
-        .add_input(grad_out)
-        .add_input(invstd_nd)
-        .add_input(weight_nd)
+        .add_borrowed_output(grad_input)
+        .add_borrowed_input(grad_out)
+        .add_borrowed_input(invstd_nd)
+        .add_borrowed_input(weight_nd)
         .check_all_same_dtype(false)
         .promote_inputs_to_common_dtype(false)
         .build();
@@ -229,9 +229,9 @@ Tensor batch_norm_elementwise_backward_eval(
     });
   } else {
     auto iter = TensorIteratorConfig()
-        .add_output(grad_input)
-        .add_input(grad_out)
-        .add_input(invstd_nd)
+        .add_borrowed_output(grad_input)
+        .add_borrowed_input(grad_out)
+        .add_borrowed_input(invstd_nd)
         .check_all_same_dtype(false)
         .promote_inputs_to_common_dtype(false)
         .build();
