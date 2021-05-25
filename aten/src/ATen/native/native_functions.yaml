@@ -3515,6 +3515,31 @@
     CPU, CUDA: silu_backward
     CompositeImplicitAutograd: math_silu_backward
 
+- func: mish(Tensor self) -> Tensor
+  structured_delegate: mish.out
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: mish
+
+- func: mish_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: mish.out
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: mish_
+
+- func: mish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: nn
+  dispatch:
+    CPU, CUDA: mish_out
+
+- func: mish_backward(Tensor grad_output, Tensor self) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU, CUDA: mish_backward
+    CompositeImplicitAutograd: math_mish_backward
+
 - func: sigmoid(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: sigmoid.out
