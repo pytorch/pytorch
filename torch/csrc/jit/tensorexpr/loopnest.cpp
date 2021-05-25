@@ -1393,11 +1393,11 @@ void LoopNest::splitWithTail(
 
 void LoopNest::splitWithMask(For* f, int factor) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *outer, *inner;
-  splitWithMask(f, factor, &outer, &inner);
+  For* inner;
+  splitWithMask(f, factor, &inner);
 }
 
-void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
+void LoopNest::splitWithMask(For* f, int factor, For** inner) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!p) {
     std::cerr << "Parent is not a Block!\n";
@@ -1432,7 +1432,7 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   // x -> x.outer * inner.size + x.inner
   const Expr* combined_index = new Add(new Mul(i_outer, factor_expr), i_inner);
 
-  Stmt* body_inner = Stmt::clone(f->body());
+  Stmt* body_inner = f->removeBody();
   // TODO: is it ok that we're doing it eagerly? In the other implementation we
   // are only materializing predicates at the last, lowering, step.
   if (tail_is_needed) {
@@ -1449,10 +1449,11 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer =
-      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
-
-  p->replace_stmt(f, *outer);
+  // The input loop `f` will be the outer loop after split.
+  f->setVar(i_outer);
+  f->setStart(new IntImm(0));
+  f->setStop(split_count);
+  f->setBody(*inner);
 }
 
 std::vector<For*> LoopNest::distributeLoop(

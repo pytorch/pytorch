@@ -307,9 +307,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(BT);
     te::For* m = loops[1];
-    te::For* mo;
-    te::For* mi;
-    loop.splitWithMask(m, kChunkSize, &mo, &mi);
+    loop.splitWithMask(m, kChunkSize);
   }
 
   loop.prepareForCodegen();
@@ -351,9 +349,9 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
 
   auto loops = loop.getLoopStmtsFor(BT);
   TORCH_CHECK(loops.size() == 1);
-  te::For* mo;
   te::For* mi;
-  loop.splitWithMask(loops.at(0), kChunkSize, &mo, &mi);
+  loop.splitWithMask(loops.at(0), kChunkSize, &mi);
+  te::For* mo = loops.at(0);
 
   loop.reorderAxis(mo, mi);
   loops = loop.getLoopStmtsFor(BT);

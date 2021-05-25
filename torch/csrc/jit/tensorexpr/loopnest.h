@@ -121,7 +121,7 @@ class TORCH_API LoopNest {
       For** tail);
 
   static void splitWithMask(For* f, int factor);
-  static void splitWithMask(For* f, int factor, For** outer, For** inner);
+  static void splitWithMask(For* f, int factor, For** inner);
 
   // The following methods support loop distribution.
   // For example, consider the following code. This will be used to
