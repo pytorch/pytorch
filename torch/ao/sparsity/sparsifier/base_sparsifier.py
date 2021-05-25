@@ -5,7 +5,7 @@ import copy
 
 from torch.quantization.quantize import prepare as qprepare
 
-from . import _variables
+from .. import get_sparse_mapping
 
 class BaseSparsifier(abc.ABC):
     r"""Base class for all sparsifiers.
@@ -63,7 +63,7 @@ class BaseSparsifier(abc.ABC):
         r"""Prepares the model by inserting the fake sparsiers into the forward
         """
         if mapping is None:
-            mapping = _variables.get_sparse_mapping()
+            mapping = get_sparse_mapping()
 
         def new_child_fn(child, mapping):
             new_child = mapping[type(child)].from_dense(child)
@@ -89,10 +89,17 @@ class BaseSparsifier(abc.ABC):
         self._swap_modules(model, new_child_fn, mapping=mapping,
                            update_config=True)
 
+    def step(self):
+        if not self.enable_mask_update:
+            return
+        with torch.no_grad():
+            for layer, args in self.module_groups:
+                self.update_mask(layer, **args)
 
     @abc.abstractmethod
-    def step(self):
-        return
+    def update_mask(self, layer, **kwargs):
+        pass
+
 
     def _swap_modules(self, module, new_child_fn, mapping, update_config=False):
         # Recursively replace the layers in the module
