@@ -226,7 +226,7 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
   });
 }
 
-void elu_backward_kernel(TensorIterator& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
+void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
@@ -346,7 +346,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void hardsigmoid_backward_kernel(TensorIterator& iter) {
+void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
@@ -503,7 +503,7 @@ static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   });
 }
 
-static void leaky_relu_backward_kernel(TensorIterator& iter, const Scalar& negval_) {
+static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
     auto zero_vec = Vec((scalar_t)(0));
@@ -542,7 +542,7 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
   });
 }
 
-void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const Scalar& threshold_) {
+void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_backward_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     auto beta = beta_.to<scalar_t>();

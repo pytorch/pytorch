@@ -1,26 +1,27 @@
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/ProcessGroupWrapper.hpp>
 #include <stdexcept>
-#include "c10/core/ScalarType.h"
-#include "c10/core/TensorOptions.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Optional.h"
-#include "c10/util/intrusive_ptr.h"
-#include "c10d/ProcessGroup.hpp"
-#include "c10d/ProcessGroupGloo.hpp"
 
 namespace c10d {
 
+namespace {
 // A container for information about a particular collective, including optype
 // and input tensors (if applicable.)
 struct CollectiveFingerPrint {
   // Current collective's operation type.
   OpType op_type_;
-  // Input tensors, if given, of the collective. If given, shapes will be
+  // Ref to input tensors, if given, of the collective. If given, shapes will be
   // checked across processes to ensure valid input into the collective.
-  std::vector<at::Tensor> input_tensors_;
+  const std::vector<at::Tensor>& input_tensors_;
   explicit CollectiveFingerPrint(
       OpType op_type,
-      std::vector<at::Tensor> input_tensors)
+      const std::vector<at::Tensor>& input_tensors)
       : op_type_(op_type), input_tensors_(input_tensors) {}
 
   // Verifies a given int is the same across processes.
@@ -57,8 +58,7 @@ struct CollectiveFingerPrint {
       c10::intrusive_ptr<ProcessGroup>& pg) {
     std::vector<std::vector<at::Tensor>> output_tensors;
     output_tensors.reserve(shape_tensors.size());
-    for (int k = 0; k < shape_tensors.size(); ++k) {
-      auto& tensor_shape = shape_tensors[k];
+    for (auto & tensor_shape : shape_tensors) {
       std::vector<at::Tensor> outputs;
       outputs.reserve(pg->getSize());
       for (int i = 0; i < pg->getSize(); ++i) {
@@ -130,8 +130,7 @@ struct CollectiveFingerPrint {
     // it is not possible that there would be a difference. This happens only
     // when the tensor wraps a single scalar.
     bool skip = true;
-    for (int i = 0; i < meta_shape_tensors.size(); ++i) {
-      auto& t = meta_shape_tensors[i];
+    for (auto & t : meta_shape_tensors) {
       if (t.item().to<int64_t>() != 0) {
         skip = false;
         break;
@@ -143,6 +142,7 @@ struct CollectiveFingerPrint {
     }
   }
 };
+} // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
     c10::intrusive_ptr<ProcessGroup> pg,
