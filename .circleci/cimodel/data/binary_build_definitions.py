@@ -113,6 +113,9 @@ class Conf(object):
                     job_def["executor"] = "windows-with-nvidia-gpu"
                 else:
                     job_def["resource_class"] = "gpu.medium"
+        if self.os == "macos":
+            job_def["resource_class"] = "large" if phase == "build" else "medium"
+
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
