@@ -323,8 +323,14 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
 
-  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self_.scalar_type(), "sort", 
-    AT_SKIP_BFLOAT16_IF_ROCM([&]{
+#ifdef __HIP_PLATFORM_HCC__
+  constexpr bool is_rocm = true;
+#else
+  constexpr bool is_rocm = false;
+#endif
+
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self_.scalar_type(), "sort", [&]{
+    c10::guts::if_constexpr<is_rocm && std::is_same<scalar_t, c10::BFloat16>::value>([&]{
       const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
       auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
       int64_t remaining = numel;
@@ -343,8 +349,8 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
         values_ptr += n;
         indices_ptr += n;
       }
-    })
-  );
+    });
+  });
 
   if (values_tmp.defined()) {
     values.copy_(values_tmp);

@@ -109,6 +109,7 @@ inline constexpr bool should_include_kernel_dtype(
     return __VA_ARGS__();                                                         \
   }
 
+
 namespace detail {
 
 inline at::ScalarType scalar_type(at::ScalarType s) {
