@@ -381,7 +381,7 @@ class RNN(RNNBase):
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
-    Inputs: `input, h_0`
+    Inputs: input, h_0
         * **input**: tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
@@ -401,7 +401,7 @@ class RNN(RNNBase):
                 H_{out} ={} & \text{hidden\_size}
             \end{aligned}
 
-    Outputs: `output, h_n`
+    Outputs: output, h_n
         * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the RNN, for each `t`. If a
@@ -524,7 +524,7 @@ class LSTM(RNNBase):
         bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``
         proj_size: If ``> 0``, will use LSTM with projections of corresponding size. Default: 0
 
-    Inputs: `input, (h_0, c_0)`
+    Inputs: input, (h_0, c_0)
         * **input**: tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
@@ -532,10 +532,10 @@ class LSTM(RNNBase):
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
         * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the
           initial hidden state for each element in the batch.
-          Defaults to zeros if `(h_0, c_0)` is not provided.
+          Defaults to zeros if (h_0, c_0) is not provided.
         * **c_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
           initial cell state for each element in the batch.
-          Defaults to zeros if `(h_0, c_0)` is not provided.
+          Defaults to zeros if (h_0, c_0) is not provided.
 
         where:
 
@@ -549,7 +549,7 @@ class LSTM(RNNBase):
                 H_{out} ={} & \text{proj\_size if } \text{proj\_size}>0 \text{ otherwise hidden\_size} \\
             \end{aligned}
 
-    Outputs: `output, (h_n, c_n)`
+    Outputs: output, (h_n, c_n)
         * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the LSTM, for each `t`. If a
@@ -735,7 +735,7 @@ class GRU(RNNBase):
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
 
-    Inputs: `input, h_0`
+    Inputs: input, h_0
         * **input**: tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
@@ -755,7 +755,7 @@ class GRU(RNNBase):
                 H_{out} ={} & \text{hidden\_size}
             \end{aligned}
 
-    Outputs: `output, h_n`
+    Outputs: output, h_n
         * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the GRU, for each `t`. If a
