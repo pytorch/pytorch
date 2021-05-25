@@ -50,11 +50,14 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupGloo
+    from torch._C._distributed_c10d import _ProcessGroupWrapper
 except ImportError:
     _GLOO_AVAILABLE = False
 
 
 logger = logging.getLogger(__name__)
+
+PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 
 
 # Some reduce ops are not supported by complex numbers and will result in an error.
@@ -2538,7 +2541,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
 
 def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
     """
-    Synchronizes all processes similar to torch.distributed.barrier, but takes
+    Synchronizes all processes similar to ``torch.distributed.barrier``, but takes
     a configurable timeout and is able to report ranks that did not pass this
     barrier within that timeout. Specifically, for non-zero ranks, will block
     until a send/recv is processed from rank 0. Rank 0 will block until all send
@@ -2550,7 +2553,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     This collective will block all processes/ranks in the group, until the
     whole group exits the function successfully, making it useful for debugging
     and synchronizing. However, it can have a performance impact and should only
-    be used for debugging or scenarios that require full synhcronization points
+    be used for debugging or scenarios that require full synchronization points
     on the host-side. For debugging purposees, this barrier can be inserted
     before the application's collective calls to check if any ranks are
     desynchronized.
@@ -2599,6 +2602,26 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
 
+def _create_process_group_wrapper(
+    wrapped_pg: ProcessGroup,
+    store_prefix: str,
+    store: Store,
+    rank: int,
+    world_size: int,
+    timeout: timedelta = default_pg_timeout
+):
+    # Create a separate prefix store for the helper process group.
+    prefix = f"{PG_WRAPPER_STORE_PREFIX}:{store_prefix}"
+    store = PrefixStore(prefix, store)
+    helper_pg = ProcessGroupGloo(
+        store,
+        rank,
+        world_size,
+        timeout=timeout
+    )
+    # Wrap the underlying pg with ProcessGroupWrapper.
+    wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
+    return wrapped_pg
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
     """

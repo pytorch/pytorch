@@ -872,6 +872,24 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
       uses_.end());
 }
 
+void Value::replaceAllUsesDominatedByNodeWith(
+    const Node* node,
+    Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
+    if (u.user->isDominatedBy(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isDominatedBy(node); }),
+      uses_.end());
+}
+
 size_t findArgument(
     const FunctionSchema& the_schema,
     const std::string& unqualName) {
@@ -1298,6 +1316,17 @@ Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
       new_symbol,
       kind());
   return replace_node;
+}
+
+bool Node::isDominatedBy(const Node* dominator) const {
+  const Node* node = this;
+  while (node) {
+    if (node->owningBlock() == dominator->owningBlock()) {
+      return dominator->isBefore(node);
+    }
+    node = node->owningBlock()->owningNode();
+  }
+  return false;
 }
 
 Value* Node::insertInput(size_t i, Value* value) {

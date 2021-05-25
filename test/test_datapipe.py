@@ -8,19 +8,20 @@ import tarfile
 import zipfile
 import numpy as np
 import sys
-from PIL import Image
 from unittest import skipIf
 
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import \
-    (IterDataPipe, RandomSampler, DataLoader,
-     argument_validation, runtime_validation_disabled, runtime_validation)
+from torch.utils.data import (
+    IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
+    argument_validation, runtime_validation_disabled, runtime_validation
+)
 
-from typing import \
-    (Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
-     TypeVar, Set, Union)
+from typing import (
+    Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
+    Type, TypeVar, Set, Union
+)
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -33,6 +34,13 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
+
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+skipIfNoPIL = skipIf(not HAS_PIL, "no Pillow")
 
 
 T_co = TypeVar('T_co', covariant=True)
@@ -178,6 +186,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
 
 
+    @skipIfNoPIL
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
@@ -258,6 +267,19 @@ class IDP(IterDataPipe):
             yield i
 
     def __len__(self):
+        return self.length
+
+
+class MDP(MapDataPipe):
+    def __init__(self, input_dp):
+        super().__init__()
+        self.input_dp = input_dp
+        self.length = len(input_dp)
+
+    def __getitem__(self, index):
+        return self.input_dp[index]
+
+    def __len__(self) -> int:
         return self.length
 
 
@@ -576,6 +598,65 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(zipped_dp), exp)
 
 
+class TestFunctionalMapDataPipe(TestCase):
+    def test_picklable(self):
+        arr = range(10)
+        picklable_datapipes: List[
+            Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
+        ] = [
+            (dp.map.Map, MDP(arr), (), {}),
+            (dp.map.Map, MDP(arr), (_fake_fn, (0,), {'test': True}), {}),
+        ]
+        for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
+            p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+
+        unpicklable_datapipes: List[
+            Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
+        ] = [
+            (dp.map.Map, MDP(arr), (lambda x: x,), {}),
+        ]
+        for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
+            with warnings.catch_warnings(record=True) as wa:
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                self.assertEqual(len(wa), 1)
+                self.assertRegex(
+                    str(wa[0].message), r"^Lambda function is not supported for pickle"
+                )
+                with self.assertRaises(AttributeError):
+                    p = pickle.dumps(datapipe)
+
+    def test_map_datapipe(self):
+        arr = range(10)
+        input_dp = MDP(arr)
+
+        def fn(item, dtype=torch.float, *, sum=False):
+            data = torch.tensor(item, dtype=dtype)
+            return data if not sum else data.sum()
+
+        map_dp = input_dp.map(fn)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for index in arr:
+            self.assertEqual(
+                map_dp[index], torch.tensor(input_dp[index], dtype=torch.float)
+            )
+
+        map_dp = input_dp.map(fn=fn, fn_args=(torch.int,), fn_kwargs={'sum': True})
+        self.assertEqual(len(input_dp), len(map_dp))
+        for index in arr:
+            self.assertEqual(
+                map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
+            )
+
+        from functools import partial
+
+        map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
+        self.assertEqual(len(input_dp), len(map_dp))
+        for index in arr:
+            self.assertEqual(
+                map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
+            )
+
+
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9
 _generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
@@ -707,7 +788,7 @@ class TestTyping(TestCase):
         dp2 = DP1(5)
         self.assertEqual(dp1.type, dp2.type)
 
-        with self.assertRaisesRegex(TypeError, r"Can not subclass a DataPipe"):
+        with self.assertRaisesRegex(TypeError, r"is not a generic class"):
             class InvalidDP5(DP1[tuple]):  # type: ignore[type-arg]
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
@@ -754,7 +835,8 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP5, IterDataPipe))
         dp = DP5()  # type: ignore[assignment]
-        self.assertTrue(dp.type.param == Any)
+        from torch.utils.data._typing import issubtype
+        self.assertTrue(issubtype(dp.type.param, Any) and issubtype(Any, dp.type.param))
 
         class DP6(IterDataPipe[int]):
             r""" DataPipe with plain Iterator"""
@@ -764,6 +846,19 @@ class TestTyping(TestCase):
         self.assertTrue(issubclass(DP6, IterDataPipe))
         dp = DP6()  # type: ignore[assignment]
         self.assertTrue(dp.type.param == int)
+
+        class DP7(IterDataPipe[Awaitable[T_co]]):
+            r""" DataPipe with abstract base class"""
+
+        self.assertTrue(issubclass(DP6, IterDataPipe))
+        self.assertTrue(DP7.type.param == Awaitable[T_co])
+
+        class DP8(DP7[str]):
+            r""" DataPipe subclass from a DataPipe with abc type"""
+
+        self.assertTrue(issubclass(DP8, IterDataPipe))
+        self.assertTrue(DP8.type.param == Awaitable[str])
+
 
     def test_construct_time(self):
         class DP0(IterDataPipe[Tuple]):
