@@ -1389,7 +1389,7 @@ Tensor matmul(
     }
 
     // fold the batch into the first dimension
-    Tensor t1 = tensor1.contiguous().view({-1, size1[size1.size() - 1]});
+    Tensor t1 = tensor1.expect_contiguous()->view({-1, size1[size1.size() - 1]});
     Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
     return has_out ? out.set_(output) : output;
