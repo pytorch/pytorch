@@ -75,11 +75,11 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   for (size_t i = 0; i < ninterp; i++) {
-    outputs.push_back(model({input}).toTensor());
+    outputs.push_back(model({input.alias()}).toTensor());
   }
 
   // Generate reference
-  auto ref_output = ref_model.forward({input}).toTensor();
+  auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
   for (size_t i = 0; i < ninterp; i++) {
@@ -117,9 +117,9 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
       for (int i = 0; i < 100; ++i) {
-        model({input}).toTensor();
+        model({input.alias()}).toTensor();
       }
-      auto result = model({input}).toTensor();
+      auto result = model({input.alias()}).toTensor();
       return result;
     }));
   }
@@ -128,7 +128,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   }
 
   // Generate reference
-  auto ref_output = ref_model.forward({input}).toTensor();
+  auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
   for (size_t i = 0; i < nthreads; i++) {
