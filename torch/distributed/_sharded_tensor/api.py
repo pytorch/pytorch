@@ -16,7 +16,7 @@ class Shard(object):
     Container which holds the data for a shard as a Tensor and also
     the associated metadata for that shard.
     """
-    __slots__ = ['tensor', 'metadata']
+    __slots__ = ['_tensor', '_metadata']
 
     def __init__(self, tensor: torch.Tensor, metadata: ShardMetadata):
         self._tensor = tensor

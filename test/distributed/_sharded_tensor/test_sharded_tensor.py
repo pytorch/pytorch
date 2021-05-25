@@ -265,6 +265,8 @@ class TestShardedTensorChunked(MultiProcessTestCase):
             local_shard = local_shards[0].tensor
             self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
             self.assertEqual((1, 20), local_shard.size())
+        else:
+            self.assertEqual(0, len(local_shards))
 
         # Validate global metadata.
         sharding_metadata = sharded_tensor.sharding_metadata()

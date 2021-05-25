@@ -20,7 +20,10 @@ packaging_directory = Path(__file__).parent
 class TestSaveLoad(PackageTestCase):
     """Core save_* and loading API tests."""
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_saving_string(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
@@ -39,7 +42,10 @@ class TestSaveLoad(PackageTestCase):
         my_mod = hi.import_module("my_mod")
         self.assertIs(my_mod.math, math)
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_save_module(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
@@ -60,6 +66,7 @@ class TestSaveLoad(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             import package_b
+
             obj = package_b.PackageBObject
             he.intern("**")
             he.save_pickle("res", "obj.pkl", obj)
@@ -103,7 +110,10 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_pickle(self):
         import package_a.subpackage
 
@@ -129,7 +139,10 @@ class TestSaveLoad(PackageTestCase):
             package_a.subpackage.PackageASubpackageObject, sp.PackageASubpackageObject
         )
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_save_imported_module_fails(self):
         """
         Directly saving/requiring an PackageImported module should raise a specific error message.
@@ -151,7 +164,10 @@ class TestSaveLoad(PackageTestCase):
         with self.assertRaisesRegex(ModuleNotFoundError, "torch.package"):
             pe.save_module(loaded1.__module__)
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_exporting_mismatched_code(self):
         """
         If an object with the same qualified name is loaded from different
