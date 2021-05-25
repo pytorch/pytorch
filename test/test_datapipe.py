@@ -1,25 +1,25 @@
 import itertools
+import numpy as np
 import os
 import pickle
 import random
+import sys
+import tarfile
 import tempfile
 import warnings
-import tarfile
 import zipfile
-import numpy as np
-import sys
+
 from unittest import skipIf
+from typing import (
+    Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
+    TypeVar, Set, Union)
 
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import \
-    (IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
-     argument_validation, runtime_validation_disabled, runtime_validation)
-
-from typing import \
-    (Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
-     TypeVar, Set, Union)
+from torch.utils.data import (
+    IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
+    argument_validation, runtime_validation_disabled, runtime_validation)
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -122,7 +122,9 @@ class TestIterableDataPipeBasic(TestCase):
         for rec in datapipe2:
             count = count + 1
             self.assertTrue(rec[0] in self.temp_files)
-            self.assertTrue(rec[1].read() == open(rec[0], 'rb').read())
+            with open(rec[0], 'rb') as f:
+                self.assertEqual(rec[1].read(), f.read())
+                rec[1].close()
         self.assertEqual(count, len(self.temp_files))
 
 
@@ -137,22 +139,18 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
         datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
         # read extracted files before reaching the end of the tarfile
-        count = 0
-        for rec, temp_file in zip(datapipe3, self.temp_files):
-            count = count + 1
+        for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
+            self.assertTrue(rec is not None and temp_file is not None)
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
-            self.assertEqual(rec[1].read(), open(temp_file, 'rb').read())
-        self.assertEqual(count, len(self.temp_files))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(rec[1].read(), f.read())
         # read extracted files after reaching the end of the tarfile
-        count = 0
-        data_refs = []
-        for rec in datapipe3:
-            count = count + 1
-            data_refs.append(rec)
-        self.assertEqual(count, len(self.temp_files))
-        for i in range(0, count):
-            self.assertEqual(os.path.basename(data_refs[i][0]), os.path.basename(self.temp_files[i]))
-            self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
+        data_refs = list(rec for rec in datapipe3)
+        self.assertEqual(len(data_refs), len(self.temp_files))
+        for data_ref, temp_file in zip(data_refs, self.temp_files):
+            self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(data_ref[1].read(), f.read())
 
 
     def test_readfilesfromzip_iterable_datapipe(self):
@@ -166,22 +164,18 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
         datapipe3 = dp.iter.ReadFilesFromZip(datapipe2)
         # read extracted files before reaching the end of the zipfile
-        count = 0
-        for rec, temp_file in zip(datapipe3, self.temp_files):
-            count = count + 1
+        for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
+            self.assertTrue(rec is not None and temp_file is not None)
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
-            self.assertEqual(rec[1].read(), open(temp_file, 'rb').read())
-        self.assertEqual(count, len(self.temp_files))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(rec[1].read(), f.read())
         # read extracted files before reaching the end of the zipile
-        count = 0
-        data_refs = []
-        for rec in datapipe3:
-            count = count + 1
-            data_refs.append(rec)
-        self.assertEqual(count, len(self.temp_files))
-        for i in range(0, count):
-            self.assertEqual(os.path.basename(data_refs[i][0]), os.path.basename(self.temp_files[i]))
-            self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
+        data_refs = list(rec for rec in datapipe3)
+        self.assertEqual(len(data_refs), len(self.temp_files))
+        for data_ref, temp_file in zip(data_refs, self.temp_files):
+            self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
+            with open(temp_file, 'rb') as f:
+                self.assertEqual(data_ref[1].read(), f.read())
 
 
     @skipIfNoPIL
@@ -202,7 +196,8 @@ class TestIterableDataPipeBasic(TestCase):
                         expected = expected.transpose(2, 0, 1)
                     self.assertEqual(rec[1], expected)
                 else:
-                    self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
+                    with open(rec[0], 'rb') as f:
+                        self.assertEqual(rec[1], f.read().decode('utf-8'))
 
         datapipe3 = dp.iter.RoutedDecoder(datapipe2, decoder_imagehandler('rgb'))
         datapipe3.add_handler(decoder_basichandlers)
