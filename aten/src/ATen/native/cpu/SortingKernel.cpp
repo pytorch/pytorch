@@ -40,8 +40,8 @@ void _dim_apply(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .declare_static_shape(values.sizes(), /*squash_dims=*/dim)
-    .add_output(values)
-    .add_output(indices)
+    .add_borrowed_output(values)
+    .add_borrowed_output(indices)
     .build();
 
   auto values_dim_stride = values.stride(dim);
