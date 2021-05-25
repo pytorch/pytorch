@@ -951,7 +951,7 @@ def create_script_dict(obj):
         and can be passed between Python and TorchScript with reference semantics and
         zero copy overhead.
     """
-    return torch._C.ScriptDict(obj)  # type: ignore
+    return torch._C.ScriptDict(obj)
 
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
