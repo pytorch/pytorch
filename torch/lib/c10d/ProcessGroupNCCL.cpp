@@ -505,10 +505,9 @@ void ProcessGroupNCCL::setSequenceNumberForGroup() {
 }
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
-  TORCH_CHECK(
-      sequenceNum_ != c10::nullopt,
-      "Sequence number is not set for rank ",
-      rank_);
+  if (sequenceNum_ == c10::nullopt) {
+    return 0;
+  }
   return sequenceNum_->get();
 }
 
