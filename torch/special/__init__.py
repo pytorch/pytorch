@@ -330,3 +330,67 @@ Example::
     >>> torch.special.betainc(x, 2, 1)
     tensor([0.0225, 0.1156, 0.9801])           
 """.format(**common_args))
+
+def betaln(a, b):
+    r"""
+    betainc(input, a, b, out=None) -> Tensor
+    
+    Computes the natural logarithm of absolute value of Beta function (as defined below)
+    for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
+
+    .. math::
+        \log\,|\,\Beta(a,b)\,|
+
+    Similar to SciPy's `scipy.special.betaln`.
+
+    """ + r"""
+
+    Args:
+        a (Tensor) : (:attr:`a > 0`)
+        b (Tensor) : (:attr:`b > 0`)
+
+    Keyword args:
+        {out}
+
+    Example::
+
+        >>> torch.special.betaln( torch.tensor([-1, 0, 1, float('inf'), float('nan')]), torch.tensor(9))
+        tensor([    inf,     inf, -2.1972,     nan,     nan])
+        >>> torch.special.betaln(torch.tensor([2, 4, 5]), torch.tensor(9))
+        tensor([-4.4998, -7.5909, -8.7695])
+        >>> torch.special.betaln(torch.tensor(6), torch.tensor(9))
+        tensor(-9.7991)
+    """
+    return torch.lgamma(a) + torch.lgamma(b) - torch.lgamma(a + b)
+
+def beta(a, b):
+    r"""
+    betainc(input, a, b, out=None) -> Tensor
+    
+    Computes the Beta function (as defined below)
+    for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
+
+    .. math::
+        \frac{\Gamma(a) * \Gamma(b)}{\Gamma(a + b)}
+
+    Similar to SciPy's `scipy.special.beta`.
+
+    """ + r"""
+
+    Args:
+        a (Tensor) : (:attr:`a > 0`)
+        b (Tensor) : (:attr:`b > 0`)
+
+    Keyword args:
+        {out}
+
+    Example::
+
+        >>> torch.special.beta( torch.tensor([-1, 0, 1, float('inf'), float('nan')]), torch.tensor(9))
+        tensor([   inf,    inf, 0.1111,    nan,    nan])
+        >>> torch.special.beta(torch.tensor([2, 4, 5]), torch.tensor(9))
+        tensor([0.0111, 0.0005, 0.0002])
+        >>> torch.special.beta(torch.tensor(6), torch.tensor(9))
+        tensor(5.5500e-05)
+    """
+    return torch.exp(betaln(a, b))

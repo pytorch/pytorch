@@ -1293,6 +1293,16 @@ calc_i0e(T _x) {
 inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
 
 template <typename T>
+inline C10_HOST_DEVICE T calc_betaln(T a, T b) {
+    return std::lgamma(a) + std::lgamma(b) - std::lgamma(a + b);
+}
+
+template <typename T>
+inline C10_HOST_DEVICE T calc_beta(T a, T b) {
+    return std::exp(calc_betaln(a, b));
+}
+
+template <typename T>
 inline C10_HOST_DEVICE T calc_betainc(T x, T a, T b) {
   if (x < 0.0 || x > 1.0 || a < 0.0 || b < 0.0){
     return 1.0 / 0.0;
@@ -1308,8 +1318,7 @@ inline C10_HOST_DEVICE T calc_betainc(T x, T a, T b) {
   }
 
   /*Find the first part before the continued fraction.*/
-  const T lbeta_ab = std::lgamma(a) + std::lgamma(b) - std::lgamma(a + b);
-  const T front = std::exp(std::log(x) * a + std::log(1.0 - x) * b - lbeta_ab) / a;
+  const T front = std::exp(std::log(x) * a + std::log(1.0 - x) * b - calc_betaln(a, b)) / a;
 
   /*Use Lentz's algorithm to evaluate the continued fraction.*/
   T f = 1.0, c = 1.0, d = 0.0;
