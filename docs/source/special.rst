@@ -29,4 +29,6 @@ Functions
 .. autofunction:: i0e
 .. autofunction:: logit
 .. autofunction:: xlog1py
+.. autofunction:: beta
+.. autofunction:: betaln
 .. autofunction:: betainc

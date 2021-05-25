@@ -87,7 +87,7 @@ class Beta(ExponentialFamily):
         return (self.concentration1, self.concentration0)
 
     def _log_normalizer(self, x, y):
-        return torch.special.beta(x, y)
+        return torch.special.betaln(x, y)
     
     def cdf(self, x):
         return torch.special.betainc(x, self.concentration1, self.concentration0)
