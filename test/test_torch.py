@@ -3946,10 +3946,10 @@ else:
 
     def test_nondeterministic_alert_scatter_add(self, device):
         def test_func(op_call):
-            input = torch.randn(10, device=device)
+            input = torch.randn(5, 4, device=device)
             dim = 0
-            index = torch.tensor([3], device=device)
-            src = torch.randn(1, device=device)
+            index = torch.tensor([[3]], device=device)
+            src = torch.tensor([[1.0]], device=device)
 
             @expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')
             def forward_func(slf, device):
@@ -4166,6 +4166,24 @@ else:
     def test_gather_backward_one_dim(self, device) -> None:
         self._test_gather_backward_one_dim(device, False)
 
+    @onlyOnCPUAndCUDA
+    def test_scatter_add_one_dim_deterministic(self, device) -> None:
+        with DeterministicGuard(True):
+            m = random.randint(20, 30)
+            elems = random.randint(2000 * m, 3000 * m)
+            dim = 0
+            src = torch.randn(elems, device=device)
+            idx = torch.randint(m, (elems,), device=device)
+
+            x = torch.zeros(m, device=device)
+            res = x.scatter_add(dim, idx, src)
+
+            expected = torch.zeros(m, device=device)
+            for i in range(elems):
+                expected[idx[i]] += src[i]
+
+            self.assertEqual(res, expected, atol=0, rtol=0)
+
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
@@ -4180,6 +4198,10 @@ else:
 
     def test_repeat_interleave(self, device):
         y = torch.tensor([[1, 2], [3, 4]], device=device)
+        # exercise single argument function signature
+        temp = y.repeat_interleave(2)
+        self.assertEqual(torch.Size([8]), temp.size())
+
         for dtype in [torch.int, torch.long]:
             lengths = torch.tensor([1, 2], dtype=dtype, device=device)
             output_size = torch.sum(lengths)
@@ -8014,9 +8036,6 @@ tensor_op_tests = [
     ('size', '', _new_t((1, 2, 3, 4)), lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'dim', _new_t((1, 2, 3, 4)), lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('split', '', _small_3d, lambda t, d: [2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('split', 'dim', _small_3d, lambda t, d: [2, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('split', 'neg_dim', _small_3d, lambda t, d: [2, -3], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('t', '', _new_t((1, 2)), lambda t, d: [],),
     ('take', '', _new_t((3, 4)),
         lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d)],
