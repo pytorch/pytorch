@@ -542,7 +542,7 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
   });
 }
 
-void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const Scalar& threshold_) {
+void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_backward_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     auto beta = beta_.to<scalar_t>();
