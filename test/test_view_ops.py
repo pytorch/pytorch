@@ -543,6 +543,8 @@ class TestViewOps(TestCase):
         nv[6] = 0
         self.assertNotEqual(t[1, 1], nv[6])
 
+    @onlyOnCPUAndCUDA
+    # TODO XLA can't fully handle as_strided; see https://github.com/pytorch/xla/issues/2964
     def test_flatten_view(self, device):
         def test_writes_propagate(t, v):
             idx_t = (0,) * t.ndim

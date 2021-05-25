@@ -179,8 +179,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
                 'extra_cuda_headers': '',
                 'legacy_th_headers': '',
-                'external_backend_headers': f'''#include "{output_dir}/{backend_key}NativeFunctions.h"
-#include <torch_xla/csrc/aten_xla_type_default.h>''',
+                'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
                 'namespaced_headers': '',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
