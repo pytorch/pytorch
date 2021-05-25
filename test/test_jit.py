@@ -14057,6 +14057,7 @@ dedent """
             m = torch.jit.script(M())
             m(p)
 
+    @unittest.skipIf(sys.version_info < (3, 7, 0), "defaults keyword added in Python 3.8")
     def test_namedtuple_default_values_using_factory_constructor(self):
         Pair = namedtuple("Pair", ["x", "y"], defaults=(1, 2))
 
