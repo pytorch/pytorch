@@ -12,6 +12,7 @@
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/ProcessGroupWrapper.hpp>
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -1194,6 +1195,10 @@ Arguments:
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_backend_name",
+              &::c10d::ProcessGroup::getBackendName,
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
@@ -1301,6 +1306,23 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("timeout") = kProcessGroupDefaultTimeout,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
+
+    // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
+    // group. It can be used to validate collective calls across processes by
+    // checking the op type and input tensor shapes.
+    auto processGroupWrapper =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
+          module, "_ProcessGroupWrapper", processGroup)
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+                          const c10::intrusive_ptr<::c10d::ProcessGroupGloo>&
+                              gloo_pg) {
+                return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
+                    pg, gloo_pg);
+              }),
+              py::arg("pg"),
+              py::arg("gloo_pg"),
+              py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL

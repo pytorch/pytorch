@@ -20,7 +20,7 @@ class BaseSparsifier(abc.ABC):
         self.config = config
         self.defaults = defaults
 
-        self.state = defaultdict(dict)
+        self.state = {}
         self.module_groups = {}
         self.enable_mask_update = False
 
@@ -87,7 +87,7 @@ class BaseSparsifier(abc.ABC):
             new_child = mapping[type(child)].from_float(child, **kwargs)
             return new_child
         self._swap_modules(model, new_child_fn, mapping=mapping,
-                           from_float_args=from_float_args)
+                           update_config=True)
 
 
     @abc.abstractmethod
