@@ -2833,7 +2833,10 @@ void ProcessGroupGloo::monitoredBarrier(
         }
         // If we are collecting all failed ranks, check if we need to throw if
         // some ranks have not responded.
-        if (waitAllRanks && processedRanks.size() != size_) {
+        // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
+        // processed.
+        auto rankFailure = (processedRanks.size() != size_ - 1);
+        if (waitAllRanks && rankFailure) {
           std::vector<int> failedRanks;
           for (int i = 1; i < size_; ++i) {
             if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
@@ -2889,10 +2892,9 @@ void ProcessGroupGloo::setSequenceNumberForGroup() {
 }
 
 uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
-  TORCH_CHECK(
-      sequenceNum_ != c10::nullopt,
-      "Sequence number is not set for rank ",
-      rank_);
+  if (sequenceNum_ == c10::nullopt) {
+    return 0;
+  }
   return sequenceNum_->get();
 }
 
