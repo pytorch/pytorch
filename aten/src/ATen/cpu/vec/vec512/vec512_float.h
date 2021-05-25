@@ -129,7 +129,7 @@ public:
     return static_cast<int32_t>(cmp);
   }
   Vectorized<float> isnan() const {
-    auto mask =  _mm512_cmp_ps_mask(values, _mm512_set1_ps(0.0f), _CMP_UNORD_Q);
+    auto mask =  _mm512_cmp_ps_mask(values, _mm512_set1_ps(0.0), _CMP_UNORD_Q);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
                                                       0xFFFFFFFF));
   }
@@ -371,8 +371,11 @@ Vectorized<float> Vectorized<float>::frac() const {
 // either input is a NaN.
 template <>
 Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b) {
-  Vectorized<float> max = _mm512_max_ps(a, b);
-  Vectorized<float> isnan = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
+  auto zero_vec = _mm512_set1_epi32(0);
+  auto max = _mm512_max_ps(a, b);
+  auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
+  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask, 
+                                                          0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   return _mm512_or_ps(max, isnan);
 }
@@ -381,8 +384,11 @@ Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<fl
 // either input is a NaN.
 template <>
 Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
-  Vectorized<float> min = _mm512_min_ps(a, b);
-  Vectorized<float> isnan = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
+  auto zero_vec = _mm512_set1_epi32(0);
+  auto min = _mm512_min_ps(a, b);
+  auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
+  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask, 
+                                                          0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   return _mm512_or_ps(min, isnan);
 }
