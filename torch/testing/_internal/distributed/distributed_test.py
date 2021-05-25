@@ -3330,8 +3330,8 @@ class DistributedTest:
                     )
 
         @unittest.skipIf(
-            BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3441,8 +3441,8 @@ class DistributedTest:
                 )
 
         @unittest.skipIf(
-            BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3450,8 +3450,8 @@ class DistributedTest:
             self._test_ddp_hook_parity(state=None, hook=default.allreduce_hook)
 
         @unittest.skipIf(
-            BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -3463,8 +3463,8 @@ class DistributedTest:
             self._test_ddp_hook_parity(state=process_group, hook=default.allreduce_hook)
 
         @unittest.skipIf(
-            BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
@@ -6041,9 +6041,13 @@ class DistributedTest:
             # Kick off some allreduce work on all ranks
             for _ in range(10):
                 dist.all_reduce(torch.cat(tensors))
-            # Run monitored barrier
+            # Run monitored barrier and ensure it passees
             timeout = timedelta(seconds=2)
             dist.monitored_barrier(timeout=timeout)
+            # Check monitored_barrier success with wait_all_ranks=True
+            for _ in range(10):
+                dist.all_reduce(torch.cat(tensors))
+            dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
             failed_rank = 1
@@ -6450,7 +6454,10 @@ class DistributedTest:
 
             # SyncBN allgathers stats across all ranks, so verify call to
             # all_gather in profiler.
-            all_gather_calls = get_profiling_event("all_gather", prof)
+            if BACKEND == 'nccl':
+                all_gather_calls = get_profiling_event("_all_gather_base", prof)
+            else:
+                all_gather_calls = get_profiling_event("all_gather", prof)
             self.assertNotEqual([], all_gather_calls)
 
             # Only do inference on one rank. If SyncBN did collective stats sync,
@@ -6466,7 +6473,10 @@ class DistributedTest:
                         loss.backward()
 
                 # Ensure sync does not occur in eval() mode.
-                all_gather_calls = get_profiling_event("all_gather", prof)
+                if BACKEND == 'nccl':
+                    all_gather_calls = get_profiling_event("_all_gather_base", prof)
+                else:
+                    all_gather_calls = get_profiling_event("all_gather", prof)
                 self.assertEqual([], all_gather_calls)
 
         @skip_if_lt_x_gpu(2)

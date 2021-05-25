@@ -155,7 +155,7 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
-def einsum(equation, *operands):
+def einsum(*args):
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -171,7 +171,7 @@ def einsum(equation, *operands):
 
     Equation:
 
-        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for each dimension of
+        The :attr:`equation` string specifies the subscripts (letters in `[a-zA-Z]`) for each dimension of
         the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
         comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
         must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
@@ -211,7 +211,7 @@ def einsum(equation, *operands):
 
     Args:
         equation (string): The subscripts for the Einstein summation.
-        operands (Tensor): The operands to compute the Einstein sum of.
+        operands (List[Tensor]): The tensors to compute the Einstein summation of.
 
     Examples::
 
@@ -259,8 +259,43 @@ def einsum(equation, *operands):
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
+    if len(args) < 2:
+        raise ValueError('einsum(): must specify the equation string and at least one operand, '
+                         'or at least one operand and its subscripts list')
+
+    equation = None
+    operands = None
+
+    if isinstance(args[0], torch.Tensor):
+        # Convert the subscript list format which is an interleaving of operand and its subscripts
+        # list with an optional output subscripts list at the end (see documentation for more details on this)
+        # to the equation string format by creating the equation string from the subscripts list and grouping the
+        # input operands into a tensorlist (List[Tensor]).
+        def parse_subscript(n: int) -> str:
+            if n == Ellipsis:
+                return '...'
+            if n >= 0 and n < 26:
+                return chr(n + ord('a'))
+            if n >= 26 and n < 52:
+                return chr(n - 26 + ord('A'))
+            raise ValueError('einsum(): subscript in subscript list is not within the valid range [0, 52)')
+
+        # Parse subscripts for input operands
+        equation = ','.join(''.join(parse_subscript(s) for s in l) for l in args[1::2])
+
+        # Parse optional output subscripts (provided when the number of arguments is odd)
+        if len(args) % 2 == 1:
+            equation += '->' + ''.join(parse_subscript(s) for s in args[-1])
+            operands = args[:-1:2]
+        else:
+            operands = args[::2]
+    else:
+        equation = args[0]
+        operands = args[1:]
+
     if has_torch_function(operands):
         return handle_torch_function(einsum, operands, equation, *operands)
+
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]

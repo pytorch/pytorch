@@ -133,9 +133,9 @@ void complex_check_dtype(
 Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
-      .add_output(result)
-      .add_input(real)
-      .add_input(imag)
+      .add_borrowed_output(result)
+      .add_borrowed_input(real)
+      .add_borrowed_input(imag)
       .check_all_same_dtype(false)
       .build();
   complex_stub(iter.device_type(), iter);
@@ -153,9 +153,9 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
 Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
-      .add_output(result)
-      .add_input(abs)
-      .add_input(angle)
+      .add_borrowed_output(result)
+      .add_borrowed_input(abs)
+      .add_borrowed_input(angle)
       .check_all_same_dtype(false)
       .build();
   polar_stub(iter.device_type(), iter);
@@ -1383,7 +1383,7 @@ Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) 
   return at::detail::tensor_complex_backend(values, options);
 }
 
-Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size,
+Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::optional<int64_t> size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1400,7 +1400,7 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
         c10::StorageImpl::use_byte_size_t(),
         size_bytes,
         THMapAllocator::makeDataPtr(
-            filename.c_str(), flags, size_bytes, nullptr),
+            std::string(filename), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
     auto tensor = detail::make_tensor<at::TensorImpl>(

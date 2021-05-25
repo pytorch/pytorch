@@ -41,6 +41,16 @@ const std::string shape_compute_functions =
           assert len(out) == 2
           return [out[0], out[1]]
 
+        # TODO: maybe make it customary that extra arguments are unused ?
+        # TODO: return self directly
+        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
+          out: List[int] = []
+          for elem in self:
+            out.append(elem)
+          return out
+
+        def broadcast_one_unused_input(self: List[int], other: List[int], unused: Any):
+          return broadcast(self, other)
     )";
 
 // mapping function schema to shape compute graphs allows multiple functions to
@@ -65,6 +75,9 @@ const std::string shape_compute_functions =
 std::unordered_map<std::string,  std::string> schema_string_to_function_name_mappings = {
     {"aten::mul.Tensor(Tensor self, Tensor other) -> (Tensor)", "broadcast"},
     {"aten::div.Tensor(Tensor self, Tensor other) -> (Tensor)", "broadcast"},
+    {"aten::gt.Tensor(Tensor self, Tensor other) -> (Tensor)", "broadcast"},
+    {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> (Tensor)", "broadcast_one_unused_input"},
+    {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> (Tensor)", "unary_two_unused_inputs"},
     {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> (Tensor)", "adaptive_avg_pool2d"},
 };
 // clang-format on
