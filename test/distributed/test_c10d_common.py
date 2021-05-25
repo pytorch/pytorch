@@ -53,6 +53,7 @@ else:
 
 DEFAULT_HOSTNAME = "localhost"
 
+torch.backends.cuda.matmul.allow_tf32 = False
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi

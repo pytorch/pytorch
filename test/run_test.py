@@ -81,6 +81,7 @@ TESTS = [
     'test_xnnpack_integration',
     'test_vulkan',
     'test_sparse',
+    'test_sparse_csr',
     'test_quantization',
     'test_pruning_op',
     'test_spectral_ops',
@@ -160,6 +161,7 @@ TESTS = [
     'distributed/elastic/utils/util_test',
     'distributed/elastic/utils/distributed_test',
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/_sharding_spec/test_sharding_spec',
 ]
 
 # Tests need to be run with pytest.
