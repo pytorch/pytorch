@@ -60,6 +60,16 @@ TORCH_META_FUNC(softplus) (
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(softplus_backward) (
+  const Tensor& grad_output,
+  const Tensor& self,
+  const Scalar& beta,
+  const Scalar& threshold,
+  const Tensor& output
+) {
+  build_borrowing_binary_op(maybe_get_output(), grad_output, self);
+}
+
 TORCH_META_FUNC(leaky_relu) (
   const Tensor& self, const Scalar& negval
 ) {
@@ -144,6 +154,17 @@ TORCH_IMPL_FUNC(softplus_out) (
   const Tensor& self, const Scalar& beta, const Scalar& threshold, const Tensor& result
 ) {
   softplus_stub(device_type(), *this, beta, threshold);
+}
+
+TORCH_IMPL_FUNC(softplus_backward_out) (
+  const Tensor& grad_output,
+  const Tensor& self,
+  const Scalar& beta,
+  const Scalar& threshold,
+  const Tensor& output,
+  const Tensor& grad_input
+) {
+  softplus_backward_stub(device_type(), *this, beta, threshold);
 }
 
 TORCH_IMPL_FUNC(leaky_relu_out) (
@@ -407,29 +428,6 @@ Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool
 
 Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
-}
-
-Tensor & softplus_backward_out(const Tensor& grad_output,
-    const Tensor& self,
-    const Scalar& beta,
-    const Scalar& threshold,
-    const Tensor& output,
-    Tensor& grad_input) {
-  auto iter = TensorIterator::borrowing_binary_op(grad_input, grad_output, self);
-  softplus_backward_stub(iter.device_type(), iter, beta, threshold);
-  return grad_input;
-}
-
-Tensor softplus_backward(
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Scalar& beta,
-    const Scalar& threshold,
-    const Tensor& output) {
-  Tensor grad_input;
-  auto iter = TensorIterator::borrowing_binary_op(grad_input, grad_output, self);
-  softplus_backward_stub(iter.device_type(), iter, beta, threshold);
-  return iter.output();
 }
 
 TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
