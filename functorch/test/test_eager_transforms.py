@@ -190,6 +190,12 @@ class TestGradTransform(TestCase):
         result, = vjp_fn(v)
         self.assertEqual(result, v * x.cos())
 
+    def test_vjp_two_outputs(self, device):
+        def f(x):
+            return x, x
+        result, vjp_fn = vjp(f, torch.tensor(1.))
+        vjp_fn(result)
+
     def test_composed_with_autograd(self, device):
         x = torch.randn([], requires_grad=True, device=device)
 
@@ -331,7 +337,7 @@ class TestGradTransform(TestCase):
             return y, y, x
 
         out, vjp_fn = vjp(unrelated, w, x)
-        result = vjp_fn(v, v, v)
+        result = vjp_fn((v, v, v))
         expected = (torch.zeros_like(x), torch.ones_like(x))
         self.assertEqual(result, expected)
 
@@ -370,7 +376,7 @@ class TestGradTransform(TestCase):
         v2 = torch.randn([], device=device)
         v3 = torch.randn([], device=device)
         _, vjp_fn = vjp(f, x)
-        result, = vjp_fn(v1, (v2, v3))
+        result, = vjp_fn((v1, (v2, v3)))
         self.assertEqual(result, v1 + v2 + v3)
 
     def test_vjp_pytree_error(self, device):
@@ -383,7 +389,7 @@ class TestGradTransform(TestCase):
         v3 = torch.randn([], device=device)
         _, vjp_fn = vjp(f, x)
         with self.assertRaisesRegex(RuntimeError, 'Expected pytree structure'):
-            result, = vjp_fn((v1, (v2, v3)))
+            result, = vjp_fn(((v1, (v2, v3)),))
 
     def test_functional_init(self, device):
         class MLPClassifier(nn.Module):

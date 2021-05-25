@@ -85,9 +85,9 @@ def vjp(f, *primals):
         results = _undo_create_differentiable(primals_out, level)
 
         flat_diff_primals, primals_spec = tree_flatten(diff_primals)
-        flat_primals_out, primals_out_spec = tree_flatten(_as_tuple(primals_out))
+        flat_primals_out, primals_out_spec = tree_flatten(primals_out)
 
-        def wrapper(*cotangents, retain_graph=True, create_graph=True):
+        def wrapper(cotangents, retain_graph=True, create_graph=True):
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
             if primals_out_spec != cotangents_spec:
                 raise RuntimeError(
