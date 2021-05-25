@@ -330,7 +330,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 #endif
 
   AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self_.scalar_type(), "sort", [&]{
-    c10::guts::if_constexpr<is_rocm && std::is_same<scalar_t, c10::BFloat16>::value>([&]{
+    c10::guts::if_constexpr<!(is_rocm && std::is_same<scalar_t, c10::BFloat16>::value)>([&]{
       const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
       auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
       int64_t remaining = numel;
