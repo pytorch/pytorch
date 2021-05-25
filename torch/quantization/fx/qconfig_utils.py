@@ -9,6 +9,7 @@ from torch.fx.graph import (
 
 from .utils import _parent_name
 
+# TODO: move this to quantization_types.py?
 QConfigAny = Union[torch.quantization.QConfig,
                    torch.quantization.QConfigDynamic, None]
 
