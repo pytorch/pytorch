@@ -31,6 +31,10 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+      - name: Install 7zip if not already installed
+        shell: powershell
+        run: |
+          choco install 7zip.install -y
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -81,6 +85,10 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+      - name: Install 7zip if not already installed
+        shell: powershell
+        run: |
+          choco install 7zip.install -y
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -91,6 +99,8 @@ jobs:
         run: |
           .\.github\scripts\install_windows_sdk.ps1
       - name: Install Cuda
+        env:
+          INSTALL_DISPLAY_DRIVER: 1
         shell: bash
         run: |
           .circleci/scripts/windows_cuda_install.sh
