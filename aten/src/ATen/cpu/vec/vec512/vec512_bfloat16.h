@@ -27,8 +27,8 @@ static inline __m512i cvtfp32_bf16(const __m512& a, const __m512& b) {
   __m512i lo = _mm512_castps_si512(a);
   __m512i hi = _mm512_castps_si512(b);
   __m512i nan = _mm512_set1_epi32(0xffff);
-  auto mask_lo = _mm512_cmp_epi8_mask(a, a, _CMP_ORD_Q);
-  auto mask_hi = _mm512_cmp_epi8_mask(b, b, _CMP_ORD_Q);
+  auto mask_lo = _mm512_cmp_ps_mask(a, a, _CMP_ORD_Q);
+  auto mask_hi = _mm512_cmp_ps_mask(b, b, _CMP_ORD_Q);
   __m512i ones = _mm512_set1_epi32(0x1);
   __m512i vec_bias = _mm512_set1_epi32(0x7fff);
   // uint32_t lsb = (input >> 16) & 1;
@@ -44,8 +44,8 @@ static inline __m512i cvtfp32_bf16(const __m512& a, const __m512& b) {
   t_lo = _mm512_srli_epi32(t_lo, 16);
   t_hi = _mm512_srli_epi32(t_hi, 16);
   // Check NaN before converting back to bf16
-  t_lo = _mm512_mask_blend_epi8(mask_lo, nan, t_lo);
-  t_hi = _mm512_mask_blend_epi8(mask_hi, nan, t_hi);
+  t_lo = _mm512_mask_blend_epi32(mask_lo, nan, t_lo);
+  t_hi = _mm512_mask_blend_epi32(mask_hi, nan, t_hi);
 
   t_lo = _mm512_packus_epi32(t_lo, t_hi); // t_hi[4-7] t_lo[4-7] t_hi[0-4] t_lo[0-4]
   __m512i idx = _mm512_set_epi64(7, 5, 3, 1, 6, 4, 2, 0);
