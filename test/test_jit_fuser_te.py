@@ -1832,6 +1832,7 @@ works_list = [
     '__radd__',
     '__rdiv__',
     '__rmul__',
+    '__rmod__',
     'abs',
     'acos',
     'add',
