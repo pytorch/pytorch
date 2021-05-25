@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
+from collections import namedtuple
 import gc
 
 from .vmap import vmap
@@ -29,7 +30,11 @@ def _undo_create_differentiable(inps, level=None):
     def unwrap_tensors(x):
         if isinstance(x, torch.Tensor):
             return _unwrap_for_grad(x, level)
-        raise AssertionError()
+        # TODO: Remove the following hack for namedtuples
+        if isinstance(x, tuple):
+            return tree_map(unwrap_tensors, tuple(x))
+
+        raise RuntimeError("Expected tensors, got unsupported type {type(x)}")
 
     return tree_map(unwrap_tensors, inps)
 
@@ -86,6 +91,14 @@ def vjp(f, *primals):
 
         flat_diff_primals, primals_spec = tree_flatten(diff_primals)
         flat_primals_out, primals_out_spec = tree_flatten(primals_out)
+
+        for primal_out in flat_primals_out:
+            assert isinstance(primal_out, torch.Tensor)
+            if primal_out.is_floating_point() or primal_out.is_complex():
+                continue
+            raise RuntimeError("vjp(f, ...): All outputs of f must be "
+                               "floating-point or complex Tensors, got Tensor "
+                               f"with dtype {primal_out.dtype}")
 
         def wrapper(cotangents, retain_graph=True, create_graph=True):
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
