@@ -561,3 +561,59 @@ class TestUnion(JitTestCase):
 
         self.checkScript(fn, (1,))
         self.checkScript(fn, (8,))
+
+    def test_union_with_listliteral(self):
+        def fn():
+            x: Union[List[torch.Tensor], int] = [torch.tensor(3)]
+            if torch.jit.isinstance(x, List[torch.Tensor]):
+                x.append(torch.tensor(3))
+            return x
+
+        self.checkScript(fn, ())
+
+    def test_union_with_empty_listliteral_can_infer_list_type(self):
+        def fn():
+            x: Union[List[torch.Tensor], int] = []
+            if torch.jit.isinstance(x, List[torch.Tensor]):
+                x.append(torch.tensor(3))
+            return x
+
+        self.checkScript(fn, ())
+
+    def test_union_with_empty_listliteral_throws_when_type_cannot_be_inferred(self):
+        def fn():
+            x: Union[List[torch.Tensor], List[str], int] = []
+            if torch.jit.isinstance(x, List[torch.Tensor]):
+                x.append(torch.tensor(3))
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "grr"):
+            torch.jit.script(fn)
+
+    def test_union_with_dictliteral(self):
+        def fn():
+            x: Union[Dict[str, torch.Tensor], int] = {foo: torch.tensor(3)}
+            if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
+                x["bar"] = torch.tensor(3)
+            return x
+
+        self.checkScript(fn, ())
+
+    def test_union_with_empty_dictliteral_can_infer_dict_type(self):
+        def fn():
+            x: Union[Dict[str, torch.Tensor], int] = {}
+            if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
+                x["foo"] = torch.tensor(3)
+            return x
+
+        self.checkScript(fn, ())
+
+    def test_union_with_empty_dictliteral_throws_when_type_cannot_be_inferred(self):
+        def fn():
+            x: Union[Dict[str, torch.Tensor], Dict[int, torch.Tensor], int] = {}
+            if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
+                x["foo"] = torch.tensor(3)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "grr"):
+            torch.jit.script(fn)
