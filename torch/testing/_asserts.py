@@ -46,11 +46,6 @@ _DTYPE_PRECISIONS = {
 }
 
 
-def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float, float]:
-    dtype = actual.dtype if actual.dtype == expected.dtype else torch.promote_types(actual.dtype, expected.dtype)
-    return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
-
-
 def _check_complex_components_individually(
     check_tensor_values: Callable[..., Optional[Exception]]
 ) -> Callable[..., Optional[Exception]]:
@@ -102,6 +97,63 @@ def _check_complex_components_individually(
     return wrapper
 
 
+def _check_quantization(check_tensor_values: Callable[..., Optional[Exception]]) -> Callable[..., Optional[Exception]]:
+    """Decorates continuous tensor check functions to handle quantized tensors.
+
+    If the inputs are not quantized, this decorator is a no-op.
+
+    Args:
+        check_tensor_values (Callable[..., Optional[Exception]]): Tensor check function for continuous tensors.
+
+    Returns:
+        Optional[Exception]: Return value of :attr:`check_tensors`.
+    """
+
+    @functools.wraps(check_tensor_values)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[Exception]:
+        if not actual.is_quantized:
+            return check_tensor_values(actual, expected, **kwargs)
+
+        if actual.qscheme() == torch.per_tensor_affine:
+            exc = check_tensor_values(torch.as_tensor(actual.q_scale()), torch.as_tensor(expected.q_scale()), **kwargs)
+            if exc:
+                return _amend_error_message(exc, "{}\n\nThe failure occurred for the quantization scale.")
+
+            exc = check_tensor_values(
+                torch.as_tensor(actual.q_zero_point()), torch.as_tensor(expected.q_zero_point()), **kwargs
+            )
+            if exc:
+                return _amend_error_message(exc, "{}\n\nThe failure occurred for the quantization zero point.")
+        elif actual.qscheme() == torch.per_channel_affine:
+            exc = check_tensor_values(actual.q_per_channel_scales(), expected.q_per_channel_scales(), **kwargs)
+            if exc:
+                return _amend_error_message(exc, "{}\n\nThe failure occurred for the quantization scales.")
+
+            exc = check_tensor_values(
+                actual.q_per_channel_zero_points(), expected.q_per_channel_zero_points(), **kwargs
+            )
+            if exc:
+                return _amend_error_message(exc, "{}\n\nThe failure occurred for the quantization zero points.")
+
+            exc = check_tensor_values(
+                torch.as_tensor(actual.q_per_channel_axis()), torch.as_tensor(expected.q_per_channel_axis()), **kwargs
+            )
+            if exc:
+                return _amend_error_message(exc, "{}\n\nThe failure occurred for the quantization per-channel axis.")
+        elif actual.qscheme() == torch.per_tensor_symmetric:
+            # TODO add meta data checking
+            pass
+        elif actual.qscheme() == torch.per_channel_symmetric:
+            # TODO add meta data checking
+            pass
+        else:
+            raise UsageError(f"Unknown quantization scheme {actual.qscheme()}.")
+
+        return check_tensor_values(actual.int_repr().to(torch.int32), expected.int_repr().to(torch.int32), **kwargs)
+
+    return wrapper
+
+
 def _check_supported_tensor(
     input: Tensor,
 ) -> Optional[UsageError]:  # type: ignore[valid-type]
@@ -112,8 +164,6 @@ def _check_supported_tensor(
     Returns:
         (Optional[UsageError]): If check did not pass.
     """
-    if input.is_quantized:
-        return UsageError("Comparison for quantized tensors is not supported yet.")
     if input.is_sparse:
         return UsageError("Comparison for sparse tensors is not supported yet.")
 
@@ -153,6 +203,11 @@ def _check_attributes_equal(
 
     if check_device and actual.device != expected.device:
         return AssertionError(msg_fmtstr.format("device", actual.device, expected.device))
+
+    if actual.is_quantized != expected.is_quantized:
+        return AssertionError(msg_fmtstr.format("is_quantized", actual.is_quantized, expected.is_quantized))
+    elif actual.is_quantized and actual.qscheme() != expected.qscheme():
+        return AssertionError(msg_fmtstr.format("qscheme()", actual.qscheme(), expected.qscheme()))
 
     if check_dtype and actual.dtype != expected.dtype:
         return AssertionError(msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
@@ -246,6 +301,7 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
 
 
 @_check_complex_components_individually
+@_check_quantization
 def _check_values_equal(
     actual: Tensor,
     expected: Tensor,
@@ -283,6 +339,7 @@ def _check_values_equal(
 
 
 @_check_complex_components_individually
+@_check_quantization
 def _check_values_close(
     actual: Tensor,
     expected: Tensor,
@@ -394,8 +451,6 @@ def _check_tensors_close(
         return UsageError(
             f"Both 'rtol' and 'atol' must be omitted or specified, but got rtol={rtol} and atol={atol} instead."
         )
-    elif rtol is None or atol is None:
-        rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
     exc: Optional[Exception] = _check_attributes_equal(
         actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
@@ -403,6 +458,9 @@ def _check_tensors_close(
     if exc:
         raise exc
     actual, expected = _equalize_attributes(actual, expected)
+
+    if rtol is None or atol is None:
+        rtol, atol = _DTYPE_PRECISIONS.get(actual.dtype, (0.0, 0.0))
 
     if (rtol == 0.0) and (atol == 0.0):
         exc = _check_values_equal(actual, expected, msg=msg)
@@ -649,8 +707,7 @@ def assert_equal(
     Raises:
         UsageError: If an array-or-scalar-like pair has different types.
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
-            future.
+        UsageError: If any tensor is sparse. This is a temporary restriction and will be relaxed in the future.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If a tensor pair does not have the same :attr:`~torch.Tensor.shape`.
@@ -751,8 +808,7 @@ def assert_close(
 
     Raises:
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
-            future.
+        UsageError: If any tensor is sparse. This is a temporary restriction and will be relaxed in the future.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If corresponding array-likes have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
