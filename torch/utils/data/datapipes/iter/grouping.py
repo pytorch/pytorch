@@ -2,7 +2,7 @@ import functools
 import os
 import warnings
 
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk, DFIterDataPipe
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
@@ -26,10 +26,24 @@ def dive(element, nesting_level):
 class UnBatchIterDataPipe(IterDataPipe):
     def __init__(self, datapipe, unbatch_level: int = 1):
         self.datapipe = datapipe
+        # print('unbatch of', type(datapipe))
+        depth = getattr(datapipe,'_dp_nesting_depth',0)
+        if unbatch_level < 0:
+            unbatch_level = depth + 1 + unbatch_level
+            print('new unbatch level', unbatch_level)
+        # p
         self.unbatch_level = unbatch_level
+        
+        # print('depth is', depth)
+        self._dp_nesting_depth = depth - unbatch_level
+        if self._dp_nesting_depth == 0 and getattr(datapipe,'_dp_contains_dataframe',False) == True:
+            # print('_dp_cast_to_df')
+            self._dp_cast_to_df = True
 
     def __iter__(self):
+        # print('unbatch iter')
         for element in self.datapipe:
+            # print(element, type(element), isinstance(element, list))
             for i in dive(element, nesting_level=self.unbatch_level):
                 yield i
 
@@ -67,6 +81,11 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
+        source_depth = getattr(datapipe,'_dp_nesting_depth',0)
+        if source_depth is None:
+            source_depth = 0
+        self._dp_nesting_depth = source_depth + 1
+        # print('self._dp_nesting_depth', self._dp_nesting_depth)
 
     def __iter__(self) -> Iterator[List[T_co]]:
         # // TODO: Never modify inplace!
@@ -75,11 +94,11 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
             # print(x)
             batch.append(x)
             if len(batch) == self.batch_size:
-                yield batch
+                yield DataChunk(batch, is_df = isinstance(self.datapipe, DFIterDataPipe))
                 batch = []
         if len(batch) > 0:
             if not self.drop_last:
-                yield batch
+                yield DataChunk(batch, is_df = isinstance(self.datapipe, DFIterDataPipe))
             batch = []
 
     def __len__(self) -> int:

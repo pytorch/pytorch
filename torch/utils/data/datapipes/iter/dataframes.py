@@ -1,6 +1,7 @@
 from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe
 from typing import Iterator, Optional, Sized, Tuple, TypeVar
 import pandas
+import random
 
 # TODO(VitalyFedyunin): Add error when two different traces get combined
 
@@ -14,16 +15,103 @@ class DataFrameTracedOps(DFIterDataPipe):
         for item in self.source_datapipe:
             yield self.output_var.calculate_me(item)
 
-# This is not tested class for API Example
+
+
+
+@functional_datapipe('dataframes_per_row', is_df = True)
+class ShuffleDataFramesPipe(DFIterDataPipe):
+    def __init__(self, source_datapipe):
+        self.source_datapipe = source_datapipe
+    
+    def __iter__(self):
+        for df in self.source_datapipe:
+            for i in range(len(df.index)):
+                yield df[i:i+1]
+
+
+@functional_datapipe('dataframes_concat', is_df = True)
+class ShuffleDataFramesPipe(DFIterDataPipe):
+    def __init__(self, source_datapipe, batch = 3):
+        self.source_datapipe = source_datapipe
+        self.batch = batch
+    
+    def __iter__(self):
+        buffer = []
+        for df in self.source_datapipe:
+            buffer.append(df)
+            if len(buffer) == self.batch:
+                yield pandas.concat(buffer)
+                buffer = []
+        if len(buffer):
+            yield pandas.concat(buffer)
+
+
+
+@functional_datapipe('dataframes_shuffle', is_df = True)
+class ShuffleDataFramesPipe(DFIterDataPipe):
+    def __init__(self, source_datapipe):
+        self.source_datapipe = source_datapipe
+    
+    def __iter__(self):
+        size = None
+        all_buffer = []
+        for df in self.source_datapipe:
+            if size is None:
+                size = len(df.index)
+            for i in range(len(df.index)):
+                all_buffer.append(df[i:i+1])
+        random.shuffle(all_buffer)
+        buffer = []
+        for df in all_buffer:
+            buffer.append(df)
+            if len(buffer) == size:
+                yield pandas.concat(buffer)
+                buffer = []
+        if len(buffer):
+            yield pandas.concat(buffer)
+
+        
+@functional_datapipe('dataframes_filter', is_df = True)
+class ShuffleDataFramesPipe(DFIterDataPipe):
+    def __init__(self, source_datapipe, filter_fn):
+        self.source_datapipe = source_datapipe
+        self.filter_fn = filter_fn
+    
+    def __iter__(self):
+        size = None
+        all_buffer = []
+        filter_res = []
+        for df in self.source_datapipe:
+            if size is None:
+                size = len(df.index)
+            for i in range(len(df.index)):
+                all_buffer.append(df[i:i+1])
+                filter_res.append(self.filter_fn(df.iloc[i]))
+        
+        # random.shuffle(all_buffer)
+
+        # print('filter repack as', size)
+
+        buffer = []
+        for df, res in zip(all_buffer, filter_res):
+            # print(df)
+            # print(res)
+            if res:
+                buffer.append(df)
+                if len(buffer) == size:
+                    yield pandas.concat(buffer)
+                    buffer = []
+        if len(buffer):
+            yield pandas.concat(buffer)
 
 
 
 @functional_datapipe('to_dataframes_pipe', is_df = True)
 class ExampleAggregateAsDataFrames(DFIterDataPipe):
-    def __init__(self, source_datapipe, batch_size=10, columns=None):
+    def __init__(self, source_datapipe, dataframe_size=10, columns=None):
         self.source_datapipe = source_datapipe
         self.columns = columns
-        self.batch_size = batch_size
+        self.dataframe_size = dataframe_size
 
     def _as_list(self, item):
         try:
@@ -35,13 +123,13 @@ class ExampleAggregateAsDataFrames(DFIterDataPipe):
         aggregate = []
         for item in self.source_datapipe:
             aggregate.append(self._as_list(item))
-            if len(aggregate) == self.batch_size:
+            if len(aggregate) == self.dataframe_size:
                 yield pandas.DataFrame(aggregate, columns=self.columns)
                 aggregate = []
         if len(aggregate) > 0:
             yield pandas.DataFrame(aggregate, columns=self.columns)
 
-DATAPIPES_OPS = ['shuffle', 'concat', 'batch']
+DATAPIPES_OPS = ['dataframes_filter','map','to_datapipe','shuffle', 'concat', 'batch', 'dataframes_per_row','dataframes_concat','dataframes_shuffle']
 
 class Capture(object):
     # All operations are shared across entire InitialCapture, need to figure out what if we join two captures
@@ -104,6 +192,30 @@ class Capture(object):
         self.ctx['operations'].append(t)
         return var
 
+    def as_datapipe(self):
+        return DataFrameTracedOps(
+            self.ctx['variables'][0].source_datapipe, self)
+
+    def raw_iterator(self):
+        # print('iterator called')
+        return self.as_datapipe().__iter__()
+
+    def __iter__(self):
+        # print('iterator called')
+        return self.dataframes_per_row().as_datapipe().__iter__()
+
+    def batch(self, batch_size = 10):
+        # print('batch called', batch_size)
+        dp = self.dataframes_per_row().dataframes_concat(batch_size)
+        dp = dp.as_datapipe().batch(1)
+        dp._dp_contains_dataframe = True
+        return dp
+
+    def shuffle(self, *args, **kwargs):
+        return self.dataframes_shuffle(*args, **kwargs)
+
+    def filter(self, *args, **kwargs):
+        return self.dataframes_filter(*args, **kwargs)
 
 class CaptureF(Capture):
     # kwargs = {}
@@ -159,13 +271,9 @@ class CaptureVariable(Capture):
             op.execute()
         return self.calculated_value
 
-    def as_datapipe(self):
-        return DataFrameTracedOps(
-            self.ctx['variables'][0].source_datapipe, self)
 
 
-    def __iter__(self):
-        return self.as_datapipe().__iter__()
+
 
 
 

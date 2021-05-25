@@ -17,6 +17,31 @@ from ... import Tensor, Generator
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
+class DataChunk(object):
+    def __init__(self, items, is_df = False):
+        self.items = items
+        # self.is_df = is_df
+
+    def __getitem__(self, key):
+        return self.items[key]
+
+    def __len__(self):
+        return len(self.items)
+
+    def as_str(self, indent = ''):
+        res = indent + "--- chunk ---\n"
+        # if self.is_df:
+        #     res += " (of DataFrames)\n"
+        for i in self.items:
+            if isinstance(i, DataChunk):
+                res += i.as_str(indent + '  ')
+            else:
+                res += str(i) + "\n"
+        res += indent + "--- end of chunk ---\n"
+        return res        
+
+    def __str__(self):
+        return self.as_str()
 
 class Dataset(Generic[T_co]):
     r"""An abstract class representing a :class:`Dataset`.
@@ -176,13 +201,25 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
         def class_function(cls, source_dp, *args, **kwargs):
+            # this hack here instead of typing
+
+
             # print('runtime call of ', function_name)
             result_pipe = cls(source_dp, *args, **kwargs)
-            if is_df or isinstance(source_dp, DFIterDataPipe):
-                if function_name != 'trace_as_dataframe':
+            if is_df or isinstance(source_dp, DFIterDataPipe) or getattr(result_pipe, '_dp_cast_to_df', False):
+                if function_name != 'trace_as_dataframe' and function_name != 'batch':
                     result_pipe = result_pipe.trace_as_dataframe()
             # else:
                 # print(function_name, 'will not return DF')
+            if getattr(result_pipe, '_dp_nesting_depth', None) is None: 
+                # print('setting dp_depth', type(source_dp), type(result_pipe))
+                # depth = getattr(source_dp, '_dp_nesting_depth', None)
+
+                result_pipe._dp_nesting_depth = getattr(source_dp, '_dp_nesting_depth', None)
+            if getattr(result_pipe, '_dp_contains_dataframe', None) is None: 
+                # print('setting _dp_contains_dataframe', type(source_dp), type(result_pipe))
+                # depth = getattr(source_dp, '_dp_nesting_depth', None)
+                result_pipe._dp_contains_dataframe = getattr(source_dp, '_dp_contains_dataframe', None)
             return result_pipe
         function = functools.partial(class_function, cls_to_register)
         IterableDataset.functions[function_name] = function

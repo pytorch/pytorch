@@ -1,7 +1,9 @@
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
+
+import pandas
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -31,20 +33,43 @@ class FilterIterDataPipe(MapIterDataPipe):
 
     def _merge(self, data, mask):
         result = []
+        # print('merging')
+        # print(data)
+        # print(mask)
+        # print('merging start')
+        is_df = False
+
         for i,b in zip(data, mask):
-            if isinstance(b, list):
+            if isinstance(b, DataChunk):
                 t = self._merge(i, b)
                 if len(t) > 0 or not self.drop_empty_batches:
                     result.append(t)
+            if isinstance(b, pandas.core.series.Series):
+                is_df = True
+                # print('iterating inside DF')
+                for idx,mask in enumerate(b):
+                    # print(mask)
+                    # print(row)
+                    if mask:
+                        result.append(i[idx:idx+1])
             else:
+                # print('combining', type(b), type(i))
+                # print(b)
+                # print(i)
                 if b:
                     result.append(i)
-        return result
+
+        if is_df:
+            if len(result) > 0:
+                return DataChunk([pandas.concat(result)])
+            else:
+                return DataChunk([])
+        return DataChunk(result)
 
     def __iter__(self) -> Iterator[T_co]:
         res: bool
         for data in self.datapipe:
-            if self.nesting_level == 0 or not isinstance(data, list):
+            if self.nesting_level == 0:
                 res = self.fn(data, *self.args, **self.kwargs)
                 if not isinstance(res, bool):
                     raise ValueError("Boolean output is required for "
@@ -53,7 +78,11 @@ class FilterIterDataPipe(MapIterDataPipe):
                     yield data
             else:
                 mask = self._apply(data, self.nesting_level, self.fn, self.args, self.kwargs)
+                # print(mask)
                 merged = self._merge(data, mask)
+                # print('merge resutl')
+                # print(merged)
+                # print('done')
                 if len(merged) > 0 or not self.drop_empty_batches:
                     yield merged
                 
