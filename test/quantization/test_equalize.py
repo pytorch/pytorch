@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.quantization.fuse_modules import fuse_modules
 
 import torch.quantization._equalize as _equalize
 
@@ -93,3 +94,95 @@ class TestEqualizeEager(QuantizationTestCase):
 
         input = torch.randn(20, 3)
         self.assertEqual(chain1(input), chain2(input))
+
+    def test_equalize_fused_convrelu(self):
+        ''' Checks to see if eager mode equalization supports fused
+        ConvReLU2d models
+
+        A model with 3 ConvReLU2d is constructed. Next, the conv2d and relu
+        layers are fused together and adjacent conv2d layers have cross-layer
+        equalization applied. Finally, we ensure that the channels have been
+        equalized and that the equalized and unequalized versions of the model
+        yield the same output given the same input
+        '''
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(3, 3, 1).to(dtype=torch.float)
+                self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
+                self.conv2 = nn.Conv2d(3, 3, 1).to(dtype=torch.float)
+                self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
+                self.conv3 = nn.Conv2d(3, 3, 1).to(dtype=torch.float)
+                self.relu3 = nn.ReLU(inplace=False).to(dtype=torch.float)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.relu1(x)
+                x = self.conv2(x)
+                x = self.relu2(x)
+                x = self.conv3(x)
+                x = self.relu3(x)
+                return x
+
+        model = M()
+
+        fused_model1 = fuse_modules(model, [['conv1', 'relu1'], ['conv2', 'relu2'], ['conv3', 'relu3']])
+        fused_model2 = copy.deepcopy(fused_model1)
+
+        _equalize.equalize(fused_model1, [['conv1', 'conv2'], ['conv2', 'conv3']], 1e-6)
+        conv1 = self.getModule(fused_model1, 'conv1')[0]
+        conv2 = self.getModule(fused_model1, 'conv2')[0]
+        conv3 = self.getModule(fused_model1, 'conv3')[0]
+
+        self.checkChannelsEqualized(conv1.weight, conv2.weight, 0, 1)
+        self.checkChannelsEqualized(conv2.weight, conv3.weight, 0, 1)
+
+        input = torch.randn(3, 3, 1, 1)
+        self.assertEqual(fused_model1(input), fused_model2(input))
+        self.assertEqual(fused_model1(input), model(input))
+
+    def test_equalize_fused_linearrelu(self):
+        ''' Checks to see if eager mode equalization supports fused
+        LinearReLU models
+
+        A model with 3 LinearReLU is constructed. Next, the linear and relu
+        layers are fused together and adjacent linear layers have cross-layer
+        equalization applied. Finally, we ensure that the channels have been
+        equalized and that the equalized and unequalized versions of the model
+        yield the same output given the same input
+        '''
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(3, 4)
+                self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
+                self.linear2 = nn.Linear(4, 5)
+                self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
+                self.linear3 = nn.Linear(5, 6)
+                self.relu3 = nn.ReLU(inplace=False).to(dtype=torch.float)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.relu1(x)
+                x = self.linear2(x)
+                x = self.relu2(x)
+                x = self.linear3(x)
+                x = self.relu3(x)
+                return x
+
+        model = M()
+
+        fused_model1 = fuse_modules(model, [['linear1', 'relu1'], ['linear2', 'relu2'], ['linear3', 'relu3']])
+        fused_model2 = copy.deepcopy(fused_model1)
+
+        _equalize.equalize(fused_model1, [['linear1', 'linear2'], ['linear2', 'linear3']], 1e-6)
+        linear1 = self.getModule(fused_model1, 'linear1')[0]
+        linear2 = self.getModule(fused_model1, 'linear2')[0]
+        linear3 = self.getModule(fused_model1, 'linear3')[0]
+
+        self.checkChannelsEqualized(linear1.weight, linear2.weight, 0, 1)
+        self.checkChannelsEqualized(linear2.weight, linear3.weight, 0, 1)
+
+        input = torch.randn(20, 3)
+        self.assertEqual(fused_model1(input), fused_model2(input))
+        self.assertEqual(fused_model1(input), model(input))
