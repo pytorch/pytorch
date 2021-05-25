@@ -64,26 +64,22 @@ const std::string shape_compute_functions =
 // which natively have List[int] inputs
 // TODO: consider storing shape compute graph directly on operator,
 // and merge into native_functions.yaml
-// TODO: we are matching on exact string here, which is brittle and can fail in
-// non-obvious ways, e.g., you have to return (Tensor) instead of Tensor. It
-// would be nice to use something like OperatorMap<T> like `OperatorSet` but for
-// mapping Operators to T
-// TODO: if a unary function has an equivalent inplace operation, then the shape
-// function must be an identity. We could add those automatically.
 
-// clang-format off
-std::unordered_map<std::string,  std::string> schema_string_to_function_name_mappings = {
-    {"aten::mul.Tensor(Tensor self, Tensor other) -> (Tensor)", "broadcast"},
-    {"aten::div.Tensor(Tensor self, Tensor other) -> (Tensor)", "broadcast"},
-    {"aten::gt.Tensor(Tensor self, Tensor other) -> (Tensor)", "broadcast"},
-    {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> (Tensor)", "broadcast_one_unused_input"},
-    {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> (Tensor)", "unary_two_unused_inputs"},
-    {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> (Tensor)", "adaptive_avg_pool2d"},
-};
-// clang-format on
-
-std::unordered_map<std::string, std::shared_ptr<Graph>>
-    schema_string_to_function_graph;
+// wrapped in function so that operators get registered before map is
+// initialized
+static const OperatorMap<std::string>& get_schema_to_function_graph() {
+  // clang-format off
+  static const OperatorMap<std::string> schema_to_function_graph{
+      {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
+      {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
+      {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
+      {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
+      {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
+  };
+  // clang-format on
+  return schema_to_function_graph;
+}
 
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     cached_schema_to_graph;
@@ -94,12 +90,13 @@ CompilationUnit compilation_unit;
 void loadModule(const CompilationUnit& module) {
   std::unordered_map<std::string, std::shared_ptr<Graph>> reused_functions;
 
-  for (const auto& pair : schema_string_to_function_name_mappings) {
-    const std::string& schema_string = pair.first;
+  for (const auto& pair :
+       get_schema_to_function_graph().getAllKeysAndValues()) {
+    const FunctionSchema* schema_string = &pair.first->schema();
     const std::string& shape_compute_function_name = pair.second;
 
     if (reused_functions.count(shape_compute_function_name)) {
-      schema_string_to_function_graph[schema_string] =
+      cached_schema_to_graph[schema_string] =
           reused_functions[shape_compute_function_name];
       continue;
     }
@@ -109,7 +106,7 @@ void loadModule(const CompilationUnit& module) {
     std::shared_ptr<Graph> graph = shape_compute_function.graph();
     Inline(*graph);
 
-    schema_string_to_function_graph[schema_string] = graph;
+    cached_schema_to_graph[schema_string] = graph;
     reused_functions[shape_compute_function_name] = graph;
   }
 }
@@ -124,24 +121,17 @@ void loadFunctions() {
 c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
-  if (schema_string_to_function_graph.size() == 0) {
+  if (cached_schema_to_graph.size() == 0) {
     loadFunctions();
   }
 
+  GRAPH_DEBUG("Trying to find schema: " + schema_str);
   auto cache_it = cached_schema_to_graph.find(&schema);
   if (cache_it != cached_schema_to_graph.end()) {
     return cache_it->second;
-  } else {
-    auto schema_str = toString(schema);
-    GRAPH_DEBUG("Trying to find schema: " + schema_str);
-
-    auto sym_shape_it = schema_string_to_function_graph.find(schema_str);
-
-    if (sym_shape_it != schema_string_to_function_graph.end()) {
-      cached_schema_to_graph[&schema] = sym_shape_it->second;
-      return sym_shape_it->second;
-    }
   }
+  GRAPH_DEBUG("Could not find schema: " + schema_str);
+
   return c10::nullopt;
 }
 
