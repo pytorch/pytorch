@@ -251,7 +251,7 @@ class ComputeOperators:
         sig = sig_group.most_faithful_signature()
         return sig.name()
 
-    def invocation(self, f: NativeFunction):
+    def invocation(self, f: NativeFunction) -> str:
         faithful_op_name = self.most_faithful_name(f)
         args = tuple(arg.name for arg in dispatcher.arguments(f.func))
         # Method only

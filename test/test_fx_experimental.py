@@ -1313,7 +1313,8 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
-        op_skip = {'einsum',
+        op_skip = {'contiguous',
+                   'einsum',
                    'expand',
                    'expand_as',
                    'gradient',
@@ -1404,7 +1405,7 @@ class TestNormalizeOperators(JitTestCase):
                 if isinstance(v, torch.Tensor):
                     param_names.append(k)
                     param_values.append(v)
-                    fx_args.append(k)
+                    fx_args.append(f'{k} = {k}')
                 else:
                     fx_args.append(f'{k} = {repr(v)}')
 
