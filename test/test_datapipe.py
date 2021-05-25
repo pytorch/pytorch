@@ -11,17 +11,17 @@ import zipfile
 
 from unittest import skipIf
 from typing import (
-    Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
-    TypeVar, Set, Union)
+    Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
+    Type, TypeVar, Set, Union)
 
 import torch
 import torch.nn as nn
+import torch.utils.data.datapipes as dp
+
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import (
     IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
     argument_validation, runtime_validation_disabled, runtime_validation)
-
-import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler)
