@@ -269,11 +269,8 @@ class Reducer {
       Reducer::BucketReplica& replica,
       size_t intra_bucket_index,
       bool global_unused);
-  // Check layout of grad and bucket_view before calling copy_grad_to_bucket
+  // Check layout of grad and bucket_view before calling copying grad to bucket.
   void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
-  // If gradient_as_bucket_view_ is false, before allreduce buckets,
-  // copy grads to buckets.
-  void copy_grad_to_bucket(const at::Tensor& grad, at::Tensor& bucket_view);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //
@@ -289,10 +286,8 @@ class Reducer {
     // Number of replicas to be marked done before this bucket is ready.
     size_t pending;
 
-    // Keep work handle around when this set of buckets is being reduced.
-    c10::intrusive_ptr<c10d::ProcessGroup::Work> work;
-
-    // Keep future work handle around if DDP comm hook is registered.
+    // Keep future work handle around DDP comm hook. If no hook is registered, a
+    // temporary vanilla allreduce hook will be used.
     c10::intrusive_ptr<torch::jit::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.

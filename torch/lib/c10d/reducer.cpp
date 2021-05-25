@@ -22,6 +22,19 @@ inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
 }
 
+// FIXME: Should make this a static method of C++ comm hook, and call it there.
+std::vector<at::Tensor> parseHookResult(const c10::IValue& result) {
+  TORCH_INTERNAL_ASSERT(
+      result.isTensor() || result.isTensorList(),
+      "expected the hook result is either a Tensor or a TensorList");
+
+  if (result.isTensor()) {
+    return {result.toTensor()};
+  }
+
+  return result.toTensorVector();
+}
+
 constexpr int kUnsetDivFactor = -1;
 
 } // namespace
@@ -285,19 +298,6 @@ void Reducer::check_grad_layout(
   }
 }
 
-void Reducer::copy_grad_to_bucket(
-    const at::Tensor& grad,
-    at::Tensor& bucket_view) {
-  // See Note [DDP Communication Hook]
-  if (comm_hook_ == nullptr) {
-    auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / divFactor_);
-    // Divides while copying into the bucket view.
-    at::mul_out(bucket_view, grad, wrapped);
-  } else {
-    bucket_view.copy_(grad);
-  }
-}
-
 void Reducer::mark_variable_ready_dense(size_t variable_index) {
   const auto replica_index = 0;
   const auto& bucket_index = variable_locators_[variable_index];
@@ -321,7 +321,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // to bucket_view. If grad has already been set as views of buckets in
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
-        this->copy_grad_to_bucket(grad, bucket_view);
+        bucket_view.copy_(grad);
         if (gradient_as_bucket_view_) {
           // Let grad point to bucket_view buffer.
           grad = bucket_view;
@@ -338,10 +338,10 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // Gradient is undefined. When find_unused_parameters=True, ensure it is
       // not marked as locally used, otherwise we will be allreducing zero's
       // instead of not touching .grad field of parameter.
-      if (this->dynamic_graph_find_unused() || this->static_graph_first_iteration()) {
+      if (this->dynamic_graph_find_unused() ||
+          this->static_graph_first_iteration()) {
         TORCH_CHECK(
-            local_used_maps_[0][variable_index]
-                    .item<int>() == 0,
+            local_used_maps_[0][variable_index].item<int>() == 0,
             "Encountered gradient which is undefined, but still allreduced by DDP reducer. This indicates a bug in DDP implementation, please report a bug with a repro to PyTorch.");
       }
       bucket_view.zero_();
@@ -800,20 +800,18 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
     //
     tensors.push_back(replica.contents);
   }
-  // See Note [DDP Communication Hook]
-  // TODO(@sinannasir): merge `work` and `future_work`. Related to GH Issue
-  // #41266.
+  GradBucket grad_bucket(
+      next_bucket_,
+      tensors[0],
+      // Since currently we do not support single-process multiple-device
+      // mode, we can assume only one replica in the bucket.
+      bucket.replicas[0].offsets,
+      bucket.replicas[0].lengths,
+      bucket.replicas[0].sizes_vec);
   if (comm_hook_ == nullptr) {
-    bucket.work = process_group_->allreduce(tensors);
+    AllReduceCommHook allreduce_hook(process_group_.get());
+    bucket.future_work = allreduce_hook.runHook(grad_bucket);
   } else {
-    GradBucket grad_bucket(
-        next_bucket_,
-        tensors[0],
-        // Since currently we do not support single-process multiple-device
-        // mode, we can assume only one replica in the bucket.
-        bucket.replicas[0].offsets,
-        bucket.replicas[0].lengths,
-        bucket.replicas[0].sizes_vec);
     bucket.future_work = comm_hook_->runHook(grad_bucket);
   }
 }
@@ -1364,33 +1362,25 @@ void Reducer::finalize_backward() {
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
-    if (comm_hook_ == nullptr) {
-      TORCH_INTERNAL_ASSERT(
-          bucket.work,
-          "Expected bucket.work not to be null. "
-          "This may indicate that allreduce hooks were not properly installed.");
-      bucket.work->wait();
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          bucket.future_work,
-          "Expected bucket.future_work not to be null. "
-          "This may indicate that communication hook was not properly installed.");
-      bucket.future_work->wait();
-
-      auto future_result =
-          comm_hook_->parseHookResult(bucket.future_work->value());
-
-      for (size_t i = 0; i < future_result.size(); i++) {
-        auto& replica = bucket.replicas[i];
-        if (bucket.expect_sparse_gradient) {
-          replica.contents.copy_(future_result[i]);
-        } else {
-          // Reinitialize only `bucket_views_out` with the future_result by
-          // following the same logic in `initialize_buckets`.
-          populate_bucket_views_out(replica, future_result[i]);
-        }
+    TORCH_INTERNAL_ASSERT(
+        bucket.future_work,
+        "Expected bucket.future_work not to be null. "
+        "This may indicate that communication hook was not properly installed.");
+    bucket.future_work->wait();
+    auto future_result = comm_hook_ == nullptr
+        ? parseHookResult(bucket.future_work->value())
+        : comm_hook_->parseHookResult(bucket.future_work->value());
+    for (size_t i = 0; i < future_result.size(); i++) {
+      auto& replica = bucket.replicas[i];
+      if (bucket.expect_sparse_gradient) {
+        replica.contents.copy_(future_result[i]);
+      } else {
+        // Reinitialize only `bucket_views_out` with the future_result by
+        // following the same logic in `initialize_buckets`.
+        populate_bucket_views_out(replica, future_result[i]);
       }
     }
+
     if (!bucket.expect_sparse_gradient) {
       // We don't need to finalize the sparse bucket since the sparse grad and
       // the bucket essentially point to the same storage. As a result, once
