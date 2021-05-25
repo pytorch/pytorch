@@ -774,6 +774,8 @@ Tensor gelu_cpu(const Tensor& self) {
       c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::unary_op(Y, self);
+  auto grain_size = self.numel() / at::get_num_threads();
+  it.set_grain_size_for_mt(grain_size);
   GeluKernel(kCPU, it);
   return Y;
 }
