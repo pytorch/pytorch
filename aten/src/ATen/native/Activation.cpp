@@ -102,6 +102,10 @@ TORCH_META_FUNC(hardsigmoid) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(hardsigmoid_backward) (const Tensor& grad_output, const Tensor& self) {
+  build_borrowing_binary_op(maybe_get_output(), grad_output, self);
+}
+
 static inline void softshrink_check(const Scalar& lambd) {
   double lamb = lambd.to<double>();
   TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
@@ -211,6 +215,12 @@ TORCH_IMPL_FUNC(hardsigmoid_out) (
   hardsigmoid_stub(device_type(), *this);
 }
 
+TORCH_IMPL_FUNC(hardsigmoid_backward_out) (
+  const Tensor& grad_output, const Tensor& self, const Tensor& grad_input
+) {
+  hardsigmoid_backward_stub(device_type(), *this);
+}
+
 TORCH_IMPL_FUNC(softshrink_out) (
   const Tensor & self, const Scalar& lambd, const Tensor& result
 ) {
@@ -239,13 +249,6 @@ Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, const Sc
   Tensor result;
   auto iter = TensorIterator::borrowing_binary_op(result, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
-  return iter.output();
-}
-
-Tensor hardsigmoid_backward(const Tensor& grad_output, const Tensor& self) {
-  Tensor result;
-  auto iter = TensorIterator::borrowing_binary_op(result, grad_output, self);
-  hardsigmoid_backward_stub(iter.device_type(), iter);
   return iter.output();
 }
 

@@ -8079,10 +8079,16 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
 
-- func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
+- func: hardsigmoid_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA: hardsigmoid_backward
+    CPU, CUDA: hardsigmoid_backward_out
+
+- func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
+  structured_delegate: hardsigmoid_backward.grad_input
+  python_module: nn
 
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
