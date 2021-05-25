@@ -1,4 +1,4 @@
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -13,11 +13,13 @@ from torch.testing._internal.common_device_type import ops, onlyCPU
 from torch.testing._internal.common_methods_invocations import op_db
 from common_utils import parameterized, instantiate_parameterized_methods
 import types
+from torch.utils._pytree import tree_flatten, tree_unflatten
 from functorch import grad
 from functorch._src.eager_transforms import _as_tuple
 
 # Version of autograd.grad that handles outputs that don't depend on inputs
 def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True):
+    inputs, inputs_spec = tree_flatten(inputs)
     result = [torch.zeros_like(inp) for inp in inputs]
     diff_argnums = tuple(i for i, inp in enumerate(inputs) if inp.requires_grad)
     inputs = tuple(inputs[i] for i in diff_argnums)
@@ -39,29 +41,23 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
                         for gi, inp in zip(grad_inputs, inputs))
     for idx, grad_inp in zip(diff_argnums, grad_inputs):
         result[idx] = grad_inp
-    return tuple(result)
+    return tree_unflatten(result, inputs_spec)
 
 
 class TestGradOpInfo(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_op(self, device, dtype, op):
-        print(op.name)
         op_skip = {
             '__getitem__',
             '__rpow__',
-            'float_power',
-            'index_put',
             'linalg.cholesky',
             'linalg.inv',
             'linalg.matrix_norm',
             'linalg.matrix_power',
             'linalg.norm',
             'nanquantile',
-            'pow',
-            # CUDA-only failures
-            'einsum',
-            'linalg.multi_dot',
             'quantile',
+            'tensor_split',
         }
         if op.name in op_skip:
             self.skipTest("Skipped; Expected failures")
@@ -81,27 +77,39 @@ class TestGradOpInfo(TestCase):
         for sample in samples:
             # TODO: test in-place
             if is_inplace(op.get_op()):
+                self.skipTest("Skipped! NYI: inplace-testing not supported.")
                 continue
 
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
-            # TODO: make this work on multilpe outputs
-            result = op(sample.input, *sample.args, **sample.kwargs)
-            if not isinstance(result, torch.Tensor):
-                continue
+            def diff_arg(arg):
+                if is_iterable_of_tensors(arg):
+                    if all([a.requires_grad for a in arg]):
+                        return True
+                    if all([not a.requires_grad for a in arg]):
+                        return False
+                    raise RuntimeError("NYI: The test runner can't handle this")
+                return isinstance(arg, Tensor) and arg.requires_grad
 
-            diff_argnums = tuple(i for i, arg in enumerate(args)
-                                 if isinstance(arg, Tensor) and
-                                 torch.is_floating_point(arg))
+            diff_argnums = tuple(i for i, arg in enumerate(args) if diff_arg(arg))
+            assert len(diff_argnums) > 0
             diff_args = tuple(args[i] for i in diff_argnums)
 
             def wrapped_fn(*args, **kwargs):
                 result = op(*args, **kwargs)
-                return result.sum()
+                if sample.output_process_fn_grad is not None:
+                    result = sample.output_process_fn_grad(result)
+
+                # Reduce into single value for grad
+                if isinstance(result, torch.Tensor):
+                    return result.sum()
+                result = sum([res.sum() for res in result])
+                return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
             expected = _autograd_grad(_as_tuple(wrapped_fn(*args, **kwargs)), diff_args)
+
             self.assertEqual(result, expected)
 
 only_for = ("cpu", "cuda")
