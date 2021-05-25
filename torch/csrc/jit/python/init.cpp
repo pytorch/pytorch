@@ -176,7 +176,6 @@ void initJITBindings(PyObject* module) {
             }
             return shapeComputeGraphForSchema(n->schema());
           })
-          []() { return ShapeSymbol::newSymbol().value(); })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
@@ -388,11 +387,19 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_custom_pattern_based_rewrite_graph",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             std::shared_ptr<Graph> g) {
+             std::shared_ptr<Graph> g,
+             const std::vector<std::pair<std::string, std::string>>&
+                 value_name_pairs) {
             SubgraphRewriter subgraph_rewriter;
-            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
+            subgraph_rewriter.RegisterRewritePattern(
+                pattern, fused_node_name, value_name_pairs);
             subgraph_rewriter.runOnGraph(g);
-          })
+          },
+          py::arg("pattern"),
+          py::arg("fused_node_name"),
+          py::arg("g"),
+          py::arg("value_name_pairs") =
+              std::vector<std::pair<std::string, std::string>>())
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
