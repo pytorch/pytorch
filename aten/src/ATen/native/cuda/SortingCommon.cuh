@@ -1,3 +1,4 @@
+#pragma once
 #include <ATen/ATen.h>
 #include <ATen/native/SortingUtils.h>
 #include <assert.h>
@@ -13,6 +14,7 @@
 namespace at {
 namespace native {
 
+// Is this questionable namespace pollution?
 #if defined(__HIP_PLATFORM_HCC__)
 constexpr int MAX_BLOCK_SIZE = 256;
 

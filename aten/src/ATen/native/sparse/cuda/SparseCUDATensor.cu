@@ -3,11 +3,12 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
+#include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/accumulate.h>
-#include <THC/THCTensorSort.cuh>
+#include <ATen/native/cuda/SortingCommon.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>

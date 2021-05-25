@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/native/cuda/SortingCommon.cuh>
 
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
+#include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 

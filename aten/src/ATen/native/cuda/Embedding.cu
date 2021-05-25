@@ -7,7 +7,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/execution_policy.h>
@@ -15,7 +14,7 @@
 #include <thrust/unique.h>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
-
+#include <ATen/native/cuda/SortingCommon.cuh>
 
 namespace at { namespace native {
 
