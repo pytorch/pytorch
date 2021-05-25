@@ -9,8 +9,7 @@ from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
                                  TensorOptionsArguments,
-                                 DeviceCheckType, Argument,
-                                 assert_never, BaseType, BaseTy,
+                                 DeviceCheckType, Argument, assert_never,
                                  is_cuda_dispatch_key, BackendIndex,
                                  gets_generated_out_inplace_wrapper)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
@@ -20,7 +19,6 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      DispatcherSignature)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.cpp as cpp
-import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
