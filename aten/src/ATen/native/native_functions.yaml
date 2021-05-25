@@ -3552,6 +3552,8 @@
 - func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: silu_backward.grad_input
   python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: math_silu_backward
 
 - func: sigmoid(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
