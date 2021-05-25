@@ -155,13 +155,14 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
     // of the underlying Tensor and that this Tensor is the sole owner of its grad_fn.
     // In this case, the only way to get a new reference to the grad_fn is by using
     // this python object, which requires the GIL to be accessed.
+    // Note that this is only valid as long as user don't share non-owning references
+    // across different threads (which is crazy and should never be done).
 
     if (tensor.use_count() == 1) {
       auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
-        int blah = grad_fn? -1:grad_fn.use_count();
         if (grad_fn && grad_fn.use_count() == 1) {
           // All Node can have a pyobj (stored in "pyobj_")
           Py_VISIT(grad_fn->pyobj());

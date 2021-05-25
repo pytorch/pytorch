@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
                                                   suppress_warnings, slowTest,
                                                   load_tests,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  TEST_WITH_ROCM,
+                                                  TEST_WITH_ROCM, disable_gc,
                                                   gradcheck, gradgradcheck, make_tensor)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
@@ -5339,21 +5339,26 @@ for shape in [(1,), ()]:
     def test_custom_function_cycle(self):
         class MyFn(Function):
             @staticmethod
-            def forward(ctx, x):
+            def forward(ctx, x, metadata):
                 x = x.clone()
-                # BAD!!! Don't do this ever!!
-                ctx.x = x
+                ctx.meta = metadata
+                ctx.save_for_backward(x)
                 return x
 
             @staticmethod
             def backward(ctx, gO):
-                self.assertEqual(ctx.x, 3.14)
-                return gO * ctx.x
+                x, = ctx.saved_tensors
+                self.assertEqual(x, 3.14)
+                self.assertEqual(ctx.meta["foo"], 3.14)
+                return gO * x, None
 
         def get_refs(with_backward):
             a = torch.tensor(3.14, requires_grad=True)
 
-            out = MyFn.apply(a)
+            metadata = {}
+            out = MyFn.apply(a, metadata)
+
+            metadata["foo"] = out
 
             if with_backward:
                 out.sum().backward()
@@ -5361,14 +5366,16 @@ for shape in [(1,), ()]:
 
             return torch._C._WeakTensorRef(out)
 
-        ref = get_refs(False)
-        self.assertFalse(ref.expired())
+        with disable_gc():
+            ref = get_refs(False)
+            self.assertFalse(ref.expired())
         gc.collect()
         self.assertTrue(ref.expired())
 
         # The backward clears the saved_variables but not the __dict__
-        ref = get_refs(True)
-        self.assertFalse(ref.expired())
+        with disable_gc():
+            ref = get_refs(True)
+            self.assertFalse(ref.expired())
         gc.collect()
         self.assertTrue(ref.expired())
 
