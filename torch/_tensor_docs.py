@@ -2942,7 +2942,7 @@ Example::
 
 add_docstr_all('repeat_interleave',
                r"""
-repeat_interleave(repeats, dim=None) -> Tensor
+repeat_interleave(repeats, dim=None, *, output_size=None) -> Tensor
 
 See :func:`torch.repeat_interleave`.
 """)

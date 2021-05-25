@@ -1,8 +1,8 @@
 #pragma once
 
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 
-#include <c10/macros/Export.h>
 #include <istream>
 #include <memory>
 #include <unordered_map>
