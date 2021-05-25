@@ -1361,20 +1361,20 @@ Tensor matmul(
     const Tensor& tensor1,
     const Tensor& tensor2) {
   NoNamesGuard guard;
-  auto dim_tensor1 = tensor1.dim();
-  auto dim_tensor2 = tensor2.dim();
-  auto has_out = out_opt.has_value();
-  Tensor out = out_opt.value_or(Tensor());
+  const auto dim_tensor1 = tensor1.dim();
+  const auto dim_tensor2 = tensor2.dim();
+  const auto has_out = out_opt.has_value();
+  const auto out = at::borrow_from_optional_tensor(out_opt);
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return has_out ? at::native::dot_out(tensor1, tensor2, out) : tensor1.dot(tensor2);
+    return has_out ? at::native::dot_out(tensor1, tensor2, *out) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
+    return has_out ? at::mv_out(*out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+    return has_out ? at::mm_out(*out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
+    return has_out ? at::mm_out(*out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
@@ -1390,9 +1390,9 @@ Tensor matmul(
 
     // fold the batch into the first dimension
     Tensor t1 = tensor1.expect_contiguous()->view({-1, size1[size1.size() - 1]});
-    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
+    Tensor output = has_out ? at::_unsafe_view(at::mm_out(*out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
-    return has_out ? out.set_(output) : output;
+    return has_out ? out->set_(output) : output;
   } else if ((dim_tensor1 == 1 || dim_tensor1 == 2) && dim_tensor2 >= 3) {
     // optimization: transpose the inner dimensions of the arguments, call
     // matmul on the swapped arguments, then transpose the inner dimensions
@@ -1407,14 +1407,14 @@ Tensor matmul(
 
     if (dim_tensor1 == 2) {
       Tensor res = res_T.transpose(-1, -2).contiguous();
-      return has_out ? out.set_(res) : res;
+      return has_out ? out->set_(res) : res;
     }
     else {
       std::vector<int64_t> shape = tensor2.sizes().slice(0, dim_tensor2 - 2).vec();
       shape.push_back(p);
 
       Tensor res = res_T.reshape(shape).contiguous();
-      return has_out ? out.set_(res) : res;
+      return has_out ? out->set_(res) : res;
     }
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
@@ -1457,10 +1457,10 @@ Tensor matmul(
       output_shape.push_back(p);
     }
 
-    Tensor output = has_out ? at::_unsafe_view(at::bmm_out(out, tensor1_expanded, tensor2_expanded), output_shape)
+    Tensor output = has_out ? at::_unsafe_view(at::bmm_out(*out, tensor1_expanded, tensor2_expanded), output_shape)
                             : at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
 
-    return has_out ? out.set_(output) : output;
+    return has_out ? out->set_(output) : output;
   }
 
  AT_ERROR("both arguments to matmul need to be at least 1D, but they are ",
