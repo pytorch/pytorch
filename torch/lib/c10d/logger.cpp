@@ -260,12 +260,11 @@ void Logger::set_runtime_stats_and_log() {
 
   if (reducer_->replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
-    // Cuda time stats are only collected for single process single
-    // device and single device module.
-    if (reducer_->replicas_.size() > 1 || reducer_->is_multi_device_module_) {
+    // Cuda time stats are only collected for single device modules.
+    if (reducer_->is_multi_device_module_) {
       TORCH_WARN_ONCE(
-          "Cuda time stats are not collected for single process "
-          "multiple device program or multi-device modules.");
+        "Cuda time stats are not collected for multi-device modules."
+      );
       return;
     }
     // Check events on the replicas_[0][0].device().
