@@ -293,7 +293,7 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
   });
 }
 
-void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const Scalar& threshold_) {
+void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_backward_cuda", [&]() {
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
@@ -328,7 +328,7 @@ void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& sca
   });
 }
 
-void elu_backward_kernel(TensorIterator& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
+void elu_backward_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "elu_backward_cuda", [&]() {
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
@@ -380,7 +380,7 @@ void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   });
 }
 
-void leaky_relu_backward_kernel(TensorIterator& iter, const Scalar& negval_) {
+void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "leaky_relu_backward_cuda", [&]() {
     auto negval = negval_.to<scalar_t>();
     gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -440,7 +440,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void hardsigmoid_backward_kernel(TensorIterator& iter) {
+void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_backward_cuda", [&]() {
     using T_ACC = acc_type<scalar_t, true>;
     const T_ACC zero(0.0f);
