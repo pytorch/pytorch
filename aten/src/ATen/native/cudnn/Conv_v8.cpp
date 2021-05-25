@@ -77,7 +77,7 @@ void filterEngineConfigs(
 
 struct CacheKey {
   ConvolutionParams params;
-  cudnnBackendDescriptorType_t dir;
+  cudnnBackendDescriptorType_t operation;
   uint8_t input_alignment;
   uint8_t weight_alignment;
   uint8_t output_alignment;
@@ -88,9 +88,9 @@ std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, ParamsHash
 
 }
 
-void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t dir, const Tensor& convoutput, const Tensor& convinput1, const Tensor& convinput2, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& convoutput, const Tensor& convinput1, const Tensor& convinput2, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
    setConvolutionParams(&key.params, convinput1, convinput2, padding, stride, dilation, groups, deterministic, allow_tf32);
-   key.dir = dir;
+   key.operation = operation;
    key.input_alignment = getAlignment(convinput1);
    key.output_alignment = getAlignment(convoutput);
    key.weight_alignment = getAlignment(convinput2);
@@ -147,7 +147,6 @@ void get_configs(cudnn_frontend::EngineConfigList& filtered_configs, cudnnHandle
   filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, x.scalar_type());
 }
 
-
 void try_filtered_configs(const cudnn_frontend::EngineConfigList filtered_configs, const CacheKey key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
   for (auto &cfg : filtered_configs) {
     try {
@@ -159,30 +158,43 @@ void try_filtered_configs(const cudnn_frontend::EngineConfigList filtered_config
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
 
+void run_single_conv(const cudnnBackendDescriptorType_t operation,
+  const Tensor& x, const Tensor& y, const Tensor& w,
+  IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+  bool benchmark, bool deterministic, bool allow_tf32) {
+  TORCH_CHECK(!benchmark, "not supported yet");
+  if (operation == CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR && y.numel() == 0) {
+    return;
+  } else if (operation == CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR && x.numel() == 0) {
+    return;
+  } else if (operation == CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR && w.numel() == 0) {
+    return;
+  }
+
+  cudnnHandle_t handle = getCudnnHandle();
+
+  CacheKey key;
+  get_cachekey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
+  auto search = engine_cache.find(key);
+  if (search != engine_cache.end()) {
+    run_conv_cfg(handle, x, y, w, search->second);
+    return;
+  }
+
+  cudnn_frontend::EngineConfigList filtered_configs;
+  get_configs(filtered_configs, handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
+
+  try_filtered_configs(filtered_configs, key, handle, x, y, w);
+}
 
 void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32)
 {
-  TORCH_CHECK(!benchmark, "not supported yet");
-  if (output.numel() == 0) {
-    return;
-  }
-  cudnnHandle_t handle = getCudnnHandle();
-
-  CacheKey key;
-  get_cachekey(key, CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, output, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  auto search = engine_cache.find(key);
-  if (search != engine_cache.end()) {
-    run_conv_cfg(handle, input, output, weight, search->second);
-    return;
-  }
-
-  cudnn_frontend::EngineConfigList filtered_configs;
-  get_configs(filtered_configs, handle, CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, input, output, weight, key, padding, stride, dilation, deterministic, allow_tf32);
-
-  try_filtered_configs(filtered_configs, key, handle, input, output, weight);
+  run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
+    input, output, weight, padding, stride, dilation, groups,
+    benchmark, deterministic, allow_tf32);
 }
 
 void raw_cudnn_convolution_backward_input_out(
@@ -191,47 +203,18 @@ void raw_cudnn_convolution_backward_input_out(
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
-  TORCH_CHECK(!benchmark, "not supported yet");
-  if (grad_input.numel() == 0) {
-    return;
-  }
-  cudnnHandle_t handle = getCudnnHandle();
-
-  CacheKey key;
-  get_cachekey(key, CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR, grad_output, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  auto search = engine_cache.find(key);
-  if (search != engine_cache.end()) {
-    run_conv_cfg(handle, grad_input, grad_output, weight, search->second);
-    return;
-  }
-
-  cudnn_frontend::EngineConfigList filtered_configs;
-  get_configs(filtered_configs, handle, CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR, grad_input, grad_output, weight, key, padding, stride, dilation, deterministic, allow_tf32);
-  try_filtered_configs(filtered_configs, key, handle, grad_input, grad_output, weight);
+  run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
+    grad_input, grad_output, weight, padding, stride, dilation, groups,
+    benchmark, deterministic, allow_tf32);
 }
 
 void raw_cudnn_convolution_backward_weight_out(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
-  TORCH_CHECK(!benchmark, "not supported yet");
-  if (grad_weight.numel() == 0) {
-    return;
-  }
-  cudnnHandle_t handle = getCudnnHandle();
-
-  CacheKey key;
-  get_cachekey(key, CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, grad_output, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-
-  auto search = engine_cache.find(key);
-  if (search != engine_cache.end()) {
-    run_conv_cfg(handle, input, grad_output, grad_weight, search->second);
-    return;
-  }
-
-  cudnn_frontend::EngineConfigList filtered_configs;
-  get_configs(filtered_configs, handle, CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, input, grad_output, grad_weight, key, padding, stride, dilation, deterministic, allow_tf32);
-  try_filtered_configs(filtered_configs, key, handle, input, grad_output, grad_weight);
+  run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
+    input, grad_output, grad_weight, padding, stride, dilation, groups,
+    benchmark, deterministic, allow_tf32);
 }
 
 }} // at::native
