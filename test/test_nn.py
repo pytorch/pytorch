@@ -8280,6 +8280,12 @@ class TestNN(NNTestCase):
                 _test_gelu(n, m, torch.float64, True)
                 _test_gelu(n, m, torch.float64, False)
 
+        # Tesst multi threaded
+        num_threads = torch.get_num_threads()
+        torch.set_num_threads(4)
+        _test_gelu(32, 32, torch.float32, False)
+        torch.set_num_threads(num_threads)
+
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
