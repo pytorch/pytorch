@@ -89,23 +89,6 @@ void selective_copy(
   }
 }
 
-bool check_bytecode_version(
-    const std::vector<c10::IValue>& bytecode_values,
-    const int64_t expect_bytecode_version) {
-  if (bytecode_values.empty()) {
-    TORCH_WARN("Empty bytecode archive.");
-    return false;
-  } else if (bytecode_values[0] != expect_bytecode_version) {
-    TORCH_WARN(
-        "Expect bytecode version ",
-        expect_bytecode_version,
-        ", but it gets ",
-        bytecode_values[0]);
-    return false;
-  }
-  return true;
-}
-
 // Copy all content from reader to stringstream
 void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
