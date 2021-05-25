@@ -1285,6 +1285,57 @@ TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
   testLiteModuleCompareResultTensors(m, inputs);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
+  Module a("A");
+  a.define(R"(
+    def bar(self, x, y):
+      return x + y
+  )");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"(
+    def foo(self, x, y):
+      return self.A0.bar(x, y) + 2
+  )");
+  Module c("C");
+  c.register_module("B0", b);
+  c.define(R"(
+    def forward(self, x, y):
+      return self.B0.foo(x, y) + 3
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({2, 4}));
+  inputs.emplace_back(torch::rand({13, 9}));
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, ExtraFilesMap(), true);
+  auto lite_m = _load_for_mobile(ss);
+  std::string error_pattern = R"(
+  Module hierarchy:top(C).B0(B).A0(A).aten::add
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.B0.foo(x, y) + 3
+             ~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in foo
+
+    def foo(self, x, y):
+      return self.A0.bar(x, y) + 2
+             ~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in bar
+
+    def bar(self, x, y):
+      return x + y
+             ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
+}
+
 namespace {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg =
