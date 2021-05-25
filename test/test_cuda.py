@@ -1908,13 +1908,16 @@ torch.cuda.synchronize()
                 for grad in grads:
                     self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
 
-        # Passing lists with mismatched devices or dtypes to a raw
-        # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
-        with self.assertRaisesRegex(RuntimeError, r"must have the same dtype"):
-            torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(dtype=torch.float16)],
-                                                             found_inf,
-                                                             inv_scale)
+        # When passing lists with mismatched dtypes to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call,
+        # it's expected to fall back to single-tensor TensorIterator kernel.
+        grads = [g.clone(), g.to(dtype=torch.float16)]
+        torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
+        for grad in grads:
+            self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
 
+        # Passing lists with mismatched devices to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
         if TEST_MULTIGPU:
             with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
                 torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
