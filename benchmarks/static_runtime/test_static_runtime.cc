@@ -352,6 +352,15 @@ TEST(StaticRuntime, IndividualOps_to) {
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::Preserve);
 }
 
+TEST(StaticRuntime, IndividualOps_FullLike) {
+  auto a = at::randn({2, 3});
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  std::vector<IValue> args {a, 4, dtype, at::kStrided, cpu, false,
+                            c10::MemoryFormat::Contiguous};
+  testStaticRuntime(full_like_script, args);
+}
+
 TEST(StaticRuntime, LongModel) {
   torch::jit::Module mod = getLongScriptModel();
   auto a = torch::randn({2, 2});
