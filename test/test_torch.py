@@ -4198,6 +4198,10 @@ else:
 
     def test_repeat_interleave(self, device):
         y = torch.tensor([[1, 2], [3, 4]], device=device)
+        # exercise single argument function signature
+        temp = y.repeat_interleave(2)
+        self.assertEqual(torch.Size([8]), temp.size())
+
         for dtype in [torch.int, torch.long]:
             lengths = torch.tensor([1, 2], dtype=dtype, device=device)
             output_size = torch.sum(lengths)
