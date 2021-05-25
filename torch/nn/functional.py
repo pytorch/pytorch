@@ -1906,7 +1906,7 @@ def mish(input: Tensor, inplace: bool = False) -> Tensor:
         \text{Mish}(x) = x * \text{Tanh}(\text{Softplus}(x))
 
     .. note::
-        See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`.
+        See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`_
 
     See :class:`~torch.nn.Mish` for more details.
     """
