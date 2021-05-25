@@ -30,7 +30,9 @@ class BackportManager final {
 
   std::unordered_map<
       int64_t,
-      std::function<bool(std::stringstream&, std::stringstream&)>>&
+      std::function<bool(
+          caffe2::serialize::PyTorchStreamReader&,
+          caffe2::serialize::PyTorchStreamWriter&)>>&
   bytecodeBackportFunctions() const;
 
   bool backport(
@@ -47,8 +49,9 @@ class BackportManager final {
   // Registry of backport functions.
   void registerBytecodeBackportFunction(
       const int64_t from_version,
-      const std::function<bool(std::stringstream&, std::stringstream&)>&
-          backport_function);
+      const std::function<bool(
+          caffe2::serialize::PyTorchStreamReader&,
+          caffe2::serialize::PyTorchStreamWriter&)>& backport_function);
 };
 
 } // namespace jit
