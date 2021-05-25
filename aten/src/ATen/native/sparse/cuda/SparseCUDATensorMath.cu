@@ -77,7 +77,7 @@ void s_addmm_out_csr_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n,
           if(dense.stride(0) == 1 && dense.stride(1) == dense.size(0)) {
             transpose_dense = 'n';
             dense_ = dense;
-          } else if(dense.stride(1) == 1 && dense.stride(0) != dense.size(1)) {
+          } else if(dense.stride(1) == 1 && dense.stride(0) == dense.size(1)) {
             transpose_dense = 't';
             dense_ = dense;
           } else {

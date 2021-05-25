@@ -93,6 +93,8 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
     at::mul_out(r, t, at::scalar_tensor(beta, r.options()));
     return r;
   }
+  // TODO: Check if cusparseSpMM can use 64-bit indices
+  // https://docs.nvidia.com/cuda/cusparse/index.html
   auto col_indices = sparse.col_indices().to(at::kInt);
   auto crow_indices = sparse.crow_indices().to(at::kInt);
   auto values = sparse.values();

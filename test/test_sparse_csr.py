@@ -2,9 +2,9 @@ import torch
 import random
 import warnings
 import unittest
+import itertools
 from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
-import itertools
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU, onlyCUDA)
 
@@ -298,35 +298,6 @@ class TestSparseCSR(TestCase):
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device)
         self.assertEqual(csr.to_dense(), dense)
 
-    @dtypes(torch.float, torch.double)
-    def test_add(self, device, dtype):
-        def _test_spadd_shape(nnz, shape):
-            x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
-            y = torch.randn(*shape, dtype=dtype, device=device)
-            r = random.random()
-
-            res = torch.add(y, x, alpha=r)
-            expected = y + r * x.to_dense()
-            self.assertEqual(res, expected)
-
-            # Non contiguous dense tensor
-            s = list(shape)
-            s[0] = shape[-1]
-            s[-1] = shape[0]
-            y = torch.randn(*s, dtype=torch.double, device=device)
-            y.transpose_(0, len(s) - 1)
-            r = random.random()
-
-            res = torch.add(y, x, alpha=r)
-            expected = y + r * x.to_dense()
-
-            self.assertEqual(res, expected)
-
-        _test_spadd_shape(10, [100, 100])
-        _test_spadd_shape(0, [100, 100])
-        _test_spadd_shape(10, [100, 1])
-        _test_spadd_shape(10, [1, 100])
-
     @coalescedonoff
     @dtypes(torch.double)
     def test_coo_to_csr_convert(self, device, dtype, coalesced):
@@ -440,6 +411,35 @@ class TestSparseCSR(TestCase):
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
+
+    @dtypes(torch.float, torch.double)
+    def test_add(self, device, dtype):
+        def _test_spadd_shape(nnz, shape):
+            x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
+            y = torch.randn(*shape, dtype=dtype, device=device)
+            r = random.random()
+
+            res = torch.add(y, x, alpha=r)
+            expected = y + r * x.to_dense()
+            self.assertEqual(res, expected)
+
+            # Non contiguous dense tensor
+            s = list(shape)
+            s[0] = shape[-1]
+            s[-1] = shape[0]
+            y = torch.randn(*s, dtype=torch.double, device=device)
+            y.transpose_(0, len(s) - 1)
+            r = random.random()
+
+            res = torch.add(y, x, alpha=r)
+            expected = y + r * x.to_dense()
+
+            self.assertEqual(res, expected)
+
+        _test_spadd_shape(10, [100, 100])
+        _test_spadd_shape(0, [100, 100])
+        _test_spadd_shape(10, [100, 1])
+        _test_spadd_shape(10, [1, 100])
 
     @dtypes(*torch.testing.floating_types())
     def test_coo_csr_conversion(self, device, dtype):
