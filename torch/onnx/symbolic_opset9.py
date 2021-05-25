@@ -2953,6 +2953,9 @@ def _weight_norm(g, weight_v, weight_g, dim):
 def dim(g, self):
     """Implement the dim functionality available for a pytorch tensor in ONNX"""
     # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
+    sizes = sym_help._get_tensor_sizes(self)
+    if sizes is not None:
+        return g.op("Constant", value_t=torch.tensor(len(sizes)))
     shape = g.op("Shape", self)
     return g.op("Size", shape)
 
