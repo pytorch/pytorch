@@ -10,6 +10,7 @@
 #include <ATen/TensorIteratorInternal.h>
 
 #include <c10/util/irange.h>
+#include <c10/util/SmallBuffer.h>
 
 namespace at {
 
@@ -17,6 +18,24 @@ using DimMask = TensorIteratorBase::DimMask;
 using PtrVector = TensorIteratorBase::PtrVector;
 using loop2d_t = TensorIteratorBase::loop2d_t;
 using StrideVector = TensorIteratorBase::StrideVector;
+
+namespace {
+
+void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
+  for (size_t i = 0; i < operands.size(); ++i) {
+    ptrs[i] = static_cast<char*>(operands[i].data);
+  }
+}
+
+void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
+  for (int64_t dim = 0; dim < ndim; ++dim) {
+    for (size_t arg = 0; arg < operands.size(); ++arg) {
+      *strides++ = operands[arg].stride_bytes[dim];
+    }
+  }
+}
+
+}
 
 /// Construction
 TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output) {
@@ -583,10 +602,8 @@ SmallVector<char*, 4> TensorIteratorBase::get_data_ptrs(ArrayRef<char*> base, In
 }
 
 SmallVector<char*, 4> TensorIteratorBase::get_base_ptrs() const {
-  auto ptrs = SmallVector<char*, 4>();
-  for (int i = 0; i < ntensors(); i++) {
-    ptrs.push_back((char*)data_ptr(i));
-  }
+  auto ptrs = SmallVector<char*, 4>(ntensors());
+  at::get_base_ptrs(ptrs.data(), operands_);
   return ptrs;
 }
 
@@ -653,12 +670,8 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
 }
 
 StrideVector TensorIteratorBase::get_strides() const {
-  StrideVector strides;
-  for (int dim = 0; dim < ndim(); dim++) {
-    for (int arg = 0; arg < ntensors(); arg++) {
-      strides.push_back(operands_[arg].stride_bytes[dim]);
-    }
-  }
+  StrideVector strides(ndim() * ntensors());
+  at::get_strides(strides.data(), operands_, ndim());
   return strides;
 }
 
@@ -666,7 +679,21 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
   if (range.size() == 0) {
     return;
   }
-  at::internal::serial_for_each(shape_, get_strides(), get_base_ptrs(), loop, range);
+
+  const auto ntensors = this->ntensors();
+  const auto ndim = this->ndim();
+
+  c10::SmallBuffer<char*, 4> ptrs(ntensors);
+  c10::SmallBuffer<int64_t, 8> strides(ntensors * std::max(2, ndim));
+
+  at::get_base_ptrs(ptrs.data(), operands_);
+  at::get_strides(strides.data(), operands_, ndim);
+  if (ndim < 2) {
+    std::fill(strides.begin() + ntensors * ndim, strides.end(), 0);
+  }
+
+  at::internal::serial_for_each(
+      shape_, strides, ptrs.data(), ptrs.size(), loop, range);
 }
 
 bool TensorIteratorBase::is_trivial_1d() const {
@@ -1409,8 +1436,13 @@ SplitUntil32Bit::iterator SplitUntil32Bit::end() const {
 DimCounter::DimCounter(IntArrayRef shape, Range range)
   : shape(shape)
   , range(range)
-  , values(shape.size(), 0)
+  , values(shape.size())
   , offset(range.begin) {
+  std::fill(values.begin(), values.end(), 0);
+  if (range.begin == 0) {
+    return;
+  }
+
   int64_t linear_offset = range.begin;
   int64_t ndim = values.size();
   for (const auto dim : c10::irange(ndim)) {

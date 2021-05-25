@@ -36,7 +36,16 @@ class SmallBuffer {
     }
   }
 
+  T& operator[] (int64_t idx) {
+    return data()[idx];
+  }
+  const T& operator[] (int64_t idx) const {
+    return data()[idx];
+  }
   T* data() {
+    return data_;
+  }
+  const T* data() const {
     return data_;
   }
   size_t size() const {
@@ -45,7 +54,13 @@ class SmallBuffer {
   T* begin() {
     return data_;
   }
+  const T* begin() const {
+    return data_;
+  }
   T* end() {
+    return data_ + size_;
+  }
+  const T* end() const {
     return data_ + size_;
   }
 };
