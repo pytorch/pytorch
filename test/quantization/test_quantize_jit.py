@@ -349,7 +349,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 self.bias = bias
 
             def forward(self, x):
-                return F.linear(x, self.weight, self.bias)
+                res = torch.matmul(x, self.weight.t())
+                if self.bias is not None:
+                    res.add_(self.bias)
+                return res
 
         x1 = torch.rand(3)
         w1 = torch.rand(5, 3)
@@ -367,12 +370,19 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         ):
             bias = b if has_bias else None
             model = torch.jit.trace(FunctionalLinear(weight, bias), [x])
+            for node in model.graph.nodes():
+                if node.kind() == "aten::matmul":
+                    source_range_1 = node.sourceRange()
             torch._C._jit_pass_fuse_linear(model.graph)
+            for node in model.graph.nodes():
+                if node.kind() == "aten::linear":
+                    source_range_2 = node.sourceRange()
             FileCheck().check("aten::linear").run(model.graph)
             check_not = ["aten::matmul", "aten::addmm", "aten::add_", "aten::t("]
             for cn in check_not:
                 FileCheck().check_not(cn).run(model.graph)
             # make sure it runs
+            self.assertTrue(source_range_1 == source_range_2)
             model(x)
 
         # check matmuls are not fused
