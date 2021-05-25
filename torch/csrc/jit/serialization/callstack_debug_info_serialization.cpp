@@ -19,10 +19,17 @@ c10::IValue InlinedCallStackSerializer::serialize(
   if (cs_it != serialized_inlined_callstack_.end()) {
     return cs_it->second;
   }
-  // Inlined callstack pointer is serialized as tuple of 3 elements
-  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack)}
+  // Inlined callstack pointer is serialized as tuple of 4 elements
+  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack),
+  // function name} Note function name is serialized separately because Function
+  // is only in memory structure. It gets constructed by JIT from serialized
+  // Code at runtime. As such even InlinedCallStack get constructed by JIT at
+  // runtime during graph inlining. However, we introduce
+  // serialization/deserialization of it in order to generate callstack debug
+  // information, _when_ equivalent InlinedCallStack cannot be constructed at
+  // runtime. For example, in lite interpreter or delegated backend.
   std::vector<c10::IValue> elements;
-  elements.reserve(3);
+  elements.reserve(4);
   elements.emplace_back(
       serialize_module_instance_info(cs_ptr->module_instance()));
   int64_t source_range_tag{kInvalidSourceRangeTag};
@@ -39,6 +46,16 @@ c10::IValue InlinedCallStackSerializer::serialize(
         serialize(cs_ptr->callee().value(), source_range_tags));
   } else {
     elements.emplace_back(c10::IValue());
+  }
+  if (cs_ptr->function()) {
+    elements.emplace_back(cs_ptr->function()->name());
+  } else {
+    auto fn_name = cs_ptr->function_name();
+    if (!fn_name.empty()) {
+      elements.emplace_back(fn_name);
+    } else {
+      elements.emplace_back("FunctionName_UNKNOWN");
+    }
   }
   c10::IValue serialized_cs = c10::ivalue::Tuple::create(elements);
   serialized_inlined_callstack_[cs_ptr] = serialized_cs;
@@ -123,8 +140,9 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
   }
 
   auto tup_elems = tup->elements();
-  TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
-  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack)}
+  TORCH_INTERNAL_ASSERT(tup_elems.size() == 4);
+  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack),
+  // function name}
   auto module_instance_info =
       deserialize_module_instance_info(tup_elems[0], cu);
   int64_t source_range_tag = tup_elems[1].toInt();
@@ -140,6 +158,7 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
     source_range = source_range_it->second;
   }
   auto callee = deserialize(tup_elems[2], source_range_map, cu);
+  auto function_name = tup_elems[3].toStringRef();
   InlinedCallStackPtr cs_ptr;
   if (callee) {
     cs_ptr = c10::make_intrusive<InlinedCallStack>(
@@ -148,6 +167,7 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
     cs_ptr = c10::make_intrusive<InlinedCallStack>(
         nullptr, source_range, module_instance_info);
   }
+  cs_ptr->set_function_name(function_name);
   cached_inlined_callstacks_[tup] = cs_ptr;
   // Invoking move constructor
   // It is not clear if copy-ellision can happen since

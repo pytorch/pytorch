@@ -150,7 +150,7 @@ Traceback of TorchScript (most recent call last):
       return self.A0.forward(x, y) + self.B0.forward(x)
              ~~~~~~~~~~~~~~~ <--- HERE
 
-  File "<string>", line 5, in FunctionName_UNKNOWN
+  File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
@@ -163,7 +163,7 @@ Traceback of TorchScript (most recent call last):
       return self.AA0.forward(x, y) + 3
              ~~~~~~~~~~~~~~~~ <--- HERE
 
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in forward
 
     def forward(self, x, y):
       return x + y
