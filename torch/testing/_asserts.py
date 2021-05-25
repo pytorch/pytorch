@@ -401,7 +401,7 @@ def _check_tensors_close(
         actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
     )
     if exc:
-        raise exc
+        return exc
     actual, expected = _equalize_attributes(actual, expected)
 
     if (rtol == 0.0) and (atol == 0.0):
