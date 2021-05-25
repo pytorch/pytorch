@@ -14,13 +14,15 @@ namespace jit {
 namespace {
 
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
-    const DebugInfoPair& source_callstack) {
+    const DebugInfoTuple& source_callstack) {
   constexpr size_t kSourceRange = 1;
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
-  const SourceRange& range = source_callstack.first;
-  InlinedCallStackPtr callstack_ptr = source_callstack.second;
+  const SourceRange& range =
+      std::get<kDebugInfoTupleSourceRangeIndex>(source_callstack);
+  InlinedCallStackPtr callstack_ptr =
+      std::get<kDebugInfoTupleInlinedCSIndex>(source_callstack);
   std::string module_info;
   if (!callstack_ptr) {
     // If not cs then top level node
@@ -70,7 +72,7 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
 // will be TopM(A).MyModule(B).SomeModule(C).Conv2d(conv)
 // Source level stack information will be from model source code.
 std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
-    const std::vector<DebugInfoPair>& source_callstacks,
+    const std::vector<DebugInfoTuple>& source_callstacks,
     const std::string& root_scope_string,
     const std::string& top_module_type_name) {
   std::vector<StackEntry> stack_entries;
@@ -82,6 +84,12 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
     stack_entries.insert(stack_entries.end(), entries.begin(), entries.end());
     module_info += debug_info_pair.second;
   }
+  // Only last entry in the callstack will have a node name of interest.
+  // Rest are likely CallMethod/CallFunction nodes
+  auto last_entry = source_callstacks.back();
+  const std::string& node_name =
+      std::get<kDebugInfoTupleNodeNameIndex>(last_entry);
+  module_info += "." + node_name;
   std::ostringstream ss;
   ss << "Module hierarchy:" << module_info << "\n";
   format_stack_trace(ss, stack_entries);
@@ -177,7 +185,7 @@ std::pair<std::string, std::string> MobileDebugTable::
     getSourceDebugModuleHierarchyInfo(
         const std::vector<int64_t>& debug_handles,
         const std::string& top_module_type_name) const {
-  std::vector<DebugInfoPair> debug_infos;
+  std::vector<DebugInfoTuple> debug_infos;
   bool debug_handle_not_found{false};
   for (auto it = debug_handles.rbegin(); it != debug_handles.rend(); ++it) {
     auto debug_handle = *it;

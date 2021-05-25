@@ -71,7 +71,7 @@ c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
 }
 
 std::vector<char> CallStackDebugInfoPickler::pickle(
-    const std::unordered_map<int64_t, DebugInfoPair>& callstack_ptrs,
+    const std::unordered_map<int64_t, DebugInfoTuple>& callstack_ptrs,
     const SourceRangeTagMap& source_range_tags) {
   std::vector<c10::IValue> ivalues;
   for (const auto& it : callstack_ptrs) {
@@ -85,15 +85,20 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
     elements.reserve(3);
     elements.emplace_back(debug_handle);
     int64_t source_range_tag{kInvalidSourceRangeTag};
-    const SourceRange& sr = it.second.first.findSourceRangeThatGenerated()
-        ? it.second.first.findSourceRangeThatGenerated().value()
-        : it.second.first;
+    const auto source_range =
+        std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
+    const SourceRange& sr = source_range.findSourceRangeThatGenerated()
+        ? source_range.findSourceRangeThatGenerated().value()
+        : source_range;
     auto sr_it = source_range_tags.find(sr);
     if (sr_it != source_range_tags.end()) {
       source_range_tag = sr_it->second;
     }
     elements.emplace_back(source_range_tag);
-    elements.emplace_back(css_.serialize(it.second.second, source_range_tags));
+    elements.emplace_back(std::get<kDebugInfoTupleNodeNameIndex>(it.second));
+    const auto inlined_cs_ptr =
+        std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
+    elements.emplace_back(css_.serialize(inlined_cs_ptr, source_range_tags));
     c10::IValue tuple = c10::ivalue::Tuple::create(elements);
     ivalues.emplace_back(tuple);
   }
@@ -190,23 +195,24 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   return cached_module_instance_info_[tup];
 }
 
-ska::flat_hash_map<int64_t, DebugInfoPair> CallStackDebugInfoUnpickler::
+ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
     unpickle(
         at::DataPtr&& data,
         size_t size,
         const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
         const std::shared_ptr<CompilationUnit>& cu) {
   auto ival = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
-  ska::flat_hash_map<int64_t, DebugInfoPair> callstack_ptrs;
+  ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptrs;
   auto& ivalues = ival.toTuple()->elements();
   for (auto& val : ivalues) {
     const auto tup_elems = val.toTuple()->elements();
     TORCH_CHECK(
-        tup_elems.size() == 3,
-        "Pickled map must have three elements: "
-        "debug_handle, source_range_tag, IValue(inlined_call_stack)");
+        tup_elems.size() == 4,
+        "Pickled map must have four elements: "
+        "debug_handle, source_range_tag, op name, IValue(inlined_call_stack)");
     int64_t debug_handle = tup_elems[0].toInt();
     int64_t source_range_tag = tup_elems[1].toInt();
+    const std::string& node_name = tup_elems[2].toStringRef();
     auto source_range_it = source_range_map.find(source_range_tag);
     TORCH_CHECK(
         source_range_it != source_range_map.end(),
@@ -215,8 +221,10 @@ ska::flat_hash_map<int64_t, DebugInfoPair> CallStackDebugInfoUnpickler::
     TORCH_CHECK(
         callstack_ptrs.count(debug_handle) == 0,
         "Debug handles should be unique.");
-    callstack_ptrs[debug_handle] = std::make_pair(
-        source_range, csds_.deserialize(tup_elems[2], source_range_map, cu));
+    callstack_ptrs[debug_handle] = std::make_tuple(
+        source_range,
+        node_name,
+        csds_.deserialize(tup_elems[3], source_range_map, cu));
   }
   return callstack_ptrs;
 }

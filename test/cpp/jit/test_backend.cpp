@@ -190,7 +190,7 @@ TEST(BackendTestDebugInfo, TestCompiler) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(backend_with_compiler_demoLoweredModule)
+  Module hierarchy:top(backend_with_compiler_demoLoweredModule).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 5, in FunctionName_UNKNOWN
                 typed_inputs: List[Any] = [x, h, ]
@@ -244,7 +244,7 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(backend_with_compiler_demoLoweredModule).A0(A)
+  Module hierarchy:top(backend_with_compiler_demoLoweredModule).A0(A).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 5, in FunctionName_UNKNOWN
                 typed_inputs: List[Any] = [x, y, ]
@@ -337,7 +337,7 @@ TEST(
    *
    */
   std::string error_pattern = R"(
-  Module hierarchy:top(backend_with_compiler_demoLoweredModule).B0(B).A0(A)
+  Module hierarchy:top(backend_with_compiler_demoLoweredModule).B0(B).A0(A).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 5, in FunctionName_UNKNOWN
                 typed_inputs: List[Any] = [x, y, ]
@@ -424,7 +424,7 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule)
+  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in FunctionName_UNKNOWN
 
@@ -545,7 +545,7 @@ TEST(
    *
    *  */
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)
+  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in FunctionName_UNKNOWN
 
