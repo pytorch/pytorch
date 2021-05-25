@@ -25,21 +25,23 @@ namespace jit {
 
 namespace {
 bool validate_debug_info(
-    const DebugInfoPair& pre_serialize,
-    const DebugInfoPair& post_serialize) {
-  auto sr1 = pre_serialize.first;
-  auto sr2 = post_serialize.first;
+    const DebugInfoTuple& pre_serialize,
+    const DebugInfoTuple& post_serialize) {
+  auto sr1 = std::get<kDebugInfoTupleSourceRangeIndex>(pre_serialize);
+  auto sr2 = std::get<kDebugInfoTupleSourceRangeIndex>(post_serialize);
   if (sr1 != sr2) {
     return false;
   }
-  if (!pre_serialize.second.defined()) {
-    return !post_serialize.second.defined();
+  auto csptr1 = std::get<kDebugInfoTupleInlinedCSIndex>(pre_serialize);
+  auto csptr2 = std::get<kDebugInfoTupleInlinedCSIndex>(post_serialize);
+  if (!csptr1.defined()) {
+    return !csptr2.defined();
   }
-  if (!post_serialize.second.defined()) {
+  if (!csptr2.defined()) {
     return false;
   }
-  auto vec1 = pre_serialize.second->vec();
-  auto vec2 = post_serialize.second->vec();
+  auto vec1 = csptr1->vec();
+  auto vec2 = csptr2->vec();
   if (vec1.size() != vec2.size()) {
     return false;
   }
