@@ -133,14 +133,14 @@ struct functor_name {                                                \
 #define OP_CUSTOM_FUNCTOR(function, op_name, functor_name)                \
 std::vector<Tensor> foreach_tensor_##op_name##_cuda(TensorList tensors) { \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors)) {                                   \
+    if (!can_use_fast_route(tensors) || has_integral_tensor(tensors, /* includeBool */ true)) { \
         return at::native::foreach_tensor_##op_name##_slow(tensors);      \
     }                                                                     \
     return function<functor_name>(tensors);                               \
 }                                                                         \
 void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors)) {                                   \
+    if (!can_use_fast_route(tensors) || has_integral_tensor(tensors, /* includeBool */ true)) { \
         return at::native::foreach_tensor_##op_name##_slow_(tensors);     \
     }                                                                     \
                                                                           \
@@ -155,9 +155,9 @@ OP_CUSTOM_FUNCTOR(function, op_name, functor_name); \
 OP(floating_half_bfloat16, erfc, Erfc);
 OP(floating_half_bfloat16, expm1, Expm1);
 OP(floating_half, lgamma, Lgamma);
-OP(floating_half, trunc, Truncf);
-OP(floating_half, floor, Floor);
-OP(floating_half, ceil, Ceil);
+OP(floating_half_bfloat16, trunc, Truncf);
+OP(floating_half_bfloat16, floor, Floor);
+OP(floating_half_bfloat16, ceil, Ceil);
 
 OP(floating_complex_half_bfloat16, acos, Acos);
 OP(floating_complex_half_bfloat16, asin, Asin);
@@ -205,8 +205,8 @@ struct Reciprocal {
 };
 
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sigmoid, Sigmoid)
-OP_CUSTOM_FUNCTOR(floating_half, round, Round)
-OP_CUSTOM_FUNCTOR(floating_half, frac, Trunc)
+OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
+OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
@@ -247,13 +247,9 @@ struct Abs {
 
 std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    bool has_complex = false;
-    for (auto t : tensors) {
-        if (at::isComplexType(t.scalar_type())) {
-            has_complex = true;
-        }
-    }
-
+    const bool has_complex = std::any_of(
+        tensors.begin(), tensors.end(),
+        [](const auto & t) { return at::isComplexType(t.scalar_type()); });
     if (!can_use_fast_route(tensors) || has_complex) {
         return at::native::foreach_tensor_abs_slow(tensors);
     }
@@ -263,13 +259,9 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
 
 void foreach_tensor_abs_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    bool has_complex = false;
-    for (auto t : tensors) {
-        if (at::isComplexType(t.scalar_type())) {
-            has_complex = true;
-        }
-    }
-
+    const bool has_complex = std::any_of(
+        tensors.begin(), tensors.end(),
+        [](const auto & t) { return at::isComplexType(t.scalar_type()); });
     if (!can_use_fast_route(tensors) || has_complex) {
         return at::native::foreach_tensor_abs_slow_(tensors);
     }

@@ -57,7 +57,6 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
   //  2) waiting for processRpc to finish.
-  auto retFuture = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
@@ -66,14 +65,12 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
         deserializeRequest(request), request.type());
     auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
 
-    rrefsReadyFuture->addCallback(
+    auto retFuture = rrefsReadyFuture->thenAsync(
         [this,
-         retFuture,
          // std::function must be copyable, hence hae to cast the unique_ptr to
          // a shared_ptr here.
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
-         id = request.id(),
          ctx = std::move(ctx)](JitFuture& /* unused */) mutable {
           c10::MultiStreamGuard guard(
               ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
@@ -92,8 +89,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
-          processRpcWithErrors(
-              *rpc, messageType, id, retFuture, std::move(ctx));
+          auto retFuture =
+              processRpcWithErrors(*rpc, messageType, std::move(ctx));
 
           // Response message has been sent at this moment, this post-response
           // work doesn't affect RPC trip time.
@@ -106,125 +103,73 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
             profiler::processglobal::pushResultRecursive(
                 serverProcessGlobalProfilerStateStackEntryPtr, event_lists);
           }
-        });
+
+          return retFuture;
+        },
+        c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+
+    auto retFutureWithMessageId = retFuture->then(
+        [id = request.id()](JitFuture& future) {
+          c10::intrusive_ptr<Message> message =
+              future.value().toCustomClass<Message>();
+          message->setId(id);
+          return message;
+        },
+        c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+
+    return retFutureWithMessageId;
   } catch (std::exception& e) {
-    retFuture->markCompleted(handleError(e, request.type(), request.id()));
     rrefContext.clearRecordedPendingRRefsOnError();
+    return asFuture(handleError(e, request.type(), request.id()));
   }
-  return retFuture;
 }
 
-void RequestCallbackNoPython::processRpcWithErrors(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
   try {
-    processRpc(rpc, messageType, messageId, responseFuture, std::move(ctx));
+    return processRpc(rpc, messageType, std::move(ctx));
   } catch (std::exception& e) {
-    responseFuture->markCompleted(handleError(e, messageType, messageId));
+    // Pass a dummy message ID since it will be overwritten anyways.
+    return asFuture(handleError(e, messageType, -1));
   }
 }
 
-void RequestCallbackNoPython::processScriptCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& /* unused */) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
+    RpcCommandBase& rpc) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
-  auto& stack = scriptCall.stackRef();
+
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
-  processScriptCallOp(scriptCall, markComplete, stack);
+  auto future = runJitOperator(*scriptCall.op(), scriptCall.stackRef());
+
+  return future->then(
+      [](JitFuture& future) {
+        return c10::make_intrusive<Message>(
+            ScriptResp(future.value()).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
-bool RequestCallbackNoPython::processScriptCallOp(
-    ScriptCall& scriptCall,
-    const std::function<void(Message)>& markComplete,
-    std::vector<at::IValue>& stack) const {
-  if (scriptCall.hasOp()) {
-    scriptCall.op()->getOperation()(&stack);
-    TORCH_INTERNAL_ASSERT(
-        stack.size() == 1,
-        "Return value of a builtin operator or a "
-        "TorchScript function should be a single IValue, got a vector of "
-        "size ",
-        stack.size());
-    markComplete(std::move(ScriptResp(std::move(stack.front()))).toMessage());
-    return true;
-  }
-  return false;
-}
-
-TypePtr RequestCallbackNoPython::getScriptRemoteCallType(
-    ScriptRemoteCall& scriptRemoteCall) const {
-  TORCH_CHECK(
-      scriptRemoteCall.hasOp(),
-      "Only supports the case where ScriptCall has an op");
-  return scriptRemoteCall.op()->schema().returns()[0].type();
-}
-
-void RequestCallbackNoPython::processPythonCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& /* unused */) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonCall(
+    RpcCommandBase& rpc) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::processPythonRemoteCall(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonRemoteCall(
     RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& /* unused */,
     std::shared_ptr<LazyStreamContext> /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::processScriptRemoteCall(
-    ScriptRemoteCall& scriptRemoteCall,
-    const std::function<void(void)>& postProcessing,
-    std::vector<at::IValue>& stack,
-    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
-  TORCH_CHECK(
-      scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
-  processScriptRemoteCallOp(scriptRemoteCall, postProcessing, stack, ownerRRef);
-}
-
-void RequestCallbackNoPython::processBaseScriptRemoteCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
-  auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
-  auto rrefId = scriptRemoteCall.retRRefId();
-  auto forkId = scriptRemoteCall.retForkId();
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
+    const RRefId& rrefId,
+    const RRefId& forkId,
+    c10::intrusive_ptr<JitFuture> valueFuture,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& ctx = RRefContext::getInstance();
 
-  auto postProcessing = [rrefId, forkId, messageId, responseFuture]() {
-    if (rrefId != forkId) {
-      // Caller is a user and callee is the owner, add fork
-      //
-      // NB: rrefId == forkId is true if and only if calling remote to
-      // self. In that case both the caller and the callee will access
-      // the OwnerRRef. Hence, on the callee side (here), it should not
-      // call addForkOfOwner as it is not a fork. To allow callee to
-      // distinguish when this request is sent to self, the caller will
-      // set forkId using rrefId (OwnerRRef does not have a forkId
-      // anyway).
-      RRefContext::getInstance().addForkOfOwner(rrefId, forkId);
-    }
-    Message m = RemoteRet(rrefId, forkId).toMessage();
-    m.setId(messageId);
-    responseFuture->markCompleted(
-        IValue(c10::make_intrusive<Message>(std::move(m))));
-  };
-
-  // scriptRemoteCall is only alive within this block, use reference to
-  // avoid copy. If the underlying code runs with a continuation, runAsync()
-  // below will std::move the appropriate portion of the stack.
-  TypePtr returnType = getScriptRemoteCallType(scriptRemoteCall);
   c10::intrusive_ptr<OwnerRRef> ownerRRef;
   if (rrefId == forkId) {
     // Creating an owner RRef on self, should already exist in owners map
@@ -233,100 +178,103 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
                               ->constValue()
                               .toRRef());
   } else {
-    ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
+    ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, valueFuture->elementType());
+    // Caller is a user and callee is the owner, add fork
+    //
+    // NB: rrefId == forkId is true if and only if calling remote to self.
+    // In that case both the caller and the callee will access the
+    // OwnerRRef. Hence, on the callee side (here), it should not call
+    // addForkOfOwner as it is not a fork. To allow callee to distinguish
+    // when this request is sent to self, the caller will set forkId using
+    // rrefId (OwnerRRef does not have a forkId anyway).
+    ctx.addForkOfOwner(rrefId, forkId);
   }
 
-  auto& stack = scriptRemoteCall.stackRef();
-  processScriptRemoteCall(scriptRemoteCall, postProcessing, stack, ownerRRef);
+  return valueFuture->then(
+      [ownerRRef, rrefId, forkId, lsctx = std::move(lsctx)](JitFuture& future) {
+        if (future.hasError()) {
+          ownerRRef->setError(future.exception_ptr());
+        } else {
+          ownerRRef->recordAllStreams(lsctx);
+          ownerRRef->setValue(future.value());
+        }
+        return c10::make_intrusive<Message>(
+            RemoteRet(rrefId, forkId).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
-bool RequestCallbackNoPython::processScriptRemoteCallOp(
-    ScriptRemoteCall& scriptRemoteCall,
-    const std::function<void(void)>& postProcessing,
-    std::vector<at::IValue>& stack,
-    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
-  if (scriptRemoteCall.hasOp()) {
-    try {
-      scriptRemoteCall.op()->getOperation()(&stack);
-    } catch (const std::exception& e) {
-      // Don't throw in this call, but rather transfer the exception
-      // to the rref.
-      ownerRRef->setError(std::current_exception());
-      postProcessing();
-      return true;
-    }
-    TORCH_INTERNAL_ASSERT(
-        stack.size() == 1,
-        "Return value of a builtin operator or a "
-        "TorchScript function should be a single IValue, got a vector of "
-        "size ",
-        stack.size());
-    ownerRRef->setValue(std::move(stack.front()));
-    postProcessing();
-    return true;
-  }
-  return false;
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
+    RpcCommandBase& rpc) const {
+  auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
+
+  TORCH_CHECK(
+      scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
+  auto future =
+      runJitOperator(*scriptRemoteCall.op(), scriptRemoteCall.stackRef());
+
+  return assignOwnerRRef(
+      scriptRemoteCall.retRRefId(),
+      scriptRemoteCall.retForkId(),
+      std::move(future),
+      /*lsctx=*/nullptr);
 }
 
-void RequestCallbackNoPython::processScriptRRefFetchCall(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
-  auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::retrieveOwnerRRef(
+    const RRefId& rrefId,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& ctx = RRefContext::getInstance();
 
-  auto futureOwner = ctx.getOwnerRRef(srf.rrefId());
+  auto rrefFuture = ctx.getOwnerRRef(rrefId);
 
-  if (futureOwner->completed()) { // optional fast-path
-    // the OwnerRRef has been created
-    const auto& rref = fromRRefInterface(futureOwner->constValue().toRRef());
-    if (rref->hasValue()) {
-      markComplete(ScriptRRefFetchRet({rref->getValue()}).toMessage());
-      return;
-    }
-  }
-
-  futureOwner->addCallback([responseFuture, messageId](JitFuture& futureOwner) {
-    const auto& rref = fromRRefInterface(futureOwner.constValue().toRRef());
-    auto whenValueSet = rref->getFuture();
-
-    // Our response is satisfied when the rpc.remote() request
-    // finishes executing on the owner.
-    whenValueSet->addCallback(
-        [responseFuture, messageId, rref](JitFuture& whenValueSet) {
-          if (whenValueSet.hasError()) {
-            responseFuture->setError(whenValueSet.exception_ptr());
-            return;
-          }
-          try {
-            Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(
-                IValue(c10::make_intrusive<Message>(std::move(m))));
-          } catch (const std::exception& /* unused */) {
-            responseFuture->setError(std::current_exception());
-          }
-        });
-  });
+  at::TypePtr type = rrefFuture->elementType();
+  TORCH_INTERNAL_ASSERT(type->kind() == at::RRefType::Kind);
+  return rrefFuture->thenAsync(
+      [lsctx](JitFuture& rrefFuture) {
+        c10::intrusive_ptr<OwnerRRef> rref =
+            fromRRefInterface(rrefFuture.value().toRRef());
+        auto valueFuture = rref->getFuture();
+        // FIXME This is a temporary fix to synchronize CUDA streams. Once the
+        // OwnerRRef's internal Future becomes CUDA-aware this will be automatic
+        // and we can remove this hack.
+        return valueFuture->then(
+            [rref, lsctx](JitFuture& future) {
+              rref->blockAllStreams(lsctx);
+              return future.value();
+            },
+            valueFuture->elementType());
+      },
+      type->cast<at::RRefType>()->getElementType());
 }
 
-void RequestCallbackNoPython::processPythonRRefFetchCall(
-    RpcCommandBase& rpc,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& /* unused */,
-    std::shared_ptr<LazyStreamContext> /* unused */) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processScriptRRefFetchCall(RpcCommandBase& rpc) const {
+  auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
+
+  auto future = retrieveOwnerRRef(srf.rrefId(), /*lsctx=*/nullptr);
+
+  return future->then(
+      [](JitFuture& future) {
+        return c10::make_intrusive<Message>(
+            ScriptRRefFetchRet({future.value()}).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processPythonRRefFetchCall(
+        RpcCommandBase& rpc,
+        std::shared_ptr<LazyStreamContext> /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::processRRefUserDelete(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefUserDelete(
+    RpcCommandBase& rpc) const {
   auto& rud = static_cast<RRefUserDelete&>(rpc);
   auto& ctx = RRefContext::getInstance();
   auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
   handleRRefDelete(deletedRRef);
-  markComplete(std::move(RRefAck()).toMessage());
+  return asFuture(RRefAck().toMessage());
 }
 
 void RequestCallbackNoPython::handleRRefDelete(
@@ -334,29 +282,26 @@ void RequestCallbackNoPython::handleRRefDelete(
   TORCH_CHECK(!rref->isPyObj(), "RRefs with python objects not supported!");
 }
 
-void RequestCallbackNoPython::processRRefChildAccept(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefChildAccept(
+    RpcCommandBase& rpc) const {
   auto& rca = static_cast<RRefChildAccept&>(rpc);
   auto& ctx = RRefContext::getInstance();
   ctx.delPendingChild(rca.forkId());
-  markComplete(std::move(RRefAck()).toMessage());
+  return asFuture(RRefAck().toMessage());
 }
 
-void RequestCallbackNoPython::processRRefForkRequest(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefForkRequest(
+    RpcCommandBase& rpc) const {
   auto& rfr = static_cast<RRefForkRequest&>(rpc);
   auto& ctx = RRefContext::getInstance();
   ctx.addForkOfOwnerIfNotPresent(rfr.rrefId(), rfr.forkId());
-  markComplete(RRefAck().toMessage());
+  return asFuture(RRefAck().toMessage());
 }
 
-void RequestCallbackNoPython::processForwardAutogradReq(
-    RpcCommandBase& rpc,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
-    std::shared_ptr<LazyStreamContext> ctx) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processForwardAutogradReq(
+        RpcCommandBase& rpc,
+        std::shared_ptr<LazyStreamContext> ctx) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
   // Need to reverse the device map for the backward pass of distributed
@@ -385,27 +330,17 @@ void RequestCallbackNoPython::processForwardAutogradReq(
 
   // Process the original RPC.
   auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-  // Make an overall future for the wrapped response.
-  auto wrappedRpcResponseFuture =
-      c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   // Kick off processing for the nested RPC command.
   // wrappedRpcResponseFuture will be a Future<T> to the result.
-  processRpc(
-      rpcWithAutograd.wrappedRpc(),
-      wrappedMessageType,
-      messageId,
-      wrappedRpcResponseFuture,
-      std::move(ctx));
+  auto wrappedRpcResponseFuture = processRpc(
+      rpcWithAutograd.wrappedRpc(), wrappedMessageType, std::move(ctx));
 
   auto fromWorkerId = rpcWithAutograd.fromWorkerId();
   // The original future needs to be marked as completed when the wrapped
   // one completes, with the autograd context information wrapped.
-  wrappedRpcResponseFuture->addCallback(
-      [responseFuture,
-       messageId,
-       fromWorkerId,
-       ctxId =
-           autogradContext->contextId()](JitFuture& wrappedRpcResponseFuture) {
+  auto responseFuture = wrappedRpcResponseFuture->then(
+      [fromWorkerId, ctxId = autogradContext->contextId()](
+          JitFuture& wrappedRpcResponseFuture) {
         // As this callback can be invoked by a different thread, we have to
         // make sure that the thread_local states in the previous thread is
         // correctly propagated.
@@ -420,24 +355,23 @@ void RequestCallbackNoPython::processForwardAutogradReq(
 
         if (wrappedRpcResponseFuture.hasError()) {
           // Propagate error to responseFuture if we had one.
-          responseFuture->setError(wrappedRpcResponseFuture.exception_ptr());
+          std::rethrow_exception(wrappedRpcResponseFuture.exception_ptr());
         } else {
           auto msg = getMessageWithAutograd(
               fromWorkerId,
               std::move(
                   *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
               MessageType::FORWARD_AUTOGRAD_RESP);
-          msg.setId(messageId);
-          responseFuture->markCompleted(
-              IValue(c10::make_intrusive<Message>(std::move(msg))));
+          return c10::make_intrusive<Message>(std::move(msg));
         }
-      });
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+
+  return responseFuture;
 }
 
-void RequestCallbackNoPython::processBackwardAutogradReq(
-    RpcCommandBase& rpc,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processBackwardAutogradReq(RpcCommandBase& rpc) const {
   auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
   const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
 
@@ -457,21 +391,20 @@ void RequestCallbackNoPython::processBackwardAutogradReq(
       autogradContext, sendFunction, gradientsCall.retainGraph());
 
   // Our response is satisfied when the rpcs come back.
-  execFuture->addCallback([responseFuture, messageId](JitFuture& execFuture) {
-    if (!execFuture.hasError()) {
-      Message m = std::move(PropagateGradientsResp()).toMessage();
-      m.setId(messageId);
-      responseFuture->markCompleted(
-          IValue(c10::make_intrusive<Message>(std::move(m))));
-    } else {
-      responseFuture->setError(execFuture.exception_ptr());
-    }
-  });
+  return execFuture->then(
+      [](JitFuture& execFuture) {
+        if (execFuture.hasError()) {
+          std::rethrow_exception(execFuture.exception_ptr());
+        } else {
+          return c10::make_intrusive<Message>(
+              PropagateGradientsResp().toMessage());
+        }
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
-void RequestCallbackNoPython::processCleanupAutogradContextReq(
-    RpcCommandBase& rpc,
-    const std::function<void(Message)>& markComplete) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processCleanupAutogradContextReq(RpcCommandBase& rpc) const {
   auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
   auto cleanupContextId = cleanupContextReq.getContextId();
   // release the context if it still exists on this thread. We need to
@@ -480,13 +413,11 @@ void RequestCallbackNoPython::processCleanupAutogradContextReq(
   // notified to clean up their context.
   DistAutogradContainer::getInstance().releaseContextIfPresent(
       cleanupContextId);
-  markComplete(std::move(CleanupAutogradContextResp()).toMessage());
+  return asFuture(CleanupAutogradContextResp().toMessage());
 }
 
-void RequestCallbackNoPython::processRunWithProfilingReq(
-    RpcCommandBase& rpc,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
+    processRunWithProfilingReq(RpcCommandBase& rpc) const {
   auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
   auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
   auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
@@ -508,8 +439,6 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
           this->cudaAvailable(),
       "Profiler state set to CUDA but CUDA not available.");
   const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
-  auto wrappedRpcResponseFuture =
-      c10::make_intrusive<JitFuture>(at::AnyClassType::get());
   // Enable the profiler with the config from the sender.
   // When enabling on the main thread, ensure profiler states are cleaned
   // up, but defer consolidation of all profiled events to the continuation
@@ -524,16 +453,14 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         "Expected profiler to be enabled!");
     // Kick off processing for nested work and get Future<T> result in
     // wrappedRpcResponseFuture
-    processRpc(
+    auto wrappedRpcResponseFuture = processRpc(
         rpcWithProfilingReq.wrappedRpc(),
         wrappedMsgType,
-        messageId,
-        wrappedRpcResponseFuture,
         {}); // TODO: https://github.com/pytorch/pytorch/issues/55757
 
-    wrappedRpcResponseFuture->addCallback(at::wrapPropagateTLSState(
-        [responseFuture, profilingKeyId, profilingConfig](
-            JitFuture& wrappedRpcResponseFuture) {
+    auto responseFuture = wrappedRpcResponseFuture->then(
+        at::wrapPropagateTLSState([profilingKeyId, profilingConfig](
+                                      JitFuture& wrappedRpcResponseFuture) {
           std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents;
           // Defer consolidation of profiler events until async work has
           // completed (such as async UDF)
@@ -551,7 +478,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
           if (wrappedRpcResponseFuture.hasError()) {
             // Propagate error
             // No need to propagate remote events in the case of an error.
-            responseFuture->setError(wrappedRpcResponseFuture.exception_ptr());
+            std::rethrow_exception(wrappedRpcResponseFuture.exception_ptr());
           } else {
             populateRemoteProfiledEvents(
                 profiledEvents, profilingConfig, event_lists);
@@ -561,33 +488,27 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
                     *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
                 profiledEvents,
                 profilingKeyId);
-            responseFuture->markCompleted(IValue(c10::make_intrusive<Message>(
-                std::move(*rpcWithProfilingResp).toMessage())));
+            return c10::make_intrusive<Message>(
+                std::move(*rpcWithProfilingResp).toMessage());
           }
-        }));
+        }),
+        c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+
+    return responseFuture;
     // Exiting the scope will disable the profiler on this thread with the
     // options specified above.
   }
 }
 
-void RequestCallbackNoPython::processRRefBackward(
-    RpcCommandBase& rpc,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& /* unused */) const {
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefBackward(
+    RpcCommandBase& rpc) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
-void RequestCallbackNoPython::processRpc(
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
     RpcCommandBase& rpc,
     const MessageType& messageType,
-    const int64_t messageId,
-    const c10::intrusive_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> ctx) const {
-  auto markComplete = [messageId, &responseFuture](Message m) {
-    m.setId(messageId);
-    responseFuture->markCompleted(
-        IValue(c10::make_intrusive<Message>(std::move(m))));
-  };
   // TODO: RpcCommandBase should have an abstract execute() method that we can
   // call here instead of having another switch statement here. Even better we
   // could have abstract classes RpcRequest and RpcResp which inherit from
@@ -596,62 +517,46 @@ void RequestCallbackNoPython::processRpc(
   // to a python object.
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
-      processScriptCall(rpc, markComplete, messageId, responseFuture);
-      return;
+      return processScriptCall(rpc);
     }
     case MessageType::PYTHON_CALL: {
-      processPythonCall(rpc, markComplete, messageId, responseFuture);
-      return;
+      return processPythonCall(rpc);
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
-      processBaseScriptRemoteCall(rpc, markComplete, messageId, responseFuture);
-      return;
+      return processScriptRemoteCall(rpc);
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      processPythonRemoteCall(
-          rpc, markComplete, messageId, responseFuture, std::move(ctx));
-      return;
+      return processPythonRemoteCall(rpc, std::move(ctx));
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
-      processScriptRRefFetchCall(rpc, markComplete, messageId, responseFuture);
-      return;
+      return processScriptRRefFetchCall(rpc);
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
-      processPythonRRefFetchCall(
-          rpc, messageId, responseFuture, std::move(ctx));
-      return;
+      return processPythonRRefFetchCall(rpc, std::move(ctx));
     }
     case MessageType::RREF_USER_DELETE: {
-      processRRefUserDelete(rpc, markComplete);
-      return;
+      return processRRefUserDelete(rpc);
     }
     case MessageType::RREF_CHILD_ACCEPT: {
-      processRRefChildAccept(rpc, markComplete);
-      return;
+      return processRRefChildAccept(rpc);
     }
     case MessageType::RREF_FORK_REQUEST: {
-      processRRefForkRequest(rpc, markComplete);
-      return;
+      return processRRefForkRequest(rpc);
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
-      processForwardAutogradReq(rpc, messageId, responseFuture, std::move(ctx));
-      return;
+      return processForwardAutogradReq(rpc, std::move(ctx));
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
-      processBackwardAutogradReq(rpc, messageId, responseFuture);
-      return;
+      return processBackwardAutogradReq(rpc);
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
-      processCleanupAutogradContextReq(rpc, markComplete);
-      return;
+      return processCleanupAutogradContextReq(rpc);
     }
     case MessageType::RUN_WITH_PROFILING_REQ: {
-      processRunWithProfilingReq(rpc, messageId, responseFuture);
-      return;
+      return processRunWithProfilingReq(rpc);
     }
     case MessageType::RREF_BACKWARD_REQ: {
-      processRRefBackward(rpc, messageId, responseFuture);
-      return;
+      return processRRefBackward(rpc);
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -660,7 +565,7 @@ void RequestCallbackNoPython::processRpc(
   }
 }
 
-IValue RequestCallbackNoPython::handleError(
+c10::intrusive_ptr<Message> RequestCallbackNoPython::handleError(
     const std::exception& e,
     const MessageType messageType,
     int64_t messageId) const {
@@ -673,8 +578,8 @@ IValue RequestCallbackNoPython::handleError(
       DistAutogradContainer::getInstance().getWorkerId(),
       ": ",
       e.what());
-  return IValue(c10::make_intrusive<Message>(
-      createExceptionResponse(errorMsg, messageId)));
+  return c10::make_intrusive<Message>(
+      createExceptionResponse(errorMsg, messageId));
 }
 
 bool RequestCallbackNoPython::cudaAvailable() const {
@@ -683,6 +588,50 @@ bool RequestCallbackNoPython::cudaAvailable() const {
 #else
   return false;
 #endif
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
+    const jit::Operator& op,
+    std::vector<at::IValue>& stack) const {
+  try {
+    op.getOperation()(&stack);
+  } catch (const std::exception&) {
+    return asFuture(std::current_exception());
+  }
+  TORCH_INTERNAL_ASSERT(
+      stack.size() == 1,
+      "Return value of a builtin operator or a TorchScript function should be "
+      "a single IValue, got a vector of size ",
+      stack.size());
+  TypePtr type = stack.front().type();
+  return asFuture(std::move(stack.front()), std::move(type));
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    IValue value,
+    TypePtr type) const {
+  auto future = c10::make_intrusive<JitFuture>(std::move(type));
+  future->markCompleted(std::move(value));
+  return future;
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    c10::intrusive_ptr<Message> message) const {
+  return asFuture(
+      std::move(message),
+      at::getCustomClassType<c10::intrusive_ptr<Message>>());
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    Message message) const {
+  return asFuture(c10::make_intrusive<Message>(std::move(message)));
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
+    std::exception_ptr err) const {
+  auto future = c10::make_intrusive<JitFuture>(at::NoneType::get());
+  future->setError(err);
+  return future;
 }
 
 } // namespace rpc
