@@ -22,9 +22,32 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
     def test_shape_analysis(self):
         @torch.jit.script
+        def broadcast(a: List[int], b: List[int]):
+            dimsA = len(a)
+            dimsB = len(b)
+            ndim = max(dimsA, dimsB)
+            expandedSizes : List[int] = []
+
+            for i in range(ndim):
+                offset = ndim - 1 - i
+                dimA = dimsA - 1 - offset
+                dimB = dimsB - 1 - offset
+                sizeA = a[dimA] if (dimA >= 0) else 1
+                sizeB = b[dimB] if (dimB >= 0) else 1
+
+                if sizeA != sizeB and sizeA != 1 and sizeB != 1:
+                    raise Exception("The size of tensor a {} must match the size of tensor b ("
+                                    "{}) at non-singleton dimension {}".format(sizeA, sizeB, i))
+
+                expandedSizes.append(sizeB if sizeA == 1 else sizeA)
+
+            return expandedSizes
+
+        @torch.jit.script
         def foo(x, y):
             return x * y
 
+        torch._C._jit_register_operator_shape_function(foo.graph.findNode("aten::mul"), broadcast.graph)
         inputs = list(foo.graph.inputs())
 
         def prop_shapes_on_graph(inp0, inp1):
@@ -48,8 +71,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertFalse(output_shape[2] in inp0_shape + inp1_shape)
 
         # XXX: symbolic shapes are represented with an increasing counter of unique
-        # values, use `_new_symbolic_shape_symbol` api instead of specifying negative # dimensions directly
-        # so there is no chance of collision between manual number # and current counter value.
+        # values, use `_new_symbolic_shape_symbol` api instead of specifying negative
+        # dimensions directly so there is no chance of collision between manual number
+        # and current counter value.
         sym1 = torch._C._new_symbolic_shape_symbol()
         sym2 = torch._C._new_symbolic_shape_symbol()
         sym3 = torch._C._new_symbolic_shape_symbol()
@@ -69,12 +93,12 @@ class TestSymbolicShapeAnalysis(JitTestCase):
                 out2.append(elem)
             return out2
 
-    def test_refine_list_len_with_no_input_information(self):
         @torch.jit.script
         def foo(x, out: List[int]):
             return torch.nn.functional.adaptive_avg_pool2d(x, out)
 
         self.run_pass("inline", foo.graph)
+        torch._C._jit_register_operator_shape_function(foo.graph.findNode("aten::adaptive_avg_pool2d"), adaptive_avg_pool2d.graph)
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
         FileCheck().check("Tensor(*, *)").check_same("adaptive_avg_pool2d").run(foo.graph)
 

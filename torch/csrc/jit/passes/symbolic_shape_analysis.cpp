@@ -16,7 +16,6 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
-#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/utils/memory.h>
 #include <memory>
 #include <unordered_map>
@@ -25,7 +24,11 @@
 /*
 XXX: this is still in prototype phase and has much work left to do, including
 but not limited to:
+- Bind shape functions for operators in C+
+- Make classes of operators share the same shape function (e.g. pointwise,
+broadcast two inputs)
 - Refactor APIs
+- Only iteratively optimize shape function while a change has been made
 - Add decent coverage of common ops
 - Add shape analysis pass on Graph that handles Ifs and Loops
 - Allow concurrent reads to the operator map
@@ -119,24 +122,22 @@ struct SymbolicShapeAnalyzer {
   }
 
   c10::SymbolicShape run() {
-    bool made_change = true;
-    while (made_change) {
-      made_change = false;
+    // TODO: only run while the last iteration has made a change
+    size_t num_optimization_iters = 6;
+    for (size_t i = 0; i < num_optimization_iters; i++) {
       // XXX: we cannot substitute symbolic dims before passes like constant
       // propagation, or we might inadvertently use them in arithmetic or
       // other operators
       substituteInputTensorProperties(/*substitute_symbolic_dims*/ false);
-      // TODO: lower simple tuples ?
-      made_change |= RemoveListMutation(graph_);
-      made_change |= UnrollConstantLoops(graph_);
-      made_change |= ConstantPropagation(graph_);
-      made_change |= PeepholeOptimizeNonTensor(graph_);
-      made_change |=
-          PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
-      made_change |= RefineIntegerValues(graph_);
-      made_change |= ConstantPropagation(graph_);
-      made_change |= EliminateCommonSubexpression(graph_);
-      EliminateDeadCode(graph_);
+      LowerSimpleTuples(graph_);
+      RemoveListMutation(graph_);
+      UnrollConstantLoops(graph_);
+      ConstantPropagation(graph_);
+      PeepholeOptimizeNonTensor(graph_);
+      PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
+      RefineIntegerValues(graph_);
+      ConstantPropagation(graph_);
+      EliminateCommonSubexpression(graph_);
     }
     substituteInputTensorProperties(/*substitute_symbolic_dims*/ true);
     // XXX: do not run any passes after we have substituted in symbolic
@@ -287,12 +288,24 @@ void PropagateShapesWithShapeFunction(
       n->output()->type()->expect<TensorType>()->withSymbolicShapes(out));
 }
 
+void RegisterOperatorShapeFunction(Node* n, std::shared_ptr<Graph>& graph) {
+  std::lock_guard<std::mutex> guard(lock);
+  if (!n->maybeSchema()) {
+    return;
+  }
+  if (operator_functions.count(toString(n->schema()))) {
+    return;
+  }
+  operator_functions[toString(n->schema())] = graph;
+}
+
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   std::lock_guard<std::mutex> guard(lock);
   for (Node* n : graph->nodes()) {
     if (n->maybeSchema()) {
-      if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
-        PropagateShapesWithShapeFunction(n, *maybe_graph);
+      if (operator_functions.count(toString(n->schema()))) {
+        PropagateShapesWithShapeFunction(
+            n, operator_functions[toString(n->schema())]);
       }
     }
   }
