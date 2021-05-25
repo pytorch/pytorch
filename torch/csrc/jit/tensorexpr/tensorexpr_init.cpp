@@ -421,9 +421,9 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "split_with_mask",
           [](const LoopNest& self, For* f, int factor) {
-            For *outer = nullptr, *inner = nullptr;
-            self.splitWithMask(f, factor, &outer, &inner);
-            return std::make_tuple(outer, inner);
+            For* inner = nullptr;
+            self.splitWithMask(f, factor, &inner);
+            return inner;
           },
           py::return_value_policy::reference)
       .def(

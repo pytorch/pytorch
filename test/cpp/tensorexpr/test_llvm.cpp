@@ -1721,16 +1721,12 @@ TEST(LLVM, VectorizedGEMM) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* m = loops[0];
-    For* mo;
-    For* mi;
-    loop.splitWithMask(m, 16, &mo, &mi);
+    loop.splitWithMask(m, 16);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* n = loops[2];
-    For* no;
-    For* ni;
-    loop.splitWithMask(n, 16, &no, &ni);
+    loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k

@@ -645,10 +645,8 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
 
   LoopNest l({tensor});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *outer, *mid, *inner;
-  l.splitWithMask(loops[0], 4, &outer, &inner);
-  l.splitWithMask(outer, 4);
+  l.splitWithMask(loops[0], 4);
+  l.splitWithMask(loops[0], 4);
 
   Stmt* stmt1 = IRSimplifier::simplify(l.root_stmt());
 
@@ -705,12 +703,13 @@ TEST(LoopNest, SplitWithMaskWithLoopOptions) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *outer, *inner;
+  For* inner;
 
   LoopNest l({tensor});
   auto loops = NodeFinder<For>::find(l.root_stmt());
   l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
-  l.splitWithMask(loops[0], 4, &outer, &inner);
+  l.splitWithMask(loops[0], 4, &inner);
+  For* outer = loops[0];
 
   // Outer loop carries loop axis bindings.
   ASSERT_TRUE(outer->loop_options().is_gpu_block_index());
@@ -1287,13 +1286,11 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
     return a->load(j + ExprHandle(8));
   });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* i_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* i_inner;
 
   LoopNest l({b}, {a, b});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
-  l.splitWithMask(loops[0], 4, &i_outer, &i_inner);
+  l.splitWithMask(loops[0], 4, &i_inner);
   l.splitWithMask(i_inner, 2);
   ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
 }
