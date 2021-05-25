@@ -166,7 +166,7 @@ class Linear(torch.nn.Module):
 
         TODO: Need to figure out how to store the block shapes in the mod
         """
-        assert type(mod) in cls._FLOAT_MODULE, cls._get_name + \
+        assert type(mod) in cls._FLOAT_MODULE, cls._get_name() + \
             '.from_float only works for ' + \
             str([n.__name__ for n in cls._FLOAT_MODULE])
         # TODO: Need to add options to qconfig to avoid the calibration.
