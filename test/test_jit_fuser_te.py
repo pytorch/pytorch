@@ -1,6 +1,7 @@
 import operator
 import unittest
 import contextlib
+import math
 import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
@@ -15,9 +16,12 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests
+    enable_profiling_mode_for_profiling_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
+
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 
 from textwrap import dedent
 from itertools import product, permutations
@@ -1803,6 +1807,177 @@ class TestTEFuser(JitTestCase):
         y = torch.rand(4, 4)
         z = 2
         script = self.checkScript(eager, (x, y, z))
+
+works_list = [
+    '__radd__',
+    '__rdiv__',
+    '__rmul__',
+    'abs',
+    'acos',
+    'add',
+    'addcmul',
+    'asin',
+    'atan2',
+    'atan',
+    'ceil',
+    'clamp',
+    'clamp.scalar',
+    'cos',
+    'cosh',
+    'div.no_rounding_mode',
+    'div.true_rounding',
+    'eq',
+    'erf',
+    'erfc',
+    'exp',
+    'expand',
+    'expm1',
+    'floor',
+    'ge',
+    'gt',
+    'le',
+    'lerp',
+    'lgamma',
+    'log10',
+    'log1p',
+    'log2',
+    'log',
+    'lt',
+    'masked_fill',
+    'max.binary',
+    'min.binary',
+    'mm',
+    'mul',
+    'ne',
+    'neg',
+    'nn.functional.gelu',
+    'nn.functional.hardshrink',
+    'nn.functional.hardswish',
+    'nn.functional.hardtanh',
+    'nn.functional.leaky_relu',
+    'pow',
+    'reciprocal',
+    'round',
+    'rsqrt',
+    'sigmoid',
+    'sin',
+    'sinh',
+    'sqrt',
+    'sub',
+    'sum',
+    'tan',
+    'tanh',
+    'transpose',
+    'trunc',
+    'unsqueeze',
+]
+
+known_failures = [
+    'matmul',
+    'permute',
+    'frac',
+    '__rmatmul__'
+]
+
+# If your OpInfo test causes this test to fail, add it here
+skip_ops = [
+]
+
+def get_name(op):
+    l = [op.name]
+    if op.variant_test_name != '':
+        l.append(op.variant_test_name)
+    return '.'.join(l)
+
+class TestNNCOpInfo(TestCase):
+    def te_compile(self, device, dtype, op):
+        # If adding new OpInfo tests cause this test to fail, add it into here
+        skip_ops = []
+        if op.name in skip_ops:
+            return
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        is_compiling = False
+        for sample_input in sample_inputs_itr:
+            arg_values = [sample_input.input] + list(sample_input.args)
+            kwarg_values = sample_input.kwargs
+            param_names = []
+            param_values = []
+            fx_args = []
+            for idx, v in enumerate(arg_values):
+                if isinstance(v, torch.Tensor):
+                    param_names.append(f"arg_{idx}")
+                    param_values.append(v)
+                    fx_args.append(param_names[-1])
+                else:
+                    fx_args.append(f'{repr(v)}')
+
+            for k, v in kwarg_values.items():
+                if isinstance(v, torch.Tensor):
+                    param_names.append(k)
+                    param_values.append(v)
+                    fx_args.append(f'{k} = {k}')
+                else:
+                    fx_args.append(f'{k} = {repr(v)}')
+
+            code = f"""
+def f({', '.join(param_names)}):
+    return op.op({', '.join(fx_args)})"""
+            g = {'torch': torch, 'inf' : math.inf, 'op': op}
+            exec(code, g)
+            f = g['f']
+            f.__module__ = 'test'
+            out = f(*param_values)
+
+            # NNC currently oftens segfault when asked to lower ops with 0-dim tensor outputs
+            if isinstance(out, torch.Tensor) and out.dim() == 0:
+                continue
+            else:
+                is_compiling = True
+
+            ts_g = torch.jit.trace(f, param_values)
+            kernel = torch._C._te.TensorExprKernel(ts_g.graph)
+            correct_val = f(*param_values)
+            self.assertEqual(kernel.run(tuple(param_values)), correct_val)
+            self.assertEqual(kernel.fallback(tuple(param_values)), correct_val)
+
+        # If all sample inputs have scalar output, we won't have tested it and
+        # we consider the op to be not working
+        if not is_compiling:
+            raise RuntimeError("Skipped all inputs")
+
+    @onlyCPU
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
+    @ops([op for op in op_db if get_name(op) in works_list], allowed_dtypes=(torch.float,))
+    def test_working(self, device, dtype, op):
+        self.te_compile(device, dtype, op)
+
+    @onlyCPU
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
+    @ops([op for op in op_db if get_name(op) in known_failures], allowed_dtypes=(torch.float,))
+    def test_failures(self, device, dtype, op):
+        try:
+            self.te_compile(device, dtype, op)
+        except Exception as e:
+            pass
+        else:
+            raise RuntimeError("Expected test to fail. If it now works, move op into works_list")
+
+    @onlyCPU
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
+    @ops([op for op in op_db if get_name(op) not in works_list + known_failures], allowed_dtypes=(torch.float,))
+    def test_unsupported(self, device, dtype, op):
+        if get_name(op) in skip_ops:
+            return
+        try:
+            self.te_compile(device, dtype, op)
+        except Exception as e:
+            pass
+        else:
+            raise RuntimeError("Expected test to fail. If it now works, move op into works_list")
+
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()
