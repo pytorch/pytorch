@@ -1,8 +1,7 @@
 import collections.abc
 import functools
 import numbers
-import sys
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union, cast
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, TypeVar, Union, cast
 from types import SimpleNamespace
 
 import torch
@@ -15,20 +14,9 @@ __all__ = ["assert_equal", "assert_close"]
 
 # The UsageError should be raised in case the test function is not used correctly. With this the user is able to
 # differentiate between a test failure (there is a bug in the tested code) and a test error (there is a bug in the
-# test). If pytest is the test runner, we use the built-in UsageError instead our custom one.
-
-try:
-    # The module 'pytest' will be imported if the 'pytest' runner is used. This will only give false-positives in case
-    # a previously imported module already directly or indirectly imported 'pytest', but the test is run by another
-    # runner such as 'unittest'.
-    # 'mypy' is not able to handle this within a type annotation
-    # (see https://mypy.readthedocs.io/en/latest/common_issues.html#variables-vs-type-aliases for details). In case
-    # 'UsageError' is used in an annotation, add a 'type: ignore[valid-type]' comment.
-    UsageError: Type[Exception] = sys.modules["pytest"].UsageError  # type: ignore[attr-defined]
-except (KeyError, AttributeError):
-
-    class UsageError(Exception):  # type: ignore[no-redef]
-        pass
+# test).
+class UsageError(Exception):
+    pass
 
 
 # This is copy-pasted from torch.testing._internal.common_utils.TestCase.dtype_precisions. With this we avoid a
@@ -102,9 +90,7 @@ def _check_complex_components_individually(
     return wrapper
 
 
-def _check_supported_tensor(
-    input: Tensor,
-) -> Optional[UsageError]:  # type: ignore[valid-type]
+def _check_supported_tensor(input: Tensor) -> Optional[UsageError]:
     """Checks if the tensors are supported by the current infrastructure.
 
     All checks are temporary and will be relaxed in the future.
