@@ -2157,10 +2157,10 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
         the order they are accessed follows the order they are built within the iterator.
         For example, if an iterator is built in the following order:
         auto iter = TensorIteratorConfig().
-          .add_output(firstOutput)
-          .add_output(secondOutput)
-          .add_input(firstInput)
-          .add_input(secondInput)
+          .add_borrowed_output(firstOutput)
+          .add_borrowed_output(secondOutput)
+          .add_borrowed_input(firstInput)
+          .add_borrowed_input(secondInput)
           .build()
         data will contain 4 pointers to pointers to values in the following order:
         firstOutput, secondOutput, firstInput, secondInput.
