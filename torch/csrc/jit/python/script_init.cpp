@@ -129,7 +129,6 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {

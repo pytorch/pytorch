@@ -1520,6 +1520,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
                                               type_expr=List[float])
         output : torch.fx.Node = graph.output(b)
+
         self.assertTrue('typing.List[float]' in str(graph))
 
     def test_ellipsis(self):
@@ -2441,6 +2442,30 @@ class TestFX(JitTestCase):
             import fx.test_future    # noqa: F401
         finally:
             del sys.modules["__future__"]
+
+    def test_annotations_empty_tuple(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x: Tuple[()], y: Tuple[str, Tuple[()]]):
+                return "foo"
+
+        traced = torch.fx.symbolic_trace(Foo())
+
+        x = ()
+        y = ("bar", ())
+
+        traced(x, y)
+
+        FileCheck().check("_Tuple[()]")   \
+                   .check("typing_Tuple[str,typing_Tuple[()]]") \
+                   .run(traced.code)
+
+        scripted = torch.jit.script(traced)
+
+        scripted(x, y)
+
+        FileCheck().check("Tuple[()]")   \
+            .check("Tuple[str, Tuple[()]]")    \
+            .run(scripted.code)
 
     @skipIfNoTorchVision
     def test_cpatcher(self):
