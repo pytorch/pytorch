@@ -15,32 +15,9 @@ if __name__ == '__main__':
 class TestSymbolicShapeAnalysis(JitTestCase):
     def test_shape_analysis(self):
         @torch.jit.script
-        def broadcast(a: List[int], b: List[int]):
-            dimsA = len(a)
-            dimsB = len(b)
-            ndim = max(dimsA, dimsB)
-            expandedSizes : List[int] = []
-
-            for i in range(ndim):
-                offset = ndim - 1 - i
-                dimA = dimsA - 1 - offset
-                dimB = dimsB - 1 - offset
-                sizeA = a[dimA] if (dimA >= 0) else 1
-                sizeB = b[dimB] if (dimB >= 0) else 1
-
-                if sizeA != sizeB and sizeA != 1 and sizeB != 1:
-                    raise Exception("The size of tensor a {} must match the size of tensor b ("
-                                    "{}) at non-singleton dimension {}".format(sizeA, sizeB, i))
-
-                expandedSizes.append(sizeB if sizeA == 1 else sizeA)
-
-            return expandedSizes
-
-        @torch.jit.script
         def foo(x, y):
             return x * y
 
-        torch._C._jit_register_operator_shape_function(foo.graph.findNode("aten::mul"), broadcast.graph)
         inputs = list(foo.graph.inputs())
 
         def prop_shapes_on_graph(inp0, inp1):
@@ -77,21 +54,11 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(output_shape[2], sym3)
 
     def test_sharing_of_list_len(self):
-        # testing generic sharing of logic, a la _convolution and conv2s
-        @torch.jit.script
-        def adaptive_avg_pool2d(self, out: List[int]):
-            assert len(out) == 2
-            out2 : List[int] = []
-            for elem in out:
-                out2.append(elem)
-            return out2
-
         @torch.jit.script
         def foo(x, out: List[int]):
             return torch.nn.functional.adaptive_avg_pool2d(x, out)
 
         self.run_pass("inline", foo.graph)
-        torch._C._jit_register_operator_shape_function(foo.graph.findNode("aten::adaptive_avg_pool2d"), adaptive_avg_pool2d.graph)
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
         FileCheck().check("Tensor(*, *)").check_same("adaptive_avg_pool2d").run(foo.graph)
 
