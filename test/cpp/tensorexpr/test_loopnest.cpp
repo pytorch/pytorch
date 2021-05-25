@@ -36,16 +36,10 @@ TEST(LoopNest, ExprSimple01) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
 
-  l.splitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
-  l.splitWithTail(x_outer, 2);
+  l.splitWithTail(loops[0], 2);
+  l.splitWithTail(loops[0], 2);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -396,8 +390,6 @@ TEST(LoopNest, ExprSplitAndSlice) {
   LoopNest l({tensor});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
@@ -405,9 +397,9 @@ TEST(LoopNest, ExprSplitAndSlice) {
   // outer: [0, 4)
   // inner: [0, 21)
   // tail:  [84, 100)
-  l.splitWithTail(loops[0], 21, &outer, &inner, &tail);
+  l.splitWithTail(loops[0], 21, &inner, &tail);
   l.sliceTail(inner, 2);
-  l.sliceHead(outer, 2);
+  l.sliceHead(loops[0], 2);
 
   // for (int x_outer = 0; x_outer < 2; x_outer++) {
   //   for (int x_inner = 0; x_inner < 19; x_inner++) {
@@ -522,15 +514,11 @@ TEST(LoopNest, ExprSplitWithTail) {
   };
   Tensor* tensor = Compute("f", {{199, "x"}}, func);
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
-  l.splitWithTail(loops[0], 17, &x_outer, &x_inner, &x_tail);
-  l.splitWithTail(x_outer, 7);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  l.splitWithTail(loops[0], 17);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  l.splitWithTail(loops[0], 7);
 
   Stmt* stmt = l.root_stmt();
   Stmt* simplified = IRSimplifier::simplify(stmt);
@@ -557,14 +545,8 @@ TEST(LoopNest, ExprSplitWithTailNone) {
   };
   Tensor* tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
-  l.splitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[0], 4);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
@@ -691,16 +673,16 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *outer, *inner, *tail;
+  For *inner, *tail;
 
   LoopNest l({tensor});
   auto loops = NodeFinder<For>::find(l.root_stmt());
   ASSERT_GT(loops.size(), 0);
   l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
-  l.splitWithTail(loops[0], 4, &outer, &inner, &tail);
-  ASSERT_NE(outer, nullptr);
+  l.splitWithTail(loops[0], 4, &inner, &tail);
   ASSERT_NE(inner, nullptr);
   ASSERT_NE(tail, nullptr);
+  For* outer = loops[0];
 
   // Outer loop carries loop axis bindings.
   ASSERT_TRUE(outer->loop_options().is_gpu_block_index());
@@ -3166,14 +3148,12 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   LoopNest::normalize(for_stmt);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_tail;
-  l.splitWithTail(for_stmt, 10, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(for_stmt, 10, &x_inner, &x_tail);
 
-  auto x_outer_result = IRSimplifier::simplify(x_outer);
+  auto x_outer_result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss_outer;
   oss_outer << *x_outer_result;
   const std::string& expected_outer_ir =

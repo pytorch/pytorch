@@ -624,22 +624,9 @@ TEST(Reductions, SplitNonReduceAxis) {
   std::vector<float> out(16, -1.f);
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_2;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_1;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail_2;
-  l.splitWithTail(x_outer, 2, &x_2, &x_1, &x_tail_2);
+  l.splitWithTail(loops[0], 2);
+  l.splitWithTail(loops[0], 2);
 
   l.prepareForCodegen();
 
@@ -1133,8 +1120,8 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *o, *i, *t;
-  loop.splitWithTail(loops[1], SPLIT_FACTOR, &o, &i, &t);
+  For *i, *t;
+  loop.splitWithTail(loops[1], SPLIT_FACTOR, &i, &t);
   loop.reorderAxis(loops[0], i);
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
