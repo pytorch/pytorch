@@ -189,7 +189,7 @@ bool backport_v5_to_v4(
     std::stringstream& ouput_model_stream) {
   // 1) read from archive `bytecode` archive
   PyTorchStreamReader reader(&input_model_stream);
-  std::vector<IValue> bytecode_values = get_bytecode_values(reader);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader);
   std::vector<IValue> constants_values =
       readArchive(kArchiveNameConstants, reader).toTuple()->elements();
 

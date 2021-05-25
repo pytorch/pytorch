@@ -1770,6 +1770,15 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
       });
+  py::class_<OperatorInfo>(m, "OperatorInfo")
+      .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);
+  m.def("_get_model_ops_and_info", [](const std::string& filename) {
+    return _get_model_ops_and_info(filename);
+  });
+  m.def("_get_model_ops_and_info_from_buffer", [](const std::string& buffer) {
+    std::istringstream in(buffer);
+    return _get_model_ops_and_info(in);
+  });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
