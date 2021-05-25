@@ -44,14 +44,14 @@ from quantization.test_workflow_module import TestDistributed  # noqa: F401
 # 1. Eager mode post training quantization
 from quantization.test_quantize_eager_ptq import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestPostTrainingDynamic  # noqa: F401
-from quantization.test_quantize_eager_ptq import TestEagerModeOps  # noqa: F401
+from quantization.test_quantize_eager_ptq import TestEagerModeActivationOps  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestFunctionalModule  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestModelNumerics  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestQuantizeONNXExport  # noqa: F401
 
 # Eager mode quantization aware training
 from quantization.test_quantize_eager_qat import TestQuantizationAwareTraining  # noqa: F401
-from quantization.test_quantize_eager_qat import TestEagerModeQATOps  # noqa: F401
+from quantization.test_quantize_eager_qat import TestQATActivationOps  # noqa: F401
 
 # Eager mode fusion passes
 from quantization.test_fusion import TestFusion  # noqa: F401

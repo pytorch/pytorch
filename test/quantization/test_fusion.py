@@ -358,3 +358,8 @@ class TestFusion(QuantizationTestCase):
         test_only_eval_fn(model, self.img_data_1d)
         self.assertEqual(counter['pre_forwards'] - before_fusion_pre_count, 2 * len(self.img_data_1d))
         self.assertEqual(counter['forwards'] - before_fusion_post_count, 2 * len(self.img_data_1d))
+
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_quantization.py TESTNAME\n\n"
+                       "instead.")
