@@ -57,6 +57,14 @@ class TestSortAndSelect(TestCase):
             x = torch.rand(4, SIZE, device=device)
             res1val, res1ind = torch.sort(x)
 
+            # Test inplace
+            y = x.clone()
+            y_inds = torch.tensor((), dtype=torch.int64, device=device)
+            torch.sort(y, out=(y, y_inds))
+            x_vals, x_inds = torch.sort(x)
+            self.assertEqual(x_vals, y)
+            self.assertEqual(x_inds, y_inds)
+
             # Test use of result tensor
             res2val = torch.tensor((), device=device)
             res2ind = torch.tensor((), device=device, dtype=torch.long)
