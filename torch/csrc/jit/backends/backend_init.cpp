@@ -3,6 +3,7 @@
 #include <pybind11/iostream.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
+#include <torch/csrc/jit/backends/generate_debug_handles.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -187,6 +188,11 @@ void initJitBackendBindings(PyObject* module) {
 
         throw py::cast_error(c10::str(
             "Object ", py::str(orig_module), " is not a ScriptModule"));
+      });
+
+  m.def(
+      "_jit_backend_generate_debug_handles", [](std::shared_ptr<Graph>& graph) {
+        return generate_debug_handles(graph);
       });
 }
 } // namespace jit
