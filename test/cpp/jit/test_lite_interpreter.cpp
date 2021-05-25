@@ -625,6 +625,34 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
 }
 
 namespace {
+
+void compareModelOutput(
+    const std::vector<IValue>& actual_result_list,
+    const std::vector<Tensor>& expect_result_list) {
+  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
+  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
+  AT_ASSERT(
+      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
+  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+}
+
+void runAndCheckTorchScriptModel(
+    std::stringstream& input_model_stream,
+    const std::vector<IValue>& input_data,
+    const std::vector<Tensor>& expect_result_list,
+    const int64_t expect_version) {
+  auto actual_version = _get_model_bytecode_version(input_model_stream);
+  AT_ASSERT(actual_version == expect_version);
+
+  // Load and run the backport model, then compare the result with expect
+  // result
+  Module m_mobile = load(input_model_stream);
+
+  auto actual_result = m_mobile.forward(input_data);
+  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  compareModelOutput(actual_result_list, expect_result_list);
+}
+
 void runAndCheckBytecodeModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
@@ -635,16 +663,12 @@ void runAndCheckBytecodeModel(
 
   // Load and run the backport model, then compare the result with expect
   // result
-  mobile::Module m_mobile = _load_for_mobile(input_model_stream);
+  Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
   std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
 
-  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
-  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
-  AT_ASSERT(
-      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
-  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+  compareModelOutput(actual_result_list, expect_result_list);
 }
 
 void backportAllVersionCheck(
@@ -678,6 +702,8 @@ void backportAllVersionCheck(
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
+        oss, input_data, expect_result_list, current_to_version);
+    runAndCheckTorchScriptModel(
         oss, input_data, expect_result_list, current_to_version);
 
     current_to_version--;
