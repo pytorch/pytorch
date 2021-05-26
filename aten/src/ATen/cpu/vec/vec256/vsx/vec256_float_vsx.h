@@ -228,7 +228,6 @@ class Vectorized<float> {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
   }
 
-
   Vectorized<float> isnan() const {
     auto x = *this;
     auto ret = (x == x);
