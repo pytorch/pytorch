@@ -59,7 +59,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_log(self, n, m, gc, dc, seed):
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32) + 1.0
@@ -326,7 +326,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_swish_gradient_inplace(self, n, m, gc, dc, seed):
         np.random.seed(seed)
 
@@ -354,7 +354,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_sigmoid(self, X, inplace, engine, gc, dc):
         op = core.CreateOperator(
             "Sigmoid",
