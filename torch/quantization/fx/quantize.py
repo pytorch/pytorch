@@ -1491,7 +1491,7 @@ class Quantizer:
                     observer_dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                     env[node.name] = (
                         quantize_node(
-                            self, load_non_quantized(prev_node),
+                            load_non_quantized(prev_node),
                             observer_module, node, modules, quantized_graph,
                             node_name_to_scope, is_input=True),
                         observer_dtype)
@@ -1502,7 +1502,7 @@ class Quantizer:
                 dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                 env[node.name] = (
                     quantize_node(
-                        self, load_non_quantized(node.args[0]),
+                        load_non_quantized(node.args[0]),
                         observer_module, node, modules, quantized_graph,
                         node_name_to_scope, is_input=True),
                     dtype)

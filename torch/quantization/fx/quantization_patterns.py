@@ -302,7 +302,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     self._maybe_get_last_node_only_observer(quantizer, modules)
                 assert activation_post_process is not None
                 return quantize_node(
-                    quantizer, op_out, activation_post_process,
+                    op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
             else:
                 warnings.warn(
@@ -532,7 +532,6 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                         self._maybe_get_last_node_only_observer(quantizer, modules)
                     assert activation_post_process is not None
                     return quantize_node(
-                        quantizer,
                         op_out,
                         activation_post_process,
                         act_post_process_node,
@@ -718,7 +717,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         self._maybe_get_last_node_only_observer(quantizer, modules)
                     assert activation_post_process is not None
                     return quantize_node(
-                        quantizer,
                         op_out,
                         activation_post_process,
                         act_post_process_node,
@@ -1115,7 +1113,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     self._maybe_get_last_node_only_observer(quantizer, modules)
                 assert activation_post_process is not None
                 return quantize_node(
-                    quantizer, op_out, activation_post_process,
+                    op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
             else:
                 assert dtypes in [(torch.float16, torch.float16, None)]
