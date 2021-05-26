@@ -991,7 +991,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             np.testing.assert_array_almost_equal(ref_outputs[i], outputs[i].numpy())
 
     @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_merge_id_lists(self, lengths_0, lengths_1):
         def _merge_id_lists(lengths, values):
             ref_op = core.CreateOperator(
