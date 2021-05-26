@@ -953,9 +953,6 @@ def run_weight_observers(observed: GraphModule) -> None:
                         weight_observer_module()
 
 class Quantizer:
-    def __init__(self):
-        self.prepare_custom_config_dict: Dict[str, Any] = {}
-
     def _prepare(
             self,
             model: GraphModule,
@@ -985,7 +982,6 @@ class Quantizer:
         """
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
-        self.prepare_custom_config_dict = prepare_custom_config_dict
 
         additional_quant_patterns = \
             prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -1037,9 +1033,9 @@ class Quantizer:
             model.graph, modules, patterns, qconfig_map, standalone_module_names,
             standalone_module_classes, custom_module_classes)
 
-        input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
+        input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
             "input_quantized_idxs", [])
-        output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
+        output_quantized_idxs: List[int] = prepare_custom_config_dict.get(
             "output_quantized_idxs", [])
 
         run_prepare_fx_on_standalone_modules(
@@ -1050,7 +1046,7 @@ class Quantizer:
             model.graph, prepare_custom_config_dict,
             input_quantized_idxs, output_quantized_idxs)
 
-        self.save_state(model, qconfig_map, node_name_to_scope, patterns)
+        self.save_state(model, qconfig_map, node_name_to_scope, patterns, prepare_custom_config_dict)
         preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
         model = ObservedGraphModule(model, model.graph, preserved_attributes)
         if is_standalone_module:
@@ -1071,21 +1067,26 @@ class Quantizer:
             observed: GraphModule,
             qconfig_map: Dict[str, QConfigAny],
             node_name_to_scope: Dict[str, Tuple[str, type]],
-            patterns: Dict[Pattern, QuantizeHandler]) -> None:
+            patterns: Dict[Pattern, QuantizeHandler],
+            prepare_custom_config_dict: Dict[str, Any]
+    ) -> None:
         observed._patterns = patterns  # type: ignore[assignment]
         observed._qconfig_map = qconfig_map  # type: ignore[assignment]
         observed._prepare_custom_config_dict = \
-            self.prepare_custom_config_dict  # type: ignore[assignment]
+            prepare_custom_config_dict  # type: ignore[assignment]
         observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
 
-    def restore_state(self, observed: GraphModule) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]]]:
+    def restore_state(
+            self,
+            observed: GraphModule
+    ) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]], Dict[str, Any]]:
         assert is_observed_module(observed), \
             'incoming model must be produced by prepare_fx'
-        self.prepare_custom_config_dict = \
+        prepare_custom_config_dict: Dict[str, Any] = \
             observed._prepare_custom_config_dict  # type: ignore[assignment]
         node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
         patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
-        return patterns, node_name_to_scope
+        return patterns, node_name_to_scope, prepare_custom_config_dict
 
     def prepare(
             self,
@@ -1112,7 +1113,7 @@ class Quantizer:
         """
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
-        patterns, node_name_to_scope = self.restore_state(model)
+        patterns, node_name_to_scope, prepare_custom_config_dict = self.restore_state(model)
         qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
         # always run weight observers in the top level forward method
         # for dynamic quant ops or weight only quant ops
@@ -1315,9 +1316,9 @@ class Quantizer:
         # by the user
         placeholder_node_seen_cnt = 0
         output_node_seen_cnt = 0
-        input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
+        input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
             "input_quantized_idxs", [])
-        output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
+        output_quantized_idxs: List[int] = prepare_custom_config_dict.get(
             "output_quantized_idxs", [])
 
         for node in model.graph.nodes:
