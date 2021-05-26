@@ -54,6 +54,8 @@ from quantization.test_quantize_eager_qat import TestConvBNQATModule  # noqa: F4
 # Eager mode fusion passes
 from quantization.test_fusion import TestFusion  # noqa: F401
 
+from quantization.test_deprecated_jit_quant import TestDeprecatedJitQuantized  # noqa: F401
+
 # 2. Graph mode quantization
 from quantization.test_quantize_jit import TestQuantizeJit  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeJitPasses  # noqa: F401
