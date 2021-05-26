@@ -149,7 +149,7 @@ bool backport_v5_to_v4(
     PyTorchStreamReader& reader,
     PyTorchStreamWriter& writer) {
   // 1) read from archive `bytecode` archive
-  std::vector<IValue> bytecode_values = get_bytecode_values(reader);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader);
   if (!check_bytecode_version(bytecode_values, kBytecodeVersionV5)) {
     TORCH_WARN("Incorrect bytecode version for input model.");
     return false;
@@ -181,7 +181,7 @@ bool backport_v5_to_v4(
   // write `constants` archive
   auto constants_tuple =
       c10::ivalue::Tuple::create(std::move(constants_values));
-  writeArchiveV4(writer, kArchiveNameConstants, bytecode_tuple);
+  writeArchiveV4(writer, kArchiveNameConstants, constants_tuple);
   return true;
 }
 

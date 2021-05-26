@@ -496,8 +496,7 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
     }
   }
 
-  std::unordered_set<std::string> expected_result({"top(M)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(M).aten::mul"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -559,8 +558,9 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
     }
   }
 
-  std::set<std::string> expected_result({"top(B)", "top(B).A0(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::mul"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -594,7 +594,6 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() &&
           (module_info.find("debug_handle") == std::string::npos)) {
-        std::cout << "Module info:" << module_info << std::endl;
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -603,9 +602,9 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
     }
   }
 
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
 
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
@@ -625,6 +624,34 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
 }
 
 namespace {
+
+void compareModelOutput(
+    const std::vector<IValue>& actual_result_list,
+    const std::vector<Tensor>& expect_result_list) {
+  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
+  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
+  AT_ASSERT(
+      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
+  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+}
+
+void runAndCheckTorchScriptModel(
+    std::stringstream& input_model_stream,
+    const std::vector<IValue>& input_data,
+    const std::vector<Tensor>& expect_result_list,
+    const int64_t expect_version) {
+  auto actual_version = _get_model_bytecode_version(input_model_stream);
+  AT_ASSERT(actual_version == expect_version);
+
+  // Load and run the backport model, then compare the result with expect
+  // result
+  Module m_mobile = load(input_model_stream);
+
+  auto actual_result = m_mobile.forward(input_data);
+  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  compareModelOutput(actual_result_list, expect_result_list);
+}
+
 void runAndCheckBytecodeModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
@@ -635,16 +662,12 @@ void runAndCheckBytecodeModel(
 
   // Load and run the backport model, then compare the result with expect
   // result
-  mobile::Module m_mobile = _load_for_mobile(input_model_stream);
+  Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
   std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
 
-  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
-  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
-  AT_ASSERT(
-      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
-  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+  compareModelOutput(actual_result_list, expect_result_list);
 }
 
 void backportAllVersionCheck(
@@ -676,6 +699,8 @@ void backportAllVersionCheck(
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
+        iss, input_data, expect_result_list, current_to_version);
+    runAndCheckTorchScriptModel(
         iss, input_data, expect_result_list, current_to_version);
 
     current_to_version--;
@@ -790,9 +815,9 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //   def forward(self, x):
   //     return self.A0.forward(self.B0.forward(x))
 
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).prim::Return"));
+  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -838,9 +863,9 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).B0(B)", "top(C).B0(B).A0(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).A0(A).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -898,9 +923,9 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   // "top(B).A0(A).forward": for the add operator in A0.
   // "top(B).A1(A).forward": for the add operator in A1.
 
-  std::set<std::string> expected_result(
-      {"top(B)", "top(B).A0(A)", "top(B).A1(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1284,6 +1309,57 @@ TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
   input = input.view({N, N});
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
+  Module a("A");
+  a.define(R"(
+    def bar(self, x, y):
+      return x + y
+  )");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"(
+    def foo(self, x, y):
+      return self.A0.bar(x, y) + 2
+  )");
+  Module c("C");
+  c.register_module("B0", b);
+  c.define(R"(
+    def forward(self, x, y):
+      return self.B0.foo(x, y) + 3
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({2, 4}));
+  inputs.emplace_back(torch::rand({13, 9}));
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, ExtraFilesMap(), true);
+  auto lite_m = _load_for_mobile(ss);
+  std::string error_pattern = R"(
+  Module hierarchy:top(C).B0(B).A0(A).aten::add
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.B0.foo(x, y) + 3
+             ~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in foo
+
+    def foo(self, x, y):
+      return self.A0.bar(x, y) + 2
+             ~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in bar
+
+    def bar(self, x, y):
+      return x + y
+             ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
 }
 
 namespace {

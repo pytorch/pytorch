@@ -182,6 +182,7 @@
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt()).conj()
+  result: auto_element_wise
 
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
@@ -190,26 +191,31 @@
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
+  result: self_t
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
   batch1: grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) }).bmm(batch2.transpose(1, 2).conj()) * alpha.conj()
   batch2: batch1.transpose(1, 2).conj().bmm(grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) })) * alpha.conj()
+  result: maybe_multiply(self_t, beta) + maybe_multiply(batch1_t.bmm(batch2_p).sum(0), alpha) + maybe_multiply(batch1_p.bmm(batch2_t).sum(0), alpha)
 
 - name: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
   tensor1: handle_r_to_c(tensor1.scalar_type(), grad * (value / tensor2).conj())
   tensor2: handle_r_to_c(tensor2.scalar_type(), -grad * (value * tensor1 / (tensor2 * tensor2)).conj())
+  result: self_t + maybe_multiply(tensor1_t / tensor2_p, value) - maybe_multiply(tensor2_t * (tensor1_p / tensor2_p) / tensor2_p, value)
 
 - name: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
   tensor1: handle_r_to_c(tensor1.scalar_type(), grad * (tensor2 * value).conj())
   tensor2: handle_r_to_c(tensor2.scalar_type(), grad * (tensor1 * value).conj())
+  result: self_t + maybe_multiply(tensor1_t * tensor2_p, value) + maybe_multiply(tensor2_t * tensor1_p, value)
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
   mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
+  result: maybe_multiply(self_t, beta) + maybe_multiply(mat1_t.mm(mat2_p), alpha) + maybe_multiply(mat1_p.mm(mat2_t), alpha)
 
 - name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
@@ -220,20 +226,24 @@
   self: maybe_multiply(grad, beta.conj())
   mat: grad.ger(vec.conj()) * alpha.conj()
   vec: mat.t().conj().mv(grad) * alpha.conj()
+  result: maybe_multiply(self_t, beta) + maybe_multiply(mat_t.mv(vec_p), alpha) + maybe_multiply(mat_p.mv(vec_t), alpha)
 
 - name: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
   vec1: grad.mv(vec2.conj()) * alpha.conj()
   vec2: grad.t().mv(vec1.conj()) * alpha.conj()
+  result: maybe_multiply(self_t, beta) + maybe_multiply(vec1_t.outer(vec2_p), alpha) + maybe_multiply(vec1_p.outer(vec2_t), alpha)
 
 - name: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
   theta: affine_grid_generator_backward(grad, size, align_corners)
 
 - name: alias(Tensor(a) self) -> Tensor(a)
   self: grad
+  result: self_t
 
 - name: angle(Tensor self) -> Tensor
   self: angle_backward(grad, self)
+  result: handle_r_to_c(result.scalar_type(), angle_backward(self_t, self_p))
 
 # The four items below are necessary because TensorIterator doesn't work on
 # Variables (codegen does not unwrap the input Tensor for all() and any() ).
@@ -251,18 +261,21 @@
 
 - name: acosh(Tensor self) -> Tensor
   self: grad * (self.pow(2) - 1).rsqrt().conj()
+  result: auto_element_wise
 
 - name: acosh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of acosh")
 
 - name: asinh(Tensor self) -> Tensor
   self: grad * (self.pow(2) + 1).rsqrt().conj()
+  result: auto_element_wise
 
 - name: asinh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of asinh")
 
 - name: atanh(Tensor self) -> Tensor
   self: grad * 1 / (1 - self.pow(2)).conj()
+  result: auto_element_wise
 
 - name: atanh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of atanh")
@@ -272,9 +285,11 @@
 
 - name: asin(Tensor self) -> Tensor
   self: grad * (-self * self + 1).rsqrt().conj()
+  result: auto_element_wise
 
 - name: atan(Tensor self) -> Tensor
   self: grad / (self * self + 1).conj()
+  result: auto_element_wise
 
 - name: atan2(Tensor self, Tensor other) -> Tensor
   self, other: atan2_backward(grad, self, other, grad_input_mask)
@@ -362,6 +377,7 @@
 
 - name: _conj(Tensor self) -> Tensor
   self: grad.conj()
+  result: self_t.conj()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
@@ -1154,7 +1170,7 @@
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
 
-- name: one_hot(Tensor self, int num_classes=-1) -> Tensor
+- name: one_hot(Tensor self, int num_classes=-1, ScalarType dtype=long) -> Tensor
   self: non_differentiable
 
 - name: flip(Tensor self, int[] dims) -> Tensor
@@ -1399,6 +1415,9 @@
 
 - name: silu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
+
+- name: mish(Tensor self) -> Tensor
+  self: "GradMode::is_enabled() ? infinitely_differentiable_mish_backward(grad, self) : mish_backward(grad, self)"
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, /* is_result */ false, self)
