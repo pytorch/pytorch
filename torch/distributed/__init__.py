@@ -53,4 +53,8 @@ if is_available():
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
 
-    from .distributed_c10d import _backend, _all_gather_base
+    from .distributed_c10d import (
+        _backend,
+        _all_gather_base,
+        _create_process_group_wrapper
+    )
