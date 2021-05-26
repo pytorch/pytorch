@@ -80,6 +80,10 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC2(remainder, Tensor)(const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
 // These are normal binary ops that preserve dtype
 #define CREATE_BINARY_META_FUNC(func)                                 \
   TORCH_META_FUNC(func) (const Tensor& self, const Tensor& other) {   \
@@ -263,6 +267,7 @@ CREATE_BINARY_TORCH_IMPL_FUNC(hypot);
 CREATE_BINARY_TORCH_IMPL_FUNC(igamma);
 CREATE_BINARY_TORCH_IMPL_FUNC(igammac);
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter);
+CREATE_BINARY_TORCH_IMPL_FUNC(remainder);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -433,23 +438,6 @@ Tensor true_divide(const Tensor& self, const Scalar& divisor) {
 
 Tensor& true_divide_(Tensor& self, const Scalar& divisor) {
   return self.div_(divisor);
-}
-
-Tensor& remainder_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor remainder(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& remainder_(Tensor& self, const Tensor& other) {
-  return native::remainder_out(self, other, self);
 }
 
 Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -627,15 +615,18 @@ Tensor& add_(Tensor& self, const Scalar& other, const Scalar& alpha) {
 }
 
 Tensor remainder(const Tensor& self, const Scalar& other) {
-  return native::remainder(self, wrapped_scalar_tensor(other));
+  // redispatch
+  return at::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, const Scalar& other) {
-  return native::remainder_(self, wrapped_scalar_tensor(other));
+  // redispatch
+  return self.remainder_(wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return native::remainder_out(self, wrapped_scalar_tensor(other), result);
+  // redispatch
+  return at::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, const Scalar& other, const Scalar& alpha) {
