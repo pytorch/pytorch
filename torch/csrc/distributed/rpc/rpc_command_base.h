@@ -22,7 +22,8 @@ class RpcCommandBase {
 };
 
 // NOLINTNEXTLINE(modernize-use-equals-default)
-inline RpcCommandBase::~RpcCommandBase() noexcept(!kTorchInternalAssertIsDebugging) {}
+inline RpcCommandBase::~RpcCommandBase() noexcept(
+    !kTorchInternalAssertIsDebugging) {}
 
 } // namespace rpc
 } // namespace distributed
