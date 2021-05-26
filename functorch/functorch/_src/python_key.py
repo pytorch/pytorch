@@ -1,3 +1,9 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 import functools
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 import torch

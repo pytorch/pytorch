@@ -1,3 +1,9 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from functorch import grad, vmap, pythonkey_trace, wrap_key, make_fx, nnc_jit, make_functional, grad_and_value
 import torch
 import torch.fx as fx
