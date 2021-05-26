@@ -1898,6 +1898,25 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.silu(input)
 
 
+def mish(input: Tensor, inplace: bool = False) -> Tensor:
+    r"""Applies the Mish function, element-wise.
+    Mish: A Self Regularized Non-Monotonic Neural Activation Function.
+
+    .. math::
+        \text{Mish}(x) = x * \text{Tanh}(\text{Softplus}(x))
+
+    .. note::
+        See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`_
+
+    See :class:`~torch.nn.Mish` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(mish, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.mish_(input)
+    return torch._C._nn.mish(input)
+
+
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Applies the hardswish function, element-wise, as described in the paper:
 
@@ -4248,7 +4267,7 @@ Example::
 one_hot = _add_docstr(
     torch._C._nn.one_hot,
     r"""
-one_hot(tensor, num_classes=-1) -> LongTensor
+one_hot(tensor, num_classes=-1, dtype=torch.long) -> LongTensor
 
 Takes LongTensor with index values of shape ``(*)`` and returns a tensor
 of shape ``(*, num_classes)`` that have zeros everywhere except where the
@@ -4265,6 +4284,8 @@ Arguments:
     num_classes (int):  Total number of classes. If set to -1, the number
         of classes will be inferred as one greater than the largest class
         value in the input tensor.
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Default: ``torch.int64``.
 
 Returns:
     LongTensor that has one more dimension with 1 values at the

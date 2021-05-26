@@ -2800,34 +2800,28 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
 
       if (loopLevels == 2) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* outer;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
         const int kDefaultBlockSize = 512;
         if (blockSize < 0) {
           blockSize = kDefaultBlockSize;
         }
-        l.splitWithMask(flattened, blockSize, &outer, &inner);
-        l.setGPUBlockIndex(outer, 0);
+        l.splitWithMask(flattened, blockSize, &inner);
+        l.setGPUBlockIndex(flattened, 0);
         l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* outer;
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner1;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* inner2;
         // TODO: change the number of microprocessors
         const int kDefaultBlockCount = 1280;
         const int kDefaultBlockSize = 256;
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
-        l.splitWithMask(flattened, blockCount * blockSize, &outer, &inner);
-        l.splitWithMask(inner, blockSize, &inner1, &inner2);
-        l.setGPUBlockIndex(inner1, 0);
-        l.setGPUThreadIndex(inner2, 0);
+        l.splitWithMask(flattened, blockCount * blockSize, &inner);
+        l.splitWithMask(inner, blockSize, &inner1);
+        l.setGPUBlockIndex(inner, 0);
+        l.setGPUThreadIndex(inner1, 0);
       } else {
         throw std::runtime_error(
             "Invalid loop-level: " + c10::to_string(loopLevels));
@@ -2850,12 +2844,11 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
       LoopNest::flatten(loops, &flattened);
       assert(flattened);
 
-      For* outer = nullptr;
       For* inner = nullptr;
-      l.splitWithMask(flattened, blockSize, &outer, &inner);
-      l.setGPUBlockIndex(outer, 0);
+      l.splitWithMask(flattened, blockSize, &inner);
+      l.setGPUBlockIndex(flattened, 0);
       l.setGPUThreadIndex(inner, 0);
-      l.setBufferMap(outer, block_analysis->getBufferMap());
+      l.setBufferMap(flattened, block_analysis->getBufferMap());
     }
   }
 
