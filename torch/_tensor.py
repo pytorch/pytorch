@@ -931,6 +931,12 @@ class Tensor(torch._C._TensorBase):
             25
 
         """
+
+        raise RuntimeError(
+            "sparse_csr isn't fully functional yet and was disabled for 1.9 release.  "
+            "To try it out, please download a nightly and check https://github.com/pytorch/pytorch/issues/44634"
+        )
+
         shape = self.size()
         fill_value = 0
         if len(shape) != 2:

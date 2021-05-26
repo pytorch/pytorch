@@ -604,6 +604,8 @@ Tensor indexing_tensor_from_data(
 }
 
 Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  TORCH_CHECK(0, "sparse_csr isn't fully functional yet and was disabled for 1.9 release.  "
+                 "To try it out, please download a nightly and check https://github.com/pytorch/pytorch/issues/44634");
   TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
   static PythonArgParser parser({
       "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
