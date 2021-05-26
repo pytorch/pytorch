@@ -37,7 +37,7 @@ static PyObject * THCPStream_pynew(
   }
 
   if (stream_ptr) {
-    TORCH_INTERNAL_ASSERT(priority == 0, "Priority was explicitly set for a external stream")
+    TORCH_CHECK(priority == 0, "Priority was explicitly set for a external stream")
   }
 
   at::cuda::CUDAStream stream =

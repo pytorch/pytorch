@@ -125,12 +125,23 @@ class Stream final {
     uint64_t bits = static_cast<uint64_t>(static_cast<uint8_t>(device_type()))
             << 56 |
         static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 48 |
-        static_cast<uint64_t>(static_cast<uint32_t>(id()));
+        // Remove the sign extension part of the 64-bit address because
+        // the id might be used to hold a pointer.
+        (static_cast<uint64_t>(id()) & ((1ULL << 48) - 1));
+    TORCH_INTERNAL_ASSERT(
+        static_cast<DeviceIndex>((bits >> 48) & 0xFFFFull) == device_index(),
+        "DeviceIndex is not correctly packed");
+    TORCH_INTERNAL_ASSERT(
+        static_cast<DeviceType>((bits >> 56)) == device_type(),
+        "DeviceType is not correctly packed");
     return bits;
   }
 
   static Stream unpack(uint64_t bits) {
-    const auto stream_id = static_cast<StreamId>(bits & 0xFFFFFFFFFFFFull);
+    // Re-extend the sign of stream_id
+    uint64_t mask = (1ULL << 47);
+    const auto stream_id =
+        (static_cast<StreamId>(bits & 0xFFFFFFFFFFFFull) ^ mask) - mask;
     bits >>= 48;
     const auto device_index = static_cast<DeviceIndex>(bits & 0xFFFFull);
     bits >>= 8;

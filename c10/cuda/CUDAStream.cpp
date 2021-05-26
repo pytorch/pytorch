@@ -10,6 +10,7 @@
 #include <mutex>
 #include <vector>
 
+#include <iostream>
 namespace c10 {
 namespace cuda {
 
@@ -41,6 +42,7 @@ static DeviceIndex num_gpus = -1;
 static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
+static constexpr int kStreamTypeBits = 3;
 
 // Note: lower numbers are higher priorities, zero is default priority
 static int kHighPriority = -1;
@@ -73,14 +75,13 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // How do we assign stream IDs?
 //
-// -- 25 bits -- -- 2 bits --  -- 5 bits -----
-// zeros         StreamIdType  stream id index
+// -- 57 bits --  -- 5 bits -----  -- 3 bits --
+// zeros          stream id index  StreamIdType
 //
 // Where StreamIdType:
-//  000 = default stream
+//  000 = default stream or externally allocated if id[63:3] != 0
 //  001 = low priority stream
 //  010 = high priority stream
-//  011 = externally allocated stream
 //
 // This is not really for efficiency; it's just easier to write the code
 // to extract the index if we do this with bitmasks :)
@@ -96,7 +97,11 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
 // could work around this with something like
 // https://stackoverflow.com/questions/13150449/efficient-unsigned-to-signed-cast-avoiding-implementation-defined-behavior
 // but it seems a bit overkill for this.
-
+//
+// Also, external managed stream pointers (cudaStream_t) can be directly stored
+// in the Id field so in this case, we need to check the stream alignment.
+// The IdType uses an additional bit to match with the 64-bit address alignment
+// making easy to identify an external stream when its value (X & 7) > 0
 enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
   LOW = 0x1,
@@ -125,27 +130,29 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   return stream;
 }
 
-// StreamId is 32-bit, so we can just rely on regular promotion rules.
+// StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on streamIdIndex and streamIdType being non-negative;
 // see Note [Hazard when concatenating signed integers]
 
 static inline StreamIdType streamIdType(StreamId s) {
-  if (s > 256) {
+  int mask_for_type = (1 << kStreamTypeBits) - 1;
+  if (s && ((s & mask_for_type) == 0)) {
     // Externally allocated streams have their id being the cudaStream_ptr
-    // while pool managed ones have their id being a byte
+    // so the bits ocrresponding to the type will be 0 and will collide with
+    // the default stream.
     return StreamIdType::EXT;
-  } else {
-    return static_cast<StreamIdType>(s >> kStreamsPerPoolBits);
   }
+  return static_cast<StreamIdType>(s & mask_for_type);
 }
 
 static inline size_t streamIdIndex(StreamId s) {
-  return static_cast<size_t>(s & ((1 << kStreamsPerPoolBits) - 1));
+  return static_cast<size_t>(
+      (s >> kStreamTypeBits) & ((1 << kStreamsPerPoolBits) - 1));
 }
 
 StreamId makeStreamId(StreamIdType st, size_t si) {
-  return (static_cast<StreamId>(st) << kStreamsPerPoolBits) |
-      static_cast<StreamId>(si);
+  return (static_cast<StreamId>(si) << kStreamTypeBits) |
+      static_cast<StreamId>(st);
 }
 
 template <typename T, typename A>
