@@ -23,9 +23,6 @@ env:
 
 jobs:
   calculate-docker-image:
-    concurrency:
-      group: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-calculate-docker-image-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     runs-on: linux.2xlarge
     env:
       DOCKER_BUILDKIT: 1
@@ -95,9 +92,6 @@ jobs:
           cd .circleci/docker && ./build_docker.sh
 
   build:
-    concurrency:
-      group: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-build-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     runs-on: linux.2xlarge
     needs: calculate-docker-image
     env:
@@ -157,16 +151,14 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           retention-days: 14
           if-no-files-found: error
-          path:
-            artifacts.zip
+          path: artifacts.zip
       - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
         name: Store PyTorch Build Artifacts on S3
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           retention-days: 14
           if-no-files-found: error
-          path:
-            artifacts.zip
+          path: artifacts.zip
       - name: Clean up docker images
         if: always()
         run: |
@@ -174,9 +166,6 @@ jobs:
           docker system prune -af
 
   test:
-    concurrency:
-      group: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     runs-on: linux.8xlarge.nvidia.gpu
     needs:
       - calculate-docker-image
@@ -261,8 +250,7 @@ jobs:
           name: test-reports
           retention-days: 14
           if-no-files-found: error
-          path:
-            test/**/*.xml
+          path: test/**/*.xml
       - name: Clean up docker images
         if: always()
         run: |
@@ -277,9 +265,6 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    concurrency:
-      group: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-render_test_results-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     if: always()
     needs:
       - test
@@ -325,3 +310,7 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+
+concurrency:
+  group: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true

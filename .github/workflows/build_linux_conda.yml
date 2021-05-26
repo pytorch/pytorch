@@ -24,9 +24,6 @@ jobs:
           MATRIX=$(python .github/scripts/generate_binary_build_matrix.py conda)
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
-    concurrency:
-      group: build-linux-conda-generate-build-matrix-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
   build-conda:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: generate-build-matrix
@@ -95,6 +92,7 @@ jobs:
           name: pytorch-conda-py${{ matrix.python_version }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
           path: /remote/**/*.bz2
       # TODO: Add a step here for uploading binaries
-    concurrency:
-      group: build-linux-conda-build-conda-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
+
+concurrency:
+  group: build-linux-conda-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true

@@ -86,9 +86,6 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
-    concurrency:
-      group: lint-quick-checks-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
 
   py2-setup-validate-errormsg:
     runs-on: ubuntu-18.04
@@ -103,9 +100,6 @@ jobs:
       - name: Attempt to run setup.py
         run: |
           python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
-    concurrency:
-      group: lint-py2-setup-validate-errormsg-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
 
   shellcheck:
     runs-on: ubuntu-18.04
@@ -156,9 +150,6 @@ jobs:
         if: always() && steps.extract_scripts.outcome == 'success'
         run: |
           .github/scripts/check_actions_for_concurrency.py
-    concurrency:
-      group: lint-shellcheck-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
 
   toc:
     runs-on: ubuntu-18.04
@@ -181,9 +172,6 @@ jobs:
           done
 
           .github/scripts/report_git_status.sh
-    concurrency:
-      group: lint-toc-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
 
   flake8-py3:
     runs-on: ubuntu-18.04
@@ -235,9 +223,6 @@ jobs:
           # Re-output flake8 status so GitHub logs show it on the step that actually failed
           cat "${GITHUB_WORKSPACE}"/flake8-output.txt
           [ ! -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]
-    concurrency:
-      group: lint-flake8-py3-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
 
   clang-tidy:
     if: github.event_name == 'pull_request'
@@ -334,9 +319,6 @@ jobs:
         with:
           name: clang-tidy
           path: clang-tidy-output/
-    concurrency:
-      group: lint-clang-tidy-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
 
   cmakelint:
     runs-on: ubuntu-18.04
@@ -359,9 +341,6 @@ jobs:
           git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
           grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/|cmake/Caffe2Config.cmake.in|aten/src/ATen/ATenConfig.cmake.in|cmake/Caffe2ConfigVersion.cmake.in|cmake/TorchConfig.cmake.in|cmake/TorchConfigVersion.cmake.in|cmake/cmake_uninstall.cmake.in)' | \
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
-    concurrency:
-      group: lint-cmakelint-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
 
   mypy:
     runs-on: ubuntu-18.04
@@ -390,6 +369,7 @@ jobs:
         run: |
           set -eux
           for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
-    concurrency:
-      group: lint-mypy-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true

@@ -19,9 +19,6 @@ jobs:
           exempt-pr-labels: "no-stale,open source,high priority"
           days-before-stale: 60
           days-before-close: 90
-    concurrency:
-      group: stale-pull-requests-stale-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
   stale-open-source:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
@@ -37,6 +34,3 @@ jobs:
           only-labels: "open source"
           days-before-stale: 150
           days-before-close: 180
-    concurrency:
-      group: stale-pull-requests-stale-open-source-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true

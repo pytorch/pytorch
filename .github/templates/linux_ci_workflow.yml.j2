@@ -25,9 +25,6 @@ env:
 
 jobs:
   calculate-docker-image:
-    concurrency:
-      group: !{{ build_environment }}-calculate-docker-image-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     runs-on: linux.2xlarge
     env:
       DOCKER_BUILDKIT: 1
@@ -97,9 +94,6 @@ jobs:
           cd .circleci/docker && ./build_docker.sh
 
   build:
-    concurrency:
-      group: !{{ build_environment }}-build-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     runs-on: linux.2xlarge
     needs: calculate-docker-image
     env:
@@ -176,9 +170,6 @@ jobs:
           docker system prune -af
 
   test:
-    concurrency:
-      group: !{{ build_environment }}-test-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     runs-on: !{{ test_runner_type }}
     needs:
       - calculate-docker-image
@@ -279,9 +270,6 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    concurrency:
-      group: !{{ build_environment }}-render_test_results-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     if: always()
     needs:
       - test
@@ -330,9 +318,6 @@ jobs:
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
-    concurrency:
-      group: !{{ build_environment }}-pytorch_python_doc_build-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     runs-on: linux.2xlarge
     needs:
       - calculate-docker-image

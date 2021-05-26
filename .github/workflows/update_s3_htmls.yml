@@ -21,6 +21,3 @@ jobs:
         uses: docker://pytorch/manage_s3_html
         with:
           args: ${{ matrix.prefix }}
-    concurrency:
-      group: update-s3-htmls-update-html-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true

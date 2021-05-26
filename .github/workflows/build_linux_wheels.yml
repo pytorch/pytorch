@@ -8,9 +8,6 @@ on:
 
 jobs:
   generate-build-matrix:
-    concurrency:
-      group: build-linux-wheels-generate-build-matrix-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     outputs:
@@ -28,9 +25,6 @@ jobs:
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
   build-wheel:
-    concurrency:
-      group: build-linux-wheels-build-wheel-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: generate-build-matrix
     runs-on: linux.2xlarge
@@ -96,3 +90,7 @@ jobs:
           name: pytorch-wheel-py${{ matrix.python_version }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
           path: /remote/**/*.whl
       # TODO: Add a step here for uploading binaries
+
+concurrency:
+  group: build-linux-wheels-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true

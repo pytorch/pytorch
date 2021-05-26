@@ -76,6 +76,3 @@ jobs:
               content_id: issue.data.id,
               content_type: "Issue",
             })
-    concurrency:
-      group: jit-triage-welcome-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: true
