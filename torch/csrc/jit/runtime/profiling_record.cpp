@@ -300,6 +300,11 @@ void ProfilingRecord::removeProfilingNodes(Block* b) {
   }
 }
 
+bool ProfilingRecord::ready() const {
+  std::lock_guard<std::mutex> lock(this->mutex_);
+  return profiling_count_ == 0;
+}
+
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
   auto new_g = graph->copy();
@@ -318,6 +323,11 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
     if (raw_pr->profiling_count_ > 0) {
       raw_pr->profiling_count_--;
+    } else {
+      // if profiling_count_ is already at 0 ignore incoming profiling data
+      // since we already collected the data for the exact number of runs
+      // required
+      return;
     }
 
     // merge profiling information from all runs
