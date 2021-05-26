@@ -5,6 +5,7 @@ import math
 import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
+from typing import List
 
 # these needs to be set before `common_utils`
 # infers `GRAPH_EXECUTOR`.
@@ -1807,6 +1808,24 @@ class TestTEFuser(JitTestCase):
         y = torch.rand(4, 4)
         z = 2
         script = self.checkScript(eager, (x, y, z))
+
+    def test_dynamic_cat(self):
+        with inline_fusion_groups():
+            @torch.jit.script
+            def repro(xs: List[torch.Tensor], ys: List[torch.Tensor], zs: List[torch.Tensor]):
+                return [
+                    torch.cat([x, torch.cat([y, z], dim=-1)], dim=-1)
+                    for x, y, z in zip(xs, ys, zs)
+                ]
+            for _ in range(3):
+                N = 3
+                xs = [torch.ones(21) for _ in range(N)]
+                # Note: concat of ys and zs will have the same size for each
+                # pair, even though the individual ys and zs do not.
+                ys = [torch.ones(N - i) for i in range(N)]
+                zs = [torch.ones(i) for i in range(N)]
+                repro(xs, ys, zs)
+
 
 works_list = [
     '__radd__',
