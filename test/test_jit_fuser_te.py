@@ -1975,7 +1975,7 @@ def f({', '.join(param_names)}):
         except Exception as e:
             pass
         else:
-            raise RuntimeError("Expected test to fail. If it now works, move op into works_list")
+            raise RuntimeError(f"Expected test to fail. If it now works, move {get_name(op)} into works_list")
 
 
 only_for = ("cpu", "cuda")
