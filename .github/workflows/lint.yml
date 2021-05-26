@@ -121,6 +121,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Regenerate workflows
+        id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
       - name: Assert that regenerating the workflows didn't change them
         run: .github/scripts/report_git_status.sh .github/workflows
@@ -137,7 +138,6 @@ jobs:
           shellcheck --version
       - name: Extract scripts from GitHub Actions workflows
         if: always() && steps.install_shellcheck.outcome == 'success'
-        id: extract_scripts
         run: |
           # For local lints, remove the .extracted_scripts folder if it was already there
           rm -rf .extracted_scripts
@@ -147,9 +147,9 @@ jobs:
         run: |
           tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch
       - name: Check that jobs will be cancelled
-        if: always() && steps.extract_scripts.outcome == 'success'
+        if: always() && steps.generate_workflows.outcome == 'success'
         run: |
-          .github/scripts/check_actions_for_concurrency.py
+          .github/scripts/ensure_actions_will_cancel.py
 
   toc:
     runs-on: ubuntu-18.04
