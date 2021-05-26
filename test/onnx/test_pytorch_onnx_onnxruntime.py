@@ -81,12 +81,15 @@ def run_ort(ort_sess, input):
     return inline_flatten_list(ort_outs, [])
 
 
-def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
+def ort_compare_with_pytorch(ort_outs, output, rtol, atol, check_dtypes=False):
     output, _ = torch.jit._flatten(output)
     outputs = [to_numpy(outp) for outp in output]
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
+    if check_dtypes:
+        assert all(l.dtype == r.dtype for l, r in zip(outputs, ort_outs)), \
+            "dtypes of outputs differ"
 
     # compare onnxruntime and PyTorch results
     [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
@@ -98,7 +101,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
                    fixed_batch_size=False, dict_check=True,
-                   training=None):
+                   training=None, check_dtypes=False):
     model.eval()
     if input is None:
         input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
@@ -133,7 +136,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    onnx_shape_inference=self.onnx_shape_inference)
         # compute onnxruntime output prediction
         ort_outs = run_ort(ort_sess, input)
-        ort_compare_with_pytorch(ort_outs, output, rtol, atol)
+        ort_compare_with_pytorch(ort_outs, output, rtol, atol, check_dtypes)
 
 
         # if additional test inputs are provided run the onnx
@@ -147,7 +150,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 if isinstance(output, torch.Tensor):
                     output = (output,)
                 ort_outs = run_ort(ort_sess, test_input)
-                ort_compare_with_pytorch(ort_outs, output, rtol, atol)
+                ort_compare_with_pytorch(ort_outs, output, rtol, atol, check_dtypes)
 
 def _init_test_generalized_rcnn_transform():
     min_size = 100
@@ -240,7 +243,7 @@ class TestONNXRuntime(unittest.TestCase):
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False, dict_check=True,
-                 training=None):
+                 training=None, check_dtypes=False):
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
@@ -248,7 +251,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size, dict_check=dict_check,
-                                  training=training)
+                                  training=training, check_dtypes=check_dtypes)
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -3256,15 +3259,17 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_one_hot(self):
         class OneHot(torch.nn.Module):
-            def __init__(self, num_classes):
+            def __init__(self, num_classes, dtype):
                 super().__init__()
                 self.num_classes = num_classes
+                self.dtype = dtype
 
             def forward(self, x):
-                return torch.nn.functional.one_hot(x, self.num_classes)
+                return torch.nn.functional.one_hot(x, self.num_classes, self.dtype)
 
         x = torch.arange(10)
-        self.run_test(OneHot(15), (x))
+        self.run_test(OneHot(15, torch.long), (x), check_dtypes=True)
+        self.run_test(OneHot(15, torch.uint8), (x), check_dtypes=True)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gather(self):
@@ -5383,6 +5388,18 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(SiLUModel(), (x))
+
+    def test_mish(self):
+        class MishModel(torch.nn.Module):
+            def __init__(self):
+                super(MishModel, self).__init__()
+                self.mish = torch.nn.Mish()
+
+            def forward(self, x):
+                return self.mish(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(MishModel(), (x))
 
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):
