@@ -226,7 +226,7 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
   });
 }
 
-void elu_backward_kernel(TensorIterator& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
+void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
@@ -346,7 +346,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void hardsigmoid_backward_kernel(TensorIterator& iter) {
+void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
@@ -503,7 +503,7 @@ static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   });
 }
 
-static void leaky_relu_backward_kernel(TensorIterator& iter, const Scalar& negval_) {
+static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
     auto zero_vec = Vec((scalar_t)(0));
@@ -542,7 +542,7 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
   });
 }
 
-void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const Scalar& threshold_) {
+void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_backward_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     auto beta = beta_.to<scalar_t>();
@@ -632,6 +632,40 @@ void silu_backward_kernel(TensorIterator& iter) {
       });
 }
 
+void mish_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
+        using Vec = Vectorized<scalar_t>;
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) -> scalar_t{
+              return static_cast<scalar_t>(x * std::tanh(std::log1p(std::exp(x))));
+            },
+            [](Vec x_vec) -> Vec {
+              return x_vec * x_vec.exp().log1p().tanh();
+            });
+      });
+}
+
+void mish_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_backward_cpu", [&]() {
+        using Vec = Vectorized<scalar_t>;
+        const Vec kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t dy, scalar_t x) -> scalar_t {
+              const scalar_t sigmoid =
+                  scalar_t(1) / (scalar_t(1) + std::exp(-x));
+              const scalar_t tanh_softplus = std::tanh(std::log1p(std::exp(x)));
+              return dy * (tanh_softplus + x * sigmoid * (scalar_t(1) - tanh_softplus * tanh_softplus));
+            },
+            [kOneVec](Vec dy_vec, Vec x_vec) -> Vec {
+              const Vec sigmoid = kOneVec / (kOneVec + x_vec.neg().exp());
+              const Vec tanh_softplus = x_vec.exp().log1p().tanh();
+              return dy_vec * (tanh_softplus + x_vec * sigmoid * (kOneVec - tanh_softplus * tanh_softplus));
+            });
+      });
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -680,6 +714,10 @@ REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, &silu_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(mish_stub, &mish_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
 
 } // namespace native
 } // namespace at
