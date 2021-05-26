@@ -94,17 +94,17 @@ void scatter_meta_impl(
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
   at::native::scatter_gather_dtype_check("scatter", self, index, src);
   at::native::scatter_shape_check(self, wrapped_dim, index, src);
-
-  meta.set_output(self.sizes(), self.options());
-
   auto output = meta.maybe_get_output(0);
-  at::assert_no_internal_overlap(output);
-  at::assert_no_overlap(output, index);
 
-  if (src.has_value()) {
-    at::assert_no_overlap(output, src.value());
+  if (output.defined()) {
+    at::assert_no_internal_overlap(output);
+    at::assert_no_overlap(output, index);
+    if (src.has_value()) {
+      at::assert_no_overlap(output, src.value());
+    }
   }
 
+  meta.set_output(self.sizes(), self.options());
   if (reduce.has_value()) {
     auto op = get_operator_enum(reduce.value());
 
