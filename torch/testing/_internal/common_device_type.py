@@ -3,6 +3,7 @@ import gc
 import inspect
 import runpy
 import threading
+from collections import namedtuple
 from enum import Enum
 from functools import wraps
 from typing import List, Any, ClassVar, Optional, Sequence, Tuple
@@ -331,8 +332,8 @@ class DeviceTypeTestBase(TestCase):
 
     def _get_tolerance_override(self, test, dtype):
         if not hasattr(test, 'tolerance_overrides'):
-            return self.rel_tol, self.precision
-        return test.tolerance_overrides.get(dtype, (self.rel_tol, self.precision))
+            return self.precision, self.rel_tol
+        return test.tolerance_overrides.get(dtype, (self.precision, self.rel_tol))
 
     # Creates device-specific tests.
     @classmethod
@@ -391,7 +392,7 @@ class DeviceTypeTestBase(TestCase):
                 guard_rel_tol = self.rel_tol
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
-                    self.rel_tol, self.precision = self._get_tolerance_override(test_fn, dtype)
+                    self.precision, self.rel_tol = self._get_tolerance_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
                 except RuntimeError as rte:
@@ -942,11 +943,12 @@ class precisionOverride(object):
         fn.precision_overrides = self.d
         return fn
 
-# Specifies per-dtype tolerance (rtol, atol) overrides. It has priority over
+# Specifies per-dtype tolerance overrides tol(atol, rtol). It has priority over
 # precisionOverride.
 # Ex.
 #
-# @toleranceOverride({torch.float : (1e-3, 1e-2}, torch.double : {0, 1e-4}, })
+# @toleranceOverride({torch.float : tol(atol=1e-2, rtol=1e-3},
+#                     torch.double : tol{atol=1e-4, rtol = 0})
 # @dtypes(torch.half, torch.float, torch.double)
 # def test_X(self, device, dtype):
 #   ...
@@ -956,15 +958,16 @@ class precisionOverride(object):
 # self.rtol and self.precision can be accessed directly, and they also control
 # the behavior of functions like self.assertEqual().
 #
-# The above example sets rtol = 1e-3 and atol = 1e-2 for torch.float and
-# rtol = 0 and atol = 1e-4 for torch.double.
+# The above example sets atol = 1e-2 and rtol = 1e-3 for torch.float and
+# atol = 1e-4 and rtol = 0 for torch.double.
+tol = namedtuple('tol', ['atol', 'rtol'])
+
 class toleranceOverride(object):
     def __init__(self, d):
-        assert isinstance(d, dict), "toleranceOverride not given a dtype : precision dict!"
+        assert isinstance(d, dict), "toleranceOverride not given a dtype : tol dict!"
         for dtype, prec in d.items():
             assert isinstance(dtype, torch.dtype), "toleranceOverride given unknown dtype {0}".format(dtype)
-            assert isinstance(prec, tuple) and len(prec) == 2, \
-                "toleranceOverride not given a dtype : (rtol, atol) dict!"
+            assert isinstance(prec, tol), "toleranceOverride not given a dtype : tol dict!"
 
         self.d = d
 

@@ -21,7 +21,7 @@ from torch.testing import \
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride, toleranceOverride)
+     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -7527,7 +7527,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('special.erfcx',
                    ref=scipy.special.erfcx if TEST_SCIPY else _NOTHING,
                    aten_name='special_erfcx',
-                   decorators=(toleranceOverride({torch.float32: (3.9e-6, 0), }),),
+                   decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=3.9e-6), }),),
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCUDA=empty_types(),
                    safe_casts_outputs=True),
