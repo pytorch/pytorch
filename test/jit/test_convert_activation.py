@@ -55,7 +55,7 @@ class TestFunctionalToInplaceActivation(JitTestCase):
         # guard the mapping, and if any later change breaks the assumption
         # we need to update the mapping correspondingly.
         for activation, dtype in product(activations, dtypes):
-            inp = torch.normal([4, 4]).to(dtype)
+            inp = torch.normal(0, 5, size=(4, 4)).to(dtype)
             try:
                 out = activation(inp)
                 if dtype != out.dtype:
