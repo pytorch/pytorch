@@ -49,6 +49,7 @@ CREATE_UNARY_FLOAT_META_FUNC(erfinv)
 CREATE_UNARY_FLOAT_META_FUNC(exp)
 CREATE_UNARY_FLOAT_META_FUNC(exp2)
 CREATE_UNARY_FLOAT_META_FUNC(expm1)
+CREATE_UNARY_FLOAT_META_FUNC(i0)
 CREATE_UNARY_FLOAT_META_FUNC(lgamma)
 CREATE_UNARY_FLOAT_META_FUNC(log)
 CREATE_UNARY_FLOAT_META_FUNC(log10)
@@ -78,7 +79,6 @@ TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   }
 CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
-CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
 CREATE_UNARY_META_FUNC(sgn)
 
@@ -531,8 +531,8 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(const Tensor& self, Tensor& result) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_output(result)
-    .add_input(self)
+    .add_borrowed_output(result)
+    .add_borrowed_input(self)
     .build();
   logical_not_stub(iter.device_type(), iter);
   return result;
@@ -548,8 +548,8 @@ Tensor& signbit_out(const Tensor& self, Tensor& result) {
   } else {
     TensorIterator iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .add_output(result)
-      .add_input(self)
+      .add_borrowed_output(result)
+      .add_borrowed_input(self)
       .build();
     signbit_stub(iter.device_type(), iter);
   }
@@ -627,9 +627,9 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
               "but got ", exponent.dtype());
 
   auto iter = TensorIteratorConfig()
-    .add_output(mantissa)
-    .add_output(exponent)
-    .add_input(self)
+    .add_borrowed_output(mantissa)
+    .add_borrowed_output(exponent)
+    .add_borrowed_input(self)
     .check_all_same_dtype(false)
     .set_check_mem_overlap(true)
     .build();
