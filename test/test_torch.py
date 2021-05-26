@@ -2398,7 +2398,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             # Check for zero strided, size 1 axis, in non-contiguous storage (gh-33812)
             c = torch.randn(10).as_strided([2, 1, 5], [1, 0, 2])
+            self.assertEqual(torch._debug_has_internal_overlap(c), OVERLAP_NO)
+            c = torch.randn(2, 1, 10)[::2].as_strided((2, 1, 5), (10, 0, 2))
             self.assertEqual(torch._debug_has_internal_overlap(c), OVERLAP_TOO_HARD)
+
 
         def test_allow_tensor_metadata_change(self):
             def do_test(t):
@@ -3946,10 +3949,10 @@ else:
 
     def test_nondeterministic_alert_scatter_add(self, device):
         def test_func(op_call):
-            input = torch.randn(10, device=device)
+            input = torch.randn(5, 4, device=device)
             dim = 0
-            index = torch.tensor([3], device=device)
-            src = torch.randn(1, device=device)
+            index = torch.tensor([[3]], device=device)
+            src = torch.tensor([[1.0]], device=device)
 
             @expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')
             def forward_func(slf, device):
@@ -4166,6 +4169,24 @@ else:
     def test_gather_backward_one_dim(self, device) -> None:
         self._test_gather_backward_one_dim(device, False)
 
+    @onlyOnCPUAndCUDA
+    def test_scatter_add_one_dim_deterministic(self, device) -> None:
+        with DeterministicGuard(True):
+            m = random.randint(20, 30)
+            elems = random.randint(2000 * m, 3000 * m)
+            dim = 0
+            src = torch.randn(elems, device=device)
+            idx = torch.randint(m, (elems,), device=device)
+
+            x = torch.zeros(m, device=device)
+            res = x.scatter_add(dim, idx, src)
+
+            expected = torch.zeros(m, device=device)
+            for i in range(elems):
+                expected[idx[i]] += src[i]
+
+            self.assertEqual(res, expected, atol=0, rtol=0)
+
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
@@ -4180,14 +4201,29 @@ else:
 
     def test_repeat_interleave(self, device):
         y = torch.tensor([[1, 2], [3, 4]], device=device)
+        # exercise single argument function signature
+        temp = y.repeat_interleave(2)
+        self.assertEqual(torch.Size([8]), temp.size())
+
         for dtype in [torch.int, torch.long]:
+            lengths = torch.tensor([1, 2], dtype=dtype, device=device)
+            output_size = torch.sum(lengths)
             a = torch.repeat_interleave(
                 y,
-                torch.tensor([1, 2], dtype=dtype, device=device),
+                lengths,
                 dim=0,
             )
             self.assertEqual(a.dtype, y.dtype)
             self.assertEqual(a.size(), torch.Size([3, 2]))
+
+            a_with_output = torch.repeat_interleave(
+                y,
+                lengths,
+                dim=0,
+                output_size=output_size,
+            )
+            self.assertEqual(a_with_output.dtype, y.dtype)
+            self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
     @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
@@ -5669,12 +5705,31 @@ else:
                 dest_ones.masked_scatter_(mask, src_ones)
                 self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
 
-                # make src smaller. this should fail
-                src = torch.zeros(num_copy - 1, dtype=dt, device=device)
-                with self.assertRaises(RuntimeError):
-                    dest.masked_scatter_(mask, src)
+                # Bound checking in CUDA is done inside a kernel
+                # in order to avoid synchronization, but this means
+                # we can not clear the failures. So there is no way
+                # to test it then recover.
+                if self.device_type != 'cuda':
+                    # make src smaller. this should fail
+                    src = torch.zeros(num_copy - 1, dtype=dt, device=device)
+                    with self.assertRaises(RuntimeError):
+                        dest.masked_scatter_(mask, src)
 
-        self.assertEqual(len(w), 3)
+                # empty tensor
+                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+                mask = torch.ones_like(dest, dtype=maskType, device=device)
+                src = torch.empty((0,), dtype=dt, device=device)
+                dest.masked_scatter_(mask, src)
+
+                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+                mask = torch.ones((5, 1, 5), dtype=maskType, device=device)
+                src = torch.empty((0,), dtype=dt, device=device)
+                dest.masked_scatter_(mask, src)
+
+        if self.device_type != 'cuda':
+            self.assertEqual(len(w), 5)
+        else:
+            self.assertEqual(len(w), 4)
 
         warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
         for wi in w:
@@ -5691,6 +5746,15 @@ else:
         mask = torch.tensor([True, False, True], device=device)
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
+
+    @onlyCUDA
+    @largeTensorTest('30GB')
+    def test_masked_scatter_large_tensor(self, device):
+        t_cpu = torch.empty(2**31 + 1, dtype=torch.bool).random_()
+        t = t_cpu.to(device)
+        result_cpu = t_cpu.masked_scatter(t_cpu, t_cpu)
+        result = t.masked_scatter(t, t)
+        self.assertEqual(result, result_cpu)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_masked_select(self, device, dtype):
@@ -8003,9 +8067,6 @@ tensor_op_tests = [
     ('size', '', _new_t((1, 2, 3, 4)), lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'dim', _new_t((1, 2, 3, 4)), lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('split', '', _small_3d, lambda t, d: [2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('split', 'dim', _small_3d, lambda t, d: [2, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('split', 'neg_dim', _small_3d, lambda t, d: [2, -3], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('t', '', _new_t((1, 2)), lambda t, d: [],),
     ('take', '', _new_t((3, 4)),
         lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d)],
