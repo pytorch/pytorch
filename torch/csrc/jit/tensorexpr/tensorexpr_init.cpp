@@ -494,10 +494,12 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "cache_accesses",
           [](LoopNest& self,
-             const Buf* producer,
+             const BufHandle& producer,
              const std::string& name,
              Stmt* consumer) {
-            return self.cacheAccesses(producer, name, consumer);
+            std::pair<const Buf*, Stmt*> ret =
+                self.cacheAccesses(producer.node(), name, consumer);
+            return std::make_pair(BufHandle(ret.first), ret.second);
           },
           py::return_value_policy::reference)
       .def(
