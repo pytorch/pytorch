@@ -176,7 +176,7 @@ int64_t hsum(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef CPU_CAPABILITY_AVX2
+#if defined(CPU_CAPABILITY_AVX2)
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
   __m256i one_epi8_v = _mm256_set1_epi8(1);
@@ -197,7 +197,28 @@ int64_t hsum(const uint8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512i sum_v = _mm512_setzero_si512();
+  __m512i one_epi16_v = _mm512_set1_epi16(1);
+  __m512i one_epi8_v = _mm512_set1_epi8(1);
+  // vectorized
+  for (; i < len / 64 * 64; i += 64) {
+    __m512i src_v = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
+    sum_v = _mm512_add_epi32(
+      sum_v,
+      _mm512_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm512_maddubs_epi16(src_v, one_epi8_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[16];
+  _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v);
+  for (int k = 0; k < 16; ++k) {
+    row_sum += temp[k];
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -212,7 +233,7 @@ int64_t hsum(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef CPU_CAPABILITY_AVX2
+#if defined(CPU_CAPABILITY_AVX2)
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
   __m256i one_epi8_v = _mm256_set1_epi8(1);
@@ -233,7 +254,28 @@ int64_t hsum(const int8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512i sum_v = _mm512_setzero_si512();
+  __m512i one_epi16_v = _mm512_set1_epi16(1);
+  __m512i one_epi8_v = _mm512_set1_epi8(1);
+  // vectorized
+  for (; i < len / 64 * 64; i += 64) {
+    __m512i src_v = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
+    sum_v = _mm512_add_epi32(
+      sum_v,
+      _mm512_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm512_maddubs_epi16(one_epi8_v, src_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[16];
+  _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v);
+  for (int k = 0; k < 16; ++k) {
+    row_sum += temp[k];
+  }  
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -248,7 +290,7 @@ int64_t hsum(const int32_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef CPU_CAPABILITY_AVX2
+#if defined(CPU_CAPABILITY_AVX2)
   __m256i sum_epi64 = _mm256_setzero_si256();
   // vectorized
   for (; i < len / 8 * 8; i += 8) {
@@ -268,7 +310,27 @@ int64_t hsum(const int32_t* A, int len) {
   for (int k = 0; k < 4; ++k) {
     row_sum += temp[k];
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512i sum_epi64 = _mm512_setzero_si512();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    __m512i src_epi32 = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
+    // widen
+    __m256i src_lo_epi32 = _mm512_castsi512_si256(src_epi32);
+    __m256i src_hi_epi32 = _mm256_castps_si256(_mm512_extractf32x8_ps(src_epi32, 1));
+    __m512i src_lo_epi64 = _mm512_cvtepi32_epi64(src_lo_epi32);
+    __m512i src_hi_epi64 = _mm512_cvtepi32_epi64(src_hi_epi32);
+    // add
+    sum_epi64 = _mm512_add_epi64(sum_epi64, src_lo_epi64);
+    sum_epi64 = _mm512_add_epi64(sum_epi64, src_hi_epi64);
+  }
+
+  alignas(64) int64_t temp[8];
+  _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_epi64);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -283,7 +345,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef CPU_CAPABILITY_AVX2
+#if defined(CPU_CAPABILITY_AVX2)
   // vectorized
   __m256i sum_v_epu32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
@@ -313,7 +375,36 @@ int64_t hsum_sq(const uint8_t* A, int len) {
     }
     sum_v_epu32 = _mm256_setzero_si256();
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512i sum_v_epu32 = _mm512_setzero_si512();
+  alignas(64) int32_t temp[16];
+  int overflow_threshold = 262144; // 2147483647(max of int32)/(512*512)*8 = 262144
+  int loop = len / overflow_threshold + 1;
+  for(int j=0; j<=loop; j++){
+    for (; ((i < overflow_threshold * j) && (i < len / 32 * 32)); i += 32) {
+      // (i31, ..., i0)
+      __m256i src_epu8 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+      __m512i src_epu16 = _mm512_cvtepu8_epi16(src_epu8);
+      // (i31 ^ 2, ..., i0 ^ 2)
+      __m512i sq_epu16 = _mm512_mullo_epi16(src_epu16, src_epu16);
+      // (i15 ^ 2, ..., i0 ^ 2)
+      __m256i sq_lo_epu16 = _mm512_castsi512_si256(sq_epu16);
+      // (i31 ^ 2, ..., i16 ^ 2)
+      __m256i sq_hi_epu16 = _mm256_castps_si256(_mm512_extractf32x8_ps(sq_epu16, 1));
+      // widen to epu32
+      __m512i sq_lo_epu32 = _mm512_cvtepu16_epi32(sq_lo_epu16);
+      __m512i sq_hi_epu32 = _mm512_cvtepu16_epi32(sq_hi_epu16);
+      // add to running sum
+      sum_v_epu32 = _mm512_add_epi32(sum_v_epu32, sq_lo_epu32);
+      sum_v_epu32 = _mm512_add_epi32(sum_v_epu32, sq_hi_epu32);
+    }
+    _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v_epu32);
+    for (int k = 0; k < 16; ++k) {
+      row_sum += temp[k];
+    }
+    sum_v_epu32 = _mm512_setzero_si512();
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -328,7 +419,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef CPU_CAPABILITY_AVX2
+#if defined(CPU_CAPABILITY_AVX2)
   // vectorized
   __m256i sum_v_epi32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
@@ -361,7 +452,40 @@ int64_t hsum_sq(const int8_t* A, int len) {
     }
     sum_v_epi32 = _mm256_setzero_si256();
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  // vectorized
+  __m512i sum_v_epi32 = _mm512_setzero_si512();
+  alignas(64) int32_t temp[16];
+
+  int overflow_threshold = 1048576; //2147483647/(256*256)*8 = 1048576
+  int loop = len / overflow_threshold + 1;
+
+  for(int j=0; j<=loop; j++){
+    for (; ((i < overflow_threshold * j) && (i < len / 32 * 32)); i += 32) {
+      // (i31, ..., i0)
+      __m256i src_epi8 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+      __m512i src_epi16 = _mm512_cvtepi8_epi16(src_epi8);
+      // (i31 ^ 2, ..., i0 ^ 2)
+      __m512i sq_epi16 = _mm512_mullo_epi16(src_epi16, src_epi16);
+      // (i15 ^ 2, ..., i0 ^ 2)
+      __m256i sq_lo_epi16 = _mm512_castsi512_si256(sq_epi16);
+      // (i31 ^ 2, ..., i16 ^ 2)
+      __m256i sq_hi_epi16 = _mm256_castps_si256(_mm512_extractf32x8_ps(sq_epi16, 1));
+      // widen to epi32
+      __m512i sq_lo_epi32 = _mm512_cvtepi16_epi32(sq_lo_epi16);
+      __m512i sq_hi_epi32 = _mm512_cvtepi16_epi32(sq_hi_epi16);
+      // add to running sum
+      sum_v_epi32 = _mm512_add_epi32(sum_v_epi32, sq_lo_epi32);
+      sum_v_epi32 = _mm512_add_epi32(sum_v_epi32, sq_hi_epi32);
+    }
+    _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v_epi32);
+
+    for (int k = 0; k < 16; ++k) {
+      row_sum += temp[k];
+    }
+    sum_v_epi32 = _mm512_setzero_si512();
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -377,7 +501,7 @@ float hsum_sq(const int32_t* A, int len) {
   float row_sum = 0;
   int i = 0;
 
-#ifdef CPU_CAPABILITY_AVX2
+#if defined(CPU_CAPABILITY_AVX2)
   __m256 sum_ps = _mm256_setzero_ps();
   // vectorized
   for (; i < len / 8 * 8; i += 8) {
@@ -391,7 +515,21 @@ float hsum_sq(const int32_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += static_cast<float>(temp[k]);
   }
-#endif // CPU_CAPABILITY_AVX2
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512 sum_ps = _mm512_setzero_ps();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    __m512i src_epi32 = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
+    __m512 src_ps = _mm512_cvtepi32_ps(src_epi32);
+    sum_ps = _mm512_add_ps(sum_ps, _mm512_mul_ps(src_ps, src_ps));
+  }
+
+  alignas(64) float temp[16];
+  _mm512_store_ps(temp, sum_ps);
+  for (int k = 0; k < 16; ++k) {
+    row_sum += static_cast<float>(temp[k]);
+  }
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
   for (; i < len; ++i) {
@@ -1247,7 +1385,7 @@ void qmaxpool_2d_nhwc_kernel(
 }
 
 template <typename T>
-void do_avg_pool_nhwc_on_AVX2(
+void do_avg_pool_nhwc_on_AVX_n(
     const typename T::underlying* i_p,
     typename T::underlying* o_p,
     int& c_start,
@@ -1264,7 +1402,7 @@ void do_avg_pool_nhwc_on_AVX2(
     int hsize,
     int wsize,
     int csize) {
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
   // buffer for channel accumulator, used to interchange channel-loop
   // to inner-most, so that memory access of the input tensor data is
   // continuous.
@@ -1273,7 +1411,6 @@ void do_avg_pool_nhwc_on_AVX2(
   constexpr int cb_step = cb_size * vec_width;
   Vectorized<int32_t> acc_buffer[cb_size];
   Vectorized<float> acc_buffer_fp[cb_size];
-
   if (vec_width == 8) {
     for (int c = c_start; c < csize; c += cb_step) {
       int cend = std::min(cb_size, (csize - c) / vec_width);
@@ -1302,12 +1439,21 @@ void do_avg_pool_nhwc_on_AVX2(
 
       // first quantize using AVX using 32 lanes, then 8, finally falls
       // back to single
+#if defined(CPU_CAPABILITY_AVX2)
       QuantizeAvx2<T>(
           (float*)acc_buffer_fp,
           o_p + c,
           cend * vec_width,
           multiplier,
           output_zero_point);
+#else
+      QuantizeAvx512<T>(
+          (float*)acc_buffer_fp,
+          o_p + c,
+          cend * vec_width,
+          multiplier,
+          output_zero_point);
+#endif
     }
     c_start = csize / vec_width * vec_width;
   }
@@ -1315,7 +1461,7 @@ void do_avg_pool_nhwc_on_AVX2(
 }
 
 template <typename T>
-void do_avg_pool_on_AVX2(
+void do_avg_pool_on_AVX_n(
     typename T::underlying* i_p,
     typename T::underlying* o_p,
     int64_t& c,
@@ -1334,8 +1480,8 @@ void do_avg_pool_on_AVX2(
     int64_t stride_D,
     int64_t stride_H,
     int64_t stride_W) {
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-  constexpr auto vec_width = Vectorized<T>::size() / 4;
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+  constexpr int vec_width = Vectorized<T>::size() / 4;
   if (vec_width == 8) {
     for (; c + vec_width <= channel_size; c += vec_width) {
       int64_t tcntr = 0;
@@ -1424,10 +1570,10 @@ void _qadaptive_avg_pool_kernel(
                                istartH * istrideH +
                                istartW * istrideW;
 
-          // Note: If AVX is not available, `do_avg_pool_on_AVX2 is a noop.
+          // Note: If AVX is not available, `do_avg_pool_on_AVX_n is a noop.
           //       In that case, the following loop takes over
           // TODO: more vectorization with loop interleaving
-          do_avg_pool_on_AVX2<scalar_t>(
+          do_avg_pool_on_AVX_n<scalar_t>(
               internal_i_p,
               o_p,
               c,
@@ -1446,7 +1592,6 @@ void _qadaptive_avg_pool_kernel(
               istrideD,
               istrideH,
               istrideW);
-
           // 1) The following loop handles the remaining channels
           // 2) It also handles the Non-AVX2 path
           for (; c < sizeC; ++c) {
@@ -1618,7 +1763,7 @@ void _qavg_pool_nhwc_kernel(
           // For int8 quantization, we implicitly use int32 as accumulation
           // Or else, it will go to the slow path
           // TODO: support 16bit, 32bit, and etc.
-          do_avg_pool_nhwc_on_AVX2<scalar_t>(
+          do_avg_pool_nhwc_on_AVX_n<scalar_t>(
               i_p,
               o_p,
               c_start,
@@ -1752,7 +1897,7 @@ void qavg_pool3d_nhwc_kernel(
 }
 
 template <typename T>
-int64_t do_quantized_bilinear_on_AVX2(
+int64_t do_quantized_bilinear_on_AVX_n(
     const typename T::underlying*& pos1,
     typename T::underlying*& pos2,
     int64_t input_height,
@@ -1770,9 +1915,13 @@ int64_t do_quantized_bilinear_on_AVX2(
     const int64_t h1p,
     const int64_t w1p) {
   int64_t c = 0;
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(AVX512)) && !defined(_MSC_VER)
   constexpr auto vec_width = Vectorized<T>::size() / 4;
+#if defined(CPU_CAPABILITY_AVX2)
   if (vec_width == 8) {
+#else
+  if (vec_width == 16) {
+#endif
     for (; c + vec_width <= channels; c += vec_width) {
       Vectorized<float> pos1_fp_v[4];
       Vectorized<int32_t> pos1_int_v[4];
@@ -1869,7 +2018,7 @@ void qupsample_bilinear2d_nhwc_kernel(
                   o_p + (h2 * output_width + w2) * channels;
               // We have to isolate this function out because the VS does not
               // expand the macro correctly.
-              c = do_quantized_bilinear_on_AVX2<scalar_t>(
+              c = do_quantized_bilinear_on_AVX_n<scalar_t>(
                   pos1,
                   pos2,
                   input_height,
@@ -2036,7 +2185,7 @@ void q_batch_norm_kernel(
         reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
     scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
 
-    constexpr int kVLen = 8;
+    constexpr int kVLen = Vectorized<float>::size();
     const int64_t outer_size = N * HxW;
     using Vec = Vectorized<scalar_t>;
     // Hoisted variables
@@ -2311,7 +2460,7 @@ void quantized_normalize_kernel(
     float y_scale = Y->q_scale();
     float y_inv_scale = 1.0f / y_scale;
 
-    constexpr int kFloatVLen = 8;
+    constexpr int kFloatVLen = fVec::size();
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
     int64_t kNumIntVecInLayer = N / kIntVLen;
     int64_t kNonVecRemInLayer = N % kIntVLen;
