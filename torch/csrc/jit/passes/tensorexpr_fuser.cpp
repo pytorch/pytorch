@@ -851,11 +851,17 @@ class TensorExprFuser {
     }
     return true;
   }
+
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
       if (!shapeIsKnown(input)) {
         return false;
+      }
+      if (input->node()->kind() == prim::ListConstruct) {
+        if (!allShapesAreKnown(input->node())) {
+          return false;
+        }
       }
     }
     for (Value* output : node->outputs()) {
