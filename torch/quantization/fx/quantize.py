@@ -1553,7 +1553,7 @@ class Quantizer:
 
                     qconfig = qconfig_map[node.name]
                     result = obj.convert(
-                        self, node, qconfig, modules, quantized_graph, node_name_to_scope, load_arg, is_reference=is_reference,
+                        node, qconfig, modules, quantized_graph, node_name_to_scope, load_arg, is_reference=is_reference,
                         convert_custom_config_dict=convert_custom_config_dict)
                     if not is_observed_standalone_module_node:
                         quantized = is_output_quantized(node, obj, qconfig, modules)

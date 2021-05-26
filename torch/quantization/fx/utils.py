@@ -12,7 +12,6 @@ from torch.fx.graph import (
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
 import operator
-from .quantization_types import QuantizerCls
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
@@ -346,7 +345,6 @@ def create_getattr_from_value(module: torch.nn.Module, graph: Graph, prefix: str
     return attr_node
 
 def create_qparam_nodes(
-        quantizer: QuantizerCls,
         node_name: str,
         scale: Any,
         zero_point: Any,
@@ -355,7 +353,7 @@ def create_qparam_nodes(
         node_name_to_scope: Dict[str, Tuple[str, type]]
 ) -> Tuple[Node, Node]:
     """
-    Create getattr nodes in the quantizer graph for scale and zero point values.
+    Create getattr nodes in the quantized graph for scale and zero point values.
     The nodes are registered with the root_module of the model.
     """
     root_module = modules['']
