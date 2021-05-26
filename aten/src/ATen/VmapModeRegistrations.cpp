@@ -30,6 +30,11 @@ template <typename... Args> Tensor& unsupportedRandomOp_(Args... args) {
               "Please perform random operations outside of vmap as a workaround");
 }
 
+template <typename... Args> const Tensor& unsupportedRandomOp__(Args... args) {
+  TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
+              "Please perform random operations outside of vmap as a workaround");
+}
+
 TORCH_LIBRARY_IMPL(_, VmapMode, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
@@ -94,7 +99,7 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
   m.impl("randperm", unsupportedRandomOp<int64_t, TENSOROPTIONS>);
   m.impl("randperm.generator", unsupportedRandomOp<int64_t, optional<Generator>, TENSOROPTIONS>);
   m.impl("randperm.out", unsupportedRandomOp_<int64_t, Tensor&>);
-  m.impl("randperm.generator_out", unsupportedRandomOp_<int64_t, optional<Generator>, Tensor&>);
+  m.impl("randperm.generator_out", unsupportedRandomOp__<int64_t, optional<Generator>, const Tensor&>);
 
   m.impl("randint", unsupportedRandomOp<int64_t, IntArrayRef, TENSOROPTIONS>);
   m.impl("randint.generator", unsupportedRandomOp<int64_t, IntArrayRef, optional<Generator>, TENSOROPTIONS>);
