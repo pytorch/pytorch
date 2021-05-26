@@ -2398,10 +2398,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             # Check for zero strided, size 1 axis, in non-contiguous storage (gh-33812)
             c = torch.randn(10).as_strided([2, 1, 5], [1, 0, 2])
-            self.assertEqual(torch._debug_has_internal_overlap(c), OVERLAP_NO)
-            c = torch.randn(2, 1, 10)[::2].as_strided((2, 1, 5), (10, 0, 2))
             self.assertEqual(torch._debug_has_internal_overlap(c), OVERLAP_TOO_HARD)
-
 
         def test_allow_tensor_metadata_change(self):
             def do_test(t):
