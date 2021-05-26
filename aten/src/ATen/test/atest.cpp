@@ -148,7 +148,7 @@ TEST_F(atest, logical_xor_operators) {
 TEST_F(atest, lt_operators) {
   auto exp_tensor = tensor({0, 0, 0, 0, 1});
   run_binary_ops_test<
-      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      const at::Tensor& (*)(const at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       lt_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
@@ -156,7 +156,7 @@ TEST_F(atest, lt_operators) {
 TEST_F(atest, le_operators) {
   auto exp_tensor = tensor({0, 1, 1, 1, 1});
   run_binary_ops_test<
-      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      const at::Tensor& (*)(const at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       le_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
@@ -164,7 +164,7 @@ TEST_F(atest, le_operators) {
 TEST_F(atest, gt_operators) {
   auto exp_tensor = tensor({1, 0, 0, 0, 0});
   run_binary_ops_test<
-      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      const at::Tensor& (*)(const at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       gt_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
@@ -172,7 +172,7 @@ TEST_F(atest, gt_operators) {
 TEST_F(atest, ge_operators) {
   auto exp_tensor = tensor({1, 1, 1, 1, 0});
   run_binary_ops_test<
-      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      const at::Tensor& (*)(const at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       ge_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
@@ -180,7 +180,7 @@ TEST_F(atest, ge_operators) {
 TEST_F(atest, eq_operators) {
   auto exp_tensor = tensor({0, 1, 1, 1, 0});
   run_binary_ops_test<
-      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      const at::Tensor& (*)(const at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       eq_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
@@ -188,7 +188,7 @@ TEST_F(atest, eq_operators) {
 TEST_F(atest, ne_operators) {
   auto exp_tensor = tensor({1, 0, 0, 0, 1});
   run_binary_ops_test<
-      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      const at::Tensor& (*)(const at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       ne_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
