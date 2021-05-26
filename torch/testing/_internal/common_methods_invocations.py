@@ -81,9 +81,9 @@ class SkipInfo(DecorateInfo):
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_input']
+    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_input', 'name']
 
-    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None, broadcasts_input=False):
+    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None, broadcasts_input=False, name=""):
         # input is the first input to the op and must be either a Tensor or TensorList (Sequence[Tensor]).
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         # op with TensorList inputs do not support method or inplace variants.
@@ -92,6 +92,7 @@ class SampleInput(object):
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
+        self.name = name
 
         # Specifies if `self.input` is broadcasted or not,
         # given that the operator supports broadcasting.
@@ -103,16 +104,55 @@ class SampleInput(object):
         # for such inputs (as they will error out otherwise).
         self.broadcasts_input = broadcasts_input
 
-    def __repr__(self):
+    def _repr_helper(self, formatter):
+        # Helper function to return the details of the SampleInput as `str`
+        # It consolidates all the fields of SampleInput and allows,
+        # formatting the fields like `input`, `args`, etc with `formatter`
+        # callable to customize the representation.
+        # Look at `summary` method for example.
         arguments = [
-            'input=Tensor' if isinstance(self.input, torch.Tensor) else f'input=TensorList[{len(self.input)}]',
-            f'args={self.args}' if len(self.args) > 0 else None,
-            f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
-            (f'output_process_fn_grad={self.output_process_fn_grad}'
-             if self.output_process_fn_grad is not None else None),
-            f'broadcasts_input={self.broadcasts_input}']
+            f'input={formatter(self.input)}',
+            f'args={formatter(self.args)}',
+            f'kwargs={formatter(self.kwargs)}',
+            f'output_process_fn_grad={self.output_process_fn_grad}',
+            f'broadcasts_input={self.broadcasts_input}',
+            f'name={repr(self.name)}']
 
         return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
+
+    def __repr__(self):
+        return self._repr_helper(lambda x: x)
+
+    def summary(self):
+        # Returns the SampleInput details in a more
+        # friendly format.
+        # It formats `Tensor` and `TensorList`
+        # in a more condensed representation.
+        def is_iter(arg):
+            try:
+                iter(arg)
+                return True
+            except TypeError as te:
+                return False
+
+        def formatter(arg):
+            # Format any instance of `Tensor` (standalone, in list, or in dict)
+            # by Tensor[TensorShape]
+            # Eg. Tensor with shape (3, 4) is formatted as Tensor[3, 4]
+            if isinstance(arg, torch.Tensor):
+                shape = str(tuple(arg.shape)).replace('(', '').replace(')', '')
+                return f"Tensor[{shape}]"
+            elif isinstance(arg, dict):
+                return {k: formatter(v) for k, v in arg.items()}
+            elif is_iterable_of_tensors(arg):
+                return "TensorList[" + ", ".join(map(formatter, arg)) + "]"
+            elif is_iter(arg):  # Handle list, tuple or any iterable type
+                return "(" + ",".join(map(formatter, arg)) + ")"
+
+            return repr(arg)
+
+        return self._repr_helper(formatter)
+
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
@@ -1998,6 +2038,24 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     def wrapped_fn(x):
         if is_integral(x.dtype):
             return fn(x, dtype=np_dtype)
+        return fn(x)
+
+    return wrapped_fn
+
+
+def np_unary_ufunc_integer_promotion_wrapper_with_astype(fn):
+    # Check np_unary_ufunc_integer_promotion_wrapper
+    def is_integral(dtype):
+        return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
+
+    @wraps(fn)
+    def wrapped_fn(x):
+        # As the default dtype can change, acquire it when function is called.
+        # NOTE: Promotion in PyTorch is from integer types to the default dtype
+        np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+
+        if is_integral(x.dtype):
+            return fn(x).astype(np_dtype)
         return fn(x)
 
     return wrapped_fn
@@ -4659,11 +4717,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            supports_out=False),
     UnaryUfuncInfo('i0',
-                   ref=np.i0,
+                   ref=np_unary_ufunc_integer_promotion_wrapper_with_astype(
+                       scipy.special.i0) if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
-                   dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   safe_casts_outputs=True,
                    supports_autograd=False),
     UnaryUfuncInfo('special.i0e',
                    aten_name='special_i0e',
