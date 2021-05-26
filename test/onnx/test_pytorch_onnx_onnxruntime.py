@@ -1962,6 +1962,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor(8.5, dtype=torch.float)
         self.run_test(ArangeModelStep(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats(self):
         class ArangeModelEnd(torch.nn.Module):
             def forward(self, end):
@@ -1986,6 +1987,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor(8.5, dtype=torch.float)
         self.run_test(ArangeModelStart(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats_override(self):
         class ArangeModelEnd(torch.nn.Module):
             def forward(self, end):
