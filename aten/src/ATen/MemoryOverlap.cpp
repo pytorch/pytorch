@@ -53,8 +53,8 @@ MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
   // same pointer across multiple storages there are many
   // similar situations (e.g., storage().data() == storage().data()+1)
   // which we will miss.
-  const auto& a_storage = a->storage();
-  if (a_storage && a_storage.is_alias_of(b->storage())) {
+  auto a_storage = a->unsafeMaybeGetStorageImpl();
+  if (a_storage && (a_storage == b->unsafeMaybeGetStorageImpl())) {
     const auto a_begin = static_cast<char*>(a->data());
     const auto a_end = a_begin + a->numel() * a->itemsize();
     const auto b_begin = static_cast<char*>(b->data());
