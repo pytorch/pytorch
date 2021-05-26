@@ -999,24 +999,20 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(NOT pybind11_PREFER_third_party)
+if(USE_SYSTEM_BIND11)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)
   endif()
-endif()
-
-if(pybind11_FOUND)
-    message(STATUS "System pybind11 found")
+  if(NOT pybind11_FOUND)
+    message(FATAL "Cannot find system pybind11")
+  endif()
 else()
     message(STATUS "Using third_party/pybind11.")
     set(pybind11_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
     install(DIRECTORY ${pybind11_INCLUDE_DIRS}
             DESTINATION ${CMAKE_INSTALL_PREFIX}
             FILES_MATCHING PATTERN "*.h")
-    set(pybind11_PREFER_third_party ON CACHE BOOL
-        "Use the third_party/pybind11 submodule, instead of looking for system
-        installation of pybind11")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
@@ -1189,6 +1185,12 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ cuDNN
+if(USE_CUDNN)
+  set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
+  include_directories(${CUDNN_FRONTEND_INCLUDE_DIR})
+endif()
+
 # ---[ HIP
 if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
@@ -1308,7 +1310,13 @@ if(USE_GLOO)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    if(MSVC)
+      # Don't install gloo on Windows
+      # It is already handled in builder scripts
+      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
+    else()
+      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    endif()
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
