@@ -49,6 +49,7 @@ static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
   auto buffer_stride = buffer.strides()[0] * buffer.element_size();
   auto buffer_0 = buffer[0];
   auto first_reduce = TensorIterator::reduce_op(buffer_0, iter.input(0));
+  TORCH_INTERNAL_ASSERT(first_reduce.output(0).is_alias_of(buffer_0));
 
   at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
     const auto thread_num = at::get_thread_num();
