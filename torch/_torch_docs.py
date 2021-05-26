@@ -4179,6 +4179,12 @@ Args:
     {input}
 """.format(**common_args))
 
+add_docstr(torch.is_grad_enabled, r"""
+is_grad_enabled() -> (bool)
+
+Returns True if grad mode is currently enabled.
+""".format(**common_args))
+
 add_docstr(torch.is_inference_mode_enabled, r"""
 is_inference_mode_enabled() -> (bool)
 
