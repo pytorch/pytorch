@@ -30,7 +30,7 @@ TEST(OperatorsTest, TestMethodOnlyDecltype) {
   // because that is how the tensor API works.
   auto& result = pass_through_wrapper<
     decltype(&ATEN_FN2(mul_, Tensor)), &ATEN_FN2(mul_, Tensor),
-    Tensor&, Tensor&, const Tensor&>(a, b);
+    const Tensor&, const Tensor&, const Tensor&>(a, b);
   ASSERT_TRUE(at::allclose(result, expected));
 }
 
