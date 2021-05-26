@@ -5,6 +5,7 @@ functionalities in `torch.jit`.
 """
 
 from typing import Optional, List
+import io
 
 import torch
 from torch.jit._script import RecursiveScriptModule, ScriptModule
@@ -164,30 +165,8 @@ def run_frozen_optimizations(mod, optimize_numerics: bool = True):
             torch._C._jit_pass_fold_frozen_conv_mul_or_div(mod.graph)
 
 def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
-    """
-    Performs a set of optimization passes to optimize a model for the
-    purposes of inference. If the model is not already frozen, optimize_for_inference
-    will invoke `torch.jit.freeze` automatically.
+    # just make a copy
+    buffer = io.BytesIO()
+    torch.jit.save(mod, buffer)
+    return torch.jit.load(buffer)
 
-    In addition to generic optimizations that should speed up your model regardless
-    of environment, prepare for inference will also bake in build specific settings
-    such as the presence of CUDNN or MKLDNN, and may in the future make transformations
-    which speed things up on one machine but slow things down on another. Accordingly,
-    serialization is not implemented following invoking `optimize_for_inference` and
-    is not guaranteed.
-
-    This is still in prototype, and may have the potential to slow down your model.
-    Primary use cases that have been targeted so far have been vision models on cpu
-    and gpu to a lesser extent.
-    """
-    if not isinstance(mod, ScriptModule):
-        raise RuntimeError(
-            "optimize_for_inference expects a ScriptModule as input. "
-            "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
-
-    if hasattr(mod, "training"):
-        mod = freeze(mod.eval())
-
-    torch._C._jit_pass_convert_frozen_ops_to_mkldnn(mod.graph)
-    torch._C._jit_pass_fuse_frozen_conv_add_relu(mod.graph)
-    return mod
