@@ -14,7 +14,7 @@
 namespace c10d {
 
 #ifdef USE_C10D_GLOO
-constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 #endif
 
 inline std::vector<std::string> split(

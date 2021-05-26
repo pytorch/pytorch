@@ -182,7 +182,7 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
       auto options = ProcessGroupGloo::Options::create();
 
       // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-      char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
+      char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
       if (ifnameEnv) {
         for (const auto& iface : split(',', ifnameEnv)) {
           options->devices.push_back(
