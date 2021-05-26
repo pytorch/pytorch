@@ -181,7 +181,7 @@ bool backport_v5_to_v4(
   // write `constants` archive
   auto constants_tuple =
       c10::ivalue::Tuple::create(std::move(constants_values));
-  writeArchiveV4(writer, kArchiveNameConstants, bytecode_tuple);
+  writeArchiveV4(writer, kArchiveNameConstants, constants_tuple);
   return true;
 }
 
