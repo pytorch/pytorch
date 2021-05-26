@@ -39,6 +39,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Device", ParameterType::DEVICE},
   {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
+  {"c10::string_view", ParameterType::STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
@@ -674,7 +675,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
       default_scalartype = at::ScalarType::Undefined;
-    } else if (str == "torch.int64") {
+    } else if (str == "torch.int64" || str == "at::kLong") {
       default_scalartype = at::ScalarType::Long;
     } else {
       throw std::runtime_error("invalid default value for ScalarType: " + str);

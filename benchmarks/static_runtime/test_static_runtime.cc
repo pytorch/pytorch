@@ -90,6 +90,8 @@ void testStaticRuntime(
   } else if (expect.isList()) {
     compareTensorLists(expect.toTensorVector(), actual.toTensorVector());
   } else {
+    VLOG(2) << "expect " << expect.toTensor() << std::endl;
+    VLOG(2) << "output " << actual.toTensor() << std::endl;
     EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
   }
   // make sure inputs were not modified
@@ -115,7 +117,7 @@ TEST(StaticRuntime, InPlace) {
 }
 
 TEST(StaticRuntime, UnaryOps) {
-  auto a = at::ones({2, 3});
+  auto a = at::randn({2, 3});
 
   std::vector<IValue> args{a};
 
@@ -125,6 +127,27 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1, args);
   testStaticRuntime(aten_sum_0_true, args);
   testStaticRuntime(aten_sum_1_true, args);
+}
+
+TEST(StaticRuntime, Clone) {
+  auto a = at::randn({2, 3});
+  auto b = at::empty_strided({3, 2}, {1, 3});
+
+  std::vector<IValue> args_0{b, c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args_1{b, c10::MemoryFormat::Preserve};
+
+  testStaticRuntime(clone_script_0, {a});
+  testStaticRuntime(clone_script_1, args_0);
+  testStaticRuntime(clone_script_1, args_1);
+}
+
+TEST(StaticRuntime, Clamp) {
+  auto a = at::randn({2, 3});
+  auto max_t = at::full_like(a, 1);
+  auto min_t = at::full_like(a, -1);
+
+  testStaticRuntime(clamp_script_1, {a, -1, 1});
+  testStaticRuntime(clamp_script_2, {a, min_t, max_t});
 }
 
 TEST(StaticRuntime, Logit) {
@@ -140,7 +163,7 @@ TEST(StaticRuntime, Logit) {
 }
 
 TEST(StaticRuntime, EmbeddingBag) {
-  at::Tensor weight = torch::ones({3, 11}, at::ScalarType::Float);
+  at::Tensor weight = torch::randn({3, 11}, at::ScalarType::Float);
   at::Tensor input = torch::tensor({0, 1, 0, 2});
   at::Tensor offset = torch::tensor({0, 2, 4});
 
@@ -327,6 +350,15 @@ TEST(StaticRuntime, IndividualOps_to) {
   test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
   test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::Preserve);
+}
+
+TEST(StaticRuntime, IndividualOps_FullLike) {
+  auto a = at::randn({2, 3});
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  std::vector<IValue> args {a, 4, dtype, at::kStrided, cpu, false,
+                            c10::MemoryFormat::Contiguous};
+  testStaticRuntime(full_like_script, args);
 }
 
 TEST(StaticRuntime, LongModel) {
