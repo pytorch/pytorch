@@ -12,7 +12,7 @@ namespace torch { namespace TraceType {
 
 namespace {
 
-Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+const Tensor & copy_(const Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
   if(torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
