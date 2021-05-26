@@ -1326,11 +1326,7 @@ void LoopNest::splitWithTail(For* f, int factor) {
   splitWithTail(f, factor, &inner, &tail);
 }
 
-void LoopNest::splitWithTail(
-    For* f,
-    int factor,
-    For** inner,
-    For** tail) {
+void LoopNest::splitWithTail(For* f, int factor, For** inner, For** tail) {
   if (!f) {
     throw malformed_input("splitWithTail attempted on null loop", f);
   }
