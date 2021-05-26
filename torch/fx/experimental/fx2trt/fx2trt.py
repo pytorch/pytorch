@@ -91,6 +91,7 @@ class TRTModule(torch.nn.Module):
 
     def forward(self, *inputs):
         batch_size = inputs[0].shape[0]
+        contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
         bindings: List[Any] = [None] * (len(self.input_names) + len(self.output_names))
 
         # create output tensors
@@ -106,7 +107,7 @@ class TRTModule(torch.nn.Module):
 
         for i, input_name in enumerate(self.input_names):
             idx = self.engine.get_binding_index(input_name)
-            bindings[idx] = inputs[i].contiguous().data_ptr()
+            bindings[idx] = contiguous_inputs[i].data_ptr()
 
         self.context.execute_async(
             batch_size, bindings, torch.cuda.current_stream().cuda_stream
@@ -149,7 +150,6 @@ class TRTInterpreter(torch.fx.Interpreter):
     def __init__(self, module : torch.fx.GraphModule, input_shapes : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
         # Preprocess the model
         module = copy.copy(module)
-        module = module.cpu()
         module = NormalizeArgs(module).transform()
         super().__init__(module)
 
@@ -167,13 +167,19 @@ class TRTInterpreter(torch.fx.Interpreter):
     def run(
         self,
         *args,
-        max_batch_size=10,
+        max_batch_size=64,
         max_workspace_size=1 << 25,
         fp16_mode=False,
         int8_mode=False,
         strict_type_constraints=False
     ):
         super().run(*args)
+
+        if int8_mode:
+            assert self.builder.platform_has_fast_int8, "Current platform doesn't support int8 inference!"
+
+        if fp16_mode:
+            assert self.builder.platform_has_fast_fp16, "Current platform doesn't support fp16 inference!"
 
         self.builder.max_batch_size = max_batch_size
         self.builder.max_workspace_size = max_workspace_size
