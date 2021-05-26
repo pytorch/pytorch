@@ -869,7 +869,7 @@ def prim_ConstantChunk(g, self, chunks, dim):
         start = end
     return res
 
-def repeat_interleave(g, self, repeats, dim=None):
+def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     from torch.onnx.symbolic_opset9 import reshape
     input = self
     final_dim = dim

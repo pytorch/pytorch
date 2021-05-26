@@ -655,7 +655,7 @@ StrideVector TensorIteratorBase::get_strides() const {
   StrideVector strides;
   for (int dim = 0; dim < ndim(); dim++) {
     for (int arg = 0; arg < ntensors(); arg++) {
-      strides.push_back(operands_[arg].stride_bytes[dim]);
+      strides.emplace_back(operands_[arg].stride_bytes[dim]);
     }
   }
   return strides;
@@ -670,10 +670,15 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
     strides.push_back(0);
   }
 
+
   auto base_ptrs = get_base_ptrs();
   if (ndim() <= 1) {
-    auto ptrs = get_data_ptrs(base_ptrs, { range.begin });
-    loop(ptrs.data(), strides.data(), range.size(), 1);
+    if (range.begin > 0) {
+      auto ptrs = get_data_ptrs(base_ptrs, {range.begin});
+      loop(ptrs.data(), strides.data(), range.size(), 1);
+    } else {
+      loop(base_ptrs.data(), strides.data(), range.size(), 1);
+    }
   } else {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
@@ -894,13 +899,22 @@ TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
   return iter;
 }
 
-TensorIterator TensorIterator::nullary_op(Tensor& out) {
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .check_all_same_dtype(false)
-    .add_output(out)
-    // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
+#define NULLARY_OP_CONFIG()                                     \
+  TensorIteratorConfig()                                        \
+    .set_check_mem_overlap(true)                                \
+    .check_all_same_dtype(false)                                \
+  /* FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342 */ \
     .resize_outputs(false)
+
+TensorIterator TensorIterator::nullary_op(Tensor& out) {
+  return NULLARY_OP_CONFIG()
+    .add_output(out)
+    .build();
+}
+
+TensorIterator TensorIterator::borrowing_nullary_op(Tensor& out) {
+  return NULLARY_OP_CONFIG()
+    .add_borrowed_output(out)
     .build();
 }
 
@@ -1003,7 +1017,9 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
     assert_no_internal_overlap(*output);
     for (int j = num_outputs_; j < ntensors(); j++) {
       const auto& input = operands_[j].tensor;
-      assert_no_partial_overlap(*output, *input);
+      if (input->unsafeGetTensorImpl()!=output->unsafeGetTensorImpl()) {
+        assert_no_partial_overlap(*output, *input);
+      }
     }
   }
 }

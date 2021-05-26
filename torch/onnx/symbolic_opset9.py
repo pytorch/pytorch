@@ -722,6 +722,8 @@ def prelu(g, self, weight):
 def silu(g, input):
     return g.op("Mul", input, g.op("Sigmoid", input))
 
+def mish(g, input):
+    return g.op('Mul', input, g.op('Tanh', g.op('Softplus', input)))
 
 def relu(g, input):
     return g.op("Relu", input)
@@ -1978,11 +1980,22 @@ def to(g, self, *args):
             # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
-            dtype = sym_help._maybe_get_const(args[0], "i")
-            if sym_help._is_value(dtype):
+            # TestONNXRuntime::test_ones_bool shows args[0] of aten::to() can be onnx::Constant[value=<Tensor>]()
+            # In this case, the constant value is a tensor not int,
+            # so sym_help._maybe_get_const(args[0], 'i') would not work.
+            dtype = args[0]
+            if sym_help._is_value(args[0]) and args[0].node().kind() == "onnx::Constant":
+                tval = args[0].node()["value"]
+                if isinstance(tval, torch.Tensor):
+                    if len(tval.shape) == 0:
+                        tval = tval.item()
+                        dtype = int(tval)
+                    else:
+                        dtype = tval
+
+            if sym_help._is_value(dtype) or isinstance(dtype, torch.Tensor):
                 # aten::to(Tensor, Tensor, bool, bool, memory_format)
-                other = args[0]
-                dtype = other.type().scalarType()
+                dtype = args[0].type().scalarType()
                 return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype])
             else:
                 # aten::to(Tensor, ScalarType, bool, bool, memory_format)
@@ -2014,7 +2027,7 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
-def repeat_interleave(g, self, repeats, dim=None):
+def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
@@ -2569,11 +2582,15 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
     return input
 
 
-@parse_args("v", "i")
-def one_hot(g, self, num_classes):
+@parse_args("v", "i", "v")
+def one_hot(g, self, num_classes, dtype):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = g.op("Constant", value_t=torch.LongTensor([num_classes]))
-    return g.op("OneHot", self, depth, values, axis_i=-1)
+    one_hot_tensor = g.op("OneHot", self, depth, values, axis_i=-1)
+    dtype = sym_help._maybe_get_const(dtype, 'i')
+    if sym_help._is_value(dtype):
+        dtype = 4  # default to int64
+    return g.op("Cast", one_hot_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
 
 
 @parse_args("v", "i", "v", "v")
