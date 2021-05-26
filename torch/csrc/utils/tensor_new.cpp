@@ -612,8 +612,18 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   const int NUM_ARGS = 9, CROW_INDICES_ARG = 0, COL_INDICES_ARG = 1, VALUES_ARG = 2;
   ParsedArgs<NUM_ARGS> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  THPObjectPtr crow_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(CROW_INDICES_ARG), "dtype"));
-  THPObjectPtr col_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(COL_INDICES_ARG), "dtype"));
+  auto safe_get_attr_string = [](PyObject *o, const char *attr_name) -> PyObject* {
+    // Clear error indicator if attribute does not exists.
+    // Otherwise subsequent Python C API calls might return bogus values.
+    // See https://github.com/pytorch/pytorch/issues/58520 for more details
+    auto rc = PyObject_GetAttrString(o, attr_name);
+    if (!rc) {
+      PyErr_Clear();
+    }
+    return rc;
+  };
+  THPObjectPtr crow_indices_dtype_attr(safe_get_attr_string(r.pyobject(CROW_INDICES_ARG), "dtype"));
+  THPObjectPtr col_indices_dtype_attr(safe_get_attr_string(r.pyobject(COL_INDICES_ARG), "dtype"));
   at::ScalarType crow_indices_scalar_type = crow_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
     crow_indices_dtype_attr.get())->scalar_type : kInt;
   at::ScalarType col_indices_scalar_type = col_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
@@ -868,21 +878,6 @@ Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyO
     return new_tensor;
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
-}
-
-Tensor new_ones(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  static PythonArgParser parser({
-    "new_ones(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  }, /*traceable=*/true);
-
-  ParsedArgs<4> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    const auto actual_options = typeIdWithDefault(r, 2, dispatch_key);
-    const auto actual_scalar_type = r.scalartypeWithDefault(1, scalar_type);
-    return dispatch_ones(actual_options, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
-  }
-  throw std::runtime_error("new_ones(): invalid arguments");
 }
 
 }} // namespace torch::utils

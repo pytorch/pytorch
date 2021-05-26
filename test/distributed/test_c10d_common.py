@@ -13,6 +13,7 @@ from sys import platform
 
 import torch
 import torch.distributed as c10d
+import torch.distributed.rpc as rpc
 
 if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
@@ -53,6 +54,7 @@ else:
 
 DEFAULT_HOSTNAME = "localhost"
 
+torch.backends.cuda.matmul.allow_tf32 = False
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
@@ -179,6 +181,45 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # object is not destroyed before the second object is created.
             store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
+
+    def test_multitenancy(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+
+        # Use noqa to silence flake8.
+        # Need to store in an unused variable here to ensure the first
+        # object is not destroyed before the second object is created.
+        store1 = c10d.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
+        store2 = c10d.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
+
+    def test_init_pg_and_rpc_with_same_socket(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+
+        os.environ["MASTER_ADDR"] = addr
+        os.environ["MASTER_PORT"] = str(port)
+
+        # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
+        # initialize even when using the same socket address.
+
+        dist.init_process_group(
+            backend="gloo",
+            init_method="env://",
+            rank=0,
+            world_size=1,
+        )
+
+        backend_opts = rpc.ProcessGroupRpcBackendOptions(
+            init_method=f"tcp://{addr}:{port}"
+        )
+        rpc.init_rpc(
+            name="worker0",
+            rank=0,
+            world_size=1,
+            rpc_backend_options=backend_opts,
+        )
+
+        rpc.shutdown()
 
     # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
     # the user and one additional key used for coordinate all the workers.
@@ -595,6 +636,124 @@ class SparseGradientModule(nn.Module):
     def forward(self, x):
         return F.softmax(self.embedding(x), dim=1)
 
+
+class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
+    def setUp(self):
+        super(AbstractProcessGroupWrapperTest, self).setUp()
+        # For Windows platform, Python does not support fork, change it to spawn here.
+        if sys.platform == "win32":
+            self._spawn_processes()
+        else:
+            self._fork_processes()
+
+    def _test_collective_hang(self, wrapper_pg, use_cuda=False):
+        # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
+        # and report an issue with rank 1.
+        faulty_rank = 1
+        if self.rank != faulty_rank:
+            tensor = torch.randn(20, 10)
+            if use_cuda:
+                tensor = tensor.to(self.rank)
+
+            if self.rank == 0:
+                # Rank 0 reports faulty ranks
+                err = f"Ranks {faulty_rank} failed to pass monitoredBarrier"
+            else:
+                err = "Please check rank 0 logs for faulty rank"
+            with self.assertRaisesRegex(RuntimeError, err):
+                wrapper_pg.allreduce([tensor])
+
+    def _test_collectives_op_mismatch(self, wrapper_pg, use_cuda=False):
+        tensor = torch.randn(20, 10)
+        if use_cuda:
+            tensor = tensor.to(self.rank)
+        works = []
+        # Run a few successful collectives
+        for _ in range(10):
+            work = wrapper_pg.allreduce([tensor])
+            works.append(work)
+
+        for w in works:
+            w.wait()
+
+        # Simulate mismatch: allreduce vs reduce.
+        with self.assertRaisesRegex(
+            RuntimeError, "Mismatch between collective operation types"
+        ):
+            if self.rank == 0:
+                wrapper_pg.allreduce([tensor])
+            else:
+                wrapper_pg.reduce([tensor])
+
+        # Check additional mismatches
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Mismatch between collective operation types"
+        ):
+            if self.rank == 0:
+                wrapper_pg.reduce([tensor])
+            else:
+                wrapper_pg.barrier()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Mismatch between collective operation types"
+        ):
+            scatter_result = [torch.ones(4) * i for i in range(self.world_size)]
+            scattered_tensor = torch.empty(4)
+            if self.rank == 0:
+                wrapper_pg.scatter(scattered_tensor, scatter_result, 0)
+            else:
+                wrapper_pg.reduce_scatter(scattered_tensor, scatter_result)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Mismatch between collective operation types"
+        ):
+            if self.rank == 0:
+                wrapper_pg.broadcast(tensor, 0)
+            else:
+                output_tensors = [
+                    torch.zeros_like(tensor) for _ in range(self.world_size)
+                ]
+                wrapper_pg.allgather([output_tensors], [tensor])
+
+    def _test_collective_shape_mismatch(self, wrapper_pg, use_cuda=False):
+        wrapper_pg.barrier()
+        dim = 2 if self.rank == 0 else 10
+        tensor = torch.randn(20, dim)
+        if use_cuda:
+            tensor = tensor.to(self.rank)
+        with self.assertRaisesRegex(RuntimeError, "Error when verifying shape tensors"):
+            wrapper_pg.allreduce([tensor])
+        # Check errors are raised when dimensionality of shapes is different
+        tensor = torch.randn(20, 10, 2) if self.rank == 0 else torch.randn(20, 10)
+        if use_cuda:
+            tensor = tensor.to(self.rank)
+        with self.assertRaisesRegex(RuntimeError, "Error when verifying shape tensors"):
+            wrapper_pg.allreduce([tensor])
+
+        # Check shape errors with scatter
+        input = [
+            torch.tensor(
+                [self.rank] if self.rank == 0 else [self.rank, self.rank],
+                device=self.rank if use_cuda else "cpu",
+            )
+            for _ in range(self.world_size)
+        ]
+        outputs = [
+            torch.tensor(
+                [-1] if self.rank == 0 else [-1, -1],
+                device=self.rank if use_cuda else "cpu",
+            )
+            for _ in range(self.world_size)
+        ]
+        root_rank = 0
+        opts = c10d.ScatterOptions()
+        opts.rootRank = root_rank
+        with self.assertRaisesRegex(RuntimeError, "Error when verifying shape tensors"):
+            if self.rank == root_rank:
+                wrapper_pg.scatter([outputs[self.rank]], [input], opts).wait()
+            else:
+                wrapper_pg.scatter([outputs[self.rank]], [], opts).wait()
 
 class AbstractDistributedDataParallelTest(object):
     def tearDown(self):
