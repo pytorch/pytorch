@@ -41,8 +41,8 @@ void _dim_apply(
     .resize_outputs(false)
     // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(values.sizes(), /*squash_dim=*/dim)
-    .add_output(values)
-    .add_output(indices)
+    .add_borrowed_output(values)
+    .add_borrowed_output(indices)
     .build();
 
   auto values_dim_stride = values.stride(dim);
@@ -142,8 +142,8 @@ static void sort_kernel(
 }
 
 static void topk_kernel(
-    Tensor& values,
-    Tensor& indices,
+    const Tensor& values,
+    const Tensor& indices,
     const Tensor& self,
     int64_t k,
     int64_t dim,

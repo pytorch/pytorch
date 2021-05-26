@@ -101,7 +101,7 @@ Tensor qcat_nhwc_kernel(
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // which causes an internal compiler error if they're not
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     for (int64_t batch = 0; batch < N; ++batch) {
       for (int64_t row = 0; row < H; ++row) {
         for (int64_t col = 0; col < W; ++col) {
@@ -126,8 +126,8 @@ Tensor qcat_nhwc_kernel(
 
             // Vectorized loop
             if (c + VLEN <= curr_C) {
-              auto curr_scale_vec = Vec256<float>(curr_scale);
-              auto curr_zero_pt_vec = Vec256<float>((float)curr_zero_pt);
+              auto curr_scale_vec = Vectorized<float>(curr_scale);
+              auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
               auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
               for (; c + VLEN <= curr_C; c += VLEN) {
                 auto inp_vec = Vec::loadu(iptr + c);
@@ -137,7 +137,7 @@ Tensor qcat_nhwc_kernel(
                 for (int i = 0; i < Vec::float_num_vecs(); ++i) {
                   if (ReLUFused) {
                     retvals[i] =
-                        vec256::maximum(float_values[i], Vec256<float>(0.0f));
+                        vec::maximum(float_values[i], Vectorized<float>(0.0f));
                   } else {
                     retvals[i] = float_values[i];
                   }
@@ -412,7 +412,7 @@ void qrelu_kernel(const Tensor& qx, Tensor& qy) {
         qx.q_scale(),
         qx.q_zero_point(),
         c10::nullopt);
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto zero_point_vec = Vec(scalar_t(zero_point));
     auto iter = TensorIterator::unary_op(qy, qx);
     cpu_kernel_vec(
@@ -434,7 +434,7 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
         qx.q_scale(),
         qx.q_zero_point(),
         c10::nullopt);
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     scalar_t six = at::native::quantize_val<scalar_t>(
         qx.q_scale(), qx.q_zero_point(), 6.0);
@@ -465,8 +465,8 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   float negval = negval_.to<float>();
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "leaky_qrelu", [&] {
-    using Vec = Vec256<float>;  // Naive implementation uses dequant/quant loop.
-    using qVec = Vec256<scalar_t>;
+    using Vec = Vectorized<float>;  // Naive implementation uses dequant/quant loop.
+    using qVec = Vectorized<scalar_t>;
     Vec zero_vec = Vec(0.0f);
     Vec one_vec = Vec(1.0f);
 
@@ -510,8 +510,8 @@ void qsigmoid_kernel(
   int64_t zero_point = qx.q_zero_point();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float scale = qx.q_scale();
-  auto scale_vec = Vec256<float>(scale);
-  auto zero_point_vec = Vec256<float>((float)zero_point);
+  auto scale_vec = Vectorized<float>(scale);
+  auto zero_point_vec = Vectorized<float>((float)zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
@@ -526,7 +526,7 @@ void qsigmoid_kernel(
         c10::nullopt);
     auto iter = TensorIterator::unary_op(qy, qx);
 
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
         iter,
         [&](scalar_t value_qx) -> scalar_t {
@@ -543,7 +543,7 @@ void qsigmoid_kernel(
           for (int idx = 0; idx < value_dx.size(); ++idx) {
             value_dx[idx] = value_dx[idx].neg();
             value_dx[idx] = value_dx[idx].exp();
-            value_dx[idx] = Vec256<float>(1.0f) + value_dx[idx];
+            value_dx[idx] = Vectorized<float>(1.0f) + value_dx[idx];
             value_dx[idx] = value_dx[idx].reciprocal();
           }
           return Vec::quantize(
@@ -556,8 +556,8 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float scale = qx.q_scale();
-  auto scale_vec = Vec256<float>(scale);
-  auto zero_point_vec = Vec256<float>((float)zero_point);
+  auto scale_vec = Vectorized<float>(scale);
+  auto zero_point_vec = Vectorized<float>((float)zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qhardsigmoid", [&]() {
@@ -586,8 +586,8 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         qx.suggest_memory_format());
     auto iter = TensorIterator::unary_op(qy, qx);
 
-    using qVec = Vec256<scalar_t>;
-    using fVec = Vec256<float>;
+    using qVec = Vectorized<scalar_t>;
+    using fVec = Vectorized<float>;
     fVec kZeroVec(0.0f);
     fVec kThreeVec(3.0f);
     fVec kSixVec(6.0f);
@@ -607,8 +607,8 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
           for (int idx = 0; idx < value_dx.size(); ++idx) {
             value_dx[idx] =
-                vec256::minimum(
-                    vec256::maximum(value_dx[idx] + kThreeVec, kZeroVec),
+                vec::minimum(
+                    vec::maximum(value_dx[idx] + kThreeVec, kZeroVec),
                     kSixVec) /
                 kSixVec;
           }
@@ -631,7 +631,7 @@ void qclamp_kernel(
         qx.q_scale(),
         qx.q_zero_point(),
         c10::nullopt);
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto min = min_scalar.to<float>();
     auto max = max_scalar.to<float>();
@@ -666,7 +666,7 @@ void qclamp_min_kernel(const Tensor& qx, const Scalar& min_scalar, Tensor& qy) {
         qx.q_scale(),
         qx.q_zero_point(),
         c10::nullopt);
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto min = min_scalar.to<float>();
     scalar_t min_q = at::native::quantize_val<scalar_t>(
@@ -692,7 +692,7 @@ void qclamp_max_kernel(const Tensor& qx, const Scalar& max_scalar, Tensor& qy) {
         qx.q_scale(),
         qx.q_zero_point(),
         c10::nullopt);
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto max = max_scalar.to<float>();
     scalar_t max_q = at::native::quantize_val<scalar_t>(
@@ -736,8 +736,8 @@ void qthreshold_kernel(
       c10::nullopt);
 
     // vectorized
-    using Vec = Vec256<float>;
-    using qVec = Vec256<scalar_t>;
+    using Vec = Vectorized<float>;
+    using qVec = Vectorized<scalar_t>;
     // defines the iterator
     auto iter = TensorIterator::unary_op(qy, qx);
     // defines the vectorized versions
@@ -790,7 +790,7 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float o_inv_scale = 1.0 / o_scale;
 
-  using fVec = Vec256<float>;
+  using fVec = Vectorized<float>;
   fVec i_scale_vec(i_scale);
   fVec i_zero_point_vec(i_zero_point);
   fVec i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
@@ -799,7 +799,7 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
   fVec six_vec(6.0f);
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qhardswish", [&]() {
-    using qVec = Vec256<scalar_t>;
+    using qVec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     cpu_kernel_vec(
         iter,
@@ -814,8 +814,8 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
                                            i_scale_neg_zp_premul_vec);
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
           for (int idx = 0; idx < value_dx.size(); idx++) {
-            value_dx[idx] = value_dx[idx] * vec256::minimum(
-              vec256::maximum(value_dx[idx] + three_vec, zero_vec),
+            value_dx[idx] = value_dx[idx] * vec::minimum(
+              vec::maximum(value_dx[idx] + three_vec, zero_vec),
               six_vec
             ) / six_vec;
           }
@@ -829,8 +829,8 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float scale = qx.q_scale();
-  auto scale_vec = Vec256<float>(scale);
-  auto zero_point_vec = Vec256<float>((float)zero_point);
+  auto scale_vec = Vectorized<float>(scale);
+  auto zero_point_vec = Vectorized<float>((float)zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qtanh", [&]() {
@@ -856,7 +856,7 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
         c10::nullopt);
     auto iter = TensorIterator::unary_op(qy, qx);
 
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
         iter,
         [&](scalar_t value_qx) -> scalar_t {
@@ -911,8 +911,8 @@ void qelu_kernel(
     auto iter = TensorIterator::unary_op(qy, qx);
 
     // vectorized
-    using Vec = Vec256<float>;
-    using qVec = Vec256<scalar_t>;
+    using Vec = Vectorized<float>;
+    using qVec = Vectorized<scalar_t>;
 
     Vec zero_vec = Vec(0.0f);
     Vec one_vec = Vec(1.0f);
@@ -986,10 +986,10 @@ void qadd_scalar_kernel(Tensor& out, const Tensor& self, const Scalar& other) {
   float multiplier = self_scale * inv_scale;
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qadd_scalar", [&]() {
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(out, self);
     auto other_val = other.to<int32_t>();
-    auto other_vec = Vec256<c10::qint32>(static_cast<c10::qint32>(other_val));
+    auto other_vec = Vectorized<c10::qint32>(static_cast<c10::qint32>(other_val));
     cpu_kernel_vec(
         iter,
         [&](scalar_t a) -> scalar_t {
@@ -1037,18 +1037,18 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   // loop iterations.
   // TODO: we can optimize dequantization by doing a premultiplication
   // of the zero point by scale and doing FMA on scale*x_q - (scale*zero_point)
-  auto self_zero_point_vec = Vec256<float>((float)self_zero_point);
-  auto self_scale_vec = Vec256<float>(self_scale);
-  auto other_zero_point_vec = Vec256<float>((float)other_zero_point);
-  auto other_scale_vec = Vec256<float>(other_scale);
+  auto self_zero_point_vec = Vectorized<float>((float)self_zero_point);
+  auto self_scale_vec = Vectorized<float>(self_scale);
+  auto other_zero_point_vec = Vectorized<float>((float)other_zero_point);
+  auto other_scale_vec = Vectorized<float>(other_scale);
 
   auto self_scale_neg_zp_premul_vec = self_scale_vec * self_zero_point_vec.neg();
   auto other_scale_zp_premul_vec = other_scale_vec * other_zero_point_vec.neg();
 
-  auto iter = TensorIterator::binary_op(out, self, other);
+  auto iter = TensorIterator::borrowing_binary_op(out, self, other);
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
         iter,
         [&](scalar_t a, scalar_t b) -> scalar_t {
@@ -1071,7 +1071,7 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
           for (int i = 0; i < Vec::float_num_vecs(); ++i) {
             auto c = da[i] + db[i];
             if (ReLUFused) {
-              c = vec256::maximum(c, Vec256<float>(0.0f));
+              c = vec::maximum(c, Vectorized<float>(0.0f));
             }
             retvals[i] = c;
           }
@@ -1105,10 +1105,10 @@ void qmul_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
 
   float multiplier = self_scale * other_scale * inv_scale;
 
-  auto iter = TensorIterator::binary_op(out, self, other);
+  auto iter = TensorIterator::borrowing_binary_op(out, self, other);
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qmul", [&]() {
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
         iter,
         [&](scalar_t a, scalar_t b) -> scalar_t {
@@ -1187,40 +1187,40 @@ void qmaxpool_2d_nhwc_kernel(
           int64_t c = 0;
 
           // Interleaved vector loop 4x
-          constexpr auto vec_width = Vec256<scalar_t>::size();
+          constexpr auto vec_width = Vectorized<scalar_t>::size();
           for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
-            Vec256<scalar_t> acc{
+            Vectorized<scalar_t> acc{
                 scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-            Vec256<scalar_t> accs[4] = {acc, acc, acc, acc};
+            Vectorized<scalar_t> accs[4] = {acc, acc, acc, acc};
             int64_t tcntr = 0;
             int64_t x, y;
             for (y = h_start; y < h_end; y += dH) {
               for (x = w_start; x < w_end; x += dW) {
                 for (int i = 0; i < 4; ++i) {
                   tcntr = y * iW + x;
-                  auto vals = Vec256<scalar_t>::loadu(
-                      i_p + tcntr * iC + c + Vec256<scalar_t>::size() * i);
-                  accs[i] = vec256::maximum(accs[i], vals);
+                  auto vals = Vectorized<scalar_t>::loadu(
+                      i_p + tcntr * iC + c + Vectorized<scalar_t>::size() * i);
+                  accs[i] = vec::maximum(accs[i], vals);
                 }
               } // for x
             } // for y
             for (int i = 0; i < 4; ++i) {
-              accs[i].store(o_p + c + Vec256<scalar_t>::size() * i);
+              accs[i].store(o_p + c + Vectorized<scalar_t>::size() * i);
             }
           } // for c
 
           // Vector loop
           for (; c + vec_width <= iC; c += vec_width) {
-            Vec256<scalar_t> acc{
+            Vectorized<scalar_t> acc{
                 scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
             int64_t tcntr = 0;
             int64_t x, y;
             for (y = h_start; y < h_end; y += dH) {
               for (x = w_start; x < w_end; x += dW) {
                 tcntr = y * iW + x;
-                auto vals = Vec256<scalar_t>::loadu(i_p + tcntr * iC + c);
-                acc = vec256::maximum(acc, vals);
+                auto vals = Vectorized<scalar_t>::loadu(i_p + tcntr * iC + c);
+                acc = vec::maximum(acc, vals);
               } // for x
             } // for y
             acc.store(o_p + c);
@@ -1269,17 +1269,17 @@ void do_avg_pool_nhwc_on_AVX2(
   // to inner-most, so that memory access of the input tensor data is
   // continuous.
   constexpr int cb_size = 16;
-  constexpr int vec_width = Vec256<T>::size() / 4;
+  constexpr int vec_width = Vectorized<T>::size() / 4;
   constexpr int cb_step = cb_size * vec_width;
-  Vec256<int32_t> acc_buffer[cb_size];
-  Vec256<float> acc_buffer_fp[cb_size];
+  Vectorized<int32_t> acc_buffer[cb_size];
+  Vectorized<float> acc_buffer_fp[cb_size];
 
   if (vec_width == 8) {
     for (int c = c_start; c < csize; c += cb_step) {
       int cend = std::min(cb_size, (csize - c) / vec_width);
       // initialize loop
       for (int ic = 0; ic < cend; ic++) {
-        acc_buffer[ic] = Vec256<int32_t>(input_zero_point_m_size);
+        acc_buffer[ic] = Vectorized<int32_t>(input_zero_point_m_size);
       }
       // compute loop
       for (int id = dstart; id < dend; id++) {
@@ -1290,7 +1290,7 @@ void do_avg_pool_nhwc_on_AVX2(
                     csize +
                 c;
             for (int ic = 0; ic < cend; ic++) {
-              auto vals = vec256::convert_to_int32<typename T::underlying>(
+              auto vals = vec::convert_to_int32<typename T::underlying>(
                   i_p + i_idx + ic * vec_width);
               acc_buffer[ic] = acc_buffer[ic] + vals;
             }
@@ -1298,7 +1298,7 @@ void do_avg_pool_nhwc_on_AVX2(
         }
       }
       // convert int32 accumulative to fp32
-      vec256::convert((int*)acc_buffer, (float*)acc_buffer_fp, cend * vec_width);
+      vec::convert((int*)acc_buffer, (float*)acc_buffer_fp, cend * vec_width);
 
       // first quantize using AVX using 32 lanes, then 8, finally falls
       // back to single
@@ -1335,17 +1335,17 @@ void do_avg_pool_on_AVX2(
     int64_t stride_H,
     int64_t stride_W) {
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-  constexpr auto vec_width = Vec256<T>::size() / 4;
+  constexpr auto vec_width = Vectorized<T>::size() / 4;
   if (vec_width == 8) {
     for (; c + vec_width <= channel_size; c += vec_width) {
       int64_t tcntr = 0;
 
-      Vec256<int32_t> acc(input_zero_point_m_size);
+      Vectorized<int32_t> acc(input_zero_point_m_size);
       for (int64_t id = dstart; id < dend; id++) {
         for (int64_t ih = hstart; ih < hend; ih++) {
           for (int64_t iw = wstart; iw < wend; iw++) {
             tcntr = id * stride_D + ih * stride_H + iw * stride_W;
-            auto vals = vec256::convert_to_int32<typename T::underlying>(
+            auto vals = vec::convert_to_int32<typename T::underlying>(
                 i_p + tcntr * channel_multiplier + c * stride_C);
             acc = acc + vals;
           }
@@ -1354,7 +1354,7 @@ void do_avg_pool_on_AVX2(
       int32_t acc_int[vec_width];
       float acc_fp[vec_width];
       acc.store(acc_int);
-      vec256::convert(acc_int, acc_fp, vec_width);
+      vec::convert(acc_int, acc_fp, vec_width);
       at::native::quantize_vec<T>(
           1.0f / multiplier,
           output_zero_point,
@@ -1771,31 +1771,31 @@ int64_t do_quantized_bilinear_on_AVX2(
     const int64_t w1p) {
   int64_t c = 0;
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-  constexpr auto vec_width = Vec256<T>::size() / 4;
+  constexpr auto vec_width = Vectorized<T>::size() / 4;
   if (vec_width == 8) {
     for (; c + vec_width <= channels; c += vec_width) {
-      Vec256<float> pos1_fp_v[4];
-      Vec256<int32_t> pos1_int_v[4];
-      pos1_int_v[0] = vec256::convert_to_int32<typename T::underlying>(pos1);
-      pos1_int_v[1] = vec256::convert_to_int32<typename T::underlying>(
+      Vectorized<float> pos1_fp_v[4];
+      Vectorized<int32_t> pos1_int_v[4];
+      pos1_int_v[0] = vec::convert_to_int32<typename T::underlying>(pos1);
+      pos1_int_v[1] = vec::convert_to_int32<typename T::underlying>(
           pos1 + w1p * channels);
-      pos1_int_v[2] = vec256::convert_to_int32<typename T::underlying>(
+      pos1_int_v[2] = vec::convert_to_int32<typename T::underlying>(
           pos1 + h1p * input_width * channels);
-      pos1_int_v[3] = vec256::convert_to_int32<typename T::underlying>(
+      pos1_int_v[3] = vec::convert_to_int32<typename T::underlying>(
           pos1 + (h1p * input_width + w1p) * channels);
       for (int i = 0; i < 4; i++) {
         int32_t pos1_int[vec_width];
         float pos1_fp[vec_width];
         pos1_int_v[i].store(pos1_int);
-        vec256::convert(pos1_int, pos1_fp, vec_width);
-        pos1_fp_v[i] = Vec256<float>::loadu(pos1_fp, 8);
+        vec::convert(pos1_int, pos1_fp, vec_width);
+        pos1_fp_v[i] = Vectorized<float>::loadu(pos1_fp, 8);
       }
-      Vec256<float> h0lambda_v(h0lambda);
-      Vec256<float> h1lambda_v(h1lambda);
-      Vec256<float> w0lambda_v(w0lambda);
-      Vec256<float> w1lambda_v(w1lambda);
-      Vec256<float> input_zero_point_v(input_zero_point);
-      Vec256<float> result =
+      Vectorized<float> h0lambda_v(h0lambda);
+      Vectorized<float> h1lambda_v(h1lambda);
+      Vectorized<float> w0lambda_v(w0lambda);
+      Vectorized<float> w1lambda_v(w1lambda);
+      Vectorized<float> input_zero_point_v(input_zero_point);
+      Vectorized<float> result =
           h0lambda_v * (w0lambda_v * pos1_fp_v[0] + w1lambda_v * pos1_fp_v[1]) +
           h1lambda_v * (w0lambda_v * pos1_fp_v[2] + w1lambda_v * pos1_fp_v[3]) -
           input_zero_point_v;
@@ -1985,26 +1985,26 @@ template <typename T>
 inline void do_bn_compute(
     typename T::underlying* X_ptr,
     typename T::underlying* Y_ptr,
-    Vec256<float> & fake_scale,
-    Vec256<float> & in_zp_vec,
-    Vec256<float> & scale_neg_zp_premul,
+    Vectorized<float> & fake_scale,
+    Vectorized<float> & in_zp_vec,
+    Vectorized<float> & scale_neg_zp_premul,
     int64_t out_zero_point,
-    Vec256<T> & out_zero_point_v,
+    Vectorized<T> & out_zero_point_v,
     float*  alpha,
     float* beta,
     int64_t vec_num,
     bool ReluFused,
     int64_t kVLen
 ) {
-  using Vec = Vec256<T>;
+  using Vec = Vectorized<T>;
   auto vals_q = Vec::loadu(X_ptr);
   // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
   auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t idx = 0; idx < vec_num; ++idx) {
-    auto alpha_v = Vec256<float>::loadu(alpha + idx * kVLen);
-    auto beta_v = Vec256<float>::loadu(beta + idx * kVLen);
-    vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
+    auto alpha_v = Vectorized<float>::loadu(alpha + idx * kVLen);
+    auto beta_v = Vectorized<float>::loadu(beta + idx * kVLen);
+    vals_dq[idx] = vec::fmadd(alpha_v, vals_dq[idx], beta_v);
   }
   // NOLINTNEXTLINE(bugprone-argument-comment)
   auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
@@ -2038,10 +2038,10 @@ void q_batch_norm_kernel(
 
     constexpr int kVLen = 8;
     const int64_t outer_size = N * HxW;
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     // Hoisted variables
-    auto in_zp_vec = Vec256<float>(static_cast<float>(in_zero_point));
-    auto fake_scale = Vec256<float>(1.0f);
+    auto in_zp_vec = Vectorized<float>(static_cast<float>(in_zero_point));
+    auto fake_scale = Vectorized<float>(1.0f);
     auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
     auto out_zero_point_v = Vec(scalar_t(out_zero_point));
     size_t lanes = Vec::float_num_vecs() * kVLen;
@@ -2119,9 +2119,9 @@ void fake_quantize_tensor_cachemask_kernel(
 
   auto iter_combined = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_output(output)
-    .add_output(mask)
-    .add_input(input)
+    .add_borrowed_output(output)
+    .add_borrowed_output(mask)
+    .add_borrowed_input(input)
     .build();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
@@ -2157,10 +2157,10 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
         the order they are accessed follows the order they are built within the iterator.
         For example, if an iterator is built in the following order:
         auto iter = TensorIteratorConfig().
-          .add_output(firstOutput)
-          .add_output(secondOutput)
-          .add_input(firstInput)
-          .add_input(secondInput)
+          .add_borrowed_output(firstOutput)
+          .add_borrowed_output(secondOutput)
+          .add_borrowed_input(firstInput)
+          .add_borrowed_input(secondInput)
           .build()
         data will contain 4 pointers to pointers to values in the following order:
         firstOutput, secondOutput, firstInput, secondInput.
@@ -2278,8 +2278,8 @@ void quantized_normalize_kernel(
     double eps,
     Tensor* Y) {
   AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
-    using qVec = vec256::Vec256<scalar_t>;
-    using fVec = vec256::Vec256<float>;
+    using qVec = vec::Vectorized<scalar_t>;
+    using fVec = vec::Vectorized<float>;
 
     TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
     TORCH_INTERNAL_ASSERT(
@@ -2429,8 +2429,8 @@ void quantized_normalize_kernel(
 
 #ifdef USE_FBGEMM
 void quantize_tensor_per_tensor_affine_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -2462,8 +2462,8 @@ void quantize_tensor_per_tensor_affine_cpu(
 }
 
 void dequantize_tensor_per_tensor_affine_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -2502,7 +2502,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
 template <typename T>
 void quantize_tensor_arm(
     const float* in,
-    Tensor qtensor,
+    Tensor& qtensor,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
@@ -2521,7 +2521,7 @@ void quantize_tensor_arm(
 template <>
 void quantize_tensor_arm<c10::quint8>(
     const float* in,
-    Tensor qtensor,
+    Tensor& qtensor,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
@@ -2589,8 +2589,8 @@ void quantize_tensor_arm<c10::quint8>(
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
 void quantize_tensor_per_tensor_affine_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     double scale,
     int64_t zero_point) {
 #if defined(__ARM_NEON__) || defined(__aarch64__)
@@ -2617,8 +2617,8 @@ void quantize_tensor_per_tensor_affine_cpu(
 }
 
 void dequantize_tensor_per_tensor_affine_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -2638,10 +2638,10 @@ void dequantize_tensor_per_tensor_affine_cpu(
 // Generic template defaults to naive quantize implementation
 template <typename T>
 void quantize_tensor_per_channel_impl(
-    Tensor rtensor,
-    Tensor qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   // TODO: channels last kernel can be made faster.
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
@@ -2697,10 +2697,10 @@ void quantize_tensor_per_channel_impl(
 // (int8, int32).
 template <>
 void quantize_tensor_per_channel_impl<c10::quint8>(
-    Tensor rtensor,
-    Tensor qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   int64_t batches = size_to_dim_(axis, rtensor.sizes());
   int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
@@ -2883,10 +2883,10 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
 void quantize_tensor_per_channel_affine_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   TORCH_CHECK(
       rtensor.is_contiguous() || (axis <= 1),
@@ -2902,10 +2902,10 @@ void quantize_tensor_per_channel_affine_cpu(
 
 template<typename T, typename N, typename Q>
 void dequantize_per_channel_affine_kernel(
-      Tensor qtensor,
-      Tensor rtensor,
-      Tensor scales,
-      Tensor zero_points,
+      const Tensor& qtensor,
+      Tensor& rtensor,
+      const Tensor& scales,
+      const Tensor& zero_points,
       int64_t axis,
       int bit_width=8) {
 
@@ -2967,10 +2967,10 @@ void dequantize_per_channel_affine_kernel(
 }
 
 void dequantize_tensor_per_channel_affine_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& qtensor,
+    Tensor& rtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cpu", [&]() {
@@ -2980,10 +2980,10 @@ void dequantize_tensor_per_channel_affine_cpu(
 
 // quantize stubs for floating point scale and zero_point.
 void quantize_tensor_per_channel_float_qparams_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
@@ -3045,10 +3045,10 @@ void quantize_tensor_per_channel_float_qparams_cpu(
 }
 
 void dequantize_tensor_per_channel_float_qparams_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& qtensor,
+    Tensor& rtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
@@ -3058,8 +3058,8 @@ void dequantize_tensor_per_channel_float_qparams_cpu(
 }
 
 void quantize_tensor_per_tensor_affine_sub_byte_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     float scale,
     float zero_point) {
   // TODO Use fbgemm kernel to pack values
@@ -3089,8 +3089,8 @@ void quantize_tensor_per_tensor_affine_sub_byte_cpu(
 }
 
 void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     float scale,
     float zero_point) {
   // TODO Use fbgemm kernel to pack values
