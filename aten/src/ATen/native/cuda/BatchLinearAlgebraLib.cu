@@ -1269,7 +1269,7 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
     auto pivots_stride = pivots.size(-1);
     auto lu_stride = matrixStride(lu);
     auto b_stride = matrixStride(b);
-    int lda = cuda_int_cast(std::max<int>(1, lu_stride), "lda");
+    int lda = cuda_int_cast(std::max<int>(1, n), "lda");
     int ldb = cuda_int_cast(std::max<int>(1, b_stride), "ldb");
 
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
@@ -1282,7 +1282,7 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
         lda,
         pivots_data + batch * pivots_stride,
         b_data + batch * b_stride,
-        ldb,
+        lda,
         infos_data + batch);
     }
   });

@@ -2848,7 +2848,7 @@ static void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivo
 #endif
 auto batch_size = batchCount(lu);
 #ifdef USE_CUSOLVER
-  if (batch_size < 2000) {
+  if (batch_size < 20000) {
     lu_solve_looped_cusolver(b, lu, pivots);
   }
 #else
