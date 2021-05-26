@@ -681,7 +681,7 @@ class Module:
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self: T) -> T:
-        r"""Casts all floating point parameters and buffers to float datatype.
+        r"""Casts all floating point parameters and buffers to ``float`` datatype.
 
         .. note::
             This method modifies the module in-place.
@@ -1634,6 +1634,8 @@ class Module:
         Returns:
             Module: self
         """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
         self.training = mode
         for module in self.children():
             module.train(mode)
@@ -1649,6 +1651,9 @@ class Module:
 
         This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
 
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
+
         Returns:
             Module: self
         """
@@ -1663,6 +1668,9 @@ class Module:
 
         This method is helpful for freezing part of the module for finetuning
         or training parts of a model individually (e.g., GAN training).
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.requires_grad_()` and several similar mechanisms that may be confused with it.
 
         Args:
             requires_grad (bool): whether autograd should record operations on

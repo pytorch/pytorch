@@ -69,11 +69,11 @@ class TestMisc(PackageTestCase):
             import package_a.subpackage
 
             obj = package_a.subpackage.PackageASubpackageObject()
+            he.intern("**")
             he.save_module(module_a.__name__)
             he.save_module(package_a.__name__)
             he.save_pickle("obj", "obj.pkl", obj)
             he.save_text("main", "main", "my string")
-
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
@@ -84,9 +84,7 @@ class TestMisc(PackageTestCase):
             dedent("\n".join(str(file_structure).split("\n")[1:])),
             export_plain,
         )
-        file_structure = hi.file_structure(
-            include=["**/subpackage.py", "**/*.pkl"]
-        )
+        file_structure = hi.file_structure(include=["**/subpackage.py", "**/*.pkl"])
         self.assertEqual(
             dedent("\n".join(str(file_structure).split("\n")[1:])),
             export_include,
@@ -106,6 +104,7 @@ class TestMisc(PackageTestCase):
         with PackageExporter(buffer, verbose=False) as he:
             import package_a.subpackage
 
+            he.intern("**")
             obj = package_a.subpackage.PackageASubpackageObject()
             he.save_pickle("obj", "obj.pkl", obj)
 
@@ -124,6 +123,7 @@ class TestMisc(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
 
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
@@ -145,6 +145,7 @@ class TestMisc(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
 
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
@@ -168,13 +169,12 @@ class TestMisc(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
 
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
         pi = PackageImporter(buffer)
-        mod = pi.import_module(
-            "package_a.subpackage"
-        )
+        mod = pi.import_module("package_a.subpackage")
         self.assertTrue(hasattr(mod, "__torch_package__"))
 
     def test_dunder_package_works_from_package(self):
@@ -188,13 +188,12 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
 
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_module(mod.__name__)
 
         buffer.seek(0)
         pi = PackageImporter(buffer)
-        imported_mod = pi.import_module(
-            mod.__name__
-        )
+        imported_mod = pi.import_module(mod.__name__)
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
 

@@ -300,6 +300,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::HIP;
       case c10::DeviceType::MSNPU:
         return c10::DispatchKey::MSNPU;
+      case c10::DeviceType::HPU:
+        return c10::DispatchKey::HPU;
       default:
         TORCH_CHECK(false,
           "Device type ", t, " cannot be overloaded at dispatch time, "

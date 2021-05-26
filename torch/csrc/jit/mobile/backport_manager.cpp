@@ -3,6 +3,7 @@
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/backport_manager.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -36,16 +37,47 @@ bool update_bytecode_version(
   return false;
 }
 
-void copy_non_bytecode(
+// Copy files from source to destination except the files and dirs
+void selective_copy(
     PyTorchStreamReader& reader,
-    PyTorchStreamWriter& writer) {
+    PyTorchStreamWriter& writer,
+    const std::unordered_set<std::string>& excluded_files,
+    const std::unordered_set<std::string>& excluded_dirs) {
   auto records = reader.getAllRecords();
   for (const auto& record : records) {
-    // Don't copy archive `version` and archive `bytecode`
-    // Archvie `version` will be written when PyTorchStreamWriter is going to
-    // finalize and run writeEndOfFile()
-    if (record != kArchiveNameVersion &&
-        record.find(kArchiveNameBytecode) == std::string::npos) {
+    // Don't copy archive in excluded_files, usually archive `version` and
+    // `bytecode`. Archvie `version` will be written when PyTorchStreamWriter is
+    // going to finalize and run writeEndOfFile()
+
+    // records is the list of all files names in the zip file, and each record
+    // is one file with path to parent folder, the example records is:
+    // data.pkl
+    // code/__torch__/___torch_mangle_5.py
+    // code/__torch__/___torch_mangle_5.py.debug_pkl
+    // constants/140245072983168.storage
+    // constants.pkl
+    // bytecode.pkl
+    // version
+    bool skip = false;
+
+    // Skip files (exaxt path)
+    for (const auto& excluded_file : excluded_files) {
+      if (record == excluded_file) {
+        skip = true;
+        break;
+      }
+    }
+
+    // Skip dirs, find the last '/' and compare it with record
+    for (const auto& excluded_dir : excluded_dirs) {
+      std::size_t found = record.find_last_of("/\\");
+      auto path = record.substr(0, found);
+      if (excluded_dir == path) {
+        skip = true;
+        break;
+      }
+    }
+    if (!skip) {
       auto data_ptr = reader.getRecord(record);
       auto data = std::get<0>(data_ptr).get();
       auto size = std::get<1>(data_ptr);
@@ -117,14 +149,27 @@ bool backport_v5_to_v4(
     PyTorchStreamReader& reader,
     PyTorchStreamWriter& writer) {
   // 1) read from archive `bytecode` archive
-  std::vector<IValue> bytecode_values = get_bytecode_values(reader);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader);
   if (!check_bytecode_version(bytecode_values, kBytecodeVersionV5)) {
     TORCH_WARN("Incorrect bytecode version for input model.");
     return false;
   }
+  std::vector<IValue> constants_values =
+      readArchive(kArchiveNameConstants, reader).toTuple()->elements();
 
-  // 2) Copy everything except bytecode related to new output
-  copy_non_bytecode(reader, writer);
+  // 2) Copy everything to new output, except some specific files and dirs
+  // (usually version, bytecode.pkl and bytecode folder are skipped)
+  std::unordered_set<std::string> excluded_files{
+      "constants.pkl",
+      "bytecode.pkl",
+      "version",
+  };
+
+  std::unordered_set<std::string> excluded_dirs{
+      "constants",
+      "bytecode",
+  };
+  selective_copy(reader, writer, excluded_files, excluded_dirs);
 
   // 3) write `bytecode` archive
   // Update the bytecode version in bytecode.pkl
@@ -132,7 +177,11 @@ bool backport_v5_to_v4(
   // Construct the list of ivalues to a big tuple
   auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
   // write `bytecode` archive
-  writeArchiveV4(writer, "bytecode", bytecode_tuple);
+  writeArchiveV4(writer, kArchiveNameBytecode, bytecode_tuple);
+  // write `constants` archive
+  auto constants_tuple =
+      c10::ivalue::Tuple::create(std::move(constants_values));
+  writeArchiveV4(writer, kArchiveNameConstants, constants_tuple);
   return true;
 }
 

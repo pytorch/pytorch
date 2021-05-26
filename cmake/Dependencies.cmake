@@ -999,24 +999,20 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(NOT pybind11_PREFER_third_party)
+if(USE_SYSTEM_BIND11)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)
   endif()
-endif()
-
-if(pybind11_FOUND)
-    message(STATUS "System pybind11 found")
+  if(NOT pybind11_FOUND)
+    message(FATAL "Cannot find system pybind11")
+  endif()
 else()
     message(STATUS "Using third_party/pybind11.")
     set(pybind11_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
     install(DIRECTORY ${pybind11_INCLUDE_DIRS}
             DESTINATION ${CMAKE_INSTALL_PREFIX}
             FILES_MATCHING PATTERN "*.h")
-    set(pybind11_PREFER_third_party ON CACHE BOOL
-        "Use the third_party/pybind11 submodule, instead of looking for system
-        installation of pybind11")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
@@ -1189,6 +1185,12 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ cuDNN
+if(USE_CUDNN)
+  set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
+  include_directories(${CUDNN_FRONTEND_INCLUDE_DIR})
+endif()
+
 # ---[ HIP
 if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
@@ -1308,7 +1310,13 @@ if(USE_GLOO)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    if(MSVC)
+      # Don't install gloo on Windows
+      # It is already handled in builder scripts
+      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
+    else()
+      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    endif()
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
@@ -1849,12 +1857,6 @@ if(USE_KINETO)
     message(STATUS "  CUDA_SOURCE_DIR = ${CUDA_SOURCE_DIR}")
     message(STATUS "  CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
 
-    find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
-        ${CUDA_INCLUDE_DIRS}
-        ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
-        ${CUDA_SOURCE_DIR}/include)
-
     if(NOT MSVC)
       if(USE_CUPTI_SO)
         set(CUPTI_LIB_NAME "libcupti.so")
@@ -1870,17 +1872,18 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
         ${CUDA_SOURCE_DIR}/lib64)
 
-    message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
-    set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
-    message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+    find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDA_INCLUDE_DIRS}
+        ${CUDA_SOURCE_DIR}
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
+        ${CUDA_SOURCE_DIR}/include)
 
-    set(FOUND_CUPTI FALSE)
-    if((EXISTS ${CUPTI_INCLUDE_DIR}) AND (EXISTS ${CUDA_cupti_LIBRARY}))
-      set(FOUND_CUPTI TRUE)
-    endif()
-
-    if(FOUND_CUPTI)
+    if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
+      message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
+      set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
+      message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
       message(STATUS "Found CUPTI")
+      set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
     else()
       message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
       set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
