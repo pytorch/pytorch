@@ -160,6 +160,9 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             if custom_module_class_mapping[type(child)] not in no_observer_set():
                 insert_activation_post_process(observed_child)
         else:
+            if needs_observation(child) and type(child) in get_supported_custom_modules():
+                warnings.warn(f"{type(child)} has a custom module implemented, "
+                              "but it is not in the `custom_module_class_mapping`.")
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
 
     # Insert observers only for leaf nodes, note that this observer is for

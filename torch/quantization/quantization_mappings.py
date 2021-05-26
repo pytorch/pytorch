@@ -119,6 +119,12 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
 
+SUPPORTED_CUSTOM_MODULES : Set[Callable] = set({
+    nn.MultiheadAttention,
+    nn.LSTMCell,
+    nn.LSTM,
+})
+
 def no_observer_set() -> Set[Any]:
     r"""These modules cannot have observers inserted by default."""
     no_observers = set([
@@ -211,6 +217,11 @@ def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
     assert quantized_op is not None, \
         'Operator {} does not have corresponding quantized op'.format(str(float_op))
     return quantized_op
+
+# Set of `nn` modules that have custom module implemented
+# This is used for warning the user that they should use custom modules
+def get_supported_custom_modules() -> Set[Callable]:
+    return SUPPORTED_CUSTOM_MODULES
 
 def _get_special_act_post_process(module: torch.nn.Module) -> Optional[Callable]:
     r""" Get the special activation post process for `module`, this has

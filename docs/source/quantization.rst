@@ -538,6 +538,107 @@ Quantization workflows work by adding (e.g. adding observers as
 means that the model stays a regular ``nn.Module``-based instance throughout the
 process and thus can work with the rest of PyTorch APIs.
 
+Custom Modules
+^^^^^^^^^^^^^^
+
+As part of the quantization customization, we provide support for "custom
+modules", which allow a user to provide a recipie on how the preparation and the
+conversion of the modules happen. For that purpose, the ``prepare`` and
+``convert`` functions take ``prepare_custom_config_dict`` and
+``convert_custom_config_dict`` arguments respectively. The expected argument is
+a dict-of-dicts of the following format::
+
+.. code-block:: python
+
+  custom_config = {
+    'float_to_observed_custom_module_class': {
+      # Mappings to use when converting floating point module to
+      # "observable"/"quantizable" module
+    },
+    'observed_to_quantized_custom_module_class': {
+      # Mappings to use when converting the observed module to quantized.
+    }
+  }
+
+For example, let's suppose you have a module that is not "quantizable"::
+
+.. code-block:: python
+
+  class NonQuantizableModule(nn.Module):
+    def __init__(self):
+      super().__init__()
+      self.w = torch.randn(oC, iC, W, H)
+
+    def forward(self, x):
+      return F.conv2d(x, self.w)
+
+
+  class Model(nn.Module):
+    def __init__(self):
+      super().__init__()
+      self.layer = NonQuantizableModule()
+
+    def forward(self, x):
+      return self.layer(x)
+
+Notice that the ``NonQuantizableLayer`` above cannot be quantized (in eager
+mode). Without changing the model, we can reimplement that layer, and replace
+them appropriately during the ``prepare`` step::
+
+.. code-block:: python
+
+  class CustomModule(nn.Module):
+    r"""Defines both 'quantizable' as well as 'quantized' implementations."""
+    def __init__(self):
+      super().__init__()
+      self.conv = nn.Conv2d(iC, oC)
+
+    def forward(self, x):
+      return self.conv(x)
+
+    @classmethod
+    def from_float(cls, other):
+      r"""Custom recipe for converting into 'observable'/quantizable'
+      """
+      new_module = CustomModule()
+      new_module.conv.weight = nn.Parameter(other.w)
+      return new_module
+
+    @classmethod
+    def from_observed(cls, other):
+      r"""Custom recipe for converting int 'quantized'
+      """
+      quantized = torch.quantization.convert(other)
+      return quantized
+
+  model = Model()
+
+  custom_config = {
+    'float_to_observed_custom_module_class': {
+      NonQuantizableModule : CustomModule
+    },
+    'observed_to_quantized_custom_module_class': {
+      CustomModule : CustomModule
+    }
+  }
+  torch.quantization.prepare(model, inplace=True, prepare_custom_config_dict=custom_config)
+  calibrate(model, data)  # Assume calibration routine is here
+  torch.quantization.convert(model, inplace=True, convert_custom_config_dict=custom_config)
+
+In the example above the ``CustomModule`` implements two methods: ``from_float``,
+which defines the custom recipe for float-to-quantized conversion; and the
+``from_observed``, which implements the custom reipe for observed-to-quantized
+conversion. Notice that in the ``from_observed`` case we can just call the
+``convert`` method.
+
+Quantizable Modules
+"""""""""""""""""""
+Currently there are several custom modules that are implemented:
+
+* :class:`~torch.nn.quantizable.LSTM`
+* :class:`~torch.nn.quantizable.LSTMCell`
+* :class:`~torch.nn.quantizable.MultiheadAttention`
+
 
 Model Preparation for Quantization
 ----------------------------------
