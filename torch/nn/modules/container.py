@@ -135,8 +135,10 @@ class Sequential(Module):
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
     def forward(self, input):
-        for module in self:
-            input = module(input)
+        for name, module in self.named_children():
+            # Only forward the number indexed module
+            if name.isdigit():
+                input = module(input)
         return input
 
 
