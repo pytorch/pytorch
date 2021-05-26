@@ -35,6 +35,11 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
       *strides++ = operands[arg].stride_bytes[dim];
     }
   }
+  // Always at least 2d strides to support 2d for_each loops
+  if (ndim < 2) {
+    const int64_t ntensors = operands.size();
+    std::fill_n(strides, (2 - ndim) * ntensors, 0);
+  }
 }
 
 }
@@ -661,8 +666,9 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
 }
 
 StrideVector TensorIteratorBase::get_strides() const {
-  StrideVector strides(ndim() * ntensors());
-  at::get_strides(strides.data(), operands_, ndim());
+  const auto dim = ndim();
+  StrideVector strides(std::max(dim, 2) * ntensors());
+  at::get_strides(strides.data(), operands_, dim);
   return strides;
 }
 
@@ -675,14 +681,10 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
   const auto ndim = this->ndim();
 
   c10::SmallBuffer<char*, 4> ptrs(ntensors);
-  c10::SmallBuffer<int64_t, 8> strides(ntensors * std::max(2, ndim));
+  c10::SmallBuffer<int64_t, 8> strides(ntensors * std::max(ndim, 2));
 
   at::get_base_ptrs(ptrs.data(), operands_);
   at::get_strides(strides.data(), operands_, ndim);
-  if (ndim < 2) {
-    std::fill(strides.begin() + ntensors * ndim, strides.end(), 0);
-  }
-
   at::internal::serial_for_each(
       shape_, strides, ptrs.data(), ptrs.size(), loop, range);
 }
