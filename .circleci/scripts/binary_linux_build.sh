@@ -22,5 +22,9 @@ else
   build_script='manywheel/build.sh'
 fi
 
+if [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; then
+  export BUILD_DEBUG_INFO=1
+fi
+
 # Build the package
 SKIP_ALL_TESTS=1 "/builder/$build_script"
