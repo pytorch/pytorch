@@ -13,7 +13,7 @@ namespace jit {
  *  BackendDebugHandleManager is responsible for issuing debug handles to
  *  backends. Debug handles are associated with nodes of a graph.
  *  BackendDebugHandleManager also maintains a map
- *  [debug-handle, DebugInfoPair = {source range, inlined callstack ptr]} that
+ *  [debug-handle, DebugInfoTuple = {source range, inlined callstack ptr]} that
  *  will help generate a callstack for exception raised using debug handles.
  *  Effectively debug handles are something that is given to backend and later
  *  when an exception occurs in the backend, backend can tell, using debug
@@ -21,14 +21,14 @@ namespace jit {
  *  callstack correspoding to the exception.
  *  There are two parts to BackendDebugHandleManager:
  *  1. static std::atomic debug_handle
- *  2. Map of [debug-handle, DebugInfoPair]
+ *  2. Map of [debug-handle, DebugInfoTuple]
  *
  *  About 1:
  *  Why do they have to be unique. The reason is that by ensuring
  *  uniqueness of debug handles, we remove the burden of another layer of
  *  mapping where we need to say this set of debug handles were generated for
  *  this lowered module or this bytecode function. This simplifies the API for
- *  serialization since debug handles can uniquely identify DebugInfoPair.
+ *  serialization since debug handles can uniquely identify DebugInfoTuple.
  *  Thus simplifies the runtime API for throwing exception. Exception throwing
  *  only needs to know debug_handle and not which module or method threw it.
  *  There are 2 issues to keep in mind, though,for static std::atomic
@@ -40,8 +40,8 @@ namespace jit {
  *  done.
  *
  *  Now about 2:
- *  There are two usecases for [debug-handle, DebugInfoPair]
- *  A. During bytecode generation the DebugInfoPair corresponding to the nodes
+ *  There are two usecases for [debug-handle, DebugInfoTuple]
+ *  A. During bytecode generation the DebugInfoTuple corresponding to the nodes
  *  of the inlined graph being serialized, are stored in this object and a
  *  unique debug handle is returned. This unique debug handle is stored in
  *  mobile_debug info for pytorch lite models. It will be used for raising
@@ -52,13 +52,13 @@ namespace jit {
  *  the debug handles provide a way to map nodes of the graph to the model level
  *  debug info.
  *
- *  During byte-code model serialization, [debug-handle, DebugInfoPair] is
+ *  During byte-code model serialization, [debug-handle, DebugInfoTuple] is
  *  serialized. Now we know a. debug handles and b. how to map debug handles to
  *  model source code. Thus we can either do eager symbolication by converting
  *  debug handles to corresponding source code at runtime, or do lazy
  *  symbolicattion offline.
  *
- *  Note that it is not necessary to serialize [debug-handle, DebugInfoPair]
+ *  Note that it is not necessary to serialize [debug-handle, DebugInfoTuple]
  *  corresponding to lowered backend if the lowering process, that is
  *  preprocess/compile, and execution happens in the same session, then eager
  *  symbolication can be employed.
@@ -66,15 +66,15 @@ namespace jit {
  *  Now how does BackendDebugHandleManager capture all of the above?
  *  By providing two API.
  *  1. getNextDebugHandle which given a Node* returns a unique debug handle,
- *     that will uniquely identify DebugInfoPair.
+ *     that will uniquely identify DebugInfoTuple.
  *     and
  *  2. getCallStackPtrMap which returns the map
- *     [debug-handle, DebugInfoPair]
+ *     [debug-handle, DebugInfoTuple]
  *
  *  1 provides debug handles to backends and 2 provides runtime a way to map
  *  debug handles to source level debug info.
  *
- *  So why does debug handle map to DebugInfoPair = {source range and inlined
+ *  So why does debug handle map to DebugInfoTuple = {source range and inlined
  *  cs}? {debug_handle, source_range_tag, serialized_callstack} Take this
  *  example: class L(nn.Module): def __init__(self):
  *      ...
@@ -112,7 +112,7 @@ namespace jit {
 using DebugHandleType = int64_t;
 
 using BackendDebugInfoMapType =
-    std::unordered_map<DebugHandleType, DebugInfoPair>;
+    std::unordered_map<DebugHandleType, DebugInfoTuple>;
 
 /*
  * This class is used to generate debug info map.
