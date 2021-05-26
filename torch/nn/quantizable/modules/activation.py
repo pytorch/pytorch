@@ -70,7 +70,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias, **factory_kwargs)
         self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias, **factory_kwargs)
         # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs) # type: ignore[assignment]
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
@@ -100,8 +100,8 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Set the linear weights
         # for the type: ignores, see https://github.com/pytorch/pytorch/issues/58969
-        observed.out_proj.weight = other.out_proj.weight # type: ignore[has-type]
-        observed.out_proj.bias = other.out_proj.bias # type: ignore[has-type]
+        observed.out_proj.weight = other.out_proj.weight  # type: ignore[has-type]
+        observed.out_proj.bias = other.out_proj.bias  # type: ignore[has-type]
         if other._qkv_same_embed_dim:
             # Use separate params
             bias = other.in_proj_bias
@@ -451,7 +451,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
         # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
-        attn_output = self.out_proj(attn_output) # type: ignore[has-type]
+        attn_output = self.out_proj(attn_output)  # type: ignore[has-type]
         attn_output_weights = self.quant_attn_output_weights(attn_output_weights)
 
         if need_weights:
