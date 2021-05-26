@@ -7,6 +7,11 @@ from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
+from .fx.qconfig_utils import (
+    check_is_valid_convert_custom_config_dict,
+    check_is_valid_fuse_custom_config_dict,
+    check_is_valid_prepare_custom_config_dict,
+    check_is_valid_qconfig_dict)
 from torch.nn.intrinsic import _FusedModule
 from typing import Dict, Any, List, Callable, Tuple, Optional, Set
 
@@ -150,6 +155,9 @@ forward graph of the parent module,
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
 
+    check_is_valid_qconfig_dict(qconfig_dict)
+    check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict)
+
     skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
     skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
 
@@ -241,6 +249,7 @@ def fuse_fx(model: torch.nn.Module,
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
+    check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict)
     graph_module = torch.fx.symbolic_trace(model)
     preserved_attributes: Set[str] = set()
     if fuse_custom_config_dict:
@@ -439,6 +448,7 @@ def _convert_fx(
         convert_custom_config_dict = {}
 
     _check_is_graph_module(graph_module)
+    check_is_valid_convert_custom_config_dict(convert_custom_config_dict)
 
     quantizer = Quantizer()
     quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict,

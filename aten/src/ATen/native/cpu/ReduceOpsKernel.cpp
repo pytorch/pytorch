@@ -43,8 +43,8 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     .resize_outputs(false)
     // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
-    .add_output(result)
-    .add_input(self)
+    .add_borrowed_output(result)
+    .add_borrowed_input(self)
     .build();
 
   auto result_dim_stride = ensure_nonempty_stride(result, dim);

@@ -1466,6 +1466,8 @@ Tensor* computeMatmul(
 
   auto size_a = a.dims();
   auto size_b = b.dims();
+  // We currently only support rank 2 matmuls
+  TORCH_INTERNAL_ASSERT(size_a.size() == 2 && size_b.size() == 2);
   auto total_size = dynamic_cast<LongImm*>(
       IRSimplifier::simplify(
           cast<int64_t>(size_a[0]) * cast<int64_t>(size_a[1]) *
@@ -1849,6 +1851,21 @@ Tensor* tensorexpr::computeOperandValue(
           [](const ExprHandle& a) {
             auto zero = Cast::make(a.dtype(), 0);
             return CompareSelect::make(a, zero, zero, a, kLT);
+          });
+    } break;
+
+    case aten::leaky_relu: {
+      return computeTwoOperand(
+          "aten_leaky_relu",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a, const ExprHandle& negative_slope) {
+            auto neg_slope = Cast::make(a.dtype(), negative_slope);
+            auto zero = Cast::make(a.dtype(), 0);
+            auto one = Cast::make(a.dtype(), 1);
+            auto cs = CompareSelect::make(a, zero, one, neg_slope, kGT);
+            return a * cs;
           });
     } break;
 
@@ -2407,7 +2424,8 @@ Tensor* tensorexpr::computeOperandValue(
           "aten_slice",
           c10::fmap<DimArg>(outputShape),
           [&](const std::vector<VarHandle>& axes) {
-            int64_t dim = c10::get<int64_t>(inputs[1]);
+            int64_t dim =
+                at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), axes.size());
             ExprHandle start = constant(inputs[2]);
             ExprHandle stride = constant(inputs[4]);
 
@@ -2477,7 +2495,8 @@ Tensor* tensorexpr::computeOperandValue(
             std::vector<VarHandle> new_axes;
             assert(permute_dims.size() == axes.size());
             for (auto i : permute_dims) {
-              new_axes.push_back(axes[i]);
+              auto new_dim = at::maybe_wrap_dim(i, A.ndim());
+              new_axes.push_back(axes[new_dim]);
             }
             return A.load(new_axes);
           });
@@ -2561,6 +2580,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg:
     case aten::isnan:
     case aten::relu:
+    case aten::leaky_relu:
     case aten::hardswish:
     case aten::gelu:
     case aten::batch_norm:
@@ -2780,34 +2800,28 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
 
       if (loopLevels == 2) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* outer;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
         const int kDefaultBlockSize = 512;
         if (blockSize < 0) {
           blockSize = kDefaultBlockSize;
         }
-        l.splitWithMask(flattened, blockSize, &outer, &inner);
-        l.setGPUBlockIndex(outer, 0);
+        l.splitWithMask(flattened, blockSize, &inner);
+        l.setGPUBlockIndex(flattened, 0);
         l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* outer;
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner1;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* inner2;
         // TODO: change the number of microprocessors
         const int kDefaultBlockCount = 1280;
         const int kDefaultBlockSize = 256;
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
-        l.splitWithMask(flattened, blockCount * blockSize, &outer, &inner);
-        l.splitWithMask(inner, blockSize, &inner1, &inner2);
-        l.setGPUBlockIndex(inner1, 0);
-        l.setGPUThreadIndex(inner2, 0);
+        l.splitWithMask(flattened, blockCount * blockSize, &inner);
+        l.splitWithMask(inner, blockSize, &inner1);
+        l.setGPUBlockIndex(inner, 0);
+        l.setGPUThreadIndex(inner1, 0);
       } else {
         throw std::runtime_error(
             "Invalid loop-level: " + c10::to_string(loopLevels));
@@ -2830,12 +2844,11 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
       LoopNest::flatten(loops, &flattened);
       assert(flattened);
 
-      For* outer = nullptr;
       For* inner = nullptr;
-      l.splitWithMask(flattened, blockSize, &outer, &inner);
-      l.setGPUBlockIndex(outer, 0);
+      l.splitWithMask(flattened, blockSize, &inner);
+      l.setGPUBlockIndex(flattened, 0);
       l.setGPUThreadIndex(inner, 0);
-      l.setBufferMap(outer, block_analysis->getBufferMap());
+      l.setBufferMap(flattened, block_analysis->getBufferMap());
     }
   }
 
@@ -2988,7 +3001,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     default: {
-      throw unsupported_dtype();
+      throw unsupported_dtype(t->repr_str());
       break;
     }
   }
