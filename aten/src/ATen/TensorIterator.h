@@ -342,6 +342,7 @@ public:
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
   void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  void build_borrowing_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_unary_float_op(const Tensor& out, const Tensor& a);
@@ -465,10 +466,12 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
 
   static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator borrowing_binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
   static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);
+  static TensorIterator borrowing_nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
@@ -498,6 +501,10 @@ public:
   // Important: the outputs have to be added before the inputs.
   TensorIteratorConfig& add_borrowed_output(const Tensor& output);
   TensorIteratorConfig& add_borrowed_input(const Tensor& input);
+
+  // Borrowing from temporaries is unlikely to go well.
+  TensorIteratorConfig& add_borrowed_output(Tensor&& output) = delete;
+  TensorIteratorConfig& add_borrowed_input(Tensor&& input) = delete;
 
   // Sets the check_mem_overlap_ flag, which is true by default.
   // If true, inputs are checked for partial overlap with the outputs and
