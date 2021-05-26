@@ -92,7 +92,7 @@ inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const
 
 // TODO: Blegh, bare references
 
-inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
+inline void rebase_history(const Variable& var, std::shared_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
     impl::rebase_history(var, {std::move(grad_fn), 0});
