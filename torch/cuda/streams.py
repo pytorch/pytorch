@@ -113,21 +113,21 @@ class Stream(torch._C._CudaStreamBase):
 
 
 class ExternalStream(Stream):
-    r"""Wrapper around a externally allocated CUDA stream.
-
-    A CUDA stream is a linear sequence of execution that belongs to a specific
-    device, independent from other streams.  See :ref:`cuda-semantics` for
-    details.
+    r"""Wrapper around an externally allocated CUDA stream.
 
     This class is used to wrap streams allocated in other libraries in order
-    to facilitate data exchange and multi-library interactions. Be aware
-    that the stream life-cycle is managed by the owner.
+    to facilitate data exchange and multi-library interactions.
+
+    .. note:: This class doesn't manage the stream life-cycle, it is the user
+       responsibility to keep the referenced stream alive while this class is
+       being used.
 
     Args:
         stream_ptr(int): Integer representation of the `cudaStream_t` value.
             allocated externally.
         device(torch.device or int, optional): the device where the stream
-            was originally allocated.
+            was originally allocated. if device is specified incorrectly,
+            subsequent launches using this stream may fail.
     """
 
     def __new__(cls, stream_ptr, device=None, **kwargs):

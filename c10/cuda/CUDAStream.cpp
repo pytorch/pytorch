@@ -138,7 +138,7 @@ static inline StreamIdType streamIdType(StreamId s) {
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   if (s && ((s & mask_for_type) == 0)) {
     // Externally allocated streams have their id being the cudaStream_ptr
-    // so the bits ocrresponding to the type will be 0 and will collide with
+    // so the bits corresponding to the type will be 0 and will collide with
     // the default stream.
     return StreamIdType::EXT;
   }
@@ -269,7 +269,7 @@ static void initCUDAStreamsOnce() {
 
 // Helper to verify the GPU index is valid
 static inline void check_gpu(DeviceIndex device_index) {
-  AT_ASSERT(device_index >= 0 && device_index < num_gpus);
+  TORCH_INTERNAL_ASSERT(device_index >= 0 && device_index < num_gpus);
 }
 
 // Helper to determine the index of the stream to return
@@ -333,7 +333,7 @@ cudaStream_t CUDAStream::stream() const {
     return reinterpret_cast<cudaStream_t>(stream_id);
   } else {
     auto ptr = CUDAStream_internals(*this);
-    AT_ASSERT(ptr);
+    TORCH_INTERNAL_ASSERT(ptr);
     return ptr->stream;
   }
 }
@@ -394,7 +394,7 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
 void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
   auto ptr = CUDAStream_internals(stream);
-  AT_ASSERT(ptr);
+  TORCH_INTERNAL_ASSERT(ptr);
   current_streams[ptr->device_index] = ptr;
 }
 
