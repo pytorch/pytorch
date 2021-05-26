@@ -571,17 +571,6 @@ StrideVector TensorIteratorBase::get_dim_strides(int dim) const {
   return inner_strides;
 }
 
-SmallVector<char*, 4> TensorIteratorBase::get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const {
-  auto ptrs = SmallVector<char*, 4>(base);
-  for (int dim = 0; dim < ndim(); dim++) {
-    int64_t value = counter[dim];
-    for (int arg = 0; arg < ntensors(); arg++) {
-      ptrs[arg] += value * operands_[arg].stride_bytes[dim];
-    }
-  }
-  return ptrs;
-}
-
 SmallVector<char*, 4> TensorIteratorBase::get_base_ptrs() const {
   auto ptrs = SmallVector<char*, 4>();
   for (int i = 0; i < ntensors(); i++) {
