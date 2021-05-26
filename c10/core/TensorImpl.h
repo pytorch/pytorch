@@ -657,6 +657,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_;
   }
 
+  inline StorageImpl* unsafeMaybeGetStorageImpl() const {
+    if (C10_UNLIKELY(storage_access_should_throw_)) {
+      return nullptr;
+    }
+    return storage().unsafeGetStorageImpl();
+  }
+
   /**
    * The number of elements in a tensor.
    *
