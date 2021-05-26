@@ -182,7 +182,7 @@ void raw_cudnn_convolution_forward_out(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32)
 {
-  if (y.numel() > 0) {
+  if (output.numel() > 0) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
       input, output, weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
@@ -195,7 +195,7 @@ void raw_cudnn_convolution_backward_input_out(
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
-  if (x.numel() > 0) {
+  if (grad_input.numel() > 0) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
       grad_input, grad_output, weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
@@ -206,7 +206,7 @@ void raw_cudnn_convolution_backward_weight_out(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
-  if (w.numel() > 0) {
+  if (grad_weight.numel() > 0) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
       input, grad_output, grad_weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
