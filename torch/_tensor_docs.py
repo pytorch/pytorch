@@ -4777,7 +4777,7 @@ matrix multiplication, it is necessary to use ``int32`` indexing in order
 to avoid downcasting and potentially losing information.
 
 Example::
-    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr = torch.eye(5,5)._to_sparse_csr()
     >>> csr.crow_indices()
     tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
 
@@ -4795,7 +4795,7 @@ matrix multiplication, it is necessary to use ``int32`` indexing in order
 to avoid downcasting and potentially losing information.
 
 Example::
-    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr = torch.eye(5,5)._to_sparse_csr()
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)
 

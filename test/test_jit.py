@@ -1699,10 +1699,10 @@ graph(%Ra, %Rb):
         self.checkScript(test_sparse_addmm_alpha_beta, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
 
     @suppress_warnings
-    def test_sparse_csr_tensors(self):
+    def test__sparse_csr_tensors(self):
         @torch.jit.ignore
         def get_sparse_csr():
-            return torch.randn(3, 3).to_sparse_csr()
+            return torch.randn(3, 3)._to_sparse_csr()
 
         @torch.jit.script
         def test_is_sparse_csr(input):

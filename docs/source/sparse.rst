@@ -397,7 +397,7 @@ and ``values``:
 Construction of CSR tensors
 ---------------------------
 
-Sparse CSR matrices can be directly constructed by using the :func:`torch.sparse_csr_tensor`
+Sparse CSR matrices can be directly constructed by using the :func:`torch._sparse_csr_tensor`
 method. The user must supply the row and column indices and values tensors separately.
 The ``size`` argument is optional and will be deduced from the the ``crow_indices``
 and ``col_indices`` if it is not present.
@@ -405,7 +405,7 @@ and ``col_indices`` if it is not present.
     >>> crow_indices = torch.tensor([0, 2, 4])
     >>> col_indices = torch.tensor([0, 1, 0, 1])
     >>> values = torch.tensor([1, 2, 3, 4])
-    >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.double)
+    >>> csr = torch._sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.double)
     >>> csr
     tensor(crow_indices=tensor([0, 2, 4]),
           col_indices=tensor([0, 1, 0, 1]),
@@ -419,11 +419,11 @@ CSR Tensor Operations
 ---------------------
 
 The simplest way of constructing a sparse CSR tensor from a strided or sparse COO
-tensor is to use :meth:`tensor.to_sparse_csr`. Any zeros in the (strided) tensor will
+tensor is to use :meth:`tensor._to_sparse_csr`. Any zeros in the (strided) tensor will
 be interpreted as missing values in the sparse tensor:
 
     >>> a = torch.tensor([[0, 0, 1, 0], [1, 2, 0, 0], [0, 0, 0, 0]], dtype = torch.float64)
-    >>> sp = a.to_sparse_csr()
+    >>> sp = a._to_sparse_csr()
     >>> sp
     tensor(crow_indices=tensor([0, 1, 3, 3]),
           col_indices=tensor([2, 0, 1]),
@@ -496,7 +496,7 @@ The following Tensor methods are related to sparse tensors:
     Tensor.sparse_dim
     Tensor.sparse_mask
     Tensor.to_sparse
-    Tensor.to_sparse_csr
+    Tensor._to_sparse_csr
     Tensor.indices
     Tensor.values
 
@@ -581,7 +581,7 @@ Torch functions specific to sparse Tensors
     :nosignatures:
 
     sparse_coo_tensor
-    sparse_csr_tensor
+    _sparse_csr_tensor
     sparse.sum
     sparse.addmm
     sparse.mm

@@ -27,7 +27,7 @@ def gen_sparse_csr(shape, nnz):
         dense[f] = fill_value
     dense = torch.from_numpy(dense.reshape(shape))
 
-    return dense.to_sparse_csr()
+    return dense._to_sparse_csr()
 
 def gen_sparse_coo(shape, nnz):
     dense = np.random.randn(*shape)
@@ -51,4 +51,4 @@ def gen_sparse_coo_and_csr(shape, nnz):
         dense[f] = 0
 
     dense = torch.from_numpy(dense.reshape(shape))
-    return dense.to_sparse(), dense.to_sparse_csr()
+    return dense.to_sparse(), dense._to_sparse_csr()

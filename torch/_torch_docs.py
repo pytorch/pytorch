@@ -8156,9 +8156,9 @@ Example::
             [-0.0881,  0.4370,  0.2275,  1.0284]])
 """.format(**common_args))
 
-add_docstr(torch.sparse_csr_tensor,
+add_docstr(torch._sparse_csr_tensor,
            r"""
-sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+_sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs>` with specified
 values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
@@ -8190,7 +8190,7 @@ Example ::
     >>> crow_indices = [0, 2, 4]
     >>> col_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
-    >>> torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
+    >>> torch._sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
     ...                         torch.tensor(col_indices, dtype=torch.int64),
     ...                         torch.tensor(values), dtype=torch.double)
     tensor(crow_indices=tensor([0, 2, 4]),

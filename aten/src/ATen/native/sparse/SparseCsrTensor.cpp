@@ -36,7 +36,7 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
 // TODO: This constructor should probably use an ATen abstract method in order
 // to make autograd dispatch available for the CSR constructor. See the relevant
 // note in native_functions.yaml.
-Tensor sparse_csr_tensor(
+Tensor _sparse_csr_tensor(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const Tensor& values,
@@ -86,7 +86,7 @@ Tensor sparse_csr_tensor(
   return self;
 }
 
-Tensor sparse_csr_tensor(
+Tensor _sparse_csr_tensor(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const Tensor& values,
@@ -125,7 +125,7 @@ Tensor sparse_csr_tensor(
     size[1] = 0;
   }
 
-  return at::sparse_csr_tensor(
+  return at::_sparse_csr_tensor(
       crow_indices, col_indices, values, size, options);
 }
 
