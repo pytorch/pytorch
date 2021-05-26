@@ -36,6 +36,7 @@ jobs:
       - name: Update self-hosted PyTorch
         run: |
           pushd "${HOME}"/pytorch
+          git remote prune origin
           git fetch
           popd
       - name: Run TorchBench
