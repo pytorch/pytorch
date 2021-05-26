@@ -22,6 +22,7 @@ These are the basic building blocks for graphs:
 
     ~parameter.Parameter
     ~parameter.UninitializedParameter
+    ~parameter.UninitializedBuffer
 
 Containers
 ----------------------------------
