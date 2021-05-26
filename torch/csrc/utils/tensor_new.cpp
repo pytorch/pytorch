@@ -88,7 +88,7 @@ Tensor new_with_tensor(c10::TensorOptions options, at::ScalarType scalar_type, c
   options = options.dtype(scalar_type);
   TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
                    options, " (got ", other.options(), ")");
-  return other.slice();
+  return other.alias();
 }
 
 std::vector<int64_t> compute_sizes(PyObject* seq) {
