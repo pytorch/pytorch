@@ -42,7 +42,7 @@ TEST(TestLoops, HasSameArgTypes) {
 }
 #endif
 
-TEST(TestVectorizedMemoryAccess, CanVectorizedUpTo) {
+TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 4);
