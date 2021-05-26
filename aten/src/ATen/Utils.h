@@ -26,7 +26,7 @@ namespace at {
 TORCH_API int _crash_if_asan(int);
 
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
-// away, we can delete this function
+// away, we can delete this function :p
 static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const char * name, int pos, const char * api, bool allowNull, DeviceType device_type, ScalarType scalar_type) {
   if(allowNull && !expr.defined()) {
     return nullptr;
