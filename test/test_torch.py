@@ -3041,24 +3041,38 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaises(AssertionError):
                 with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
                     _test(op, data[0:sz], data[1:sz + 1])
+        # output is transpose of input:
+        length = int(math.sqrt(sz))
+        input = data[:length**2].view([length, length])
+        out = input.t()
+        if not expected_failure:
+            with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                _test(op, out, input)
+        else:
+            with self.assertRaises(AssertionError):
+                with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                    _test(op, out, input)
 
     def ternary_check_input_output_mem_overlap(self, op, device,
                                                expected_failure=False):
-        sz = 3
+        sz = 9
         data = torch.randn(2 * sz, device=device)
         other1 = torch.randn(sz, device=device)
         other2 = torch.randn(sz, device=device)
 
         self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(input, other1, other2, out=out),
+            data, sz, lambda input, out:
+                op(input, other1.view(input.shape), other2.view(input.shape), out=out),
             expected_failure=expected_failure)
 
         self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(other1, input, other2, out=out),
+            data, sz, lambda input, out:
+                op(other1.view(input.shape), input, other2.view(input.shape), out=out),
             expected_failure=expected_failure)
 
         self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(other1, other2, input, out=out),
+            data, sz, lambda input, out:
+                op(other1.view(input.shape), other2.view(input.shape), input, out=out),
             expected_failure=expected_failure)
 
 
@@ -6209,7 +6223,7 @@ else:
     def test_copy_mem_overlap(self, device, dtype):
         self.check_internal_mem_overlap(
             torch.Tensor.copy_, num_inputs=2, dtype=dtype, device=device)
-        sz = 3
+        sz = 9
         doubles = torch.randn(2 * sz, dtype=dtype, device=device)
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
