@@ -42,7 +42,7 @@ TEST(TestLoops, HasSameArgTypes) {
 }
 #endif
 
-TEST(TestVectorizeddMemoryAccess, CanVectorizedUpTo) {
+TEST(TestVectorizedMemoryAccess, CanVectorizedUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 4);
@@ -87,7 +87,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   policy.store(buf, idx);
 }
 
-TEST(TestVectorizeddMemoryAccess, CopyKernel) {
+TEST(TestVectorizedMemoryAccess, CopyKernel) {
   if (!at::cuda::is_available()) {
     return;
   }
