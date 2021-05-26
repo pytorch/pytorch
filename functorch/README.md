@@ -207,3 +207,6 @@ In the end state, we'd like to upstream this into PyTorch once we iron out the
 design details. To figure out the details, we need your help -- please send us
 your use cases by starting a conversation in the issue tracker or try out the
 prototype.
+
+## License
+Functorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
