@@ -745,7 +745,6 @@ def _optional_input_placeholder_tensor(g):
     return n
 
 def _handle_reduce_dim_none(g, self, op_name):
-    dim_size = _get_tensor_dim_size(self, 0)
     rank = _get_tensor_rank(self)
     if rank is not None and any([_get_tensor_dim_size(self, i) == 0 for i in range(rank)]):
         # If input tensor is empty, according to ONNX ReduceSum definition,
