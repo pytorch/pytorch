@@ -31,7 +31,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Sequence
 from contextlib import contextmanager, closing
-from functools import wraps, partial
+from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
