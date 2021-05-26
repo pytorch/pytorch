@@ -327,25 +327,33 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
 
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, self_.scalar_type(), "sort", [&]{
-    const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
-    auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
-    int64_t remaining = numel;
-    while (remaining > 0) {
-      int64_t n = std::min(remaining, nbatch);
-      int64_t nsegments = n / nsort;
+#ifdef __HIP_PLATFORM_HCC__
+  constexpr bool is_rocm = true;
+#else
+  constexpr bool is_rocm = false;
+#endif
 
-      auto reverse_indices = at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}).contiguous();
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self_.scalar_type(), "sort", [&]{
+    c10::guts::if_constexpr<!(is_rocm && std::is_same<scalar_t, c10::BFloat16>::value)>([&](auto _){
+      const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
+      auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
+      int64_t remaining = _(numel);
+      while (remaining > 0) {
+        int64_t n = std::min(remaining, nbatch);
+        int64_t nsegments = n / nsort;
 
-      at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
-        reverse_indices.data_ptr<int64_t>(), indices_ptr, n, nsegments,
-        offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
+        auto reverse_indices = at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}).contiguous();
 
-      remaining -= n;
-      self_ptr += n;
-      values_ptr += n;
-      indices_ptr += n;
-    }
+        at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
+          reverse_indices.data_ptr<int64_t>(), indices_ptr, n, nsegments,
+          offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
+
+        remaining -= n;
+        self_ptr += n;
+        values_ptr += n;
+        indices_ptr += n;
+      }
+    }, [&](auto _){ TORCH_CHECK(_(false), "BFloat16 is not supported on ROCm"); });
   });
 
   if (values_tmp.defined()) {

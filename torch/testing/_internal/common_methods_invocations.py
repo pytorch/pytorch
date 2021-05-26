@@ -6133,7 +6133,7 @@ op_db: List[OpInfo] = [
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('gather',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -6175,8 +6175,8 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
            )),
     OpInfo('sort',
-           dtypes=all_types_and(torch.bool, torch.float16),
-           dtypesIfCUDA=all_types_and(torch.float16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_sort,
            skips=(
@@ -6193,12 +6193,12 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,  # vmap complains of the sizes
            sample_inputs_func=sample_inputs_take),
     OpInfo('scatter',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter,
            supports_out=False),
     OpInfo('scatter_add',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
            supports_out=False),
@@ -6247,7 +6247,8 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('msort',
-           dtypes=all_types_and(torch.float16),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfROCM=all_types_and(torch.float16),
            check_batched_gradgrad=False,
            skips=(
                #  msort does not correctly warn when resizing out= inputs.
@@ -6282,7 +6283,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_squeeze),
     OpInfo('take_along_dim',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_take_along_dim,

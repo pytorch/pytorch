@@ -6,7 +6,7 @@ from torch._six import nan
 from itertools import permutations, product
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, make_tensor, slowTest)
+    (TEST_WITH_ROCM, TestCase, run_tests, make_tensor, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU, largeTensorTest)
@@ -127,8 +127,10 @@ class TestSortAndSelect(TestCase):
                                  'random with NaNs')
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
+        if TEST_WITH_ROCM and dtype == torch.bfloat16:
+            return
         sizes = (100, 1000, 10000)
         for ncopies in sizes:
             x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=device)
@@ -197,9 +199,11 @@ class TestSortAndSelect(TestCase):
         self._test_sort_discontiguous(device, dtype)
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):
-        if dtype in torch.testing.floating_types_and(torch.float16):
+        if TEST_WITH_ROCM and dtype == torch.bfloat16:
+            return
+        if dtype in torch.testing.floating_types_and(torch.float16, torch.bfloat16):
             inf = float('inf')
             neg_inf = -float('inf')
             nan = float('nan')
@@ -253,16 +257,25 @@ class TestSortAndSelect(TestCase):
 
         for sample, dim in generate_samples():
             _, idx_torch = sample.sort(dim=dim, stable=True)
-            sample_numpy = sample.cpu().numpy()
+            if dtype is torch.bfloat16:
+                sample_numpy = sample.float().cpu().numpy()
+            else:
+                sample_numpy = sample.cpu().numpy()
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_msort(self, device, dtype):
+        if TEST_WITH_ROCM and dtype == torch.bfloat16:
+            return
+
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
             if tensor.size() != torch.Size([]):
-                expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
+                if dtype is torch.bfloat16:
+                    expected = torch.from_numpy(np.msort(tensor.float().cpu().numpy())).bfloat16()
+                else:
+                    expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
             else:
                 expected = tensor  # numpy.msort() does not support empty shapes tensor
 
