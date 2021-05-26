@@ -368,7 +368,7 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
         self = _maybe_cast_reduce_op_input(g, self)
         if dim is None:
             # all-reduce path
-            return g.op(onnx_op_name, self, keepdims_i=0)
+            return sym_help._handle_reduce_dim_none(g, self, onnx_op_name)
         else:
             # dim-reduce path
             desc = "is" if allow_multi_dim_support else "i"
