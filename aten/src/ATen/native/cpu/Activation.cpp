@@ -634,7 +634,7 @@ void silu_backward_kernel(TensorIterator& iter) {
 
 void mish_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
-        using Vec = Vectorized<scalar_t>;
+        using Vec = Vec256<scalar_t>;
         cpu_kernel_vec(
             iter,
             [](scalar_t x) -> scalar_t{
@@ -648,7 +648,7 @@ void mish_kernel(TensorIteratorBase& iter) {
 
 void mish_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_backward_cpu", [&]() {
-        using Vec = Vectorized<scalar_t>;
+        using Vec = Vec256<scalar_t>;
         const Vec kOneVec(scalar_t(1));
         cpu_kernel_vec(
             iter,
