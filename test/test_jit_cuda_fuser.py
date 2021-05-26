@@ -2229,7 +2229,7 @@ class TestCudaFuser(JitTestCase):
                      "Requires fusion optimization pass to be effective")
     def test_batch_norm_impl_index_correctness(self):
         batch = [2, 7, 16]
-        channels = [4, 19, 32]
+        channels = [4, 89, 19, 32]
         hw = [1, 8, 17, 32]
 
         # failing sizes (2, 1, 1, 1)

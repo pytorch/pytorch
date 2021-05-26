@@ -425,29 +425,21 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
  public:
   explicit Predicate(
       Passkey passkey,
-      const Expr* expr,
-      Bool* thread_pred,
-      PredicateType ptype)
+      PredicateType ptype,
+      const Expr* expr = nullptr,
+      Bool* thread_pred = nullptr)
       : Val(passkey, DataType::Bool),
+        ptype_(ptype),
         expr_(expr),
-        thread_pred_(thread_pred),
-        ptype_(ptype) {
-    TORCH_INTERNAL_ASSERT(expr != nullptr);
-    TORCH_INTERNAL_ASSERT(thread_pred != nullptr);
-    TORCH_INTERNAL_ASSERT(ptype != PredicateType::Unswitch);
-  }
-
-  explicit Predicate(Passkey passkey, const Expr* expr, PredicateType ptype)
-      : Val(passkey, DataType::Bool), expr_(expr), ptype_(ptype) {
-    TORCH_INTERNAL_ASSERT(expr != nullptr);
+        thread_pred_(thread_pred) {
     TORCH_INTERNAL_ASSERT(
-        ptype == PredicateType::Shift || ptype == PredicateType::Padding);
+        ptype != PredicateType::Unswitch && ptype != PredicateType::Manual);
   }
 
   explicit Predicate(Passkey passkey, ForLoop* unrolled_loop)
       : Val(passkey, DataType::Bool),
-        unrolled_loop_(unrolled_loop),
-        ptype_(PredicateType::Unswitch) {
+        ptype_(PredicateType::Unswitch),
+        unrolled_loop_(unrolled_loop) {
     TORCH_INTERNAL_ASSERT(unrolled_loop != nullptr);
   }
 
@@ -472,7 +464,8 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
 
   const Expr* expr() const {
     TORCH_INTERNAL_ASSERT(
-        ptype_ != PredicateType::Unswitch && ptype_ != PredicateType::Manual);
+        ptype_ != PredicateType::Unswitch &&
+        ptype_ != PredicateType::Vectorize && ptype_ != PredicateType::Manual);
     return expr_;
   }
 
@@ -506,6 +499,8 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
   }
 
  private:
+  PredicateType ptype_ = PredicateType::Manual;
+
   // For PredicateCompute::getInlinePredicate,
   // ShiftPredicateInserter::getShiftPredicate and getPaddingPredicate
   const Expr* expr_ = nullptr;
@@ -515,8 +510,6 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
 
   // For ParallelType::Unswitch - UnswitchPredicate::get
   ForLoop* unrolled_loop_ = nullptr;
-
-  PredicateType ptype_ = PredicateType::Manual;
 
   // The Bool conditional value
   // The value is nullptr until lower_predicate pass

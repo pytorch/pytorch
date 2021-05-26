@@ -358,12 +358,29 @@ void UnswitchPredicate::openLoop(kir::ForLoop* fl) {
   for (auto expr : fl->body().exprs()) {
     if (ir_utils::isTVOp(expr) || isTensorIndexOp(expr)) {
       predicateOn(expr);
+    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+      openIte(ite);
     } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       openLoop(for_loop);
     }
   }
 
   for_loops_.pop_back();
+}
+
+void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
+  FUSER_PERF_SCOPE("UnswitchPredicate::openIte");
+
+  // only expand the ite thenBody
+  for (auto expr : ite->thenBody().exprs()) {
+    if (ir_utils::isTVOp(expr) || isTensorIndexOp(expr)) {
+      predicateOn(expr);
+    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+      openIte(ite);
+    } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
+      openLoop(for_loop);
+    }
+  }
 }
 
 UnswitchPredicate::UnswitchPredicate(

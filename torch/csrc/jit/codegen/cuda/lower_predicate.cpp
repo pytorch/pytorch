@@ -100,6 +100,22 @@ class ConditionalFromPredicateModifier {
             pred->thread_pred(),
             pred->predicate_type());
       }
+      case PredicateType::Vectorize: {
+        std::vector<kir::ForLoop*> outer_loops;
+        kir::ForLoop* vectorized_loop = nullptr;
+        for (auto loop : for_loops_structure_) {
+          if (loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
+            vectorized_loop = loop;
+            break;
+          } else {
+            outer_loops.emplace_back(loop);
+          }
+        }
+        TORCH_INTERNAL_ASSERT(
+            vectorized_loop != nullptr, "Should be unreachable.");
+        return UnswitchPredicate::get(
+            outer_loops, vectorized_loop, p2c_root_map_);
+      }
       case PredicateType::Unswitch: {
         return UnswitchPredicate::get(
             for_loops_structure_, pred->unrolled_loop(), p2c_root_map_);

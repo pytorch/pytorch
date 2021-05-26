@@ -194,6 +194,10 @@ void IrPrinter::visit(const kir::Predicate* node) {
       ir_str_ << "InternalSync";
       break;
     }
+    case PredicateType::Manual: {
+      ir_str_ << node->value();
+      break;
+    }
     case PredicateType::Misaligned: {
       ir_str_ << "Misaligned";
       break;
@@ -206,12 +210,12 @@ void IrPrinter::visit(const kir::Predicate* node) {
       ir_str_ << "Shift";
       break;
     }
-    case PredicateType::Manual: {
-      ir_str_ << node->value();
-      break;
-    }
     case PredicateType::Unswitch: {
       ir_str_ << "Unswitch";
+      break;
+    }
+    case PredicateType::Vectorize: {
+      ir_str_ << "Vectorize";
       break;
     }
     default:

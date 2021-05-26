@@ -69,6 +69,8 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
 
   void openLoop(kir::ForLoop*);
 
+  void openIte(kir::IfThenElse*);
+
  private:
   std::unordered_map<kir::IterDomain*, kir::Bool*> predicates_;
   std::vector<kir::ForLoop*> for_loops_;

@@ -83,7 +83,7 @@ void ShiftPredicateInserter::insert(
   // }
 
   kir::Predicate* shift_pred =
-      ir_builder.create<kir::Predicate>(expr, PredicateType::Shift);
+      ir_builder.create<kir::Predicate>(PredicateType::Shift, expr);
   auto shift_ite = ir_builder.create<kir::IfThenElse>(shift_pred);
 
   auto& scope = loops.back()->body();
@@ -99,7 +99,7 @@ void ShiftPredicateInserter::insert(
 
   // Pading by zero
   kir::Predicate* padding_pred =
-      ir_builder.create<kir::Predicate>(expr, PredicateType::Padding);
+      ir_builder.create<kir::Predicate>(PredicateType::Padding, expr);
   auto bounds_ite = ir_builder.create<kir::IfThenElse>(padding_pred);
   const int pad_value = 0;
   auto pad_expr = ir_builder.create<kir::UnaryOp>(

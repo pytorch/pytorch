@@ -43,6 +43,7 @@ enum class PredicateType {
   Manual,
   Inline,
   Unswitch,
+  Vectorize,
   Misaligned,
   InternalSync,
   Shift,

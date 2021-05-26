@@ -109,24 +109,13 @@ void UnrollPass::handle(kir::Expr* expr) {
               return fl->iter_domain()->parallelType() ==
                   ParallelType::Vectorize;
             })) {
-      std::vector<kir::ForLoop*> outer_loops;
-      kir::ForLoop* vectorized_loop = nullptr;
-      for (auto loop : for_loops_) {
-        if (loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
-          vectorized_loop = loop;
-          break;
-        } else {
-          outer_loops.emplace_back(loop);
-        }
-      }
-      TORCH_INTERNAL_ASSERT(
-          vectorized_loop != nullptr, "Should be unreachable.");
-      vectorized_pred = ir_builder.create<kir::Predicate>(vectorized_loop);
+      vectorized_pred =
+          ir_builder.create<kir::Predicate>(PredicateType::Vectorize);
     }
 
     const auto pred = vectorized_pred == nullptr
         ? ir_builder.create<kir::Predicate>(
-              expr, thread_pred, PredicateType::Inline)
+              PredicateType::Inline, expr, thread_pred)
         : vectorized_pred;
 
     TORCH_INTERNAL_ASSERT(pred != nullptr);

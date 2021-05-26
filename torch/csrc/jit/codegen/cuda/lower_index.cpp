@@ -172,9 +172,9 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
 
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     const auto pred = ir_builder.create<kir::Predicate>(
+        PredicateType::InternalSync,
         rop,
-        GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()),
-        PredicateType::InternalSync);
+        GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()));
 
     block_reduction_op->setPredicate(pred);
     pushBack(block_reduction_op);
@@ -257,7 +257,7 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
 
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     const auto pred = ir_builder.create<kir::Predicate>(
-        rop, ir_builder_.trueVal(), PredicateType::InternalSync);
+        PredicateType::InternalSync, rop, ir_builder_.trueVal());
     grid_reduction->setPredicate(pred);
 
     pushBack(reduce_buffer);
@@ -361,9 +361,9 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
 
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     const auto pred = ir_builder.create<kir::Predicate>(
+        PredicateType::InternalSync,
         wop,
-        GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()),
-        PredicateType::InternalSync);
+        GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()));
 
     block_welford_op->setPredicate(pred);
     pushBack(block_welford_op);
@@ -406,7 +406,7 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
 
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     const auto pred = ir_builder.create<kir::Predicate>(
-        wop, ir_builder_.trueVal(), PredicateType::InternalSync);
+        PredicateType::InternalSync, wop, ir_builder_.trueVal());
 
     grid_welford->setPredicate(pred);
 
@@ -438,7 +438,7 @@ void IndexLowering::visit(const kir::BroadcastOp* bop) {
   if (is_block_broadcast) {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     const auto pred = ir_builder.create<kir::Predicate>(
-        bop, ir_builder_.trueVal(), PredicateType::InternalSync);
+        PredicateType::InternalSync, bop, ir_builder_.trueVal());
     indexed_expr->setPredicate(pred);
   }
 }

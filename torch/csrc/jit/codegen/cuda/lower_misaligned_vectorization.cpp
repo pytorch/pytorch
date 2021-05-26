@@ -119,7 +119,7 @@ class MisalignedVectorizationModifier {
 
     // Get the predicate for all but last root domains
     auto pred_except_last_root_domain = ir_builder.create<kir::Predicate>(
-        vec_expr, ir_builder.trueVal(), PredicateType::Misaligned);
+        PredicateType::Misaligned, vec_expr, ir_builder.trueVal());
     TORCH_INTERNAL_ASSERT(pred_except_last_root_domain != nullptr);
     kir::IfThenElse* pred_ite =
         ir_builder.create<kir::IfThenElse>(pred_except_last_root_domain);
