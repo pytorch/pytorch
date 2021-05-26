@@ -37,11 +37,11 @@ class TORCH_CUDA_CU_API LaunchParams {
   }
 
   int64_t nBlocks() const {
-    return abs(gdimx_ * gdimy_ * gdimz_);
+    return std::abs(gdimx_ * gdimy_ * gdimz_);
   }
 
   int64_t nThreads() const {
-    return abs(bdimx_ * bdimy_ * bdimz_);
+    return std::abs(bdimx_ * bdimy_ * bdimz_);
   }
 
   int64_t bdimx() const {

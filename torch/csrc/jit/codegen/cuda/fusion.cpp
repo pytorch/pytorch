@@ -627,7 +627,7 @@ std::unordered_set<int> Fusion::getOutputAliasIndices() const {
 
   std::unordered_set<int> alias_indices;
 
-  for (int i = 0; i < outputs_.size(); i++) {
+  for (size_t i = 0; i < outputs_.size(); i++) {
     if (io_alias_.count(outputs_[i]) != 0) {
       alias_indices.insert(i);
     }
@@ -641,10 +641,10 @@ std::vector<std::pair<int, int>> Fusion::getInputAliasIndices() const {
   }
 
   std::vector<std::pair<int, int>> alias_indices;
-  for (int i = 0; i < outputs_.size(); i++) {
+  for (size_t i = 0; i < outputs_.size(); i++) {
     if (io_alias_.count(outputs_[i]) != 0) {
       bool found = false;
-      for (int j = 0; j < inputs_.size(); j++) {
+      for (size_t j = 0; j < inputs_.size(); j++) {
         if (io_alias_.at(outputs_[i]) == inputs_[j]) {
           alias_indices.emplace_back(i, j);
           found = true;
