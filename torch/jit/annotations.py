@@ -300,6 +300,9 @@ def try_ann_to_type(ann, loc):
     if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
     if is_tuple(ann):
+        # Special case for the empty Tuple type annotation `Tuple[()]`
+        if len(ann.__args__) == 1 and ann.__args__[0] == ():
+            return TupleType([])
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
     if is_list(ann):
         elem_type = try_ann_to_type(ann.__args__[0], loc)

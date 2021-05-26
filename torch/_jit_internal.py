@@ -17,6 +17,7 @@ import sys
 import builtins
 import io
 import pickle
+import functools
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -59,6 +60,11 @@ def createResolutionCallbackFromEnv(lookup_base):
         i = 0
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
+
+        # Special case logic for the empty Tuple as a subscript (used
+        # in the type annotation `Tuple[()]`)
+        if expr[:i] == '()':
+            return (), i
 
         base = lookupInModule(expr[:i].strip(), module)
         assert base is not None, f"Unresolvable type {expr[:i]}"
@@ -971,6 +977,9 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
         self.uses_true_division = uses_true_division
         self.filename = filename
 
+@functools.lru_cache(maxsize=None)
+def make_source_context(*args):
+    return SourceContext(*args)
 
 def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
