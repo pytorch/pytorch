@@ -13,9 +13,10 @@ namespace torch {
 namespace jit {
 
 struct TORCH_API StaticModuleOptions {
-  bool cleanup_activations{true};
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors
+  bool cleanup_activations{true};
+  // enabling out variant allows Static Runtime to do memory planning
   bool enable_out_variant{true};
   // to reuse tensor storage for tensors whose live-range do not overlap to
   // reduce memory footprint (enable_out_variant must be true)
@@ -97,8 +98,8 @@ class TORCH_API StaticModule {
       const StaticModuleOptions& opts);
 
   // for <kind, idx>
-  //   if kind == CONSTANT_KIND: map to constants_[idx]
-  //   if kind == INPUT_KIND: map to inputs_[idx]
+  //   if kind == CONSTANT_VALUE: map to constants_[idx]
+  //   if kind == INPUT_VALUE: map to inputs_[idx]
   //   otherwise: map to nodes_[kind].outputs()[idx]
   using DefInfo = std::pair<int, int>;
 
@@ -119,60 +120,60 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  inline const std::unordered_map<int, std::vector<DefInfo>>& index_map()
-      const {
+  const std::unordered_map<int, std::vector<DefInfo>>& index_map() const {
     return node_inputs_ssa_def_map_;
   }
 
-  inline const std::vector<DefInfo>& output_indices() const {
+  const std::vector<DefInfo>& output_indices() const {
     return output_ssa_defs_;
   }
 
-  inline const std::vector<IValue>& constants() const {
+  const std::vector<IValue>& constants() const {
     return constants_;
   }
 
-  inline const std::vector<ProcessedNode>& nodes() const {
+  const std::vector<ProcessedNode>& nodes() const {
     return nodes_;
   }
 
-  inline const c10::optional<c10::FunctionSchema>& schema() const {
+  const c10::optional<c10::FunctionSchema>& schema() const {
     return schema_;
   }
 
-  inline const std::unordered_map<const Value*, std::vector<const Value*>>&
+  const std::unordered_map<const Value*, std::vector<const Value*>>&
   values_share_same_storage() const {
     return value_to_same_storage_values_;
   }
 
-  inline const std::unordered_set<const Value*>& external_values() const {
+  const std::unordered_set<const Value*>& external_values() const {
     return external_values_;
   }
 
   StaticRuntime& runtime();
 
  private:
-  // Static runtime states
   StaticModuleOptions opts_;
+  std::shared_ptr<torch::jit::Graph> graph_;
+  c10::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
+
+  // Bookkeeping for creating new StaticRuntime instances
   // IValue table (defined by prim::Constant nodes)
   std::vector<IValue> constants_;
+  // The nodes we need to run
+  std::vector<ProcessedNode> nodes_;
   // a vector of ssa_defs corresponding to graph->outputs()
   std::vector<DefInfo> output_ssa_defs_;
   // map a node idx (in graph order) to a vector of ssa_defs for node inputs
   std::unordered_map<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
-  // The nodes we need to run
-  std::vector<ProcessedNode> nodes_;
-  // map a value to the set of values that may share the same storage with it
-  std::unordered_map<const Value*, std::vector<const Value*>>
-      value_to_same_storage_values_;
+
+  // Bookkeeping for MemoryPlanner in StaticRuntime
   // values whose live-time exceeds that of running one inference (e.g., input,
   // output, prim::Constants, and their aliases)
   std::unordered_set<const Value*> external_values_;
-
-  // Original input
-  std::shared_ptr<torch::jit::Graph> graph_;
-  c10::optional<c10::FunctionSchema> schema_;
+  // map a value to the set of values that may share the same storage with it
+  std::unordered_map<const Value*, std::vector<const Value*>>
+      value_to_same_storage_values_;
 };
 
 class TORCH_API StaticRuntime {
@@ -236,11 +237,11 @@ class TORCH_API StaticRuntime {
     return outputs_;
   }
 
-  inline const std::vector<ProcessedNode>& nodes() const {
+  const std::vector<ProcessedNode>& nodes() const {
     return nodes_;
   }
 
-  inline std::vector<ProcessedNode>& nodes() {
+  std::vector<ProcessedNode>& nodes() {
     return nodes_;
   }
 
@@ -254,10 +255,10 @@ class TORCH_API StaticRuntime {
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
+  const StaticModule& static_module_;
   std::unique_ptr<MemoryPlanner> planner_;
   std::vector<IValue> inputs_;
   std::vector<IValue*> outputs_;
-  const StaticModule& static_module_;
   std::vector<ProcessedNode> nodes_;
 };
 
@@ -266,25 +267,26 @@ class TORCH_API StaticRuntime {
 ///   2. view producing op
 ///   3. tensor producing op (could be replaced with type 1 by adding the _out
 ///      variant to Static Runtime)
-/// The memory planner only manages tensors that are outputs of type 1 ops,
-/// because type 2 ops don't incur memory allocation and for type 3, the output
-/// tensors are allocated inside the operator and can't be directly managed by
-/// memory planner.
+/// In Static Runtime, type 2 ops are replaced with their corespoinding copy
+/// versions when enable_out_variant is enabled and become type 1 ops.The memory
+/// planner only manages tensors that are outputs of type 1 ops. For type 3, the
+/// output tensors are allocated inside the operator and can't be directly
+/// managed by memory planner.
 ///
 /// Memory planner tries to minimize the number of memory allocations by
-/// tracking the unique StorageImpls of the output tensors of ops with _out
-/// variants. It tries to do this in several steps:
-///   1. record the max memory usage for each StorageImpl at the end of each
-///      iteration
+/// tracking the output tensors of ops with _out variants with unique DataPtr
+/// (part of StorageImpl). It tries to do this in several steps:
+///   1. record the max memory usage for each Tensor with unique DataPtr at the
+///      end of each iteration
 ///   2. in the next iteration, allocate the buffer for the max total usage and
 ///      compute the offset of each allocation with regard to the single memory
-///      buffer, optionally reusing memory.  In the first iteration, we rely on
+///      buffer, optionally reusing memory. In the first iteration, we rely on
 ///      the default allocator for memory allocation.
 ///   3. free the buffer at the end of each iteration
 /// Steps 1 and 3 are handled by `deallocate()`, and step 2 by `allocate()`.
 /// Only models with simple output types are supported, i.e. None, Tensor or
-/// List/Tuple of Tensors. Complex output types such as List of Lists are not
-/// supported.
+/// List/Tuple/Dict of Tensors. Complex output types such as List of Lists are
+/// not supported.
 
 class MemoryPlanner {
  public:
@@ -294,9 +296,15 @@ class MemoryPlanner {
       const std::unordered_set<const Value*>& external_values,
       bool enable_out_variant,
       bool manage_graph_output_memory);
+  // disable copying and moving
+  MemoryPlanner(const MemoryPlanner&) = delete;
+  MemoryPlanner& operator=(const MemoryPlanner&) = delete;
+  MemoryPlanner(MemoryPlanner&&) = delete;
+  MemoryPlanner& operator=(MemoryPlanner&&) = delete;
 
   void allocate();
   void deallocate();
+
   size_t total_managed() const {
     return managed_bytes_;
   }
@@ -312,13 +320,13 @@ class MemoryPlanner {
   // and a vector of Tensors that should be backed by that same data.
   // Thus, if memonger is disabled, all vectors are of size 1.
   std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
+  at::DataPtr buffer_; // allocated each time we call Run()
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
-  at::DataPtr buffer_; // allocated each time we call Run()
 
   // since output tensors are alive after one inference, their storage
   // is managed differently (e.g., deallocation happens at client side)
-  // std::vector<std::pair<sizse_t, std::vector<at::Tensor*>>>
+  // std::vector<std::pair<size_t, std::vector<at::Tensor*>>>
   //     managed_output_storage_;
   // size_t managed_output_bytes_{0};
   // size_t reused_output_tensors_{0};
@@ -344,10 +352,6 @@ class ProcessedNode {
     return node_;
   }
 
-  inline void set_input(size_t index, const IValue* ival) {
-    inputs_[index] = ival;
-  }
-
   // Input is readonly
   const IValue& Input(size_t i) const {
     DCHECK(i < inputs_.size());
@@ -358,6 +362,10 @@ class ProcessedNode {
   IValue& Output(size_t i) {
     DCHECK(i < outputs_.size());
     return outputs_[i];
+  }
+
+  void set_input(size_t index, const IValue* ival) {
+    inputs_[index] = ival;
   }
 
   const std::vector<IValue>& outputs() const {
