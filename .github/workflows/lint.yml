@@ -229,12 +229,10 @@ jobs:
   clang-tidy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-18.04
+    container:
+      # ubuntu18.04-cuda10.2-py3.6-tidy11
+      image: ghcr.io/pytorch/cilint-clang-tidy:e2cfc57ce4fa3a257a4b78fdfdc2b065c167b9c5
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.x
-          architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -243,47 +241,32 @@ jobs:
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          cd "${GITHUB_WORKSPACE}"
           mkdir clang-tidy-output
           cd clang-tidy-output
           echo "$HEAD_SHA" > commit-sha.txt
-      - name: Install dependencies
-        run: |
-          set -eux
-          # Install CUDA
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/cuda-ubuntu1804.pin
-          sudo mv cuda-ubuntu1804.pin /etc/apt/preferences.d/cuda-repository-pin-600
-          sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
-          sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
-          sudo apt-get update
-          sudo apt-get --no-install-recommends -y install cuda-toolkit-10-2
-          # Install dependencies
-          pip install pyyaml typing_extensions
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-11 main"
-          sudo apt-get update
-          sudo apt-get install -y clang-tidy-11
-          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 1000
       - name: Generate build files
         run: |
+          cd "${GITHUB_WORKSPACE}"
           set -eux
           git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
 
-          if [[ ! -d build ]]; then
+          if [ ! -d build ]; then
             git submodule update --init --recursive
 
             export USE_NCCL=0
             export USE_DEPLOY=1
             # We really only need compile_commands.json, so no need to build!
-            time python setup.py --cmake-only build
+            time python3 setup.py --cmake-only build
 
             # Generate ATen files.
-            time python -m tools.codegen.gen \
+            time python3 -m tools.codegen.gen \
               -s aten/src/ATen \
               -d build/aten/src/ATen
 
             # Generate PyTorch files.
-            time python tools/setup_helpers/generate_code.py            \
+            time python3 tools/setup_helpers/generate_code.py            \
               --declarations-path build/aten/src/ATen/Declarations.yaml \
               --native-functions-path aten/src/ATen/native/native_functions.yaml \
               --nn-path aten/src
@@ -293,6 +276,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          cd "${GITHUB_WORKSPACE}"
           set -eux
 
           # Run Clang-Tidy
@@ -303,7 +287,7 @@ jobs:
           # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
           # deploy/interpreter files are excluded due to using macros and other techniquies
           # that are not easily converted to accepted c++
-          python tools/clang_tidy.py                               \
+          python3 tools/clang_tidy.py                               \
             --verbose                                              \
             --paths torch/csrc/                                    \
             --diff "$BASE_SHA"                                   \

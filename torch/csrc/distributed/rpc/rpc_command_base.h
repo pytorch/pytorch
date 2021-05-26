@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
@@ -17,11 +18,11 @@ class RpcCommandBase {
     return std::move(*this).toMessageImpl();
   }
   virtual Message toMessageImpl() && = 0;
-  virtual ~RpcCommandBase() = 0;
+  virtual ~RpcCommandBase() noexcept(!kTorchInternalAssertIsDebugging) = 0;
 };
 
 // NOLINTNEXTLINE(modernize-use-equals-default)
-inline RpcCommandBase::~RpcCommandBase() {}
+inline RpcCommandBase::~RpcCommandBase() noexcept(!kTorchInternalAssertIsDebugging) {}
 
 } // namespace rpc
 } // namespace distributed
