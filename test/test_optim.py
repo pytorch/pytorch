@@ -533,6 +533,29 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
+    def test_radam(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.RAdam([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.RAdam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.RAdam([weight, bias], lr=1e-3, weight_decay=0.1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.RAdam([weight, bias], lr=1e-3),
+            [lambda opt: ExponentialLR(opt, gamma=0.9),
+                lambda opt: ReduceLROnPlateau(opt)]
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+            optim.RAdam(None, lr=1e-2, betas=(1.0, 0.0))
+
+        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+            optim.RAdam(None, lr=1e-2, weight_decay=-1)
+
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
             self._test_basic_cases(
