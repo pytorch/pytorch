@@ -8,7 +8,6 @@
 #include <ATen/SparseTensorUtils.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/accumulate.h>
-#include <ATen/native/cuda/SortingCommon.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>
