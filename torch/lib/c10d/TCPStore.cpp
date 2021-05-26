@@ -84,7 +84,7 @@ class BackgroundThread {
   const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
   HANDLE ghStopEvent_{};
 #else
-  std::array<int, 2> controlPipeFd_ = {-1, -1};
+  std::array<int, 2> controlPipeFd_{{-1, -1}};
 #endif
 
  private:
