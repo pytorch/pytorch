@@ -297,7 +297,6 @@ public:
   StrideVector get_dim_strides(int dim) const;
   StrideVector get_strides() const;
   StrideVector get_inner_strides() const { return get_dim_strides(0); }
-  PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const;
   PtrVector get_base_ptrs() const;
 
   /// true if the stride computation can use 32-bit arithmetic. Used by GPU kernels

@@ -1,6 +1,5 @@
 #include <ATen/TensorIterator.h>
 
-#include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TypeProperties.h>
@@ -12,6 +11,9 @@
 #include <c10/util/irange.h>
 #include <c10/util/SmallBuffer.h>
 
+#include <array>
+#include <algorithm>
+
 namespace at {
 
 using DimMask = TensorIteratorBase::DimMask;
@@ -21,13 +23,13 @@ using StrideVector = TensorIteratorBase::StrideVector;
 
 namespace {
 
-void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
-  for (size_t i = 0; i < operands.size(); ++i) {
-    ptrs[i] = static_cast<char*>(operands[i].data);
-  }
+inline void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
+  std::transform(operands.begin(), operands.end(), ptrs, [](const OperandInfo& op) {
+    return static_cast<char*>(op.data);
+  });
 }
 
-void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
+inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
   for (int64_t dim = 0; dim < ndim; ++dim) {
     for (size_t arg = 0; arg < operands.size(); ++arg) {
       *strides++ = operands[arg].stride_bytes[dim];
@@ -588,17 +590,6 @@ StrideVector TensorIteratorBase::get_dim_strides(int dim) const {
     inner_strides.push_back(dims == 0 ? 0 : op.stride_bytes[dim]);
   }
   return inner_strides;
-}
-
-SmallVector<char*, 4> TensorIteratorBase::get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const {
-  auto ptrs = SmallVector<char*, 4>(base);
-  for (int dim = 0; dim < ndim(); dim++) {
-    int64_t value = counter[dim];
-    for (int arg = 0; arg < ntensors(); arg++) {
-      ptrs[arg] += value * operands_[arg].stride_bytes[dim];
-    }
-  }
-  return ptrs;
 }
 
 SmallVector<char*, 4> TensorIteratorBase::get_base_ptrs() const {
