@@ -141,7 +141,6 @@ class Vectorized<double> {
         vec_sel(a._vec0, b._vec0, mask._vecb0),
         vec_sel(a._vec1, b._vec1, mask._vecb1)};
   }
-
   template <typename step_t>
   static Vectorized<double> arange(double base = 0., step_t step = static_cast<step_t>(1)) {
     return Vectorized<double>(base, base + step, base + 2 * step, base + 3 * step);
@@ -360,7 +359,6 @@ class Vectorized<double> {
   Vectorized<double> i0e() const {
     return map(calc_i0e);
   }
-
 
   Vectorized<double> _nor() const {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
