@@ -87,8 +87,8 @@ Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target,
 
   TensorIterator iter = TensorIteratorConfig()
       .add_borrowed_output(loss_squeezed)
-      .add_input(at::squeeze(input))
-      .add_input(at::squeeze(target))
+      .add_owned_input(at::squeeze(input))
+      .add_owned_input(at::squeeze(target))
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_out_cuda", [&]() {
     gpu_kernel(iter,

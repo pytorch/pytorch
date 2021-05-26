@@ -85,8 +85,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     .check_all_same_dtype(false)
     .add_borrowed_output(Y)
     .add_borrowed_input(self)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_owned_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): read once, write twice.  Not done at the moment
@@ -95,8 +95,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     .check_all_same_dtype(false)
     .add_borrowed_output(mask)
     .add_borrowed_input(self)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_owned_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): look into packing the mask further (BoolTensor uses

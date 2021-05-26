@@ -268,7 +268,7 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   config.set_check_mem_overlap(false)
         .check_all_same_dtype(false)
         .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
-        .add_output(Tensor())
+        .add_owned_output(Tensor())
         .add_borrowed_input(info.src);
   for (auto& index : info.indices) {
     config.add_borrowed_input(index);

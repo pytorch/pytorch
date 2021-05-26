@@ -21,8 +21,8 @@
 // Example:
 //
 //   auto iter = TensorIteratorConfig()
-//     .add_output(output)
-//     .add_input(input)
+//     .add_owned_output(output)
+//     .add_owned_input(input)
 //     .build()
 //
 // [MyKernel.cpp / MyKernel.cu]
@@ -37,9 +37,9 @@
 // Note [Order of Construction]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // When setting up the tensor iterator configuration, the output Tensors
-// have to be added first via TensorIteratorConfig::add_output(at::Tensor).
+// have to be added first via TensorIteratorConfig::add_owned_output(at::Tensor).
 // After adding all outputs, the inputs can be added via
-// TensorIteratorConfig::add_input(at::Tensor).
+// TensorIteratorConfig::add_owned_input(at::Tensor).
 // Adding another output after inputs have been added will rise an exception.
 //
 // Note [Common Dtype Computation]
@@ -491,8 +491,22 @@ public:
   /// Construction
   // Stores input/output Tensors while incrementing the reference count.
   // Important: the outputs have to be added before the inputs.
+  // Note that add_borrowed_{in,out}put are nearly always what you
+  // want, and the exception (adding an unnamed temporary) won't
+  // compile.
   TensorIteratorConfig& add_output(const Tensor& output);
   TensorIteratorConfig& add_input(const Tensor& input);
+
+  // Synonymous with add_output and add_input; should be preferred to
+  // those methods. (TBD: can we remove add_output and add_input
+  // without breaking bc?)
+  TensorIteratorConfig& add_owned_output(const Tensor& output) {
+    return add_output(output);
+  }
+
+  TensorIteratorConfig& add_owned_input(const Tensor& input) {
+    return add_input(input);
+  }
 
   // Advanced API: stores input/output Tensors without incrementing
   // the reference count. The caller must ensure that these Tensors
