@@ -1111,7 +1111,7 @@ class Quantizer:
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         self.restore_state(model)
-        qconfig_map = model._qconfig_map  # type: ignore[assignment]
+        qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
         # always run weight observers in the top level forward method
         # for dynamic quant ops or weight only quant ops
         self._run_weight_observers(model)

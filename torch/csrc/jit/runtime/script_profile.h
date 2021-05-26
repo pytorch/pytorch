@@ -89,7 +89,7 @@ class TORCH_API ScriptProfile : public CustomClassHolder {
   void disable();
   const SourceMap& dumpStats();
   void addDatapoint(std::shared_ptr<profiling::Datapoint>);
-  ~ScriptProfile();
+  ~ScriptProfile() override;
 
  private:
   bool enabled_{false};
