@@ -37,7 +37,7 @@ An example of this would look like:
 release/1.8
 ```
 
-Please make sure to create branch that pins divergent point of release branch from the main thunk, i.e. `orig/release/{MAJOR}.{MINOR}`
+Please make sure to create branch that pins divergent point of release branch from the main branch, i.e. `orig/release/{MAJOR}.{MINOR}`
 ### Making release branch specific changes
 
 These are examples of changes that should be made to release branches so that CI / tooling can function normally on
