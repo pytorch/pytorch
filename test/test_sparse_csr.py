@@ -21,7 +21,7 @@ class TestSparseCSR(TestCase):
         crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
         values = [1, 2, 3, 4]
-        sparse = torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
+        sparse = torch._sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
                                          torch.tensor(col_indices, dtype=torch.int64),
                                          torch.tensor(values), dtype=dtype, device=device)
         self.assertEqual(torch.tensor(crow_indices, dtype=torch.int64), sparse.crow_indices())
@@ -37,7 +37,7 @@ class TestSparseCSR(TestCase):
         col_indices = [0, 1, 0, 1]
         values = [1, 2, 3, 4]
         for index_dtype in [torch.int32, torch.int64]:
-            sparse = torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=index_dtype),
+            sparse = torch._sparse_csr_tensor(torch.tensor(crow_indices, dtype=index_dtype),
                                              torch.tensor(col_indices, dtype=index_dtype),
                                              torch.tensor(values),
                                              size=(2, 10),
@@ -55,26 +55,26 @@ class TestSparseCSR(TestCase):
         col_indices = [0, 1, 0, 1]
         values = [1, 2, 3, 4]
         size = (2, 10)
-        torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), size,
+        torch._sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), size,
                                 dtype=dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError,
                                     r"crow_indices\.numel\(\) must be size\(0\) \+ 1, but got: 3"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), (1, 1),
+            torch._sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), (1, 1),
                                     dtype=dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError, "0th value of crow_indices must be 0"):
-            torch.sparse_csr_tensor(torch.tensor([-1, -1, -1]), torch.tensor(col_indices), torch.tensor(values), size,
+            torch._sparse_csr_tensor(torch.tensor([-1, -1, -1]), torch.tensor(col_indices), torch.tensor(values), size,
                                     dtype=dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError, "last value of crow_indices should be less than length of col_indices."):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 0, 0]), torch.tensor(values), size,
+            torch._sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 0, 0]), torch.tensor(values), size,
                                     dtype=dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError,
                                     r"col_indices and values must have equal sizes, " +
                                     r"but got col_indices\.size\(0\): 4, values\.size\(0\): 5"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor([0, 0, 0, 0, 0]),
+            torch._sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor([0, 0, 0, 0, 0]),
                                     size, dtype=dtype, device=device)
 
     @onlyCPU
@@ -113,19 +113,19 @@ class TestSparseCSR(TestCase):
     @onlyCPU
     def test_sparse_csr_from_dense(self, device):
         dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], device=device)
-        sparse = dense.to_sparse_csr()
+        sparse = dense._to_sparse_csr()
         self.assertEqual(torch.tensor([0, 2, 2, 3], dtype=torch.int64), sparse.crow_indices())
         self.assertEqual(torch.tensor([0, 1, 0], dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([4, 5, 1]), sparse.values())
 
         dense = torch.tensor([[0, 0, 0], [0, 0, 1], [1, 0, 0]], device=device)
-        sparse = dense.to_sparse_csr()
+        sparse = dense._to_sparse_csr()
         self.assertEqual(torch.tensor([0, 0, 1, 2], dtype=torch.int64), sparse.crow_indices())
         self.assertEqual(torch.tensor([2, 0], dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([1, 1]), sparse.values())
 
         dense = torch.tensor([[2, 2, 2], [2, 2, 2], [2, 2, 2]], device=device)
-        sparse = dense.to_sparse_csr()
+        sparse = dense._to_sparse_csr()
         self.assertEqual(torch.tensor([0, 3, 6, 9], dtype=torch.int64), sparse.crow_indices())
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9), sparse.values())
@@ -135,18 +135,18 @@ class TestSparseCSR(TestCase):
     def test_dense_convert(self, device, dtype):
         size = (5, 5)
         dense = torch.randn(size, dtype=dtype, device=device)
-        sparse = dense.to_sparse_csr()
+        sparse = dense._to_sparse_csr()
         self.assertEqual(sparse.to_dense(), dense)
 
         size = (4, 6)
         dense = torch.randn(size, dtype=dtype, device=device)
-        sparse = dense.to_sparse_csr()
+        sparse = dense._to_sparse_csr()
         self.assertEqual(sparse.to_dense(), dense)
 
         crow_indices = torch.tensor([0, 3, 5])
         col_indices = torch.tensor([0, 1, 2, 0, 1])
         values = torch.tensor([1, 2, 1, 3, 4], dtype=dtype)
-        csr = torch.sparse_csr_tensor(crow_indices, col_indices,
+        csr = torch._sparse_csr_tensor(crow_indices, col_indices,
                                       values, dtype=dtype, device=device)
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device)
         self.assertEqual(csr.to_dense(), dense)
@@ -159,7 +159,7 @@ class TestSparseCSR(TestCase):
         sparse_dim = 2
         nnz = 10
         sparse_coo, _, _ = self.genSparseTensor(size, sparse_dim, nnz, coalesced, device, dtype)
-        sparse_csr = sparse_coo.to_sparse_csr()
+        sparse_csr = sparse_coo._to_sparse_csr()
 
         self.assertTrue(sparse_csr.is_sparse_csr)
         self.assertEqual(sparse_csr.to_dense(), sparse_coo.to_dense())
@@ -177,7 +177,7 @@ class TestSparseCSR(TestCase):
         ], dtype=torch.int32)
         values = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dtype, device=device)
         coo = torch.sparse_coo_tensor(index, values, torch.Size([100, 100]), dtype=dtype, device=device)
-        csr = coo.to_sparse_csr()
+        csr = coo._to_sparse_csr()
 
         self.assertEqual(coo.matmul(vec), csr.matmul(vec))
 
@@ -186,7 +186,7 @@ class TestSparseCSR(TestCase):
     def test_mkl_matvec_warnings(self, device, dtype):
         if torch.has_mkl:
             for index_dtype in [torch.int32, torch.int64]:
-                sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
+                sp = torch._sparse_csr_tensor(torch.tensor([0, 2, 4]),
                                              torch.tensor([0, 1, 0, 1]),
                                              torch.tensor([1, 2, 3, 4], dtype=dtype, device=device))
                 vec = torch.randn((2, 1), dtype=dtype, device=device)
@@ -204,7 +204,7 @@ class TestSparseCSR(TestCase):
         dense = torch.randn(size, dtype=dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError, "Only 2D"):
-            sparse = dense.to_sparse_csr()
+            sparse = dense._to_sparse_csr()
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -229,7 +229,7 @@ class TestSparseCSR(TestCase):
         size = (5, 5)
         dense = torch.randn(size, dtype=dtype, device=device)
         coo_sparse = dense.to_sparse()
-        csr_sparse = coo_sparse.to_sparse_csr()
+        csr_sparse = coo_sparse._to_sparse_csr()
 
         self.assertEqual(csr_sparse.to_dense(), dense)
 

@@ -162,7 +162,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.result_type,
         torch.scalar_tensor,
         torch.sparse_coo_tensor,
-        torch.sparse_csr_tensor,
+        torch._sparse_csr_tensor,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -221,7 +221,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
-        Tensor.to_sparse_csr,
+        Tensor._to_sparse_csr,
         Tensor._reduce_ex_internal,
     }
 

@@ -1074,7 +1074,7 @@ class TestCase(expecttest.TestCase):
             return values, crow_indices, col_indices
 
         values, crow_indices, col_indices = random_sparse_csr(size[0], size[1], nnz)
-        return torch.sparse_csr_tensor(crow_indices,
+        return torch._sparse_csr_tensor(crow_indices,
                                        col_indices,
                                        values, size=size, dtype=dtype, device=device)
 
