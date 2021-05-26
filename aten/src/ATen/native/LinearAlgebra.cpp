@@ -780,10 +780,10 @@ static TensorIterator build_addr_iter(Tensor& result,
 
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)
-    .add_borrowed_output(result)
+    .add_output(result)
     .add_owned_input(*self_)
     .add_owned_input(vec1.reshape({vec1_size0, 1}))
-    .add_borrowed_input(vec2)
+    .add_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -2780,8 +2780,8 @@ std::tuple<Tensor, Tensor, Tensor> lu_unpack(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .declare_static_shape(LU_pivots.sizes(), /*squash_dim=*/LU_pivots.dim() - 1)
-    .add_borrowed_output(unpacked_pivots)
-    .add_borrowed_input(LU_pivots_zero_idx)
+    .add_output(unpacked_pivots)
+    .add_input(LU_pivots_zero_idx)
     .build();
   // }
 
