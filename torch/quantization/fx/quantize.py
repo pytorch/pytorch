@@ -967,9 +967,6 @@ class Quantizer:
         self.patterns: Dict[Pattern, QuantizeHandler] = {}
         self.prepare_custom_config_dict: Dict[str, Any] = {}
 
-        # mapping from node name to the scope of the module which contains the node.
-        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
-
     def _prepare(
             self,
             model: GraphModule,
@@ -982,6 +979,9 @@ class Quantizer:
 
         How the standalone module is observed is specified by `input_quantized_idxs` and
         `output_quantized_idxs` in the prepare_custom_config for the standalone module
+        Args:
+            node_name_to_scope: mapping from node name to the scope of the module which contains the node.
+            The scope is a tuple of fully qualified path of the module and the type of the module
         Returns:
             model(GraphModule): prepared standalone module
             attributes:
@@ -1021,7 +1021,6 @@ class Quantizer:
         # }
         modules = dict(model.named_modules())
 
-        self.node_name_to_scope = node_name_to_scope
         # fill qconfig_map, a map from node name to qconfig, used in _find_matches
         qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_dict, node_name_to_scope)
 
@@ -1052,7 +1051,7 @@ class Quantizer:
             model.graph, prepare_custom_config_dict,
             input_quantized_idxs, output_quantized_idxs)
 
-        self.save_state(model, qconfig_map)
+        self.save_state(model, qconfig_map, node_name_to_scope)
         preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
         model = ObservedGraphModule(model, model.graph, preserved_attributes)
         if is_standalone_module:
@@ -1068,20 +1067,25 @@ class Quantizer:
             model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
         return model
 
-    def save_state(self, observed: GraphModule, qconfig_map: Dict[str, QConfigAny]) -> None:
+    def save_state(
+            self,
+            observed: GraphModule,
+            qconfig_map: Dict[str, QConfigAny],
+            node_name_to_scope: Dict[str, Tuple[str, type]]) -> None:
         observed._patterns = self.patterns  # type: ignore[assignment]
         observed._qconfig_map = qconfig_map  # type: ignore[assignment]
         observed._prepare_custom_config_dict = \
             self.prepare_custom_config_dict  # type: ignore[assignment]
-        observed._node_name_to_scope = self.node_name_to_scope  # type: ignore[assignment]
+        observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
 
-    def restore_state(self, observed: GraphModule) -> None:
+    def restore_state(self, observed: GraphModule) -> Dict[str, Tuple[str, type]]:
         assert is_observed_module(observed), \
             'incoming model must be produced by prepare_fx'
         self.patterns = observed._patterns  # type: ignore[assignment]
         self.prepare_custom_config_dict = \
             observed._prepare_custom_config_dict  # type: ignore[assignment]
-        self.node_name_to_scope = observed._node_name_to_scope  # type: ignore[assignment]
+        node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
+        return node_name_to_scope
 
     def prepare(
             self,
@@ -1108,7 +1112,7 @@ class Quantizer:
         """
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
-        self.restore_state(model)
+        node_name_to_scope = self.restore_state(model)
         qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
         # always run weight observers in the top level forward method
         # for dynamic quant ops or weight only quant ops
@@ -1290,8 +1294,10 @@ class Quantizer:
                     assert isinstance(prev_node, Node)
                     observer_dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                     env[node.name] = (
-                        quantize_node(self, load_non_quantized(prev_node),
-                                      observer_module, node, modules, quantized_graph, is_input=True),
+                        quantize_node(
+                            self, load_non_quantized(prev_node),
+                            observer_module, node, modules, quantized_graph,
+                            node_name_to_scope, is_input=True),
                         observer_dtype)
             else:
                 # replace activation post process with quantization ops
@@ -1299,8 +1305,10 @@ class Quantizer:
                 assert isinstance(node.args[0], Node)
                 dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                 env[node.name] = (
-                    quantize_node(self, load_non_quantized(node.args[0]),
-                                  observer_module, node, modules, quantized_graph, is_input=True),
+                    quantize_node(
+                        self, load_non_quantized(node.args[0]),
+                        observer_module, node, modules, quantized_graph,
+                        node_name_to_scope, is_input=True),
                     dtype)
 
         # additional state to override inputs to be quantized, if specified
@@ -1349,7 +1357,7 @@ class Quantizer:
 
                     qconfig = qconfig_map[node.name]
                     result = obj.convert(
-                        self, node, qconfig, modules, quantized_graph, load_arg, is_reference=is_reference,
+                        self, node, qconfig, modules, quantized_graph, node_name_to_scope, load_arg, is_reference=is_reference,
                         convert_custom_config_dict=convert_custom_config_dict)
                     if not is_observed_standalone_module_node:
                         quantized = is_output_quantized(node, obj, qconfig, modules)
@@ -1417,12 +1425,17 @@ class Quantizer:
             _remove_qconfig(model)
         preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
         model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
+        if not is_reference:
+            model = self._fold_weight(model, node_name_to_scope)
         return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the
     # graph module with the traced nodes and run the graph module to pack the
     # weight. then replace the original chain of ops with the packed weight.
-    def _fold_weight(self, quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    def _fold_weight(
+            self,
+            quantized: QuantizedGraphModule,
+            node_name_to_scope: Dict[str, Tuple[str, type]]) -> QuantizedGraphModule:
         packed_weights = dict()
         # map from folded node name to the prepacked weight name
         folded_nodes = dict()
@@ -1454,7 +1467,7 @@ class Quantizer:
                 packed_weight = packed_weights[node.name]
                 # add a prepacked attribute to root
                 op_node = list(prepack_node.users)[0]
-                module_path, _ = self.node_name_to_scope[op_node.name]
+                module_path, _ = node_name_to_scope[op_node.name]
                 get_new_packed_weight_name = \
                     get_new_attr_name_with_prefix(module_path + '_packed_weight_')
                 packed_weight_name = get_new_packed_weight_name(quantized_root)
@@ -1477,8 +1490,6 @@ class Quantizer:
                 _remove_qconfig: bool = True) -> QuantizedGraphModule:
         quantized = self._convert(
             model, is_reference, convert_custom_config_dict, is_standalone_module, _remove_qconfig_flag=_remove_qconfig)
-        if not is_reference:
-            quantized = self._fold_weight(quantized)
         return quantized
 
     def _find_matches(
