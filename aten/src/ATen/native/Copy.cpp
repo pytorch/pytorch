@@ -212,8 +212,8 @@ static const Tensor & copy_impl(const Tensor & self, const Tensor & src, bool no
   }
 
   auto iter = TensorIteratorConfig()
-    .add_borrowed_output(self)
-    .add_borrowed_input(src)
+    .add_output(self)
+    .add_input(src)
     .resize_outputs(false)
     .check_all_same_dtype(false)
     .check_all_same_device(false)
