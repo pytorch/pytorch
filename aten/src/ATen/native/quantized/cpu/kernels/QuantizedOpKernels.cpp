@@ -274,7 +274,7 @@ int64_t hsum(const int8_t* A, int len) {
   _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v);
   for (int k = 0; k < 16; ++k) {
     row_sum += temp[k];
-  }  
+  }
 #endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
   // scalar
