@@ -146,10 +146,7 @@ const std::string shape_compute_functions =
 
         def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
           out = matmul(input, t(weight))
-          # TODO: type refinement not working in C++ ?
           if bias is not None:
-          # if torch.__isnot__(bias, None):
-            # bias0 = prim.unchecked_unwrap_optional(bias)
             assert broadcast(bias, out) == out
           return out
 

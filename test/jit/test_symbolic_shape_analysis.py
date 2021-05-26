@@ -11,6 +11,7 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+import unittest
 try:
     import torchvision
     HAS_TORCHVISION = True
