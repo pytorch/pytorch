@@ -78,9 +78,9 @@ void filterEngineConfigs(
 struct CacheKey {
   ConvolutionParams params;
   cudnnBackendDescriptorType_t operation;
-  uint8_t input_alignment;
-  uint8_t weight_alignment;
-  uint8_t output_alignment;
+  uint8_t x_alignment;
+  uint8_t w_alignment;
+  uint8_t y_alignment;
 };
 
 // FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
@@ -88,12 +88,12 @@ std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, ParamsHash
 
 }
 
-void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& convoutput, const Tensor& convinput1, const Tensor& convinput2, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
-   setConvolutionParams(&key.params, convinput1, convinput2, padding, stride, dilation, groups, deterministic, allow_tf32);
+void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+   setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
    key.operation = operation;
-   key.input_alignment = getAlignment(convinput1);
-   key.output_alignment = getAlignment(convoutput);
-   key.weight_alignment = getAlignment(convinput2);
+   key.x_alignment = getAlignment(x);
+   key.y_alignment = getAlignment(y);
+   key.w_alignment = getAlignment(w);
 }
 
 void run_conv_cfg(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, cudnn_frontend::ManagedOpaqueDescriptor cfg) {
@@ -103,11 +103,9 @@ void run_conv_cfg(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const 
         .build();
 
     auto workspace_size = plan.getWorkspaceSize();
-    // TODO: is always using 'x' options() ok? e.g., in backward data
     Tensor workspace;
     workspace = at::empty({workspace_size}, x.options().dtype(kByte));
     void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
-    // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
     int64_t uids[] = {'x', 'y', 'w'};
     auto variantPack = cudnn_frontend::VariantPackBuilder()
         .setWorkspacePointer(workspace.data_ptr())
@@ -117,11 +115,11 @@ void run_conv_cfg(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const 
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
-void get_configs(cudnn_frontend::EngineConfigList& filtered_configs, cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+void get_configs_from_heuristics(cudnn_frontend::EngineConfigList& filtered_configs, cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
   auto op = cudnn_frontend::OperationBuilder(desc)
-      .setxDesc(getTensorDescriptor(x, 'x', key.input_alignment))
-      .setyDesc(getTensorDescriptor(y, 'y', key.output_alignment))
-      .setwDesc(getTensorDescriptor(w, 'w', key.weight_alignment))
+      .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
+      .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
+      .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
       .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
       .build();
 
@@ -142,7 +140,6 @@ void get_configs(cudnn_frontend::EngineConfigList& filtered_configs, cudnnHandle
   auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
   auto& fallback_list = fallback.getFallbackList();
 
-  // TODO: Is this ok or do we need to change type deduction based on descriptor?
   filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, x.scalar_type());
   filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, x.scalar_type());
 }
@@ -163,13 +160,6 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
   bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(!benchmark, "not supported yet");
-  if (operation == CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR && y.numel() == 0) {
-    return;
-  } else if (operation == CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR && x.numel() == 0) {
-    return;
-  } else if (operation == CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR && w.numel() == 0) {
-    return;
-  }
 
   cudnnHandle_t handle = getCudnnHandle();
 
@@ -182,7 +172,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   }
 
   cudnn_frontend::EngineConfigList filtered_configs;
-  get_configs(filtered_configs, handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
+  get_configs_from_heuristics(filtered_configs, handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
 
   try_filtered_configs(filtered_configs, key, handle, x, y, w);
 }
@@ -192,9 +182,11 @@ void raw_cudnn_convolution_forward_out(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32)
 {
-  run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
-    input, output, weight, padding, stride, dilation, groups,
-    benchmark, deterministic, allow_tf32);
+  if (y.numel() > 0) {
+    run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
+      input, output, weight, padding, stride, dilation, groups,
+      benchmark, deterministic, allow_tf32);
+  }
 }
 
 void raw_cudnn_convolution_backward_input_out(
@@ -203,18 +195,22 @@ void raw_cudnn_convolution_backward_input_out(
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
-  run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
-    grad_input, grad_output, weight, padding, stride, dilation, groups,
-    benchmark, deterministic, allow_tf32);
+  if (x.numel() > 0) {
+    run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
+      grad_input, grad_output, weight, padding, stride, dilation, groups,
+      benchmark, deterministic, allow_tf32);
+  }
 }
 
 void raw_cudnn_convolution_backward_weight_out(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
-  run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
-    input, grad_output, grad_weight, padding, stride, dilation, groups,
-    benchmark, deterministic, allow_tf32);
+  if (w.numel() > 0) {
+    run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
+      input, grad_output, grad_weight, padding, stride, dilation, groups,
+      benchmark, deterministic, allow_tf32);
+  }
 }
 
 }} // at::native
