@@ -37,7 +37,6 @@ from quantization.test_quantize_eager_ptq import TestPostTrainingStatic  # noqa:
 from quantization.test_quantize_eager_ptq import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestEagerModeActivationOps  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestFunctionalModule  # noqa: F401
-from quantization.test_quantize_eager_ptq import TestModelNumerics  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestQuantizeONNXExport  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestQuantizedFunctionalOps  # noqa: F401
 from quantization.test_quantize_eager_ptq import TestStaticQuantizedModule  # noqa: F401
@@ -50,6 +49,8 @@ from quantization.test_quantize_eager_qat import TestConvBNQATModule  # noqa: F4
 
 # Eager mode fusion passes
 from quantization.test_fusion import TestFusion  # noqa: F401
+
+from quantization.test_model_numerics import TestModelNumericsEager  # noqa: F401
 
 from quantization.test_deprecated_jit_quant import TestDeprecatedJitQuantized  # noqa: F401
 
