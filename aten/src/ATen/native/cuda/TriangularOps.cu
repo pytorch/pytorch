@@ -150,8 +150,8 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 
   TensorArg result_arg{result, "result", 1};
   TensorArg self_arg{self, "self", 2};
-  checkAllSameGPU("diag", {result_arg, self_arg});
-  checkSameType("diag", result_arg, self_arg);
+  checkAllSameGPU(__func__, {result_arg, self_arg});
+  checkSameType(__func__, result_arg, self_arg);
 
   int nDimension = self.dim();
   if (nDimension == 2) {
