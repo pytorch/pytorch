@@ -1,3 +1,9 @@
+// Copyright (c) Facebook, Inc. and its affiliates.
+// All rights reserved.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
+
 #include <functorch/csrc/PythonKey.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
