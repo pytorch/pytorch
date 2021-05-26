@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+
 /**
  * Android versions with libgnustl incorrectly handle thread_local C++
  * qualifier with composite types. NDK up to r17 version is affected.
