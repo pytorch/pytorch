@@ -23,9 +23,6 @@ from quantization.test_quantized_functional import TestQuantizedFunctional  # no
 from quantization.test_quantized_module import TestStaticQuantizedModule  # noqa: F401
 from quantization.test_quantized_module import TestDynamicQuantizedModule  # noqa: F401
 
-# Quantization Aware Training
-from quantization.test_qat_module import TestQATModule  # noqa: F401
-
 # Quantization specific fusion passes
 from quantization.test_fusion_passes import TestFusionPasses  # noqa: F401
 
@@ -52,6 +49,7 @@ from quantization.test_quantize_eager_ptq import TestQuantizeONNXExport  # noqa:
 # Eager mode quantization aware training
 from quantization.test_quantize_eager_qat import TestQuantizationAwareTraining  # noqa: F401
 from quantization.test_quantize_eager_qat import TestQATActivationOps  # noqa: F401
+from quantization.test_quantize_eager_qat import TestConvBNQATModule  # noqa: F401
 
 # Eager mode fusion passes
 from quantization.test_fusion import TestFusion  # noqa: F401
