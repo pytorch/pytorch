@@ -1834,7 +1834,7 @@ works_list = [
     'expm1',
     'floor',
     'fmod',
-    'fmod_autodiffed',
+    'fmod.autodiffed',
     'ge',
     'gt',
     'le',
