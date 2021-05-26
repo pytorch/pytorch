@@ -1434,7 +1434,7 @@ class TestQuantizeFx(QuantizationTestCase):
             "dynamic": (default_dynamic_qconfig, DynamicQuantCustomModule, 0)
         }
 
-        for quant_type in [QuantType.DYNAMIC]:
+        for quant_type in [QuantType.STATIC, QuantType.DYNAMIC]:
             key = quant_type_to_str(quant_type)
             qconfig, quantized_module_class, num_observers = test_configs[key]
             qconfig_dict = {"": qconfig}
