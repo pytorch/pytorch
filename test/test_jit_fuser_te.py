@@ -1870,6 +1870,7 @@ works_list = [
     'transpose',
     'trunc',
     'unsqueeze',
+    'where',
 ]
 
 known_failures = [
