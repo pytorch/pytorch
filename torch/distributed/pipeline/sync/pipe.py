@@ -68,7 +68,7 @@ def _verify_module(module: nn.Sequential) -> None:
 
 
 def _verify_splitting(
-    module: nn.Sequential, partitions: nn.Sequential, devices: List[torch.device]
+    module: nn.Sequential, partitions: List[nn.Sequential], devices: List[torch.device]
 ) -> None:
     num_parameters = len(list(module.parameters()))
     num_child_parameters = sum(len(list(child.parameters())) for child in module.children())
@@ -298,7 +298,7 @@ class Pipe(Module):
 
     def __len__(self) -> int:
         """Counts the length of the underlying sequential module."""
-        return sum(len(p) if isinstance(p, nn.Sequential) else 1 for p in self.partitions)
+        return sum(len(p) for p in self.partitions)
 
     def __getitem__(self, index: int) -> nn.Module:
         """Gets a layer in the underlying sequential module."""
@@ -307,17 +307,12 @@ class Pipe(Module):
             partitions = partitions[::-1]
 
         for partition in partitions:
+            try:
+                return partition[index]
+            except IndexError:
+                pass
 
-            if isinstance(partition, nn.Sequential):
-                try:
-                    return partition[index]
-                except IndexError:
-                    pass
-                shift = len(partition)
-            else:
-                if index == 0 or index == -1:
-                    return partition
-                shift = 1
+            shift = len(partition)
 
             if index < 0:
                 index += shift
@@ -329,10 +324,7 @@ class Pipe(Module):
     def __iter__(self) -> Iterable[nn.Module]:
         """Iterates over children of the underlying sequential module."""
         for partition in self.partitions:
-            if isinstance(partition, nn.Sequential):
-                yield from partition
-            else:
-                yield partition
+            yield from partition
 
     # Pipe should manage the device of each partition.
     # Deny cuda(), cpu(), and to() with device, by TypeError.

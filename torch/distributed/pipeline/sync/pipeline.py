@@ -82,7 +82,7 @@ class Pipeline:
 
     def __init__(
         self,
-        partitions: nn.Sequential,
+        partitions: List[nn.Sequential],
         devices: List[torch.device],
         copy_streams: List[List[AbstractStream]],
         skip_layout: SkipLayout,

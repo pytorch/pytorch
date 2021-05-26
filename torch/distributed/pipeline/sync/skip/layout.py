@@ -61,7 +61,7 @@ class SkipLayout:
         return prev_j != next_j
 
 
-def inspect_skip_layout(partitions: nn.Sequential) -> SkipLayout:
+def inspect_skip_layout(partitions: List[nn.Sequential]) -> SkipLayout:
     """Inspects the skip connection layout in the given partitions."""
     # NOTE(sublee): Hide circular import inside this subroutine. Circular
     # import is not ideal but placing this logic near to SkipLayout may
