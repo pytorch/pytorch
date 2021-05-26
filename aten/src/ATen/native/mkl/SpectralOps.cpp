@@ -24,18 +24,18 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool onesided, Tensor& out) {
+const Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool onesided, const Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         int64_t last_dim_size, Tensor& out) {
+const Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         int64_t last_dim_size, const Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward, Tensor& out) {
+const Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool forward, const Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
