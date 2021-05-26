@@ -1,5 +1,5 @@
 from functools import reduce, wraps, partial
-from itertools import product
+from itertools import product, chain
 from operator import mul
 import collections
 import operator
@@ -81,9 +81,9 @@ class SkipInfo(DecorateInfo):
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_input']
+    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_input', 'name']
 
-    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None, broadcasts_input=False):
+    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None, broadcasts_input=False, name=""):
         # input is the first input to the op and must be either a Tensor or TensorList (Sequence[Tensor]).
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         # op with TensorList inputs do not support method or inplace variants.
@@ -92,6 +92,7 @@ class SampleInput(object):
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
+        self.name = name
 
         # Specifies if `self.input` is broadcasted or not,
         # given that the operator supports broadcasting.
@@ -103,16 +104,55 @@ class SampleInput(object):
         # for such inputs (as they will error out otherwise).
         self.broadcasts_input = broadcasts_input
 
-    def __repr__(self):
+    def _repr_helper(self, formatter):
+        # Helper function to return the details of the SampleInput as `str`
+        # It consolidates all the fields of SampleInput and allows,
+        # formatting the fields like `input`, `args`, etc with `formatter`
+        # callable to customize the representation.
+        # Look at `summary` method for example.
         arguments = [
-            'input=Tensor' if isinstance(self.input, torch.Tensor) else f'input=TensorList[{len(self.input)}]',
-            f'args={self.args}' if len(self.args) > 0 else None,
-            f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
-            (f'output_process_fn_grad={self.output_process_fn_grad}'
-             if self.output_process_fn_grad is not None else None),
-            f'broadcasts_input={self.broadcasts_input}']
+            f'input={formatter(self.input)}',
+            f'args={formatter(self.args)}',
+            f'kwargs={formatter(self.kwargs)}',
+            f'output_process_fn_grad={self.output_process_fn_grad}',
+            f'broadcasts_input={self.broadcasts_input}',
+            f'name={repr(self.name)}']
 
         return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
+
+    def __repr__(self):
+        return self._repr_helper(lambda x: x)
+
+    def summary(self):
+        # Returns the SampleInput details in a more
+        # friendly format.
+        # It formats `Tensor` and `TensorList`
+        # in a more condensed representation.
+        def is_iter(arg):
+            try:
+                iter(arg)
+                return True
+            except TypeError as te:
+                return False
+
+        def formatter(arg):
+            # Format any instance of `Tensor` (standalone, in list, or in dict)
+            # by Tensor[TensorShape]
+            # Eg. Tensor with shape (3, 4) is formatted as Tensor[3, 4]
+            if isinstance(arg, torch.Tensor):
+                shape = str(tuple(arg.shape)).replace('(', '').replace(')', '')
+                return f"Tensor[{shape}]"
+            elif isinstance(arg, dict):
+                return {k: formatter(v) for k, v in arg.items()}
+            elif is_iterable_of_tensors(arg):
+                return "TensorList[" + ", ".join(map(formatter, arg)) + "]"
+            elif is_iter(arg):  # Handle list, tuple or any iterable type
+                return "(" + ",".join(map(formatter, arg)) + ")"
+
+            return repr(arg)
+
+        return self._repr_helper(formatter)
+
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
@@ -2913,6 +2953,24 @@ def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples + [vec_sample]
 
+def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # Shapes for 2D Tensors
+    shapes_2d = ((M, M), (3, 5), (5, 3))
+
+    # Shapes for 3D Tensors
+    shapes_3d = ((M, M, M),)
+
+    args_2d = ((), (2,), (-2,), (1,))
+    args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
+
+    def generator():
+        for shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
+            yield SampleInput(make_arg(shape), args=arg)
+
+    return list(generator())
+
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
 
@@ -4510,6 +4568,15 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_diag),
+    OpInfo('diag_embed',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_diagonal_diag_embed),
+    OpInfo('diagonal',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_diagonal_diag_embed),
     OpInfo('eq',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
@@ -6633,19 +6700,6 @@ def method_tests():
         ('norm', (), (3, 0), '3_dim_scalar', (), [1]),
         ('norm', (), (2, 0, True), 'keepdim_2_dim_scalar', (), [1]),
         ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', (), [1]),
-        ('diag_embed', (S, S), NO_ARGS),
-        ('diagonal', (M, M), NO_ARGS, '2d'),
-        ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
-        ('diagonal', (3, 5), (2,), '2d_wide_pos'),
-        ('diagonal', (3, 5), (-2,), '2d_wide_neg'),
-        ('diagonal', (5, 3), NO_ARGS, '2d_tall'),
-        ('diagonal', (5, 3), (2,), '2d_tall_pos'),
-        ('diagonal', (5, 3), (-2,), '2d_tall_neg'),
-        ('diagonal', (M, M), (1,), '2d_1'),
-        ('diagonal', (M, M), (2,), '2d_2'),
-        ('diagonal', (M, M, M), (1, 1, 2), '3d_1'),
-        ('diagonal', (M, M, M), (2, 0, 1), '3d_2'),
-        ('diagonal', (M, M, M), (-2, 0, 1), '3d_3'),
         ('tril', (M, M), NO_ARGS),
         ('tril', (M, M), (2,), 'idx'),
         ('tril', (S, M, M), NO_ARGS, 'batched'),
