@@ -1400,14 +1400,17 @@ class TestCase(expecttest.TestCase):
             super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         # Tensor x Numpy array
         elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
+            raise RuntimeError()
             self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Numpy array x Tensor
         elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
+            raise RuntimeError()
             self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Numpy array x Numpy array
         elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
+            raise RuntimeError()
             self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         else:
