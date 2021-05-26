@@ -99,14 +99,13 @@ class _ExtractModuleReferences(ast.NodeVisitor):
                             self.references[(name, alias)] = True
                         else:
                             self.references[(name, None)] = True
-            except Exception as ex:
-                warnings.warn(
-                    f"PackageExporter encountered an error in determining the dependency"
-                    f" for an __import__ call in module '{self.module}', lineno: "
-                    f"{node.lineno}; skipping this dependency. Dynamic __import__ support "
-                    f"is not implemented. Error encountered: {ex}."
+            except Exception as e:
+                raise Exception(
+                    f"Error encountered in determining"
+                    f" the target dependency for an __import__ call in module '{self.module}"
+                    f"', lineno: {node.lineno}. Support for __import__ is limited to"
+                    f" constant arguments. Error encountered: {e}."
                 )
-                return
 
 
 find_files_source_depends_on = _ExtractModuleReferences.run
