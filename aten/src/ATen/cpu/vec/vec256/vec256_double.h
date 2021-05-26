@@ -14,6 +14,7 @@ namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
+
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 template <> class Vectorized<double> {

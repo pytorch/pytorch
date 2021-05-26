@@ -696,7 +696,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 // This is a type and driver dispatching helper function for 'apply_lstsq'
 void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
 
-  static auto driver_string_to_type = std::unordered_map<std::string, LapackLstsqDriverType>({
+  static auto driver_string_to_type = std::unordered_map<c10::string_view, LapackLstsqDriverType>({
     {"gels", at::native::LapackLstsqDriverType::Gels},
     {"gelsy", at::native::LapackLstsqDriverType::Gelsy},
     {"gelsd", at::native::LapackLstsqDriverType::Gelsd},

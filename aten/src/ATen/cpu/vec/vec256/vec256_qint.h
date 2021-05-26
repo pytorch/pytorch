@@ -530,7 +530,6 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
     Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) { }
 
-
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
             memcpy(ptr, &vals, count * sizeof(value_type));

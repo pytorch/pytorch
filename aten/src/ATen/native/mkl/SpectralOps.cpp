@@ -389,7 +389,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   auto input = self;
   if (dim.size() > 1) {
     auto c2c_dims = dim.slice(0, dim.size() - 1);
-    input = _fft_c2c_mkl(self, c2c_dims, normalization, /*foward=*/false);
+    input = _fft_c2c_mkl(self, c2c_dims, normalization, /*forward=*/false);
     dim = dim.slice(dim.size() - 1);
   }
 

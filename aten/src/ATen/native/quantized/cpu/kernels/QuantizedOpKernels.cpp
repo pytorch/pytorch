@@ -1183,7 +1183,7 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   auto self_scale_neg_zp_premul_vec = self_scale_vec * self_zero_point_vec.neg();
   auto other_scale_zp_premul_vec = other_scale_vec * other_zero_point_vec.neg();
 
-  auto iter = TensorIterator::binary_op(out, self, other);
+  auto iter = TensorIterator::borrowing_binary_op(out, self, other);
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -1243,7 +1243,7 @@ void qmul_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
 
   float multiplier = self_scale * other_scale * inv_scale;
 
-  auto iter = TensorIterator::binary_op(out, self, other);
+  auto iter = TensorIterator::borrowing_binary_op(out, self, other);
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qmul", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -1411,6 +1411,7 @@ void do_avg_pool_nhwc_on_AVX_n(
   constexpr int cb_step = cb_size * vec_width;
   Vectorized<int32_t> acc_buffer[cb_size];
   Vectorized<float> acc_buffer_fp[cb_size];
+
   if (vec_width == 8) {
     for (int c = c_start; c < csize; c += cb_step) {
       int cend = std::min(cb_size, (csize - c) / vec_width);
@@ -2268,9 +2269,9 @@ void fake_quantize_tensor_cachemask_kernel(
 
   auto iter_combined = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_output(output)
-    .add_output(mask)
-    .add_input(input)
+    .add_borrowed_output(output)
+    .add_borrowed_output(mask)
+    .add_borrowed_input(input)
     .build();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
@@ -2306,10 +2307,10 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
         the order they are accessed follows the order they are built within the iterator.
         For example, if an iterator is built in the following order:
         auto iter = TensorIteratorConfig().
-          .add_output(firstOutput)
-          .add_output(secondOutput)
-          .add_input(firstInput)
-          .add_input(secondInput)
+          .add_borrowed_output(firstOutput)
+          .add_borrowed_output(secondOutput)
+          .add_borrowed_input(firstInput)
+          .add_borrowed_input(secondInput)
           .build()
         data will contain 4 pointers to pointers to values in the following order:
         firstOutput, secondOutput, firstInput, secondInput.
@@ -2578,8 +2579,8 @@ void quantized_normalize_kernel(
 
 #ifdef USE_FBGEMM
 void quantize_tensor_per_tensor_affine_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -2611,8 +2612,8 @@ void quantize_tensor_per_tensor_affine_cpu(
 }
 
 void dequantize_tensor_per_tensor_affine_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -2651,7 +2652,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
 template <typename T>
 void quantize_tensor_arm(
     const float* in,
-    Tensor qtensor,
+    Tensor& qtensor,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
@@ -2670,7 +2671,7 @@ void quantize_tensor_arm(
 template <>
 void quantize_tensor_arm<c10::quint8>(
     const float* in,
-    Tensor qtensor,
+    Tensor& qtensor,
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
@@ -2738,8 +2739,8 @@ void quantize_tensor_arm<c10::quint8>(
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
 void quantize_tensor_per_tensor_affine_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     double scale,
     int64_t zero_point) {
 #if defined(__ARM_NEON__) || defined(__aarch64__)
@@ -2766,8 +2767,8 @@ void quantize_tensor_per_tensor_affine_cpu(
 }
 
 void dequantize_tensor_per_tensor_affine_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -2787,10 +2788,10 @@ void dequantize_tensor_per_tensor_affine_cpu(
 // Generic template defaults to naive quantize implementation
 template <typename T>
 void quantize_tensor_per_channel_impl(
-    Tensor rtensor,
-    Tensor qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   // TODO: channels last kernel can be made faster.
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
@@ -2846,10 +2847,10 @@ void quantize_tensor_per_channel_impl(
 // (int8, int32).
 template <>
 void quantize_tensor_per_channel_impl<c10::quint8>(
-    Tensor rtensor,
-    Tensor qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   int64_t batches = size_to_dim_(axis, rtensor.sizes());
   int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
@@ -3032,10 +3033,10 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
 void quantize_tensor_per_channel_affine_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   TORCH_CHECK(
       rtensor.is_contiguous() || (axis <= 1),
@@ -3051,10 +3052,10 @@ void quantize_tensor_per_channel_affine_cpu(
 
 template<typename T, typename N, typename Q>
 void dequantize_per_channel_affine_kernel(
-      Tensor qtensor,
-      Tensor rtensor,
-      Tensor scales,
-      Tensor zero_points,
+      const Tensor& qtensor,
+      Tensor& rtensor,
+      const Tensor& scales,
+      const Tensor& zero_points,
       int64_t axis,
       int bit_width=8) {
 
@@ -3116,10 +3117,10 @@ void dequantize_per_channel_affine_kernel(
 }
 
 void dequantize_tensor_per_channel_affine_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& qtensor,
+    Tensor& rtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cpu", [&]() {
@@ -3129,10 +3130,10 @@ void dequantize_tensor_per_channel_affine_cpu(
 
 // quantize stubs for floating point scale and zero_point.
 void quantize_tensor_per_channel_float_qparams_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
@@ -3194,10 +3195,10 @@ void quantize_tensor_per_channel_float_qparams_cpu(
 }
 
 void dequantize_tensor_per_channel_float_qparams_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& qtensor,
+    Tensor& rtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
@@ -3207,8 +3208,8 @@ void dequantize_tensor_per_channel_float_qparams_cpu(
 }
 
 void quantize_tensor_per_tensor_affine_sub_byte_cpu(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     float scale,
     float zero_point) {
   // TODO Use fbgemm kernel to pack values
@@ -3238,8 +3239,8 @@ void quantize_tensor_per_tensor_affine_sub_byte_cpu(
 }
 
 void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     float scale,
     float zero_point) {
   // TODO Use fbgemm kernel to pack values
