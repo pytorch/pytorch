@@ -246,6 +246,20 @@ class TestSparse(TestCase):
         ref = test_sparse_sum()
         self.assertTrue(ref.expired())
 
+    @dtypes(torch.double)
+    def test_ctor_large_sizes(self, device, dtype):
+        # Test that integer overflow is detected when computing numel
+        # of a sparse tensor with large dimensions (gh-57416). Notice
+        # that numel is computed internally when constructing a
+        # tensor, hence the overflow may appear during the tensor
+        # construction step.
+        N = 100000
+        indices = torch.tensor([[N, N - 1]] * 4, dtype=torch.int64, device=device)
+        values = torch.tensor([1, 2], dtype=dtype, device=device)
+        self.assertRaises(RuntimeError,
+                          lambda: torch.sparse_coo_tensor(
+                              indices, values, (N + 1,) * 4, device=device))
+
     @dtypes(torch.double, torch.cdouble)
     def test_ctor_size_checks(self, device, dtype):
         indices = self.index_tensor([
