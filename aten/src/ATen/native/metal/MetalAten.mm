@@ -117,7 +117,7 @@ struct MetalImpl : public at::metal::MetalInterface {
     return false;
 #endif
   }
-  at::Tensor& metal_copy_(at::Tensor& input, const at::Tensor& src)
+  const at::Tensor& metal_copy_(const at::Tensor& input, const at::Tensor& src)
       const override {
     TORCH_CHECK(
         is_metal_available(), "Metal is not available on the current device");
