@@ -8,9 +8,9 @@ MemOverlap has_internal_overlap(const Tensor& tensor) {
 }
 
 MemOverlap has_internal_overlap(TensorImpl* t) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t->layout() == kStrided);
+  AT_ASSERT(t->layout() == kStrided);
 
-  if (t->is_non_overlapping_and_dense()) {
+  if (t->is_contiguous()) {
     return MemOverlap::NO;
   }
 
@@ -45,7 +45,7 @@ MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
   if (a->numel() == 0 || b->numel() == 0) {
     return MemOverlapStatus::NO;
   }
-  if (!a->is_non_overlapping_and_dense() || !b->is_non_overlapping_and_dense()) {
+  if (!a->is_contiguous() || !b->is_contiguous()) {
     return MemOverlapStatus::TOO_HARD;
   }
   if (!a->has_storage() || !b->has_storage()) {
