@@ -172,11 +172,17 @@ std::shared_ptr<Graph> ToONNX(
   return new_graph;
 }
 
-void BlockToONNX(
+// BlockToONNX.
+// is_sub_block = true means the old_block (aten graph) is in the sub block
+// (e.g., if sub block), and we want to convert it into its parent block in onnx
+// graph. In this case, we don't register the input/output or eliminate the dead
+// code.
+std::unordered_map<Value*, Value*> BlockToONNX(
     Block* old_block,
     Block* new_block,
     ::torch::onnx::OperatorExportTypes operator_export_type,
-    std::unordered_map<Value*, Value*> env) {
+    std::unordered_map<Value*, Value*>& env,
+    bool is_sub_block) {
   torch::autograd::SymbolicContext ctx{};
   ctx.block = new_block;
 
@@ -185,24 +191,32 @@ void BlockToONNX(
       old_block->owningGraph()->toString());
 
   // Initialize context and environment
-  for (auto input : old_block->inputs()) {
-    auto n = ctx.block->addInput()->copyMetadata(input);
-    env[input] = n;
+  if (!is_sub_block) {
+    for (auto input : old_block->inputs()) {
+      auto n = ctx.block->addInput()->copyMetadata(input);
+      env[input] = n;
+    }
   }
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
     NodeToONNX(node, ctx.block, operator_export_type, env);
   }
+
+  if (is_sub_block) {
+    return env;
+  }
+
   for (auto output : old_block->outputs()) {
     ctx.block->registerOutput(env.at(output));
   }
-
   // Run dce to clean-up unused functional and inplace ops.
   EliminateDeadCode(
       ctx.block,
       true,
       DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+
+  return {};
 }
 
 void NodeToONNX(
@@ -240,6 +254,10 @@ void NodeToONNX(
       ss << num_old_outputs << ", but got " << outputs.size() << ")";
       throw std::runtime_error(ss.str());
     }
+    // For const node, it does not need params_dict info, so set it to {}.
+    const ParamMap empty_params_dict = {};
+    auto opset_version =
+        py::cast<int>(onnx_symbolic.attr("_export_onnx_opset_version"));
     for (size_t i = 0; i < num_old_outputs; ++i) {
       auto old = old_outputs[i];
       if (outputs[i]) {
@@ -249,13 +267,34 @@ void NodeToONNX(
         //
         // If onnx shape inference is turned on, the new outputs will have
         // types inferred, and they will be merged with the old types.
-        outputs[i]->setType(MergeInferredType(old->type(), outputs[i]->type()));
+        if (outputs[i]->node()->kind() != c10::onnx::Constant &&
+            ConstantValueMap::HasValue(outputs[i]->debugName())) {
+          // Create a const node if the node output value is in
+          // ConstantValueMap.
+          auto value =
+              ConstantValueMap::GetValue(outputs[i]->debugName()).value();
+          Node* const_node =
+              new_block->owningGraph()->create(c10::onnx::Constant);
+          const_node->t_(attr::value, value);
+          const_node->output()->setType(TensorType::create(value));
 
-        // Copy over source location and scope information to all nodes
-        // created by the symbolic
-        outputs[i]->node()->setSourceRange(node->sourceRange());
-        outputs[i]->node()->setScope(node->scope());
-        env[old] = outputs[i];
+          // Copy over source location and scope information to all nodes
+          // created by the symbolic
+          const_node->output()->node()->setSourceRange(node->sourceRange());
+          const_node->output()->node()->setScope(node->scope());
+          new_block->appendNode(const_node);
+          ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
+          env[old] = const_node->output();
+        } else {
+          outputs[i]->setType(
+              MergeInferredType(old->type(), outputs[i]->type()));
+
+          // Copy over source location and scope information to all nodes
+          // created by the symbolic
+          outputs[i]->node()->setSourceRange(node->sourceRange());
+          outputs[i]->node()->setScope(node->scope());
+          env[old] = outputs[i];
+        }
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
         // to certain PyTorch outputs

@@ -793,6 +793,8 @@ def _set_training_mode(training_mode):
     _training_mode = training_mode
 
 _onnx_shape_inference = False
+# This function is for debug use only.
+# onnx_shape_inference = True by default.
 def _set_onnx_shape_inference(onnx_shape_inference):
     global _onnx_shape_inference
     _onnx_shape_inference = onnx_shape_inference
