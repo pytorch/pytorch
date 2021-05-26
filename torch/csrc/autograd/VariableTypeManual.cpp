@@ -110,7 +110,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
 }
 
 // We don't have an outplace copy, so this can't be generated automatically
-Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
+const Tensor & copy_(c10::DispatchKeySet ks, const Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -264,7 +264,7 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 namespace ADInplaceOrView {
   #define CREATION_META_DEFINITION InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)
 
-  Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
+  const Tensor & copy_(c10::DispatchKeySet ks, const Tensor & self, const Tensor & src, bool non_blocking) {
     {
       at::AutoDispatchBelowADInplaceOrView guard;
       at::redispatch::copy_(ks & c10::after_ADInplaceOrView_keyset, self, src, non_blocking);

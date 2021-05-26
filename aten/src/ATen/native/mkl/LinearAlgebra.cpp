@@ -6,7 +6,7 @@
 
 namespace at { namespace native {
 
-Tensor& _baddbmm_mkl_(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+const Tensor& _baddbmm_mkl_(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   AT_ERROR("bmm: ATen not compiled with MKL support");
 }
 

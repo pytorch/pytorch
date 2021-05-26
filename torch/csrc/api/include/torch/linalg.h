@@ -132,7 +132,7 @@ inline Tensor multi_dot(TensorList tensors) {
   return torch::linalg_multi_dot(tensors);
 }
 
-inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
+inline const Tensor& multi_dot_out(TensorList tensors, const Tensor& result) {
   return torch::linalg_multi_dot_out(result, tensors);
 }
 
@@ -379,7 +379,7 @@ inline Tensor multi_dot(TensorList tensors) {
   return detail::multi_dot(tensors);
 }
 
-inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
+inline const Tensor& multi_dot_out(TensorList tensors, const Tensor& result) {
   return detail::multi_dot_out(tensors, result);
 }
 
