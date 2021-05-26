@@ -250,7 +250,7 @@ class PackageExporter:
             module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
         )
         try:
-            dep_pairs = find_files_source_depends_on(src, package_name)
+            dep_pairs = find_files_source_depends_on(src, package_name, module_name)
         except Exception as e:
             self.dependency_graph.add_node(
                 module_name,
