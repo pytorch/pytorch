@@ -116,8 +116,8 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(b_linear_batch_idx)
-    .add_input(a_linear_batch_idx)
+    .add_borrowed_output(b_linear_batch_idx)
+    .add_borrowed_input(a_linear_batch_idx)
     .build();
 
   auto m = a.size(-2);
@@ -328,7 +328,7 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
 }
 
 // parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
-static inline std::tuple<bool, bool> _parse_qr_mode(std::string mode) {
+static inline std::tuple<bool, bool> _parse_qr_mode(c10::string_view mode) {
   bool compute_q;
   bool reduced;
   if (mode == "reduced") {
@@ -480,7 +480,7 @@ static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
 
 // This function checks whether the uplo argument input is valid
 // Allowed strings are "u", "U", "l", "L"
-static inline void checkUplo(const std::string& uplo) {
+static inline void checkUplo(const c10::string_view uplo) {
   // To use std::toupper safely with plain chars (or signed chars), the argument should first be converted to unsigned char
   char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
   TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
