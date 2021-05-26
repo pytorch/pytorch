@@ -1,11 +1,10 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml
-# Generation script: .github/scripts/generate_linux_ci_workflows.py
+# Generation script: .github/scripts/generate_ci_workflows.py
 name: Linux CI (pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-
   push:
     branches:
       - master
@@ -31,6 +30,15 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -48,7 +56,6 @@ jobs:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           BASE_REVISION: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
-          eval "$(aws ecr get-login --no-include-email --region us-east-1)"
           set -x
           # Check if image already exists, if it does then skip building it
           if docker manifest inspect "${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"; then
@@ -83,6 +90,7 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
+
   build:
     runs-on: linux.2xlarge
     needs: calculate-docker-image
@@ -134,11 +142,22 @@ jobs:
       - name: Archive artifacts into zip
         run: |
           zip -r artifacts.zip dist/ build/
+      # Upload to github so that people can click and download artifacts
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts
+        # Don't fail on upload to GH since it's only for user convenience
+        continue-on-error: true
+        name: Store PyTorch Build Artifacts on Github
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
-          retention-days: 30
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            artifacts.zip
+      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        name: Store PyTorch Build Artifacts on S3
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          retention-days: 14
           if-no-files-found: error
           path:
             artifacts.zip
@@ -147,6 +166,7 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
+
   test:
     runs-on: linux.8xlarge.nvidia.gpu
     needs:
@@ -186,7 +206,7 @@ jobs:
               ;;
           esac
           echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
-      - uses: actions/download-artifact@v2
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -230,7 +250,7 @@ jobs:
         if: always()
         with:
           name: test-reports
-          retention-days: 30
+          retention-days: 14
           if-no-files-found: error
           path:
             test/**/*.xml
@@ -241,6 +261,12 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
+
+  # this is a separate step from test because the log files from test are too
+  # long: basically, GitHub tries to render all of the log files when you click
+  # through an action causing extreme slowdown on actions that contain too many
+  # logs (like test); we can always move it back to the other one, but it
+  # doesn't create the best experience
   render_test_results:
     if: always()
     needs:
