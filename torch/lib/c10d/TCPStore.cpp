@@ -770,9 +770,6 @@ class TCPServer {
   std::unique_ptr<TCPStoreMasterDaemon> daemon_;
 };
 
-std::unordered_map<std::uint16_t, std::weak_ptr<TCPServer>>
-    TCPServer::cachedServers_{};
-
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   if (opts.multiTenant) {
     LOG(WARNING)
