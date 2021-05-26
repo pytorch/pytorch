@@ -59,6 +59,36 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
   }
 }
 
+TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
+    const Tensor& input,
+    IntArrayRef padding) {
+  int64_t dim_plane = 0;
+  int64_t dim_w = 1;
+  int64_t nbatch = 1;
+
+  if (input.ndimension() == 3) {
+    nbatch = input.size(0);
+    dim_w++;
+    dim_plane++;
+  }
+
+  /* sizes */
+  auto pad_l = padding[0];
+  auto pad_r = padding[1];
+  int64_t nplane = input.size(dim_plane);
+  int64_t input_w = input.size(dim_w);
+  int64_t output_w  = input_w + pad_l + pad_r;
+
+  TORCH_CHECK(output_w == grad_output.size(dim_w), "grad_output width unexpected."
+    " Expected: ", output_w, ", Got: ", grad_output.size(dim_w));
+
+  if (input.ndimension() == 2) {
+    set_output({nplane, output_w}, input.options());
+  } else {
+    set_output({nbatch, nplane, output_w}, input.options());
+  }
+}
+
 } // namespace meta
 
 namespace native {
@@ -241,7 +271,7 @@ inline void reflection_pad1d_backward_out_loop(
 }
 
 void reflection_pad1d_backward_out_template(
-    Tensor& grad_input, const Tensor& grad_output_, const Tensor& input,
+    const Tensor& grad_input, const Tensor& grad_output_, const Tensor& input,
     IntArrayRef padding) {
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
@@ -603,6 +633,13 @@ Tensor reflection_pad1d_cpu(const Tensor& input, IntArrayRef padding) {
 TORCH_IMPL_FUNC(reflection_pad1d_out_cpu)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
   reflection_pad1d_out_template(output, input, padding);
+}
+
+TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cpu)(const Tensor& grad_output,
+    const Tensor& input,
+    IntArrayRef padding,
+    const Tensor& grad_input) {
+  reflection_pad1d_backward_out_template(grad_input, grad_output, input, padding);
 }
 
 Tensor& reflection_pad1d_backward_out_cpu(const Tensor& grad_output,
