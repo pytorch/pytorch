@@ -422,10 +422,10 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
-        _raise_not_supported(self.train.__name__)
+        return self.module_rref.rpc_sync().train()
 
     def eval(self: T) -> T:  # type: ignore[return]
-        _raise_not_supported(self.eval.__name__)
+        return self.module_rref.rpc_sync().eval()
 
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)

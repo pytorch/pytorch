@@ -36,13 +36,19 @@ def remote_module_attributes(remote_module):
 def remote_forward(remote_module, args):
     return remote_module.forward(*args)
 
-
 # RPC handler for running forward_async on the destination worker.
 def remote_forward_async(remote_module, args):
     # Since future cannot be pickled and sent over the RPC layer,
     # have to wait and behave just like ``forward_sync``.
     return remote_module.forward_async(*args).wait()
 
+# RPC handler for setting train mode on the destination worker.
+def remote_train(remote_module, args):
+    return remote_module.train(args)
+
+# RPC handler for setting eval mode on the destination worker.
+def remote_eval(remote_module):
+    return remote_module.eval()
 
 class ModuleCreationMode(enum.Enum):
     MODULE_CTOR_WITH_INTERFACE = "module_ctor_with_interface"
@@ -145,6 +151,7 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
             RemoteModule(remote_device, BadModule, args, kwargs).forward()
+
 
     @dist_utils.dist_init
     def test_forward_async(self):
@@ -381,14 +388,6 @@ class RemoteModuleTest(CommonRemoteModuleTest):
                 remote_module.named_modules()
 
             with self.assertRaisesRegex(
-                ValueError, r"Method ``train`` not supported for RemoteModule"
-            ):
-                remote_module.train()
-            with self.assertRaisesRegex(
-                ValueError, r"Method ``eval`` not supported for RemoteModule"
-            ):
-                remote_module.eval()
-            with self.assertRaisesRegex(
                 ValueError, r"Method ``requires_grad_`` not supported for RemoteModule"
             ):
                 remote_module.requires_grad_()
@@ -505,6 +504,16 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
                 dst_worker2_name, remote_forward_async, (remote_module, args)
             )
             self.assertEqual(ret2, tuple(reversed(args)))
+            
+            args = True
+            ret3 = rpc.rpc_sync(dst_worker2_name, remote_train, (remote_module, args))
+            self.assertEqual(ret3.training, True)
+            
+            ret4 = rpc.rpc_sync(dst_worker2_name, remote_eval, (remote_module,))
+            self.assertEqual(ret4.training, False)
+
+
+
 
     @unittest.skip(
         "Script RemoteModule cannot be sent over RPC at this time. See #57865"
