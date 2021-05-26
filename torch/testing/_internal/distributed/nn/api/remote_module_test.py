@@ -42,13 +42,9 @@ def remote_forward_async(remote_module, args):
     # have to wait and behave just like ``forward_sync``.
     return remote_module.forward_async(*args).wait()
 
-# RPC handler for setting train mode on the destination worker.
-def remote_train(remote_module, args):
-    return remote_module.train(args)
-
-# RPC handler for setting eval mode on the destination worker.
-def remote_eval(remote_module):
-    return remote_module.eval()
+# RPC handler for getting training mode on the destination worker.
+def get_remote_training_arg(module_rref):
+    return module_rref.local_value().training
 
 class ModuleCreationMode(enum.Enum):
     MODULE_CTOR_WITH_INTERFACE = "module_ctor_with_interface"
@@ -263,6 +259,32 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             self.assertEqual(rref, remote_module.module_rref)
             for param in rref.to_here().parameters():
                 self.assertTrue(torch.equal(param, _PARAM_VAL))
+
+    @dist_utils.dist_init
+    def test_train(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            remote_module.train()
+            ret = rpc.rpc_sync(dst_worker_name, get_remote_training_arg, args=(remote_module.get_module_rref(),))
+            self.assertEqual(ret, True)
+
+    @dist_utils.dist_init
+    def test_eval(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            remote_module.eval()
+            ret = rpc.rpc_sync(dst_worker_name, get_remote_training_arg, args=(remote_module.get_module_rref(),))
+            self.assertEqual(ret, False)
 
     @dist_utils.dist_init
     def test_unsupported_methods(self):
@@ -504,16 +526,6 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
                 dst_worker2_name, remote_forward_async, (remote_module, args)
             )
             self.assertEqual(ret2, tuple(reversed(args)))
-            
-            args = True
-            ret3 = rpc.rpc_sync(dst_worker2_name, remote_train, (remote_module, args))
-            self.assertEqual(ret3.training, True)
-            
-            ret4 = rpc.rpc_sync(dst_worker2_name, remote_eval, (remote_module,))
-            self.assertEqual(ret4.training, False)
-
-
-
 
     @unittest.skip(
         "Script RemoteModule cannot be sent over RPC at this time. See #57865"
