@@ -4180,12 +4180,9 @@ Args:
 """.format(**common_args))
 
 add_docstr(torch.is_inference_mode_enabled, r"""
-is_inference_mode_enabled(input) -> (bool)
+is_inference_mode_enabled() -> (bool)
 
 Returns True if inference mode is currently enabled.
-
-Args:
-    {input}
 """.format(**common_args))
 
 add_docstr(torch.is_nonzero, r"""
