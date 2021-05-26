@@ -39,11 +39,25 @@ class DevicePlacementSpec(PlacementSpec):
         """
         return self._device
 
-class ChunkShardingSpec(PlacementSpec):
+
+class ShardingSpec(PlacementSpec):
+    """
+    Base class representing sharding specifications. It is special type of
+    PlacementSpec.
+    """
+    pass
+
+
+class ChunkShardingSpec(ShardingSpec):
     """
     This is a type of PlacementSpec that defines the placement as being sharded
     across multiple devices. In particular, it represents sharding a Tensor
     along a single dimension into equal chunks (similar to :meth:`torch.chunk`).
+
+    The semantics of how a tensor is partitioned is inline with
+    :meth:`torch.chunk`, where ``dim`` in torch.chunk corresponds to the
+    specified ``dim`` and ``chunks`` in torch.chunk is the number of elements
+    in the placement specified.
 
     Args:
         dim (int or str):
@@ -76,6 +90,8 @@ class ChunkShardingSpec(PlacementSpec):
 
     @staticmethod
     def _verify_devices(placements):
+        if placements is None or len(placements) == 0:
+            raise ValueError(f'None/Empty placement provided: {placements}')
         for dev in placements:
             if not isinstance(dev, PlacementSpec) and not is_valid_device(dev):
                 raise ValueError(f'{dev} is not a valid device')
@@ -99,88 +115,89 @@ class ChunkShardingSpec(PlacementSpec):
         """
         return self._placements
 
-class EnumerableShardingSpec(PlacementSpec):
+class ShardMetadata(object):
+    """
+    Represents a shard of the overall Tensor including its
+    offsets, lengths and device placement.
 
-    class Shard:
-        """
-        Represents a shard of the overall Tensor including its
-        offsets, lengths and device placement.
+    Args:
+        shard_offsets(List[int]): Offsets in the orignal tensor indicating
+            the start offsets for this shard. Should have the same rank as
+            the original tensor.
+        shard_lengths(List[int]): Lengths indicating the length of each
+            dimension for this shard. Should have the same rank as the
+            original tensor.
+        placement(List[Device or PlacementSpec]):
+            Specifies the placement of each shard of the Tensor. The size of
+            the list represents the number of shards to be created. This
+            parameter can be a list of devices
+            (ex: ["rank:0/cuda:0", "rank:1/cuda:1"]) or a list of custom
+            placement specs.
 
-        Args:
-            shard_offsets(List[int]): Offsets in the orignal tensor indicating
-                the start offsets for this shard. Should have the same rank as
-                the original tensor.
-            shard_lengths(List[int]): Lengths indicating the length of each
-                dimension for this shard. Should have the same rank as the
-                original tensor.
-            placement(List[Device] or List[PlacementSpec]):
-                Specifies the placement of each shard of the Tensor. The size of
-                the list represents the number of shards to be created. This
-                parameter can be a list of devices
-                (ex: ["rank:0/cuda:0", "rank:1/cuda:1"]) or a list of custom
-                placement specs.
+            The device can be a local device or a remote device specified by one
+            of the following remote formats:
 
-                The device can be a local device or a remote device specified by one
-                of the following remote formats:
+                1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
+                2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
+    """
 
-                    1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
-                    2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
-        """
+    ShardPlacement = Union[Device, PlacementSpec]
 
-        ShardPlacement = Union[Device, PlacementSpec]
+    __slots__ = ['_shard_offsets', '_shard_lengths', '_placement']
 
-        __slots__ = ['_shard_offsets', '_shard_lengths', '_placement']
+    def __init__(
+            self,
+            shard_offsets: List[int],
+            shard_lengths: List[int],
+            placement: ShardPlacement):
 
-        def __init__(
-                self,
-                shard_offsets: List[int],
-                shard_lengths: List[int],
-                placement: ShardPlacement):
+        if not isinstance(placement, PlacementSpec) and not is_valid_device(placement):
+            raise ValueError(f'{placement} is not a valid device')
 
-            if not isinstance(placement, PlacementSpec) and not is_valid_device(placement):
-                raise ValueError(f'{placement} is not a valid device')
+        if len(shard_offsets) != len(shard_lengths):
+            raise ValueError(
+                f'shard_offsets and shard_lengths should have '
+                f'the same number of elements, found {len(shard_offsets)} '
+                f'and {shard_lengths} respectively')
 
-            if len(shard_offsets) != len(shard_lengths):
-                raise ValueError(
-                    f'shard_offsets and shard_lengths should have '
-                    f'the same number of elements, found {len(shard_offsets)} '
-                    f'and {shard_lengths} respectively')
+        for i in range(len(shard_offsets)):
+            if shard_offsets[i] < 0:
+                raise ValueError('shard_offsets should be >=0')
+            if shard_lengths[i] <= 0:
+                raise ValueError('shard_lengths should be > 0')
 
-            for i in range(len(shard_offsets)):
-                if shard_offsets[i] < 0:
-                    raise ValueError('shard_offsets should be >=0')
-                if shard_lengths[i] <= 0:
-                    raise ValueError('shard_lengths should be > 0')
+        self._shard_offsets = shard_offsets
+        self._shard_lengths = shard_lengths
+        self._placement = placement
 
-            self._shard_offsets = shard_offsets
-            self._shard_lengths = shard_lengths
-            self._placement = placement
+    def __repr__(self):
+        return (
+            f'ShardMetadata(shard_offsets: {self._shard_offsets}, '
+            f'shard_lengths: {self._shard_lengths}, placement: {self._placement})'
+        )
 
-        def __repr__(self):
-            return (
-                f'Shard(shard_offsets: {self._shard_offsets}, '
-                f'shard_lengths: {self._shard_lengths}, placement: {self._placement})'
-            )
+    @property
+    def shard_offsets(self):
+        return self._shard_offsets
 
-        @property
-        def shard_offsets(self):
-            return self._shard_offsets
+    @property
+    def shard_lengths(self):
+        return self._shard_lengths
 
-        @property
-        def shard_lengths(self):
-            return self._shard_lengths
+    @property
+    def placement(self):
+        return self._placement
 
-        @property
-        def placement(self):
-            return self._placement
 
-    def __init__(self, shards: List[Shard]):
+class EnumerableShardingSpec(ShardingSpec):
+
+    def __init__(self, shards: List[ShardMetadata]):
         """
         This is a type of PlacementSpec that allows users to specify a generic
         sharding scheme by enumerating exactly how each shard is laid out.
 
         Args:
-            shards(List[Shard]): List of :class:`Shard` objects representing
+            shards(List[ShardMetadata]): List of :class:`ShardMetadata` objects representing
                 each shard.
         """
         super(EnumerableShardingSpec, self).__init__()
@@ -199,7 +216,7 @@ class EnumerableShardingSpec(PlacementSpec):
         self._shards = shards
 
     @staticmethod
-    def _validate_non_overlapping(shards: List[Shard]):
+    def _validate_non_overlapping(shards: List[ShardMetadata]):
         """
         Ensures none of the shards overlap with each other.
         """
@@ -210,7 +227,7 @@ class EnumerableShardingSpec(PlacementSpec):
                     raise ValueError(f'Shards {shards[i]} and {shards[j]} overlap')
 
     @staticmethod
-    def _check_shard_pair_overlap(shard1: Shard, shard2: Shard):
+    def _check_shard_pair_overlap(shard1: ShardMetadata, shard2: ShardMetadata):
         """
         Checks if two shards overlap.
         """
