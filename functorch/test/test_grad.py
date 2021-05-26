@@ -55,6 +55,48 @@ def diff_arg(arg):
     return isinstance(arg, Tensor) and arg.requires_grad
 
 
+# Given f, returns an f' such that:
+# - f' takes only positional arguments
+# - All arguments to f' are floating-point Tensors
+# - All outputs of f' are floating-point Tensors
+def normalize_op_for_vjp2(f, args, kwargs, output_process_fn_grad=None):
+    flat_args, args_spec = tree_flatten(args)
+    diff_argnums = tuple(i for i, arg in enumerate(flat_args) if diff_arg(arg))
+    assert len(diff_argnums) > 0
+    primals = tuple(flat_args[i] for i in diff_argnums)
+
+    @functools.wraps(f)
+    def wrapped(*primals):
+        _args = list(flat_args)
+        for num, arg in zip(diff_argnums, primals):
+            _args[num] = arg
+        _args = tree_unflatten(_args, args_spec)
+        result = f(*_args, **kwargs)
+        if output_process_fn_grad is not None:
+            result = output_process_fn_grad(result)
+        if isinstance(result, tuple):
+            # TODO: Remove the following hack for namedtuples
+            result = tuple(result)
+            result = tuple(r for r in result if torch.is_floating_point(r))
+            assert len(result) > 0
+        return result
+    return wrapped, primals
+
+
+def normalize_op_for_vjp(f, sample):
+    args = tuple([sample.input] + list(sample.args))
+    return normalize_op_for_vjp2(f, args, sample.kwargs, sample.output_process_fn_grad)
+
+
+def ref_vjp(f, *primals):
+    result = f(*primals)
+
+    def wrapped(cotangents):
+        return _autograd_grad(_as_tuple(result), primals, _as_tuple(cotangents))
+
+    return result, wrapped
+
+
 class TestGradOpInfo(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_grad(self, device, dtype, op):
@@ -149,36 +191,15 @@ class TestGradOpInfo(TestCase):
                 self.skipTest("Skipped! NYI: inplace-testing not supported.")
                 continue
 
-            args = [sample.input] + list(sample.args)
-            kwargs = sample.kwargs
-
-            diff_argnums = tuple(i for i, arg in enumerate(args) if diff_arg(arg))
-            assert len(diff_argnums) > 0
-            diff_args = tuple(args[i] for i in diff_argnums)
-
-            def processed_op(*args, **kwargs):
-                result = op(*args, **kwargs)
-                if sample.output_process_fn_grad is not None:
-                    result = sample.output_process_fn_grad(result)
-                if isinstance(result, tuple):
-                    # TODO: Remove the following hack for namedtuples
-                    result = tuple(result)
-                    result = tuple(r for r in result if torch.is_floating_point(r))
-                return result
-
-            def wrapped_fn(*diff_args):
-                _args = list(args)
-                for num, arg in zip(diff_argnums, diff_args):
-                    _args[num] = arg
-                return processed_op(*_args, **kwargs)
-
-            result, vjp_fn = vjp(wrapped_fn, *diff_args)
+            fn, primals = normalize_op_for_vjp(op, sample)
+            result = fn(*primals)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
+
+            _, vjp_fn = vjp(fn, *primals)
             result_vjps = vjp_fn(cotangents)
 
-            result = processed_op(*args, **kwargs)
-            result = _as_tuple(result)
-            expected_vjps = _autograd_grad(result, diff_args, _as_tuple(cotangents))
+            _, vjp_fn = ref_vjp(fn, *primals)
+            expected_vjps = vjp_fn(cotangents)
 
             self.assertEqual(result_vjps, expected_vjps)
 
