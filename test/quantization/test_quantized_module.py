@@ -197,7 +197,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
 
         # Make sure `from_float` works for all linear variants
-        modules_under_test = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
+        modules_under_test = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear]
 
         for mut in modules_under_test:
             # Test from_float.
@@ -978,7 +978,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # Test JIT
         self.checkScriptable(qlinear, [[X]], check_save_load=True)
 
-        modules_under_test = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
+        modules_under_test = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear]
         for mut in modules_under_test:
             # Test from_float
             float_linear = mut(in_features, out_features).float()
