@@ -3,8 +3,34 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/native/Histogram.h>
+#include <ATen/native/Resize.h>
 
 #include <tuple>
+#include "c10/core/DefaultDtype.h"
+
+/* Implement a numpy-like histogram function running on cpu
+ * https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
+ *
+ * - torch.histogram(input, bins, range=None, weight=None, density=False)
+ *   input     - tensor containing the input values. The histogram is computed over the flattened values.
+ *   bins      - int or 1D tensor. If int, defines the number of equal-width bins. If tensor, defines the
+ *               sequence of bin edges including the rightmost edge.
+ *   min       - scalar, optional. Defines the lower range of the bins. If not provided, defaults to input.min().
+ *   max       - scalar, optional. Defines the upper range of the bins. If not provided, defaults to input.max().
+ *   weight    - tensor, optional. If provided, weight should have the same shape as input. Each value
+ *               in input contributes its associated weight towards its bin's result (instead of 1).
+ *   density   - bool, optional. If False, the result will contain the number of samples (or total weight)
+ *               in each bin. If True, the result is the value of the probability density function at the
+ *               bin, normalized such that the integral over the range is 1.
+ *
+ * Returns:
+ *   hist      - 1D tensor containing the values of the histogram.
+ *   bin_edges - 1D tensor containing the edges of the histogram bins. Contains hist.numel() + 1 elements.
+ *               Bins include their left edge and exclude their right edge, with the exception of the
+ *               rightmost bin which includes both of its edges.
+ *
+ * Restrictions are defined in histogram_pre_check()
+ */
 
 namespace at { namespace native {
 
@@ -16,118 +42,124 @@ DEFINE_DISPATCH(histogram_linear_stub);
 
 namespace {
 
-inline void histogram_pre_check(const Tensor& input, const Tensor& bins, const c10::optional<Tensor>& weight,
-    bool density, const Tensor& hist, const Tensor& bin_edges) {
-  TORCH_CHECK(bins.device() == input.device(), "bins and input value tensors should have same device type, ",
-    "but we got bins tensor device type ", bins.device(), " and input value tensor device type ", input.device());
+/* Shape and dtype checks for histogram's input tensors (input, weight)
+ * and output tensors (hist, bin_edges).
+ */
+inline void histogram_pre_check(const Tensor& input, const Tensor& bin_edges_in,
+        const c10::optional<Tensor>& weight, bool density,
+        const Tensor& hist, const Tensor& bin_edges_out) {
+    TORCH_CHECK(input.dtype() == bin_edges_in.dtype(), "torch.histogram(): input tensor and bins tensor should",
+            " have same dtype, but got input ", input.dtype(), " and bins ", bin_edges_in.dtype());
 
-  TORCH_CHECK(bins.dim() == 1, "bins tensor should have dimension 1, but got ", bins.dim(), " dimension");
+    TORCH_CHECK(input.dtype() == hist.dtype(), "torch.histogram(): input tensor and hist tensor should",
+            " have same dtype, but got input ", input.dtype(), " and hist ", hist.dtype());
 
-  TORCH_CHECK(hist.dim() == 1, "hist tensor should have dimension 1, but got ", hist.dim(), " dimension");
+    TORCH_CHECK(input.dtype() == bin_edges_out.dtype(), "torch.histogram(): input tensor and bin_edges tensor should",
+            " have same dtype, but got input ", input.dtype(), " and bin_edges ", bin_edges_out.dtype());
 
-  TORCH_CHECK(bin_edges.dim() == 1, "bin_edges tensor should have dimension 1, but got ", bin_edges.dim(), " dimension");
+    TORCH_CHECK(hist.dim() == 1, "torch.histogram(): hist tensor should have dimension 1,",
+            " but got ", hist.dim(), " dimension");
 
-  TORCH_CHECK(bins.numel() > 0, "bins tensor should have at least 1 element, but has 0");
+    TORCH_CHECK(bin_edges_in.dim() == 1, "torch.histogram(): bins tensor should have dimension 1,",
+            " but got ", bin_edges_in.dim(), " dimension");
 
-  if (weight.has_value()) {
-    auto weight_sizes = weight.value().sizes();
-    TORCH_CHECK(input.sizes() == weight.value().sizes(), "if weight tensor is provided, input value tensor and weight tensor",
-        " should have the same shape, but we got input(", input.sizes(), ") and weight(", weight_sizes, ")");
+    TORCH_CHECK(bin_edges_out.dim() == 1, "torch.histogram(): bin_edges tensor should have dimension 1,",
+            " but got ", bin_edges_out.dim(), " dimension");
 
-    ScalarType weight_dtype = weight.value().scalar_type();
-    TORCH_CHECK(weight_dtype == ScalarType::Float || weight_dtype == ScalarType::Double,
-        "weight tensor's dtype must be Float or Double, but we got weight tensor's type ", weight_dtype);
-  }
-
-  TORCH_CHECK(hist.is_contiguous(), "hist output tensor must be contiguous");
-
-  TORCH_CHECK(bin_edges.is_contiguous(), "bin_edges output tensor must be contiguous");
-
-  ScalarType hist_dtype = hist.scalar_type();
-  if (density) {
-    TORCH_CHECK(hist_dtype == ScalarType::Double, "hist tensor's dtype is wrong, it must be Double if density flag is True, "
-        "but we got hist tensor's type ", hist_dtype, " and density flag is ", (density ? "True" : "False"));
-  } else if (weight.has_value()) {
-    TORCH_CHECK(hist_dtype == ScalarType::Double, "hist tensor's dtype is wrong, it must be Double if weight is provided, "
-        "but we got hist tensor's type ", hist_dtype);
-  } else {
-    TORCH_CHECK(hist_dtype == ScalarType::Long, "hist tensor's dtype is wrong, it should be long in the unweighted case ",
-        "but we got hist tensor's type ", hist_dtype);
-  }
-}
-
-ScalarType hist_scalar_type(const c10::optional<Tensor>& weight, bool density) {
-    if (density || weight.has_value()) {
-        return ScalarType::Double;
-    }
-    return ScalarType::Long;
-}
-
-std::pair<double, double> select_outer_bin_edges(const Tensor& input, const Scalar& min, const Scalar& max) {
-    double min_val = min.to<double>();
-    double max_val = max.to<double>();
-
-    TORCH_CHECK(min_val <= max_val, "min should not exceed max, but we got min=", min_val, " max=", max_val,
-            " (after conversion to double precision)");
-
-    if (min_val != max_val) {
-        return {min_val, max_val};
+    if (weight.has_value()) {
+        auto weight_sizes = weight.value().sizes();
+        TORCH_CHECK(input.sizes() == weight.value().sizes(), "torch.histogram(): if weight tensor is provided,"
+                " input tensor and weight tensor should have the same shape, but got input(", input.sizes(), ")",
+                ", and weight(", weight_sizes, ")");
     }
 
+    TORCH_CHECK(hist.is_contiguous(), "torch.histogram(): hist tensor must be contiguous");
+
+    TORCH_CHECK(bin_edges_in.numel() > 0, "torch.histogram(): bin_edges tensor should have at least 1 element,",
+            " but got ", bin_edges_in.numel(), " elements");
+
+    at::native::resize_output(hist, {bin_edges_in.numel() - 1});
+
+    at::native::resize_output(bin_edges_out, {bin_edges_in.numel()});
+
+    // TODO: bring back support for non-contiguous input
+    TORCH_CHECK(input.is_contiguous(), "torch.histogram(): input tensor must be contiguous");
+    TORCH_CHECK(!weight.has_value() || weight.value().is_contiguous(),
+            "torch.histogram(): weight tensor must be contiguous");
+}
+
+/* Determines the outermost bin edges.
+ */
+std::pair<double, double> select_outer_bin_edges(const Tensor& input,
+        const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
+    if (min.has_value() && max.has_value()) {
+        return {min.value().to<double>(), max.value().to<double>()};
+    }
+
+    // Default range for empty input matching numpy.histogram's default
     if (input.numel() == 0) {
         return {0., 1.};
     }
 
-    double first_edge = input.min().item<double>();
-    double last_edge = input.max().item<double>();
+    auto extrema = _aminmax(input);
 
-    if (first_edge == last_edge) {
-        first_edge -= 0.5;
-        last_edge += 0.5;
+    double leftmost_edge  = min.has_value() ? min.value().to<double>() : std::get<0>(extrema).item<double>();
+    double rightmost_edge = max.has_value() ? max.value().to<double>() : std::get<1>(extrema).item<double>();
+
+    TORCH_CHECK(leftmost_edge <= rightmost_edge, "torch.histogram(): min should not exceed max, but got",
+            "min ", leftmost_edge, " max ", rightmost_edge);
+
+    // Expand empty range to match numpy behavior and avoid division by 0 in normalization
+    if (leftmost_edge == rightmost_edge) {
+        leftmost_edge -= 0.5;
+        rightmost_edge += 0.5;
     }
 
-    return {first_edge, last_edge};
+    return {leftmost_edge, rightmost_edge};
 }
 
 } // namespace
 
 std::tuple<Tensor&, Tensor&>
-histogram_out_cpu(const Tensor& self, const Tensor& bins, const Scalar& min, const Scalar& max, const c10::optional<Tensor>& weight, bool density, Tensor& hist, Tensor& bin_edges) {
-    histogram_pre_check(self, bins, weight, density, hist, bin_edges);
-    histogram_stub(self.device().type(), self, bins, min, max, weight, density, hist, bin_edges);
-
-    return {hist, bin_edges};
+histogram_out_cpu(const Tensor& self, const Tensor& bin_edges,
+        const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
+        const c10::optional<Tensor>& weight, bool density,
+        Tensor& hist, Tensor& bin_edges_out) {
+    histogram_pre_check(self, bin_edges, weight, density, hist, bin_edges_out);
+    bin_edges_out.copy_(bin_edges);
+    histogram_stub(self.device().type(), self, weight, density, hist, bin_edges_out);
+    return {hist, bin_edges_out};
 }
 
 std::tuple<Tensor, Tensor>
-histogram_cpu(const Tensor& self, const Tensor& bins, const Scalar& min, const Scalar& max, const c10::optional<Tensor>& weight, bool density) {
-    c10::TensorOptions hist_options = TensorOptions().device(self.options().device()).dtype(hist_scalar_type(weight, density));
-    Tensor hist = at::empty({0}, hist_options, MemoryFormat::Contiguous);
-    Tensor bin_edges = at::empty({0}, bins.options(), MemoryFormat::Contiguous);
-
-    return histogram_out_cpu(self, bins, min, max, weight, density, hist, bin_edges);
+histogram_cpu(const Tensor& self, const Tensor& bin_edges,
+        const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
+        const c10::optional<Tensor>& weight, bool density) {
+    Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
+    Tensor bin_edges_out = at::empty({0}, bin_edges.options());
+    return histogram_out_cpu(self, bin_edges, min, max, weight, density, hist, bin_edges_out);
 }
 
 std::tuple<Tensor&, Tensor&>
-histogram_out_cpu(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, const c10::optional<Tensor>& weight, bool density, Tensor& hist, Tensor& bin_edges) {
+histogram_out_cpu(const Tensor& self, int64_t bin_ct,
+        const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
+        const c10::optional<Tensor>& weight, bool density,
+        Tensor& hist, Tensor& bin_edges_out) {
     auto outer_bin_edges = select_outer_bin_edges(self, min, max);
-    linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bins + 1, bin_edges);
+    linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges_out);
 
-    histogram_pre_check(self, bin_edges, weight, density, hist, bin_edges);
-    histogram_linear_stub(self.device().type(), self, bin_edges, min, max, weight, density, hist, bin_edges);
-
-    return {hist, bin_edges};
+    histogram_pre_check(self, bin_edges_out, weight, density, hist, bin_edges_out);
+    histogram_linear_stub(self.device().type(), self, weight, density, hist, bin_edges_out);
+    return {hist, bin_edges_out};
 }
 
 std::tuple<Tensor, Tensor>
-histogram_cpu(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, const c10::optional<Tensor>& weight, bool density) {
-    c10::TensorOptions hist_options = TensorOptions().device(self.options().device()).dtype(hist_scalar_type(weight, density));
-    Tensor hist = at::empty({0}, hist_options, MemoryFormat::Contiguous);
-
-    c10::TensorOptions bin_edges_options = TensorOptions().device(self.options().device()).dtype(ScalarType::Double);
-    Tensor bin_edges = at::empty({0}, bin_edges_options, MemoryFormat::Contiguous);
-
-    return histogram_out_cpu(self, bins, min, max, weight, density, hist, bin_edges);
+histogram_cpu(const Tensor& self, int64_t bin_ct,
+        const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
+        const c10::optional<Tensor>& weight, bool density) {
+    Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
+    Tensor bin_edges_out = at::empty({0}, self.options());
+    return histogram_out_cpu(self, bin_ct, min, max, weight, density, hist, bin_edges_out);
 }
 
 }} // namespace at::native

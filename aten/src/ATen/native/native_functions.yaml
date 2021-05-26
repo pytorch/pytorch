@@ -6649,20 +6649,20 @@
     CPU: legacy::cpu::_th_histc
     CUDA: _histc_cuda
 
-- func: histogram.bins_tensor_out(Tensor self, Tensor bins, Scalar min=0, Scalar max=0, Tensor? weight=None, bool density=False, *, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
+- func: histogram.bins_tensor_out(Tensor self, Tensor bins, Scalar? min=None, Scalar? max=None, Tensor? weight=None, bool density=False, *, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
   dispatch:
     CPU: histogram_out_cpu
 
-- func: histogram.bins_tensor(Tensor self, Tensor bins, Scalar min=0, Scalar max=0, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
+- func: histogram.bins_tensor(Tensor self, Tensor bins, Scalar? min=None, Scalar? max=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
   variants: method, function
   dispatch:
     CPU: histogram_cpu
 
-- func: histogram.bin_ct_out(Tensor self, int bins=100, Scalar min=0, Scalar max=0, Tensor? weight=None, bool density=False, *, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
+- func: histogram.bin_ct_out(Tensor self, int bins=100, Scalar? min=None, Scalar? max=None, Tensor? weight=None, bool density=False, *, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
   dispatch:
     CPU: histogram_out_cpu
 
-- func: histogram.bin_ct(Tensor self, int bins=100, Scalar min=0, Scalar max=0, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
+- func: histogram.bin_ct(Tensor self, int bins=100, Scalar? min=None, Scalar? max=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
   variants: method, function
   dispatch:
     CPU: histogram_cpu
