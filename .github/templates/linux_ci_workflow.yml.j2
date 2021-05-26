@@ -23,6 +23,10 @@ env:
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
+concurrency:
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   calculate-docker-image:
     runs-on: linux.2xlarge

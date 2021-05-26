@@ -25,6 +25,10 @@ env:
   VC_VERSION: ""
   VC_YEAR: "2019"
 
+concurrency:
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: "windows.4xlarge"

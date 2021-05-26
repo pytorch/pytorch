@@ -24,6 +24,10 @@ env:
   VC_VERSION: ""
   VC_YEAR: "2019"
 
+concurrency:
+  group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: "windows.4xlarge"
@@ -108,7 +112,7 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
-          .jenkins/pytorch/win-test.sh
+            .jenkins/pytorch/win-test.sh
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -116,7 +120,8 @@ jobs:
           name: test-reports
           retention-days: 14
           if-no-files-found: error
-          path: test/**/*.xml
+          path:
+            test/**/*.xml
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -170,7 +175,3 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
-
-concurrency:
-  group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true

@@ -21,6 +21,10 @@ env:
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
+concurrency:
+  group: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   calculate-docker-image:
     runs-on: linux.2xlarge
@@ -151,14 +155,16 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           retention-days: 14
           if-no-files-found: error
-          path: artifacts.zip
+          path:
+            artifacts.zip
       - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
         name: Store PyTorch Build Artifacts on S3
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           retention-days: 14
           if-no-files-found: error
-          path: artifacts.zip
+          path:
+            artifacts.zip
       - name: Clean up docker images
         if: always()
         run: |
@@ -250,7 +256,8 @@ jobs:
           name: test-reports
           retention-days: 14
           if-no-files-found: error
-          path: test/**/*.xml
+          path:
+            test/**/*.xml
       - name: Clean up docker images
         if: always()
         run: |
@@ -310,7 +317,3 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
-
-concurrency:
-  group: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
