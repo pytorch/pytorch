@@ -234,7 +234,7 @@ void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ self, "input", 3 };
   checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
     self.scalar_type(), "cummax_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? (-1*std::numeric_limits<scalar_t>::infinity()) : std::numeric_limits<scalar_t>::lowest();
     scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::greater_equal<scalar_t>());
@@ -246,7 +246,7 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ self, "input", 3 };
   checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
     self.scalar_type(), "cummin_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? std::numeric_limits<scalar_t>::infinity() : std::numeric_limits<scalar_t>::max();
     scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::less_equal<scalar_t>());
@@ -500,23 +500,25 @@ Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) 
   TensorArg input_arg{ self, "input", 2 };
   checkAllSameGPU(__func__, {output_arg, input_arg});
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
-    self.scalar_type(), "logcumsumexp_cuda", [&]() {
-    using accscalar_t = acc_type<scalar_t, true>;
-    scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-    auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
-      scalar_t min = at::_isnan(y) ? y : std::min<scalar_t>(x,y); //std::min returns first arg if one of the args is nan
-      scalar_t max = at::_isnan(y) ? y : std::max<scalar_t>(x,y); //std::max returns first arg if one of the args is nan
-      if (min != max || ::isfinite(static_cast<accscalar_t>(min))) {
-      // nan will be propagated here
-          return ::log1p(std::exp(min - max)) + max;
-      } else {
-      // special case to correctly handle infinite inputs
-         return x;
-      }
-    };
-    scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      self.scalar_type(), "logcumsumexp_cuda",
+      [&]() {
+        using accscalar_t = acc_type<scalar_t, true>;
+        scalar_t init = -std::numeric_limits<scalar_t>::infinity();
+        auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
+          scalar_t min = at::_isnan(y) ? y : std::min<scalar_t>(x,y); //std::min returns first arg if one of the args is nan
+          scalar_t max = at::_isnan(y) ? y : std::max<scalar_t>(x,y); //std::max returns first arg if one of the args is nan
+          if (min != max || ::isfinite(static_cast<accscalar_t>(min))) {
+          // nan will be propagated here
+              return ::log1p(std::exp(min - max)) + max;
+          } else {
+          // special case to correctly handle infinite inputs
+             return x;
+          }
+        };
+        scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
+      });
 
   return result;
 }
@@ -543,8 +545,10 @@ Tensor& _cumsum_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
-      at::ScalarType::Half, self.scalar_type(), "cumsum_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      self.scalar_type(), "cumsum_cuda",
+      [&]() {
         scalar_t init = 0;
         scan_dim<scalar_t>(
             self,
@@ -579,8 +583,8 @@ Tensor& _cumprod_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
-      at::ScalarType::Half, self.scalar_type(), "cumprod_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "cumprod_cuda", [&]() {
         scalar_t init = 1;
         scan_dim<scalar_t>(
             self,
