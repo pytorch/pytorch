@@ -31,7 +31,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Sequence
 from contextlib import contextmanager, closing
-from functools import wraps
+from functools import wraps, partial
 from itertools import product
 from copy import deepcopy
 from numbers import Number
@@ -44,7 +44,7 @@ from typing import cast, Any, Dict, Iterable, Iterator, Optional
 
 import numpy as np
 
-from torch.testing import floating_types_and, integral_types, complex_types
+from torch.testing import floating_types_and, integral_types, complex_types, assert_close
 from torch.testing._internal import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
@@ -1257,17 +1257,26 @@ class TestCase(expecttest.TestCase):
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
                     atol: Optional[float] = None, rtol: Optional[float] = None,
-                    equal_nan=True, exact_dtype=True, exact_device=False) -> None:
+                    equal_nan=True, exact_dtype=True, exact_device=False, exact_stride=False) -> None:
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
         debug_msg: Optional[str] = None
 
+        assert_close_ = partial(
+            assert_close,
+            rtol=rtol,
+            atol=atol,
+            check_device=exact_device,
+            check_dtype=exact_dtype,
+            check_stride=exact_stride,
+            equal_nan=equal_nan,
+            msg=msg,
+        )
+
         # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+            assert_close_(x.item(), y)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+            assert_close_(x, y.item())
         # Tensor x np.bool
         elif isinstance(x, torch.Tensor) and isinstance(y, np.bool_):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
@@ -1345,14 +1354,7 @@ class TestCase(expecttest.TestCase):
                     debug_msg = "Quantized representations failed to compare as equal! " + debug_msg_compare
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             else:
-                result, debug_msg_generic = self._compareTensors(x, y, rtol=rtol, atol=atol,
-                                                                 equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                 exact_device=exact_device)
-
-                if not result:
-                    assert debug_msg_generic is not None
-                    debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
-                super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+                assert_close_(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
                          f"Expected: {repr(x)}; Actual: {repr(y)}.")
@@ -1400,16 +1402,13 @@ class TestCase(expecttest.TestCase):
             super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         # Tensor x Numpy array
         elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
-            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+            assert_close_(x, torch.as_tensor(y))
         # Numpy array x Tensor
         elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
-            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+            assert_close_(torch.as_tensor(x), y)
         # Numpy array x Numpy array
         elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+            assert_close_(x, y)
         else:
             super().assertEqual(x, y, msg=msg)
 
