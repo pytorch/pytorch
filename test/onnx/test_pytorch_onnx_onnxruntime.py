@@ -5882,6 +5882,21 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_type_as(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([1.0])
+                return x.type_as(y)
+
+        a = torch.tensor([True, False], dtype=torch.bool)
+        b = torch.randn(3, 4, dtype=torch.double)
+        c = torch.ones((2, 2), dtype=torch.int64)
+        model = MyModule()
+        self.run_test(model, a)
+        self.run_test(model, b)
+        self.run_test(model, c)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_ones_bool(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
