@@ -1834,6 +1834,7 @@ works_list = [
     'expm1',
     'floor',
     'fmod',
+    'fmod_autodiffed',
     'ge',
     'gt',
     'le',
@@ -1859,6 +1860,7 @@ works_list = [
     'pow',
     'reciprocal',
     'remainder',
+    'remainder.autodiffed',
     'round',
     'rsqrt',
     'sigmoid',
@@ -1975,7 +1977,7 @@ def f({', '.join(param_names)}):
         except Exception as e:
             pass
         else:
-            raise RuntimeError(f"Expected test to fail. If it now works, move {get_name(op)} into works_list")
+            raise RuntimeError("Expected test to fail. If it now works, move op into works_list")
 
 
 only_for = ("cpu", "cuda")
