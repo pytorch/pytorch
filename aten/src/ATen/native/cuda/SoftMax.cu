@@ -433,7 +433,7 @@ ilpReduce(int shift,
  */
 template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __device__ __forceinline__ void
-WriteFpropResultsVectorizedd(
+WriteFpropResultsVectorized(
              int size,
              const int shift,
              scalar_t *input,
@@ -486,7 +486,7 @@ WriteFpropResultsVectorizedd(
 
 template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __device__ __forceinline__ void
-WriteBpropResultsVectorizedd(
+WriteBpropResultsVectorized(
              int size,
              const int shift,
              scalar_t *gradInput,
@@ -645,7 +645,7 @@ cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
 
   if (shift == output_shift) {
-    WriteFpropResultsVectorizedd<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
+    WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
   } else {
     WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, input, output, epilogue);
   }
@@ -676,7 +676,7 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(sum_k);
 
   if (shift == output_shift && shift == grad_output_shift) {
-    WriteBpropResultsVectorizedd<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, gradInput, output, gradOutput, epilogue);
+    WriteBpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, gradInput, output, gradOutput, epilogue);
   } else {
     WriteBpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, gradInput, output, gradOutput, epilogue);
   }
