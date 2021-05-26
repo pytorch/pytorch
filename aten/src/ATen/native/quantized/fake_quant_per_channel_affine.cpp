@@ -83,8 +83,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
 
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_borrowed_output(Y)
-    .add_borrowed_input(self)
+    .add_output(Y)
+    .add_input(self)
     .add_owned_input(native::_unsafe_view(scale, expected_shape))
     .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
@@ -93,8 +93,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   //   for simplicity, as we do not expect this to be a bottleneck.
   TensorIterator iter_mask = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_borrowed_output(mask)
-    .add_borrowed_input(self)
+    .add_output(mask)
+    .add_input(self)
     .add_owned_input(native::_unsafe_view(scale, expected_shape))
     .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
@@ -227,13 +227,13 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   auto zero_point_vectorized = zero_point_rounded.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
 
   auto iter = TensorIteratorConfig()
-    .add_borrowed_output(dX)
-    .add_borrowed_output(dScale_vec)
-    .add_borrowed_output(dZeroPoint_vec)
-    .add_borrowed_input(X)
-    .add_borrowed_input(dY)
-    .add_borrowed_input(scale_vectorized)
-    .add_borrowed_input(zero_point_vectorized)
+    .add_output(dX)
+    .add_output(dScale_vec)
+    .add_output(dZeroPoint_vec)
+    .add_input(X)
+    .add_input(dY)
+    .add_input(scale_vectorized)
+    .add_input(zero_point_vectorized)
     .build();
 
   fake_quant_grad_learnable_channel_stub(

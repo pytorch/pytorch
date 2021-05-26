@@ -202,12 +202,12 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   Tensor output = at::empty(input.sizes(), input.options());
   auto iter = TensorIteratorConfig()
-    .add_borrowed_output(output)
-    .add_borrowed_input(input)
-    .add_borrowed_input(mean)
-    .add_borrowed_input(invstd)
-    .add_borrowed_input(w)
-    .add_borrowed_input(b)
+    .add_output(output)
+    .add_input(input)
+    .add_input(mean)
+    .add_input(invstd)
+    .add_input(w)
+    .add_input(b)
     .build();
 
   cpu_kernel(iter, [=](scalar_t input, scalar_t mean, scalar_t invstd, scalar_t weight, scalar_t bias) {
@@ -248,7 +248,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
       // compute variance per input
       auto iter = TensorIteratorConfig()
-        .add_borrowed_input(in)
+        .add_input(in)
         .build();
       accscalar_t var_sum = 0;
       auto mean = static_cast<accscalar_t>(save_mean_a[f]);
@@ -335,8 +335,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
         auto iter = TensorIteratorConfig()
-          .add_borrowed_input(in)
-          .add_borrowed_input(grad_out)
+          .add_input(in)
+          .add_input(grad_out)
           .build();
         cpu_serial_kernel(iter, [&](const scalar_t i, const scalar_t go) -> void {
           dotp += (i - mean) * go;

@@ -849,7 +849,7 @@ void GroupNormBackwardKernelImplInternal(
     if (gamma.defined()) {
       auto iter = TensorIteratorConfig()
                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
-                      .add_borrowed_output(c1)
+                      .add_output(c1)
                       .add_owned_input(rstd.view({N, G, 1}))
                       .add_owned_input(gamma.view({1, G, D}))
                       .build();

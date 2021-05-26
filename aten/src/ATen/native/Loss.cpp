@@ -103,9 +103,9 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   auto grad_expand = grad.expand_as(input);
   if (!log_target) {
     auto iter = TensorIteratorConfig()
-      .add_borrowed_output(grad_input)
-      .add_borrowed_input(target)
-      .add_borrowed_input(grad_expand)
+      .add_output(grad_input)
+      .add_input(target)
+      .add_input(grad_expand)
       .build();
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
       cpu_serial_kernel(iter, [](scalar_t target_val, scalar_t grad_val) -> scalar_t{
@@ -141,7 +141,7 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
     Tensor loss_squeezed = at::squeeze(loss);
 
     auto iter = TensorIteratorConfig()
-      .add_borrowed_output(loss_squeezed)
+      .add_output(loss_squeezed)
       .add_owned_input(at::squeeze(input))
       .add_owned_input(at::squeeze(target))
       .build();
@@ -191,7 +191,7 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
     Tensor grad_input_squeezed = at::squeeze(grad_input);
 
     auto iter = TensorIteratorConfig()
-      .add_borrowed_output(grad_input_squeezed)
+      .add_output(grad_input_squeezed)
       .add_owned_input(at::squeeze(grad))
       .add_owned_input(at::squeeze(input))
       .add_owned_input(at::squeeze(target))
@@ -364,10 +364,10 @@ Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& inp
         grad_output, input, target, reduction, grad_input);
   auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
   auto iter = at::TensorIteratorConfig()
-    .add_borrowed_output(grad_input)
-    .add_borrowed_input(input)
-    .add_borrowed_input(target)
-    .add_borrowed_input(grad_output)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(target)
+    .add_input(grad_output)
     .build();
   smooth_l1_backward_stub(iter.device_type(), iter, norm, beta);
   return grad_input;
@@ -408,10 +408,10 @@ Tensor huber_loss_backward(const Tensor& grad_output, const Tensor& input, const
 Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& grad_input) {
   auto norm = (reduction == Reduction::Mean) ? (1. / input.numel()) : 1.;
   auto iter = at::TensorIteratorConfig()
-    .add_borrowed_output(grad_input)
-    .add_borrowed_input(input)
-    .add_borrowed_input(target)
-    .add_borrowed_input(grad_output)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(target)
+    .add_input(grad_output)
     .build();
   huber_backward_stub(iter.device_type(), iter, norm, delta);
   return grad_input;
@@ -450,10 +450,10 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
     const Tensor& input, const Tensor& target, int64_t reduction, Tensor& grad_input) {
   auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
   auto iter = at::TensorIteratorConfig()
-    .add_borrowed_output(grad_input)
-    .add_borrowed_input(input)
-    .add_borrowed_input(target)
-    .add_borrowed_input(grad_output)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(target)
+    .add_input(grad_output)
     .build();
   mse_backward_stub(iter.device_type(), iter, norm);
   return grad_input;

@@ -927,9 +927,9 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_borrowed_output(self)
-      .add_borrowed_input(self)
-      .add_borrowed_input(*b_mask)
+      .add_output(self)
+      .add_input(self)
+      .add_input(*b_mask)
       .build();
 
   if (b_mask->dtype() == at::ScalarType::Byte) {

@@ -226,8 +226,8 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)  // Already checked above
       .resize_outputs(false)
-      .add_borrowed_output(result_slice)
-      .add_borrowed_input(source_slice)
+      .add_output(result_slice)
+      .add_input(source_slice)
       .enforce_safe_casting_to_output(true)
       .build();
 
@@ -253,8 +253,8 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
       auto iter = TensorIteratorConfig()
         .set_check_mem_overlap(false)  // Already checked above
         .resize_outputs(false)
-        .add_borrowed_output(result_slice)
-        .add_borrowed_input(tensor)
+        .add_output(result_slice)
+        .add_input(tensor)
         .promote_inputs_to_common_dtype(true)
         .cast_common_dtype_to_outputs(true)
         .enforce_safe_casting_to_output(true)

@@ -1775,8 +1775,8 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   }
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
-    .add_borrowed_input(self)
-    .add_borrowed_input(other)
+    .add_input(self)
+    .add_input(other)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .build();

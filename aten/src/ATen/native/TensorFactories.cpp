@@ -133,9 +133,9 @@ void complex_check_dtype(
 Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
-      .add_borrowed_output(result)
-      .add_borrowed_input(real)
-      .add_borrowed_input(imag)
+      .add_output(result)
+      .add_input(real)
+      .add_input(imag)
       .check_all_same_dtype(false)
       .build();
   complex_stub(iter.device_type(), iter);
@@ -153,9 +153,9 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
 Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
-      .add_borrowed_output(result)
-      .add_borrowed_input(abs)
-      .add_borrowed_input(angle)
+      .add_output(result)
+      .add_input(abs)
+      .add_input(angle)
       .check_all_same_dtype(false)
       .build();
   polar_stub(iter.device_type(), iter);
