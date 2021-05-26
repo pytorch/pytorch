@@ -688,7 +688,7 @@ class TestSortAndSelect(TestCase):
             lambda x, **kwargs: torch.unique(x, sorted=True, **kwargs),
             lambda x, **kwargs: x.unique(sorted=True, **kwargs),
         )
-        x_sliced = torch.empty(x.size(0)*2, dtype=dtype, device=device)[::2].copy_(x)
+        x_sliced = torch.empty(x.size(0) * 2, dtype=dtype, device=device)[::2].copy_(x)
         xs = (x, x_sliced)
         for f, x in product(fs, xs):
             self._test_unique_with_expects(device, dtype, f, x, expected_unique, expected_inverse, expected_counts, (2, 2, 2))
