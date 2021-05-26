@@ -142,7 +142,7 @@ TEST(RunTimeTest, DelegateException) {
   inputs.emplace_back(torch::rand({13, 9}));
 
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)
+  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in FunctionName_UNKNOWN
 
@@ -150,7 +150,7 @@ Traceback of TorchScript (most recent call last):
       return self.A0.forward(x, y) + self.B0.forward(x)
              ~~~~~~~~~~~~~~~ <--- HERE
 
-  File "<string>", line 5, in FunctionName_UNKNOWN
+  File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
@@ -163,7 +163,7 @@ Traceback of TorchScript (most recent call last):
       return self.AA0.forward(x, y) + 3
              ~~~~~~~~~~~~~~~~ <--- HERE
 
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in forward
 
     def forward(self, x, y):
       return x + y
