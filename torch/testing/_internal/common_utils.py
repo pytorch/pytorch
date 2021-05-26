@@ -1737,7 +1737,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
         it is not possible to create a noncontiguous Tensor with a single element.
 
-        If exclude_zero is passed with True (default is False), all the matching values (with zero) in created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if complex type and 1 if integer/boolean type.
+        If exclude_zero is passed with True (default is False), all the matching values (with zero) in
+        created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
+        complex type and 1 if integer/boolean type.
     """
 
     assert low is None or low < 9, "low value too high!"
