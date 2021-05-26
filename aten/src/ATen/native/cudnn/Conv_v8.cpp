@@ -26,7 +26,7 @@ namespace {
 uint8_t getAlignment(const Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
-  uint64_t address = reinterpret_cast<uint64_t>(t.data_ptr());
+  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
   while (address % alignment == 0 && alignment < 16) alignment *= 2;
   return alignment;
 }
