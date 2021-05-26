@@ -64,3 +64,6 @@ jobs:
           linter_output_path: annotations.json
           commit_sha: ${{ steps.unzip.outputs.sha }}
           mode: json
+    concurrency:
+      group: add-annotations-annotate-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true

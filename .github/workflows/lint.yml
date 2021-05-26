@@ -3,7 +3,7 @@ name: Lint
 on:
   push:
     branches:
-    - master
+      - master
   pull_request:
 
 jobs:
@@ -23,13 +23,6 @@ jobs:
       - name: Ensure consistent CircleCI YAML config
         if: always() && steps.requirements.outcome == 'success'
         run: cd .circleci && ./ensure-consistency.py
-      - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
-        if: always() && steps.requirements.outcome == 'success'
-        run: |
-          pip install ruamel.yaml==0.17.4
-          echo "Please locally run .github/scripts/regenerate_cancel_redundant_workflow.py and commit if this step fails."
-          .github/scripts/regenerate_cancel_redundant_workflow.py
-          git diff --exit-code .github/workflows/cancel_redundant_workflows.yml
       - name: Lint native_functions.yaml
         if: always() && steps.requirements.outcome == 'success'
         run: |
@@ -93,6 +86,9 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
+    concurrency:
+      group: lint-quick-checks-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
 
   py2-setup-validate-errormsg:
     runs-on: ubuntu-18.04
@@ -107,6 +103,9 @@ jobs:
       - name: Attempt to run setup.py
         run: |
           python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
+    concurrency:
+      group: lint-py2-setup-validate-errormsg-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
 
   shellcheck:
     runs-on: ubuntu-18.04
@@ -144,6 +143,7 @@ jobs:
           shellcheck --version
       - name: Extract scripts from GitHub Actions workflows
         if: always() && steps.install_shellcheck.outcome == 'success'
+        id: extract_scripts
         run: |
           # For local lints, remove the .extracted_scripts folder if it was already there
           rm -rf .extracted_scripts
@@ -152,6 +152,13 @@ jobs:
         if: always() && steps.install_shellcheck.outcome == 'success'
         run: |
           tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch
+      - name: Check that jobs will be cancelled
+        if: always() && steps.extract_scripts.outcome == 'success'
+        run: |
+          .github/scripts/check_actions_for_concurrency.py
+    concurrency:
+      group: lint-shellcheck-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
 
   toc:
     runs-on: ubuntu-18.04
@@ -174,6 +181,9 @@ jobs:
           done
 
           .github/scripts/report_git_status.sh
+    concurrency:
+      group: lint-toc-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
 
   flake8-py3:
     runs-on: ubuntu-18.04
@@ -225,6 +235,9 @@ jobs:
           # Re-output flake8 status so GitHub logs show it on the step that actually failed
           cat "${GITHUB_WORKSPACE}"/flake8-output.txt
           [ ! -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]
+    concurrency:
+      group: lint-flake8-py3-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
 
   clang-tidy:
     if: github.event_name == 'pull_request'
@@ -321,6 +334,9 @@ jobs:
         with:
           name: clang-tidy
           path: clang-tidy-output/
+    concurrency:
+      group: lint-clang-tidy-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
 
   cmakelint:
     runs-on: ubuntu-18.04
@@ -343,6 +359,9 @@ jobs:
           git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
           grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/|cmake/Caffe2Config.cmake.in|aten/src/ATen/ATenConfig.cmake.in|cmake/Caffe2ConfigVersion.cmake.in|cmake/TorchConfig.cmake.in|cmake/TorchConfigVersion.cmake.in|cmake/cmake_uninstall.cmake.in)' | \
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
+    concurrency:
+      group: lint-cmakelint-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
 
   mypy:
     runs-on: ubuntu-18.04
@@ -371,3 +390,6 @@ jobs:
         run: |
           set -eux
           for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+    concurrency:
+      group: lint-mypy-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true

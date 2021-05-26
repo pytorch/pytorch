@@ -1,4 +1,4 @@
-# Template is at:    .github/templates/windows_ci_workflow.yml
+# Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Windows CI (!{{ build_environment }})
 
@@ -27,6 +27,9 @@ env:
 
 jobs:
   build:
+    concurrency:
+      group: !{{ build_environment }}-build-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     runs-on: "windows.4xlarge"
     steps:
       - name: Checkout PyTorch
@@ -69,6 +72,9 @@ jobs:
           path: C:\w\build-results
 
   test:
+    concurrency:
+      group: !{{ build_environment }}-test-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
@@ -126,6 +132,9 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
+    concurrency:
+      group: !{{ build_environment }}-render_test_results-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     if: always()
     needs:
       - test

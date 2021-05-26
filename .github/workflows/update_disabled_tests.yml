@@ -19,7 +19,7 @@ jobs:
       - name: Push file to test-infra repository
         uses: dmnemec/copy_file_to_another_repo_action@5f40763ccee2954067adba7fb8326e4df33bcb92
         env:
-           API_TOKEN_GITHUB: ${{ secrets.TEST_INFRA_TOKEN }}
+          API_TOKEN_GITHUB: ${{ secrets.TEST_INFRA_TOKEN }}
         with:
           source_file: 'disabled-tests.json'
           destination_repo: 'pytorch/test-infra'
@@ -28,3 +28,6 @@ jobs:
           user_email: 'test-infra@pytorch.org'
           user_name: 'Pytorch Test Infra'
           commit_message: 'Updating disabled tests stats'
+    concurrency:
+      group: update-disabled-tests-update-disabled-tests-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true

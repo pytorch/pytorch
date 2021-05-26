@@ -42,3 +42,6 @@ jobs:
           fi
           echo "$GIT_DIFF"
           exit 1
+    concurrency:
+      group: clang-format-clang-format-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true

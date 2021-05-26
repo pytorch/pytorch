@@ -24,13 +24,15 @@ jobs:
           MATRIX=$(python .github/scripts/generate_binary_build_matrix.py libtorch)
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
+    concurrency:
+      group: build-linux-libtorch-generate-build-matrix-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
   build-libtorch:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: generate-build-matrix
     runs-on: linux.2xlarge
     strategy:
-      matrix:
-        ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
       fail-fast: false
     container:
       image: ${{ matrix.container_image }}
@@ -92,3 +94,6 @@ jobs:
           name: pytorch-libtorch-${{ matrix.libtorch_variant }}-${{ matrix.devtoolset }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
           path: /remote/**/*.zip
       # TODO: Add a step here for uploading binaries
+    concurrency:
+      group: build-linux-libtorch-build-libtorch-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true

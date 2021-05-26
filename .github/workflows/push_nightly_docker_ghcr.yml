@@ -20,3 +20,6 @@ jobs:
       - name: Build and upload nightly docker
         run: |
           bash .github/scripts/build_publish_nightly_docker.sh
+    concurrency:
+      group: push-nightly-docker-ghcr-build-publish-docker-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true

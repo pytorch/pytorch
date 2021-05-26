@@ -8,6 +8,9 @@ on:
 
 jobs:
   generate-build-matrix:
+    concurrency:
+      group: build-linux-wheels-generate-build-matrix-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     outputs:
@@ -25,12 +28,14 @@ jobs:
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
   build-wheel:
+    concurrency:
+      group: build-linux-wheels-build-wheel-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: generate-build-matrix
     runs-on: linux.2xlarge
     strategy:
-      matrix:
-        ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
       fail-fast: false
     container:
       image: ${{ matrix.container_image }}

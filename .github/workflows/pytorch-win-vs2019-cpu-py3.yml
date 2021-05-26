@@ -1,5 +1,5 @@
 # @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/windows_ci_workflow.yml
+# Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Windows CI (pytorch-win-vs2019-cpu-py3)
 
@@ -26,6 +26,9 @@ env:
 
 jobs:
   build:
+    concurrency:
+      group: pytorch-win-vs2019-cpu-py3-build-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     runs-on: "windows.4xlarge"
     steps:
       - name: Checkout PyTorch
@@ -68,6 +71,9 @@ jobs:
           path: C:\w\build-results
 
   test:
+    concurrency:
+      group: pytorch-win-vs2019-cpu-py3-test-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     runs-on: windows.4xlarge
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-test
@@ -125,6 +131,9 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
+    concurrency:
+      group: pytorch-win-vs2019-cpu-py3-render_test_results-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     if: always()
     needs:
       - test
