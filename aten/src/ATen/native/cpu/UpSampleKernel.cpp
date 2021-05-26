@@ -758,12 +758,12 @@ void upsample_generic_Nd_kernel_impl(
   TensorIteratorConfig config;
   config.check_all_same_dtype(false)
     .declare_static_dtype_and_device(input.scalar_type(), input.device())
-    .add_output(output)
-    .add_input(restrided_input);
+    .add_borrowed_output(output)
+    .add_borrowed_input(restrided_input);
 
   for (auto & idx_weight: indices_weights) {
     for (auto& tensor : idx_weight) {
-      config.add_input(tensor);
+      config.add_borrowed_input(tensor);
     }
   }
 
