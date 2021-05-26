@@ -722,6 +722,8 @@ def prelu(g, self, weight):
 def silu(g, input):
     return g.op('Mul', input, g.op('Sigmoid', input))
 
+def mish(g, input):
+    return g.op('Mul', input, g.op('Tanh', g.op('Softplus', input)))
 
 def relu(g, input):
     return g.op("Relu", input)
@@ -1999,7 +2001,7 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
-def repeat_interleave(g, self, repeats, dim=None):
+def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
@@ -2554,11 +2556,15 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
     return input
 
 
-@parse_args('v', 'i')
-def one_hot(g, self, num_classes):
+@parse_args('v', 'i', 'v')
+def one_hot(g, self, num_classes, dtype):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = g.op("Constant", value_t=torch.LongTensor([num_classes]))
-    return g.op("OneHot", self, depth, values, axis_i=-1)
+    one_hot_tensor = g.op("OneHot", self, depth, values, axis_i=-1)
+    dtype = sym_help._maybe_get_const(dtype, 'i')
+    if sym_help._is_value(dtype):
+        dtype = 4  # default to int64
+    return g.op("Cast", one_hot_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
 
 
 @parse_args('v', 'i', 'v', 'v')
