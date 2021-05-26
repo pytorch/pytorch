@@ -1147,6 +1147,15 @@ Tensor infinitely_differentiable_silu_backward(
   return grad_output * sigmoid * (1.0 + input * (1.0 - sigmoid));
 }
 
+Tensor infinitely_differentiable_mish_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  const Tensor sigmoid = input.sigmoid();
+  const Tensor softplus = input.exp().log1p();
+  const Tensor tanh_softplus = softplus.tanh();
+  return grad_output * (tanh_softplus + input * sigmoid * (1.0 - tanh_softplus * tanh_softplus));
+}
+
 Tensor infinitely_differentiable_logit_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -3517,13 +3526,13 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
 
     // Get the new grad value that should be used after any zero happened:
     // (X, a*t1, a*b*t1, 0, 0) = cumprod((a, t1, b, 0, c))
-    auto new_grad = self_p.masked_scatter(mask_first_zero, self_t.masked_select(mask_first_zero).view(-1)).cumprod(dim);
+    auto new_grad = at::where(mask_first_zero, self_t, self_p).cumprod(dim);
 
     // Get a mask of everything after the first zero: (0, 1, 1, 1, 1)
     auto mask_after_first_zero = mask_first_zero.cumsum(dim);
 
     // Do the final replacement
-    return at::where(mask_after_first_zero.to(ScalarType::Byte), new_grad, gradient);
+    return at::where(mask_after_first_zero.to(ScalarType::Bool), new_grad, gradient);
   }
 }
 
