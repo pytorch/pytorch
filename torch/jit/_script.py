@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Union, Callable
 
 
 import torch
@@ -35,12 +35,15 @@ from torch.jit._state import (
 )
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
+from torch.package import PackageExporter, PackageImporter
+from ._serialization import validate_map_location
 
 from torch.jit._monkeytype_config import (
     monkeytype_trace,
     JitTypeTraceConfig ,
     JitTypeTraceStore
 )
+from torch._classes import classes
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
@@ -334,6 +337,27 @@ class ConstMap:
         return self.const_mapping[attr]
 
 
+def unpackage_script_module(importer: PackageImporter, script_module_id: str) -> torch.nn.Module:
+    """
+    Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
+    Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
+    """
+    if not isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
+        raise RuntimeError(
+            "Loading ScriptObjects from a PackageImporter created from a "
+            "directory is not supported. Use a package archive file instead."
+        )
+    cu = torch._C.CompilationUnit()
+    cpp_module = torch._C._import_ir_module_from_package(
+        cu,
+        importer.zip_reader,
+        importer.storage_context,
+        validate_map_location(importer.last_map_location),
+        script_module_id,
+    )
+    return wrap_cpp_module(cpp_module)
+
+
 if _enabled:
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
@@ -405,6 +429,19 @@ if _enabled:
 
         def _replicate_for_data_parallel(self):
             return self._actual_script_module._replicate_for_data_parallel()
+
+        def __reduce_package__(self, exporter: PackageExporter):
+            """
+            Called by ``torch.package.PackageExporter``'s Pickler's ``persistent_id`` when
+            saving TorchScript objects. Performs act of saving a ScriptModule inside of
+            a ``torch.package`` archive.
+
+            Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
+            Pickler's ``persistent_load`` function.
+            """
+            script_module_id = exporter.get_unique_id()
+            exporter.script_module_serializer.serialize(self._c, int(script_module_id))
+            return (unpackage_script_module, (script_module_id,))
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
@@ -851,7 +888,8 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]] = None):
+def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
+                example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None):
     # This is a private API, intended for internal use only. Usage of this API is only for experimental
     # purposes only and is highly discouraged.
     global type_trace_db
@@ -869,20 +907,34 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
     if isinstance(obj, ScriptFunction):
         return obj
 
-    # If MonkeyType is installed, enable profile directed type annotation
-    # Check if example_inputs are defined and generate call traces
-    # for the method by running eager mode version of the method with
-    # the provide example inputs. This logs all the traces in type_trace_db
-    type_trace_db = JitTypeTraceStore()
-    if monkeytype_trace:
-        monkeytype_config = JitTypeTraceConfig(type_trace_db)
-        with monkeytype_trace(monkeytype_config):
-            for example_input in example_inputs:  # type: ignore[union-attr]
-                obj(*example_input)
-    else:
-        warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
-                      "to enable Profile-Directed Typing in TorchScript. Refer to "
-                      "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
+    if example_inputs:
+        # If MonkeyType is installed, enable profile directed type annotation
+        # Check if example_inputs are defined and generate call traces
+        # for the method by running eager mode version of the method with
+        # the provide example inputs. This logs all the traces in type_trace_db
+        type_trace_db = JitTypeTraceStore()
+        if monkeytype_trace:
+            monkeytype_config = JitTypeTraceConfig(type_trace_db)
+            with monkeytype_trace(monkeytype_config):
+                if isinstance(example_inputs, Dict):
+                    # If the obj is an nn.Module or a class, then each method is
+                    # executed with the arguments provided in the example inputs.
+                    # example inputs here will be of type Dict(class.method, (arguments))
+                    # This is used to infer type annotations for those methods
+                    # which are not called directly under the hood of monkeytype.
+                    for module, example_input in example_inputs.items():
+                        for example in example_input:
+                            module(*example)
+                elif isinstance(example_inputs, List):
+                    for examples in example_inputs:
+                        obj(*examples)
+                else:
+                    warnings.warn("Error: Unable to infer types. Please format the inputs to type `List[Tuple]`"
+                                  " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
+        else:
+            warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
+                          "to enable Profile-Directed Typing in TorchScript. Refer to "
+                          "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
     return script(obj, optimize, _frames_up, _rcb)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
@@ -1210,6 +1262,111 @@ def _recursive_compile_class(obj, loc):
 
 CompilationUnit = torch._C.CompilationUnit
 set_module(CompilationUnit, "torch.jit")
+
+
+def pad(s: str, padding: int, offset: int = 0, char: str = ' '):
+    if padding >= len(s):
+        padding -= len(s)
+    return ''.join([char for _ in range(padding + offset)]) + s
+
+
+class _ScriptProfileColumn:
+    def __init__(self, header: str, alignment: int = 4, offset: int = 0):
+        self.header = header
+        self.alignment = alignment
+        self.offset = offset
+        self.rows: Dict[int, Any] = {}
+
+    def add_row(self, lineno: int, value: Any):
+        self.rows[lineno] = value
+
+    def materialize(self):
+        max_length = len(self.header)
+        rows: List[Tuple[int, str]] = []
+        for (key, value) in self.rows.items():
+            cell = str(value)
+            rows.append((key, cell))
+            max_length = max(len(cell), max_length)
+
+        if self.alignment > 0:
+            padding = max_length + self.alignment
+            padding -= padding % self.alignment
+        else:
+            padding = 0
+
+        rows = [(key, pad(cell, padding, self.offset)) for key, cell in rows]
+        return pad(self.header, padding, self.offset), rows
+
+
+class _ScriptProfileTable:
+    def __init__(self, cols: List[_ScriptProfileColumn], source_range: List[int]):
+        self.cols = cols
+        self.source_range = source_range
+
+    def dump_string(self):
+        outputs: List[str] = []
+        cells: List[Tuple[str, Dict[int, str]]] = []
+        header_buffer = ''
+        for col in self.cols:
+            header, rows = col.materialize()
+            header_buffer += header
+            cells.append((header, dict(rows)))
+
+        outputs.append(header_buffer)
+        outputs.append(pad('', len(header_buffer), 0, '='))
+        for line in self.source_range:
+            row_buffer = ''
+            for header, rows in cells:
+                cell = rows.get(line)
+                if cell is None:
+                    row_buffer += pad('', len(header))
+                else:
+                    row_buffer += cell
+            outputs.append(row_buffer)
+        return '\n'.join(outputs)
+
+
+class _ScriptProfile:
+    def __init__(self):
+        self.profile = classes.profiling._ScriptProfile()
+
+    def enable(self):
+        self.profile.enable()
+
+    def disable(self):
+        self.profile.disable()
+
+    def dump_string(self) -> str:
+        outputs: List[str] = []
+        for source_stats in self.profile._dump_stats():
+            source_ref = source_stats.source()
+            source_lines = source_ref.text().splitlines()
+            dedent = min([len(line) - len(line.lstrip(' ')) for line in source_lines])
+            source_lines = [line[dedent:] for line in source_lines]
+
+            start_line = source_ref.starting_lineno()
+            end_line = start_line + len(source_lines)
+            source_range = range(start_line, end_line)
+            lineno = _ScriptProfileColumn("Line #")
+            hits = _ScriptProfileColumn("Hits")
+            time_ns = _ScriptProfileColumn("Time (ns)")
+            line_contents = _ScriptProfileColumn("Line Contents", 0, 1)
+            stats = source_stats.line_map()
+            for line in source_range:
+                lineno.add_row(line, line)
+                line_contents.add_row(line, source_lines[line - start_line])
+                stat = stats.get(line)
+                if stat is not None:
+                    hits.add_row(line, stat.count())
+                    time_ns.add_row(line, stat.duration_ns())
+
+            table = _ScriptProfileTable([lineno, hits, time_ns, line_contents], list(source_range))
+            outputs.append(table.dump_string())
+        return '\n\n'.join(outputs)
+
+    def dump(self):
+        print(self.dump_string())
+
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"

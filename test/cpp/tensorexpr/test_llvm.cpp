@@ -1721,16 +1721,12 @@ TEST(LLVM, VectorizedGEMM) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* m = loops[0];
-    For* mo;
-    For* mi;
-    loop.splitWithMask(m, 16, &mo, &mi);
+    loop.splitWithMask(m, 16);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* n = loops[2];
-    For* no;
-    For* ni;
-    loop.splitWithMask(n, 16, &no, &ni);
+    loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
@@ -1802,8 +1798,6 @@ TEST(LLVM, CallRaw) {
   l.prepareForCodegen();
   Stmt* s = l.root_stmt();
 
-  LLVMCodeGen cg(s, {a, b, BufHandle(c->buf()), N});
-
   int32_t N_value = 1024;
   std::vector<float> av(M * N_value);
   std::iota(av.begin(), av.end(), 0);
@@ -1811,7 +1805,18 @@ TEST(LLVM, CallRaw) {
   std::iota(bv.begin(), bv.end(), 0);
   std::vector<float> cv(M * N_value, 0);
   std::vector<void*> args({av.data(), bv.data(), cv.data(), &N_value});
+
+  LLVMCodeGen cg(s, {a, b, BufHandle(c->buf()), N});
   cg.call_raw(args);
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N_value; j++) {
+      ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
+    }
+  }
+
+  SimpleIREvaluator eval(s, {a, b, BufHandle(c->buf()), N});
+  eval.call_raw(args);
 
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N_value; j++) {

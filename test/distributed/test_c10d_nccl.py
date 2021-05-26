@@ -30,6 +30,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_gloo,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
@@ -45,7 +46,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
 )
 import test_c10d_common
-from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook
+from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook, AbstractProcessGroupWrapperTest
 
 
 class RendezvousEnvTest(TestCase):
@@ -157,6 +158,87 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
         if torch.cuda.device_count() == 0:
             raise unittest.SkipTest("No GPUs available, skipping test")
         self._test_default_store_timeout("nccl")
+
+@requires_gloo()
+@requires_nccl()
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
+class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
+    def setUp(self):
+        self.num_gpus = torch.cuda.device_count()
+        if self.num_gpus < 2:
+            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
+        super(AbstractProcessGroupWrapperTest, self).setUp()
+        self._spawn_processes()
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _create_wrapper_pg(self, with_new_group=False, timeout=10.0):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            timeout=timedelta(seconds=timeout)
+        )
+        if with_new_group:
+            pg = c10d.new_group(backend="nccl", timeout=timedelta(seconds=timeout))
+        else:
+            _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
+            pg = c10d._create_process_group_wrapper(
+                _pg,
+                "unused",
+                store,
+                self.rank,
+                self.world_size,
+                timeout=timeout,
+            )
+        return pg
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_hang(self):
+        pg = self._create_wrapper_pg(timeout=2.0)
+        self._test_collective_hang(pg)
+
+    # NOTE: these tests are separated by debug level instead of combined into
+    # one due to https://github.com/pytorch/pytorch/issues/55967, they can be
+    # combined after that is resolved.
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collectives_op_mismatch_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collectives_op_mismatch(pg, use_cuda=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collectives_op_mismatch(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collectives_op_mismatch(pg, use_cuda=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collective_shape_mismatch_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collective_shape_mismatch(pg, use_cuda=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collective_shape_mismatch(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collective_shape_mismatch(pg, use_cuda=True)
 
 
 class ProcessGroupNCCLNoGPUTest(TestCase):
@@ -867,43 +949,20 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             output = fc3(output)
             loss = criterion(output, target)
             loss.backward()
-
-        # First test that finding unused params under these conditions is to
-        # trigger an error when `backward` is called (because fc3 is an unused
-        # parameter and will therefore be marked ready twice).
-        try:
-            test_find_unused_parameters(
-                True, gradient_as_bucket_view=gradient_as_bucket_view
-            )
-        except Exception as ex:
-            self.assertTrue(
-                str(ex).startswith(
-                    "Expected to mark a variable ready only once.",
-                )
-            )
-            unused_index = 2
-            unused_index_str = f"Parameter at index {unused_index}"
-            model = ddp_model.module
-            for module_name, module in model.named_modules():
-                if module == model.fc3:
-                    for parameter_name, _ in module.named_parameters(
-                            recurse=False
-                    ):
-                        unused_fqn = f"{module_name}.{parameter_name}"
-                        # Only one such parameter in model.fc3, since bias=False
-                        break
-
-            if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
-                unused_index_str += f" with name {unused_fqn}"
-
-            self.assertTrue(unused_index_str in str(ex))
-        else:
-            self.fail("Expected exception")
+        # First test that finding unused params under these conditions correctly
+        # marks parameter corresponding to fc3 as unused, since it was not used
+        # in DDP forward pass. Note that the above usage is not a recommended
+        # way of using DDP, if a module is wrapped within DDP, it should either
+        # stay unused or be used within DDP module itself.
+        test_find_unused_parameters(
+            True, gradient_as_bucket_view=gradient_as_bucket_view,
+        )
 
         dist.barrier(process_group)
 
-        # Then test that the default behavior can be overridden by setting
-        # `find_unused_parameters=False`.
+        # if find_unused_parameters=False, this would normally result in an
+        # error, but since fc3 does get used in a way DDP does not know about,
+        # autograd hooks are indeed called as expected.
         try:
             test_find_unused_parameters(
                 False, gradient_as_bucket_view=gradient_as_bucket_view
@@ -1574,6 +1633,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_allreduce_hook_nccl_static_graph(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(static_graph=True)
@@ -1745,7 +1805,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         )
         if static_graph:
             ddp_model._set_static_graph()
-        self.assertEqual(ddp_model.get_ddp_logging_data().get("static_graph", 0), static_graph)
+        self.assertEqual(ddp_model._get_ddp_logging_data().get("static_graph", 0), static_graph)
         input, ddp_input, target, ddp_target = self._prepare_dummy_data()
         loss = nn.MSELoss()
         for i in range(5):
@@ -1955,6 +2015,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
+    @unittest.skip("Frequently times out see https://github.com/pytorch/pytorch/issues/58920")
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda: os.abort())
 

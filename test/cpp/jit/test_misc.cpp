@@ -2625,7 +2625,6 @@ graph(%x.1 : Tensor):
       &*graph,
       vmap);
   FunctionalToInplaceActivation(graph);
-  graph->dump();
   testing::FileCheck().check("aten::relu_")->run(*graph);
   testing::FileCheck().check_not("aten::relu(")->run(*graph);
 }

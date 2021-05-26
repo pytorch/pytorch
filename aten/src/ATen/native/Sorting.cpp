@@ -12,6 +12,33 @@
 #include <utility>
 
 namespace at {
+namespace meta {
+using namespace native;
+  TORCH_META_FUNC(topk) (
+    const Tensor& self,
+    int64_t k,
+    int64_t dim_,
+    bool largest,
+    bool sorted) {
+
+    int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+    TORCH_CHECK(
+        k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
+        "selected index k out of range");
+    int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
+    TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
+
+    // Build the output size, which is the dim being selected set to
+    // size k
+    DimVector topKSize(self.sizes().vec());
+    if (topKSize.size() > 0) {
+      topKSize[dim] = k;
+    }
+    set_output(0, topKSize, self.options());
+    set_output(1, topKSize, self.options().dtype(at::kLong));
+  }
+} // namespace meta
+
 namespace native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -97,7 +124,7 @@ void quick_select_template(
 }
 
 QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
-    const std::string& interpolation) {
+    const c10::string_view interpolation) {
   if (interpolation == "linear") {
     return QUANTILE_INTERPOLATION_MODE::LINEAR;
   } else if (interpolation == "lower") {
@@ -259,9 +286,6 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   zero_numel_check_dims(self, dim, "kthvalue()");
-  TORCH_CHECK(
-      k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
-      "selected index k out of range");
 
   at::assert_no_overlap(self, values);
 
@@ -448,7 +472,7 @@ Tensor& quantile_out(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim,
-    const std::string interpolation,
+    const c10::string_view interpolation,
     Tensor& out) {
   quantile_impl(
       out,
@@ -467,7 +491,7 @@ Tensor& quantile_out(
     double q,
     optional<int64_t> dim,
     bool keepdim,
-    const std::string interpolation,
+    const c10::string_view interpolation,
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -486,7 +510,7 @@ Tensor quantile(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim,
-    const std::string interpolation) {
+    const c10::string_view interpolation) {
   Tensor out = at::empty({0}, self.options());
   quantile_impl(
       out,
@@ -505,7 +529,7 @@ Tensor quantile(
     double q,
     optional<int64_t> dim,
     bool keepdim,
-    const std::string interpolation) {
+    const c10::string_view interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::quantile(
@@ -518,7 +542,7 @@ Tensor& nanquantile_out(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim,
-    const std::string interpolation,
+    const c10::string_view interpolation,
     Tensor& out) {
   quantile_impl(
       out,
@@ -537,7 +561,7 @@ Tensor& nanquantile_out(
     double q,
     optional<int64_t> dim,
     bool keepdim,
-    const std::string interpolation,
+    const c10::string_view interpolation,
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -556,7 +580,7 @@ Tensor nanquantile(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim,
-    const std::string interpolation) {
+    const c10::string_view interpolation) {
   Tensor out = at::empty({0}, self.options());
   quantile_impl(
       out,
@@ -575,7 +599,7 @@ Tensor nanquantile(
     double q,
     optional<int64_t> dim,
     bool keepdim,
-    const std::string interpolation) {
+    const c10::string_view interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::nanquantile(
@@ -705,40 +729,25 @@ std::tuple<Tensor, Tensor> kthvalue(
   return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
 }
 
-std::tuple<Tensor&, Tensor&> topk_out_cpu(const Tensor& self,
+TORCH_IMPL_FUNC(topk_out_cpu)
+   (const Tensor& self,
     int64_t k,
     int64_t dim_,
     bool largest,
     bool sorted,
-    Tensor& values,
-    Tensor& indices) {
+    const Tensor& values,
+    const Tensor& indices) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   TORCH_CHECK(
       k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
 
-  _allocate_or_resize_output_with_indices(values, indices, self, dim_, k);
   if (self.dim() == 0 && self.numel() == 1) {
     values.copy_(self);
     indices.zero_();
-    return std::forward_as_tuple(values, indices);
+  } else {
+    topk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
   }
-
-  topk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
-
-  return std::forward_as_tuple(values, indices);
-}
-
-std::tuple<Tensor, Tensor> topk(
-    const Tensor& self,
-    int64_t k,
-    int64_t dim,
-    bool largest,
-    bool sorted) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  at::topk_out(values, indices, self, k, dim, largest, sorted);
-  return std::make_tuple(values, indices);
 }
 
 std::tuple<Tensor&, Tensor&> median_out_cpu(

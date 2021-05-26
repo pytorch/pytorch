@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 
 namespace torch {
 namespace jit {
@@ -327,6 +328,21 @@ bool RemoveTensorMutation(
     c10::optional<std::function<bool(Node*)>> mutation_filter) {
   MutationRemover mr(graph, std::move(mutation_filter));
   return mr.removeTensorMutation();
+}
+
+static const std::unordered_set<Symbol> activation_ops = []() {
+  std::unordered_set<Symbol> target_ops;
+  for (const auto& iter : activation_type_promotion_mapping) {
+    std::string name = std::string(iter.first.toQualString()) + "_";
+    target_ops.insert(Symbol::fromQualString(name));
+  }
+  return target_ops;
+}();
+
+bool InplaceToFunctionalActivation(const std::shared_ptr<Graph>& graph) {
+  return RemoveTensorMutation(graph, [](Node* node) {
+    return activation_ops.count(node->kind()) != 0;
+  });
 }
 
 } // namespace jit

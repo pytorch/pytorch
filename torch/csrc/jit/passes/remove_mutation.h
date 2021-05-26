@@ -74,5 +74,9 @@ TORCH_API bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
     c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);
 
+// Replaces in-place aten activation ops with their functional equivalence
+TORCH_API bool InplaceToFunctionalActivation(
+    const std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch

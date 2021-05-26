@@ -1,6 +1,7 @@
 import os
 import sys
 
+from itertools import product
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,15 +25,46 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+activations = [
+    F.celu,
+    F.elu,
+    F.hardsigmoid,
+    F.hardswish,
+    F.hardtanh,
+    F.leaky_relu,
+    F.relu,
+    F.relu6,
+    F.rrelu,
+    F.selu,
+    F.silu,
+]
+
 class TestFunctionalToInplaceActivation(JitTestCase):
+    def test_check_no_type_promotion(self):
+        dtypes = [
+            torch.bool,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float32,
+            torch.float64,
+        ]
+        # restore_mutation.h contains a mapping from activation operators
+        # to whether they allow type conversion. Use this checking to
+        # guard the mapping, and if any later change breaks the assumption
+        # we need to update the mapping correspondingly.
+        for activation, dtype in product(activations, dtypes):
+            inp = torch.normal([4, 4]).to(dtype)
+            try:
+                out = activation(inp)
+                if dtype != out.dtype:
+                    exit()
+            except Exception:
+                pass
+
     def test_functional_to_inplace_activation(self):
-        for activation in [
-            F.hardtanh,
-            F.relu6,
-            torch.relu,
-        ]:
-            # Without type inference, conversion can only happen when
-            # there is no possiblity of type promotion.
+        for activation in activations:
             def test_basic(x):
                 y = x + 1
                 z = activation(y)
@@ -49,31 +81,42 @@ class TestFunctionalToInplaceActivation(JitTestCase):
             self.assertEqual(fn(inp), test_basic(inp))
 
     def test_no_functional_to_inplace(self):
-        def test1(x):
-            y = x[0]
-            z = torch.relu(y)
+        # inplace conversion should not happen because sigmoid may
+        # perform type conversion
+        def test1():
+            y = torch.ones([2, 2])
+            z = torch.sigmoid(y)
             return z
 
         fn = torch.jit.script(test1)
         self.run_pass('functional_to_inplace_activation', fn.graph)
-        FileCheck().check_not("aten::relu_").run(fn.graph)
-        inp = torch.rand([2, 2])
-        self.assertEqual(fn(inp), test1(inp))
+        FileCheck().check_not("aten::sigmoid_").run(fn.graph)
 
-        class Test2(nn.Module):
+        # inplace conversion should not happen because y is alias
+        # the input x
+        def test2(x):
+            y = x[0]
+            z = torch.relu(y)
+            return z
+
+        fn = torch.jit.script(test2)
+        self.run_pass('functional_to_inplace_activation', fn.graph)
+        FileCheck().check_not("aten::relu_").run(fn.graph)
+
+        # inplace conversion should not happen because self.x is
+        # at the global scope
+        class Test3(nn.Module):
             def __init__(self, x):
-                super(Test2, self).__init__()
+                super(Test3, self).__init__()
                 self.x = x
 
             def forward(self):
                 y = torch.relu(self.x)
                 return y
 
-        test2 = Test2(torch.rand([2, 2])).eval()
-        fn = torch.jit.script(test2)
+        fn = torch.jit.script(Test3(torch.rand([2, 2])).eval())
         self.run_pass('functional_to_inplace_activation', fn.graph)
         FileCheck().check_not("aten::relu_").run(fn.graph)
-        self.assertEqual(fn(), test2())
 
     @skipIfNoTorchVision
     def test_resnet18_correctness(self):
@@ -87,12 +130,7 @@ class TestFunctionalToInplaceActivation(JitTestCase):
 
 class TestInplaceToFunctionalActivation(JitTestCase):
     def test_inplace_to_functional_activation(self):
-        for activation in [
-            F.hardsigmoid,
-            F.hardtanh,
-            F.hardswish,
-            F.relu6,
-        ]:
+        for activation in activations:
             def test_basic(x):
                 y = x + 1
                 activation(y, inplace=True)
