@@ -126,6 +126,9 @@ template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp
 template <int kSpatialDim>
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsMkldnn<
     kSpatialDim>::unpack() {
+  TORCH_CHECK(
+      kSpatialDim == 2,
+      "MKLDNN only supports conv2d_unpack right now.");
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
       orig_weight_, orig_bias_);
 }

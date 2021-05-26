@@ -782,8 +782,7 @@ template at::Tensor PackedConvWeightsQnnp<3>::apply_relu(
 
 #endif // USE_PYTORCH_QNNPACK
 
-#if !AT_MKLDNN_ENABLED()
-#else
+#if AT_MKLDNN_ENABLED()
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply(
     const at::Tensor& input,
@@ -812,6 +811,10 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());
+  TORCH_CHECK(
+      kSpatialDim == 2,
+      func_name, kSpatialDim,
+      "d (mkldnn): MKLDNN only supports Conv2d now.");
 
   // src
   auto src_dims = act.sizes().vec();
@@ -822,8 +825,7 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
   src.set_scale(ideep::scale_t(1, 1.0/act.q_scale())); // Scales of MKLDNN and PyTorch are reciprocal
   src.set_zero_point(std::vector<int32_t>(1, act.q_zero_point()));
   // weights & bias
-  ideep::tensor weights = (act.q_zero_point() != 0) ? *(weight_.get()) : *(weight_nzp_.get());
-  // ideep::tensor weights = *(weight_.get());
+  ideep::tensor weights = *(weight_.get());
   bool with_bias = bias_.has_value();
   auto kernel_size = weights.get_dims();
   // dst
@@ -852,18 +854,21 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
   const ideep::scale_t& weights_scales = weights.get_scale();
   const ideep::scale_t& dst_scales = ideep::scale_t(weights_scales.size(), 1.0/output_scale); // Scales of MKLDNN and PyTorch are reciprocal
   ideep::attr_t op_attr = kReluFused ? ideep::attr_t() : ideep::attr_t::fuse_relu();
+  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL}); // runtime src zero point
   if (with_bias) {
     auto b = bias_.value();
     ideep::convolution_forward::compute(src, weights, b, dst_dims, dst,
                                         strides, dilates, padding_l, padding_r, groups_,
                                         src_scales, weights_scales, dst_scales, op_attr,
-                                        dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference);
+                                        dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+                                        ideep::u8s8, ideep::engine::cpu_engine());
   } else {
     ideep::convolution_forward::compute(src, weights, dst_dims, dst,
                                         strides, dilates, padding_l, padding_r, groups_,
                                         src_scales, weights_scales, dst_scales, op_attr,
-                                        dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference);
-  }
+                                        dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+                                        ideep::u8s8, ideep::engine::cpu_engine());
+}
 
   return output;
 }

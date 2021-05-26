@@ -11,62 +11,10 @@
 #include <ATen/native/mkldnn/Utils.h>
 #include <cfloat>
 
-struct PackedLinearWeightsMkldnn : public LinearPackedParamsBase {
-  PackedLinearWeightsMkldnn(
-      std::unique_ptr<ideep::tensor> weight,
-      c10::optional<ideep::tensor> bias,
-      at::Tensor orig_weight,
-      c10::optional<at::Tensor> orig_bias)
-      : weight_(std::move(weight)),
-        bias_(std::move(bias)),
-        orig_weight_(std::move(orig_weight)),
-        orig_bias_(std::move(orig_bias)) {}
-  std::unique_ptr<ideep::tensor> weight_;
-  c10::optional<ideep::tensor> bias_;
-  at::Tensor orig_weight_;
-  c10::optional<at::Tensor> orig_bias_;
-
-  at::Tensor apply(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point) override;
-  at::Tensor apply_relu(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point) override;
-
-  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
-  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
-
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
-
-  c10::optional<at::Tensor> bias() override {
-    return orig_bias_;
-  }
-
-  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
-      at::Tensor weight,
-      c10::optional<at::Tensor> bias);
-
- private:
-  template <bool ReluFused>
-  at::Tensor apply_impl(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point);
-
-  template <bool ReluFused>
-  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
-
-  void find_scale_zero_point(at::Tensor input, bool reduce_range,
-                             double &scale, int64_t &zero_point);
-};
-
 template <int kSpatialDim = 2>
 struct PackedConvWeightsMkldnn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightsMkldnn(
       std::unique_ptr<ideep::tensor> weight,
-      std::unique_ptr<ideep::tensor> weight_nzp,
       c10::optional<ideep::tensor> bias,
       at::Tensor orig_weight,
       c10::optional<at::Tensor> orig_bias,
@@ -77,7 +25,6 @@ struct PackedConvWeightsMkldnn : public ConvPackedParamsBase<kSpatialDim> {
       int64_t groups,
       uint8_t transpose)
     : weight_(std::move(weight)),
-    weight_nzp_(std::move(weight_nzp)),
     bias_(std::move(bias)),
     orig_weight_(std::move(orig_weight)),
     orig_bias_(std::move(orig_bias)),
@@ -89,7 +36,6 @@ struct PackedConvWeightsMkldnn : public ConvPackedParamsBase<kSpatialDim> {
     transpose_(transpose) {}
 
   std::unique_ptr<ideep::tensor> weight_;
-  std::unique_ptr<ideep::tensor> weight_nzp_; // no zero point of src
   c10::optional<ideep::tensor> bias_;
   at::Tensor orig_weight_;
   c10::optional<at::Tensor> orig_bias_;

@@ -331,8 +331,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
         bool transpose) {
   TORCH_CHECK(
       transpose == false,
-      "Quantized::conv_prepack (mkldnn): "
-      "Convolution transpose is not supported.");
+      "Quantized::conv_prepack: "
+      "MKLDNN does not support qconv_transpose right now.");
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ", kSpatialDim + 2, " dimensions");
@@ -352,9 +352,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
       dilation.size() == kSpatialDim,
       "dilation should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
-  TORCH_CHECK(
-      weight.q_zero_point()==0,
-      "quantized::conv_prepack: MKLDNN requires zero point of weight to be 0.");
 
   // Weight
   auto dims = weight.sizes().vec();
@@ -369,11 +366,13 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
                                         : weight.size(0);
   const auto qtype = weight.qscheme();
   if (qtype == c10::kPerTensorAffine) {
+    TORCH_CHECK(
+        weight.q_zero_point()==0,
+        "quantized::qconv_prepack: MKLDNN only supports symmetric quantization of weight,"
+        " whose zero point must be 0.");
     wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
     wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of MKLDNN and PyTorch are reciprocal
   } else if (qtype == c10::kPerChannelAffine) {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    int64_t axis = weight.q_per_channel_axis();
     TORCH_CHECK(
         !transpose,
         "Per Channel Quantization is currently disabled for transposed conv");
@@ -381,43 +380,33 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
     wgt_scales.resize(output_channels);
     for (int i = 0; i < output_channels; ++i) {
       wgt_zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
+      TORCH_CHECK(
+          wgt_zero_points[i]==0,
+          "quantized::qconv_prepack: MKLDNN only supports symmetric quantization of weight,"
+          " whose zero point must be 0.");
       wgt_scales[i] = 1.0f / weight.q_per_channel_scales()[i].item<float>(); // Scales of MKLDNN and PyTorch are reciprocal
     }
   } else {
     TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
   }
 
-  // Prepack weight in case that the zero point of src is non-zero.
-  // A dummy case to align with qconv.cpp (Cannot use {0} as zero point)
-  auto src_zero_point = std::vector<int32_t>(1, 1);
+  // Set runtime src zero point
+  auto src_zero_point = {DNNL_RUNTIME_S32_VAL};
   op_attr.set_zero_points(DNNL_ARG_SRC,
                           ideep::utils::tensor_zp_mask(src_zero_point.size()),
                           src_zero_point);
-  auto w_desc = ideep::convolution_forward::expected_weights_desc(dims, dnnl::memory::data_type::s8,
-                                                                  strides, padding_l, padding_r, dilates, groups,
-                                                                  dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-                                                                  dnnl::memory::data_type::u8, ideep::dims(), op_attr);
+  ideep::tensor::desc w_desc = ideep::convolution_forward::expected_weights_desc(dims, dnnl::memory::data_type::s8,
+                                                                                 strides, padding_l, padding_r, dilates, groups,
+                                                                                 dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+                                                                                 dnnl::memory::data_type::u8, ideep::dims(), op_attr);
   ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight.data_ptr());
   ideep::tensor exp_wgt;
   exp_wgt.init(w_desc);
   exp_wgt.feed_from(wgt);
   ideep::tensor * packed_weight_p = new ideep::tensor(exp_wgt);
-  // Weight format: OIHW
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
-
-  // Prepack another weight in case that the zero point of src is zero.
-  auto w_desc_nzp = w_desc;
-  w_desc_nzp.data.extra.asymm_compensation_mask = 0;
-  w_desc_nzp.data.extra.flags = 0;
-  ideep::tensor exp_wgt_nzp;
-  exp_wgt_nzp.init(w_desc_nzp);
-  exp_wgt_nzp.feed_from(wgt);
-  ideep::tensor * packed_weight_nzp_p = new ideep::tensor(exp_wgt_nzp);
-  packed_weight_nzp_p->set_scale(wgt_scales);
-  packed_weight_nzp_p->set_zero_point(wgt_zero_points);
-  std::unique_ptr<ideep::tensor> weight_nzp_ptr(packed_weight_nzp_p);
   // Bias
   c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
   if (bias.has_value()) {
@@ -434,7 +423,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
   auto ret_ptr = c10::make_intrusive<PackedConvWeightsMkldnn<kSpatialDim>>(
       PackedConvWeightsMkldnn<kSpatialDim>{
         std::move(weight_ptr),
-        std::move(weight_nzp_ptr),
         mkldnn_bias,
         weight,
         bias,

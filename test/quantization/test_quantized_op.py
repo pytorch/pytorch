@@ -3542,7 +3542,6 @@ class TestQuantizedConv(TestCase):
             W_packed = qconv_prepack_fn(W_q, bias, strides, i_pads, o_pads,
                                         dilations, groups)
         else:
-            print("W_q = {}, bias = {}, strides = {}, i_pads = {}, dilations = {}, groups = {}".format(W_q, bias, strides, i_pads, dilations, groups))
             W_packed = qconv_prepack_fn(W_q, bias, strides, i_pads, dilations,
                                         groups)
         (W_unpacked, bias) = qconv_unpack_fn(W_packed)
