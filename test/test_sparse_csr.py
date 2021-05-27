@@ -2,9 +2,9 @@ import torch
 import warnings
 import unittest
 import random
+import itertools
 from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
-import itertools
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU, onlyCUDA)
 
@@ -278,6 +278,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9), sparse.values())
 
+    @onlyCPU
     @dtypes(torch.double)
     def test_dense_convert(self, device, dtype):
         size = (5, 5)
@@ -298,8 +299,8 @@ class TestSparseCSR(TestCase):
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device)
         self.assertEqual(csr.to_dense(), dense)
 
-    @coalescedonoff
     @onlyCPU
+    @coalescedonoff
     @dtypes(torch.double)
     def test_coo_to_csr_convert(self, device, dtype, coalesced):
         size = (5, 5)
@@ -399,6 +400,7 @@ class TestSparseCSR(TestCase):
                 for k in range(2, 8):
                     test_shape(i, j, k, i * j // 2)
 
+    @onlyCPU
     @dtypes(*torch.testing.floating_types())
     def test_coo_csr_conversion(self, device, dtype):
         size = (5, 5)
