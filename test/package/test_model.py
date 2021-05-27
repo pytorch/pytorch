@@ -90,17 +90,6 @@ class ModelTest(PackageTestCase):
         r3 = i2.load_pickle("model", "model.pkl")
         self.assertTrue(torch.allclose(r3(input), ref))
 
-        # test we can load from a directory
-        import zipfile
-
-        zf = zipfile.ZipFile(f1, "r")
-
-        with TemporaryDirectory() as td:
-            zf.extractall(path=td)
-            iz = PackageImporter(str(Path(td) / Path(f1).name))
-            r4 = iz.load_pickle("model", "model.pkl")
-            self.assertTrue(torch.allclose(r4(input), ref))
-
     @skipIfNoTorchVision
     def test_model_save(self):
 

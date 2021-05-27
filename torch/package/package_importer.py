@@ -21,7 +21,7 @@ from ._importlib import (
     _sanity_check,
 )
 from ._mangling import PackageMangler, demangle
-from ._mock_zipreader import MockZipReader
+from ._directory_reader import DirectoryReader
 from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
@@ -74,7 +74,7 @@ class PackageImporter(Importer):
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
-                self.zip_reader = MockZipReader(self.filename)
+                self.zip_reader = DirectoryReader(self.filename)
         else:
             self.filename = "<binary>"
             self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
