@@ -82,7 +82,7 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
   TORCH_CHECK(output_w == grad_output.size(dim_w), "grad_output width unexpected."
     " Expected: ", output_w, ", Got: ", grad_output.size(dim_w));
 
-	set_output(input.sizes(), input.options());
+  set_output(input.sizes(), input.options());
 }
 
 } // namespace meta
@@ -584,10 +584,10 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cpu)(const Tensor& grad_output_,
     const Tensor& input,
     IntArrayRef padding,
     const Tensor& grad_input) {
-	grad_input.resize_as_(input);
+  grad_input.resize_as_(input);
   grad_input.zero_();
 
-	int64_t dim_plane = 0;
+  int64_t dim_plane = 0;
   int64_t dim_w = 1;
   int64_t nbatch = 1;
 
