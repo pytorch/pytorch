@@ -1441,7 +1441,7 @@ void do_avg_pool_nhwc_on_AVX_n(
       // convert int32 accumulative to fp32
       vec::convert((int*)acc_buffer, (float*)acc_buffer_fp, cend * vec_width);
 
-      // first quantize using AVX using 32 lanes, then 8, finally falls
+      // first quantize using AVX2 or AVX512 using 32 lanes, then 8, finally falls
       // back to single
 #if defined(CPU_CAPABILITY_AVX2)
       QuantizeAvx2<T>(
