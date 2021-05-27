@@ -82,8 +82,7 @@ def get_gcda_files() -> List[str]:
         # TODO use glob
         # output = glob.glob(f"{folder_has_gcda}/**/*.gcda")
         output = subprocess.check_output(["find", folder_has_gcda, "-iname", "*.gcda"])
-        output = output.decode("utf-8").split("\n")
-        return output
+        return output.decode("utf-8").split("\n")
     else:
         return []
 

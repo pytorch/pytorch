@@ -12,14 +12,18 @@ import argparse
 import yaml
 
 from collections import defaultdict
+from typing import Dict, List, Set
 
 
-def canonical_name(opname):
+def canonical_name(opname: str) -> str:
     # Skip the overload name part as it's not supported by code analyzer yet.
     return opname.split('.', 1)[0]
 
 
-def load_op_dep_graph(fname):
+DepGraph = Dict[str, Set[str]]
+
+
+def load_op_dep_graph(fname: str) -> DepGraph:
     with open(fname, 'r') as stream:
         result = defaultdict(set)
         for op in yaml.safe_load(stream):
@@ -27,10 +31,10 @@ def load_op_dep_graph(fname):
             for dep in op.get('depends', []):
                 dep_name = canonical_name(dep['name'])
                 result[op_name].add(dep_name)
-        return result
+        return dict(result)
 
 
-def load_root_ops(fname):
+def load_root_ops(fname: str) -> List[str]:
     result = []
     with open(fname, 'r') as stream:
         for op in yaml.safe_load(stream):
@@ -38,7 +42,11 @@ def load_root_ops(fname):
     return result
 
 
-def gen_transitive_closure(dep_graph, root_ops, train=False):
+def gen_transitive_closure(
+    dep_graph: DepGraph,
+    root_ops: List[str],
+    train: bool = False,
+) -> List[str]:
     result = set(root_ops)
     queue = root_ops[:]
 
@@ -64,7 +72,7 @@ def gen_transitive_closure(dep_graph, root_ops, train=False):
 
     return sorted(result)
 
-def gen_transitive_closure_str(dep_graph, root_ops):
+def gen_transitive_closure_str(dep_graph: DepGraph, root_ops: List[str]) -> str:
     return ' '.join(gen_transitive_closure(dep_graph, root_ops))
 
 

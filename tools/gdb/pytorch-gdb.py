@@ -1,5 +1,6 @@
-import gdb
+import gdb  # type: ignore[import]
 import textwrap
+from typing import Any
 
 class DisableBreakpoints:
     """
@@ -8,18 +9,18 @@ class DisableBreakpoints:
     commands
     """
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.disabled_breakpoints = []
         for b in gdb.breakpoints():
             if b.enabled:
                 b.enabled = False
                 self.disabled_breakpoints.append(b)
 
-    def __exit__(self, etype, evalue, tb):
+    def __exit__(self, etype: Any, evalue: Any, tb: Any) -> None:
         for b in self.disabled_breakpoints:
             b.enabled = True
 
-class TensorRepr(gdb.Command):
+class TensorRepr(gdb.Command):  # type: ignore[misc, no-any-unimported]
     """
     Print a human readable representation of the given at::Tensor.
     Usage: torch-tensor-repr EXP
@@ -31,11 +32,11 @@ class TensorRepr(gdb.Command):
     """
     __doc__ = textwrap.dedent(__doc__).strip()
 
-    def __init__(self):
+    def __init__(self) -> None:
         gdb.Command.__init__(self, 'torch-tensor-repr',
                              gdb.COMMAND_USER, gdb.COMPLETE_EXPRESSION)
 
-    def invoke(self, args, from_tty):
+    def invoke(self, args: str, from_tty: bool) -> None:
         args = gdb.string_to_argv(args)
         if len(args) != 1:
             print('Usage: torch-tensor-repr EXP')
