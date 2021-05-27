@@ -124,10 +124,10 @@ Tensor& add_out_dense_sparse_csr_cuda(
                     cast_value,
                     out_strides1
                     ]__device__(int64_t irow) {
-                        int32_t start_index = crow_indices_accessor[irow];
-                        int32_t end_index = crow_indices_accessor[irow + 1];
+                        index_t start_index = crow_indices_accessor[irow];
+                        index_t end_index = crow_indices_accessor[irow + 1];
 
-                        for (int i = start_index; i < end_index; ++i) {
+                        for (index_t i = start_index; i < end_index; ++i) {
                             auto icol = col_indices_accessor[i];
                             auto index = out_storage_offset + irow * out_strides0 + icol * out_strides1;
                             out_ptr[index] += cast_value * values_accessor[i];

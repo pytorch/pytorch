@@ -2119,9 +2119,9 @@ void fake_quantize_tensor_cachemask_kernel(
 
   auto iter_combined = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_borrowed_output(output)
-    .add_borrowed_output(mask)
-    .add_borrowed_input(input)
+    .add_output(output)
+    .add_output(mask)
+    .add_input(input)
     .build();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
@@ -2157,10 +2157,10 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
         the order they are accessed follows the order they are built within the iterator.
         For example, if an iterator is built in the following order:
         auto iter = TensorIteratorConfig().
-          .add_borrowed_output(firstOutput)
-          .add_borrowed_output(secondOutput)
-          .add_borrowed_input(firstInput)
-          .add_borrowed_input(secondInput)
+          .add_output(firstOutput)
+          .add_output(secondOutput)
+          .add_input(firstInput)
+          .add_input(secondInput)
           .build()
         data will contain 4 pointers to pointers to values in the following order:
         firstOutput, secondOutput, firstInput, secondInput.
