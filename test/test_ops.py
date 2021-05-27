@@ -39,8 +39,6 @@ class TestOpInfo(TestCase):
         with self.assertRaises(RuntimeError):
             # NOTE: only tests on first sample
             sample = op.get_one_sample_input(device, dtype)
-            if sample is None:
-                self.skipTest("Skipped! No sample inputs!")
             op(sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
@@ -456,8 +454,6 @@ class TestCommon(JitCommonTestCase):
     def test_jit_alias_remapping(self, device, dtype, op):
         # NOTE: only tests on first sample
         sample = op.get_one_sample_input(device, dtype, requires_grad=True)
-        if sample is None:
-            self.skipTest("Skipped! No sample inputs!")
 
         # [Scripting Data Preparation]
         # Prepare data for test scripting

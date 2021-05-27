@@ -346,6 +346,8 @@ class OpInfo(object):
             samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
         except TypeError:
             samples = self.sample_inputs_func(self, device, dtype, requires_grad)
+        if len(samples) == 0:
+            raise ValueError('sample_inputs_func must return at least 1 sample')
         return samples
 
     def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
@@ -376,8 +378,7 @@ class OpInfo(object):
     def get_one_sample_input(self, device, dtype, requires_grad=False, **kwargs):
         """Returns a single SampleInput if it exists, else None"""
         samples = self.generate_sample_inputs(device, dtype, requires_grad, **kwargs)
-        if len(samples) == 0:
-            return None
+        assert len(samples) > 0
         return samples[0]
 
     @contextlib.contextmanager

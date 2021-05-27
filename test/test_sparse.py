@@ -3430,9 +3430,6 @@ class TestSparseUnaryUfuncs(TestCase):
             self.skipTest('Skipped! Unsupported dtypes for Sparse')
 
         sample = op.get_one_sample_input(device, dtype)
-        if sample is None:
-            self.skipTest("Skipped! No sample inputs!")
-
         assert isinstance(sample.input, torch.Tensor)
 
         expected = op(sample.input)
