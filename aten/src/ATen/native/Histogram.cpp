@@ -81,10 +81,6 @@ inline void histogram_pre_check(const Tensor& input, const Tensor& bin_edges_in,
     at::native::resize_output(hist, {bin_edges_in.numel() - 1});
 
     at::native::resize_output(bin_edges_out, {bin_edges_in.numel()});
-
-    // TODO: bring back support for non-contiguous input
-    TORCH_CHECK(!weight.has_value() || weight.value().is_contiguous(),
-            "torch.histogram(): weight tensor must be contiguous");
 }
 
 /* Determines the outermost bin edges.

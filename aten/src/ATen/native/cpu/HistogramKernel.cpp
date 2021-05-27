@@ -23,26 +23,27 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
     TORCH_INTERNAL_ASSERT(hist.is_contiguous());
     TORCH_INTERNAL_ASSERT(bin_edges.is_contiguous());
     TORCH_INTERNAL_ASSERT(hist.numel() + 1 == bin_edges.numel());
-    TORCH_INTERNAL_ASSERT(!weight.has_value() || weight.value().is_contiguous());
+    TORCH_INTERNAL_ASSERT(input.dim() == 1);
+    TORCH_INTERNAL_ASSERT(!weight.has_value() || weight.value().dim() == 1);
 
-    int64_t numel_in = input.numel();
+    const int64_t numel_in = input.numel();
     if (!numel_in) {
         return;
     }
 
-    int64_t numel_be = bin_edges.numel();
+    TensorAccessor<input_t, 1> accessor_in = input.accessor<input_t, 1>();
 
-    Tensor reshaped_in = input.reshape({numel_in});
-    TensorAccessor<input_t, 1> accessor_in = reshaped_in.accessor<input_t, 1>();
+    const auto accessor_wt = weight.has_value()
+            ? c10::optional<TensorAccessor<input_t, 1>>(weight.value().accessor<input_t, 1>())
+            : c10::optional<TensorAccessor<input_t, 1>>();
 
+    const int64_t numel_be = bin_edges.numel();
     const input_t *data_be = bin_edges.data_ptr<input_t>();
-
-    input_t *data_out = hist.data_ptr<input_t>();
 
     const input_t leftmost_bin_edge = data_be[0];
     const input_t rightmost_bin_edge = data_be[numel_be - 1];
 
-    const input_t *data_wt = weight.has_value() ? weight.value().data_ptr<input_t>() : nullptr;
+    input_t *data_out = hist.data_ptr<input_t>();
 
     /* Parallelizes processing of input using at::parallel_for.
      * Each thread accumulates a local result for some range of the input in data_out_local
@@ -79,7 +80,7 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
             }
 
             // In the unweighted case, the default weight is 1
-            input_t wt = data_wt == nullptr ? static_cast<input_t>(1) : data_wt[i];
+            input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
             data_out_local[pos] += wt;
         }
 
@@ -92,20 +93,27 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
 }
 
 /* Some pre- and post- processing steps for the main algorithm.
- * Initializes hist to 0, calls into the main algorithm, and performs normalization if necessary.
+ * Initializes hist to 0, calls into the main algorithm, and normalizes output if necessary.
  */
 template<bool LinearBinEdges>
 std::tuple<Tensor&, Tensor&>
 histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weight, bool density, Tensor& hist, Tensor& bin_edges) {
     hist.fill_(0);
 
+    const int64_t numel_in = self.numel();
+    const Tensor reshaped_input = self.reshape({numel_in});
+
+    const auto reshaped_weight = weight.has_value()
+            ? c10::optional<Tensor>(weight.value().reshape({numel_in}))
+            : c10::optional<Tensor>();
+
     switch (self.scalar_type()) {
         case ScalarType::Double: {
-            histogram_cpu_contiguous<double, LinearBinEdges>(hist, bin_edges.contiguous(), self, weight);
+            histogram_cpu_contiguous<double, LinearBinEdges>(hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
             break;
         }
         case ScalarType::Float: {
-            histogram_cpu_contiguous<float, LinearBinEdges>(hist, bin_edges.contiguous(), self, weight);
+            histogram_cpu_contiguous<float, LinearBinEdges>(hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
             break;
         }
         default:

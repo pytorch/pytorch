@@ -4937,7 +4937,7 @@ else:
                 product([True, False], range(1, 10), [True, False], [True, False], [True, False], shapes):
             values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous = not contig)
             bin_range = sorted((random.uniform(-9, 9), random.uniform(-9, 9))) if minmax else None
-            weights = make_tensor(shape, device, dtype, low=0, high=9) if weighted else None
+            weights = make_tensor(shape, device, dtype, low=0, high=9, noncontiguous = not contig) if weighted else None
 
             # Tests passing just the bin_ct
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
