@@ -1244,7 +1244,8 @@
 - func: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: count_nonzero
+    CPU: count_nonzero_cpu
+    CUDA: count_nonzero_cuda
 
 - func: count_nonzero(Tensor self, int? dim=None) -> Tensor
   variants: function, method
@@ -6228,13 +6229,13 @@
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_nonzero_out
+    CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
 
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_nonzero
+    CPU: nonzero_cpu
     CUDA: nonzero_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
@@ -8421,6 +8422,7 @@
 
 - func: avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: avg_pool2d_out_cpu
     CUDA: avg_pool2d_out_cuda
@@ -8428,9 +8430,8 @@
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   python_module: nn
+  structured_delegate: avg_pool2d.out
   dispatch:
-    CPU: avg_pool2d_cpu
-    CUDA: avg_pool2d_cuda
     MkldnnCPU: mkldnn_avg_pool2d
     QuantizedCPU: avg_pool2d_quantized_cpu
 

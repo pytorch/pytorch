@@ -7,9 +7,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 from typing import Tuple
 import copy
-import io
 
-# TODO: Move some tensor tests here like test_serialize_qtensor to test_quantize_tensor.py
 class TestDeprecatedJitQuantized(JitTestCase):
     @skipIfNoFBGEMM
     def test_rnn_cell_quantized(self):
