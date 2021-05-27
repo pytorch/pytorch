@@ -46,7 +46,7 @@ struct KinetoObserverContext : public at::ObserverContext {
   CUDAEventStub cuda_event_end_ = nullptr;
 };
 
-struct TORCH_API KinetoEvent {
+struct TORCH_API _KinetoEvent {
   uint64_t startThreadId() const {
     return start_thread_id_;
   }
@@ -99,47 +99,51 @@ struct TORCH_API KinetoEvent {
     return scope_;
   }
 
-  KinetoEvent& startThreadId(uint64_t start_thread_id) {
+  _KinetoEvent& startThreadId(uint64_t start_thread_id) {
     start_thread_id_ = start_thread_id;
     return *this;
   }
 
-  KinetoEvent& endThreadId(uint64_t end_thread_id) {
+  _KinetoEvent& endThreadId(uint64_t end_thread_id) {
     end_thread_id_ = end_thread_id;
     return *this;
   }
 
-  KinetoEvent& fwdThreadId(uint64_t fwd_thread_id) {
+  _KinetoEvent& fwdThreadId(uint64_t fwd_thread_id) {
     fwd_thread_id_ = fwd_thread_id;
     return *this;
   }
 
-  KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
+  _KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
     shapes_ = shapes;
     return *this;
   }
 
+<<<<<<< HEAD
   KinetoEvent& dtypes(const std::vector<std::string>& dtypes) {
     dtypes_ = dtypes;
     return *this;
   }
 
   KinetoEvent& flops(uint64_t flops) {
+=======
+  _KinetoEvent& flops(uint64_t flops) {
+>>>>>>> 866a5cd2fe (Precede KinetoEvent and ProfilerResult with an underscore)
     flops_ = flops;
     return *this;
   }
 
-  KinetoEvent& sequenceNr(int64_t sequence_nr) {
+  _KinetoEvent& sequenceNr(int64_t sequence_nr) {
     sequence_nr_ = sequence_nr;
     return *this;
   }
 
-  KinetoEvent& stack(const std::vector<std::string>& st) {
+  _KinetoEvent& stack(const std::vector<std::string>& st) {
     stack_ = st;
     return *this;
   }
 
-  KinetoEvent& scope(uint8_t scope) {
+  _KinetoEvent& scope(uint8_t scope) {
     scope_ = scope;
     return *this;
   }
@@ -151,7 +155,7 @@ struct TORCH_API KinetoEvent {
 
   // Kineto fields
 
-  KinetoEvent& activity(const libkineto::TraceActivity& activity);
+  _KinetoEvent& activity(const libkineto::TraceActivity& activity);
 
   std::string name() const {
     return name_;
@@ -177,7 +181,7 @@ struct TORCH_API KinetoEvent {
     return correlation_id_;
   }
 
-  KinetoEvent& correlationId(uint64_t correlation_id)  {
+  _KinetoEvent& correlationId(uint64_t correlation_id)  {
     correlation_id_ = correlation_id;
     return *this;
   }
@@ -222,14 +226,14 @@ struct TORCH_API KinetoEvent {
 // Consolidating events returned directly from Kineto
 // with events manually created by us (e.g. start/stop marks,
 // memory allocation events)
-struct TORCH_API ProfilerResult {
-  ProfilerResult(
-      std::vector<KinetoEvent> events,
+struct TORCH_API _ProfilerResult {
+  _ProfilerResult(
+      std::vector<_KinetoEvent> events,
       thread_event_lists legacy_events,
       std::unique_ptr<libkineto::ActivityTraceInterface> trace);
-  ~ProfilerResult();
+  ~_ProfilerResult();
 
-  const std::vector<KinetoEvent>& events() const {
+  const std::vector<_KinetoEvent>& events() const {
     return events_;
   }
 
@@ -241,7 +245,7 @@ struct TORCH_API ProfilerResult {
 
  private:
   bool saved_ = false;
-  std::vector<KinetoEvent> events_;
+  std::vector<_KinetoEvent> events_;
   thread_event_lists legacy_events_;
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
 };
@@ -250,7 +254,7 @@ TORCH_API void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
 
-TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
+TORCH_API std::unique_ptr<_ProfilerResult> disableProfiler();
 
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,

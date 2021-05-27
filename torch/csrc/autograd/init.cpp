@@ -108,38 +108,38 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("Metal", c10::DeviceType::Metal);
 
 #ifdef USE_KINETO
-  py::class_<KinetoEvent>(m, "_KinetoEvent")
+  py::class_<_KinetoEvent>(m, "_KinetoEvent")
       // name of the event
-      .def("name", &KinetoEvent::name)
+      .def("name", &_KinetoEvent::name)
       // PyTorch thread id of the start callback
-      .def("start_thread_id", [](const KinetoEvent& e) {
+      .def("start_thread_id", [](const _KinetoEvent& e) {
         return e.startThreadId();
       })
       // PyTorch thread id of the end callback
-      .def("end_thread_id", [](const KinetoEvent& e) {
+      .def("end_thread_id", [](const _KinetoEvent& e) {
         return e.endThreadId();
       })
       // for events of scope BACKWARD_FUNCTION - PyTorch thread id
       // of the corresponding forward op
-      .def("fwd_thread_id", [](const KinetoEvent& e) {
+      .def("fwd_thread_id", [](const _KinetoEvent& e) {
         return e.fwdThreadId();
       })
       // together with fwd_thread_id, used to uniquely identify
       // the forward op
-      .def("sequence_nr", [](const KinetoEvent& e) {
+      .def("sequence_nr", [](const _KinetoEvent& e) {
         return e.sequenceNr();
       })
       // absolute start time (since unix epoch) in us
-      .def("start_us", &KinetoEvent::startUs)
+      .def("start_us", &_KinetoEvent::startUs)
       // duration in us
-      .def("duration_us", &KinetoEvent::durationUs)
+      .def("duration_us", &_KinetoEvent::durationUs)
       // used for correlation between high-level PyTorch events
       // and low-level device events
-      .def("correlation_id", [](const KinetoEvent& e) {
+      .def("correlation_id", [](const _KinetoEvent& e) {
         return e.correlationId();
       })
       // shapes of input tensors
-      .def("shapes", [](const KinetoEvent& e) {
+      .def("shapes", [](const _KinetoEvent& e) {
         if (e.hasShapes()) {
           return e.shapes();
         } else {
@@ -154,7 +154,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         }
       })
       // stack traces of the PyTorch CPU events
-      .def("stack", [](const KinetoEvent& e) {
+      .def("stack", [](const _KinetoEvent& e) {
         if (e.hasStack()) {
           return e.stack();
         } else {
@@ -163,21 +163,21 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       })
       // type of the RecordFunction that generated a PyTorch CPU event
       // (op, torchscript function, user label, etc)
-      .def("scope", [](const KinetoEvent& e) {
+      .def("scope", [](const _KinetoEvent& e) {
         return e.scope();
       })
       // device number, for CPU - process id
-      .def("device_index", &KinetoEvent::deviceIndex)
+      .def("device_index", &_KinetoEvent::deviceIndex)
       // for CUDA - stream id, for CPU - start thread id
-      .def("device_resource_id", &KinetoEvent::deviceResourceId)
+      .def("device_resource_id", &_KinetoEvent::deviceResourceId)
       // device type
-      .def("device_type", [](const KinetoEvent& e) {
+      .def("device_type", [](const _KinetoEvent& e) {
         return e.deviceType();
       })
       // correlation id of a linked event
-      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId)
+      .def("linked_correlation_id", &_KinetoEvent::linkedCorrelationId)
       // compute flops
-      .def("flops", [](const KinetoEvent& e) {
+      .def("flops", [](const _KinetoEvent& e) {
         return e.flops();
       })
       // Whether this is async event or not
@@ -186,10 +186,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
 
+<<<<<<< HEAD
   py::class_<ProfilerResult>(m, "_ProfilerResult")
     .def("events", &ProfilerResult::events)
     .def("legacy_events", &ProfilerResult::legacy_events)
     .def("save", &ProfilerResult::save);
+=======
+  py::class_<_ProfilerResult>(m, "_ProfilerResult")
+    .def("events", &_ProfilerResult::events)
+    .def("legacy_events", &_ProfilerResult::legacy_events)
+    .def("save", &_ProfilerResult::save);
+>>>>>>> 866a5cd2fe (Precede KinetoEvent and ProfilerResult with an underscore)
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
