@@ -59,9 +59,14 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
     return;
 
   pybind11::gil_scoped_acquire gil;
-  // TODO This assert is not generally true in the presence of Python weak
-  // references; need to take a little more care here
-  TORCH_INTERNAL_ASSERT(Py_REFCNT(pyobj) == 1);
+  if (Py_REFCNT(pyobj) > 1) {
+    // It's still alive!  This can happen if a weak ref resurrected
+    // the PyObject without flipping ownership.  At this point it is
+    // too late to rescue the object, so just stub out the PyObject
+    // so that it fails on subsequent uses.  Don't raise an error here;
+    // you're probably in a destructor.
+    ((THPVariable*)pyobj)->cdata = MaybeOwned<Variable>();
+  }
   Py_DECREF(pyobj);
 };
 
@@ -138,7 +143,6 @@ PyObject * THPVariable_Wrap(Variable var)
     auto obj = *mb_obj;
     if (obj) {
       if (var.unsafeGetTensorImpl()->owns_pyobj()) {
-        TORCH_INTERNAL_ASSERT(Py_REFCNT(obj) == 1);
         // C++ owns the Python object; this implies there weren't any other
         // owning references to the Python object.  Since we're making the
         // object "live" again on Python side, let's flip back the ownership
@@ -270,6 +274,12 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 }
 
 PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs);
+
+static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
+  const auto& var = THPVariable_Unpack(self);
+  THPVariable_Wrap(var);
+  Py_RETURN_NONE;
+}
 
 // Instantiates a subclass of self with the same data.
 static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObject* kwargs) {
@@ -934,6 +944,8 @@ static PyMethodDef extra_methods[] = {
     METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_make_subclass", castPyCFunctionWithKeywords(THPVariable_make_subclass),
     METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_fix_weakref", THPVariable_fix_weakref,
+    METH_NOARGS, nullptr},
   {nullptr}
 };
 

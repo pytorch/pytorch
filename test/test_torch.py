@@ -18,6 +18,7 @@ import types
 import pickle
 import textwrap
 import subprocess
+import weakref
 import sys
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes
@@ -8377,7 +8378,6 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         self.assertTrue(m[0])
 
     def test_tensor_weakref_dealloc(self):
-        import weakref
 
         x = torch.empty(2)
         m = [False]
@@ -8488,6 +8488,35 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
 
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
+
+    def test_dead_weak_ref(self):
+        x = torch.empty(2)
+        w_x = weakref.ref(x)
+        y = torch.empty(2)
+        y.grad = x
+        del x
+
+        x = w_x()
+        # Ideally, x would keep the tensor live.  But CPython doesn't
+        # provide enough hooks to do this.  So it will go dead and x
+        # will transmute into an undefined tensor.  Not great, but the
+        # best we can do.
+        del y
+
+        self.assertRaises(RuntimeError, lambda: x.sigmoid())
+
+    def test_resurrected_weak_ref(self):
+        x = torch.empty(2)
+        w_x = weakref.ref(x)
+        y = torch.empty(2)
+        y.grad = x
+        del x
+
+        x = w_x()
+        # Use this to manually fix weak references after dereferencing them
+        x._fix_weakref()
+        del y
+        x.sigmoid()
 
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
