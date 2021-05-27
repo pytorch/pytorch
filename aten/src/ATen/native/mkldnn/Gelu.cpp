@@ -85,3 +85,5 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input) {
 }
 
 }}
+
+#endif // AT_MKLDNN_EBABLED
