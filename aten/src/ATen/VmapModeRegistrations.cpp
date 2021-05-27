@@ -98,7 +98,7 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
 
   m.impl("randperm", unsupportedRandomOp<int64_t, TENSOROPTIONS>);
   m.impl("randperm.generator", unsupportedRandomOp<int64_t, optional<Generator>, TENSOROPTIONS>);
-  m.impl("randperm.out", unsupportedRandomOp_<int64_t, Tensor&>);
+  m.impl("randperm.out", unsupportedRandomOp__<int64_t, const Tensor&>);
   m.impl("randperm.generator_out", unsupportedRandomOp__<int64_t, optional<Generator>, const Tensor&>);
 
   m.impl("randint", unsupportedRandomOp<int64_t, IntArrayRef, TENSOROPTIONS>);

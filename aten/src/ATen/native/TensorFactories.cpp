@@ -861,7 +861,7 @@ Tensor randn_like(
 
 namespace {
 template <typename scalar_t>
-void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
+void randperm_cpu(const Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
   scalar_t *r__data = result.data_ptr<scalar_t>();
 
   result.resize_({n});
@@ -908,11 +908,11 @@ Tensor randperm(int64_t n, c10::optional<Generator> generator,
   return at::randperm_out(tensor, n, generator);
 }
 
-Tensor& randperm_out(int64_t n, Tensor& result) {
+const Tensor& randperm_out(int64_t n, const Tensor& result) {
   return at::randperm_out(result, n, c10::nullopt);
 }
 
-Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, Tensor& result) {
+const Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, const Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   check_supported_max_int_with_precision(n, result);

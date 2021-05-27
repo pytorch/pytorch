@@ -3310,6 +3310,7 @@
 - func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: randperm.generator_out(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
