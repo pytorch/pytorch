@@ -47,6 +47,15 @@ class TestPythonKey(TestCase):
         inp = torch.randn(3)
         self.assertEqual(jit_f(inp), f(inp))
 
+    def test_nnc_scalar(self, device):
+        def f(x):
+            return torch.sin(x)
+
+        jit_f = nnc_jit(f)
+
+        inp = torch.randn(())
+        self.assertEqual(jit_f(inp), f(inp))
+
     def test_nnc_pytrees(self, device):
         def f(x):
             return [torch.sin(x[0])]
