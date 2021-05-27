@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <cstring>
 #include <iostream>
 #include <sstream>
@@ -8,13 +9,13 @@
 namespace c10 {
 namespace utils {
 // Reads an environment variable and returns
-// - true,              if set equal to "1"
-// - false,             if set equal to "0"
-// - `default_value`,   otherwise
+// - optional<true>,              if set equal to "1"
+// - optional<false>,             if set equal to "0"
+// - nullopt,   otherwise
 //
 // NB:
 // Issues a warning if the value of the environment variable is not 0 or 1.
-bool check_env_bool(const char* name, bool default_value = false) {
+optional<bool> check_env_bool(const char* name) {
   auto envar = std::getenv(name);
   if (envar) {
     if (strcmp(envar, "0") == 0) {
@@ -30,45 +31,7 @@ bool check_env_bool(const char* name, bool default_value = false) {
         envar,
         "valid values are 0 or 1.");
   }
-  return default_value;
-}
-
-// Reads an environment variable and returns
-// - its value,         if it is set and is a valid value
-// - `default_value`,   otherwise
-//
-// You can optionally pass in a list of valid values (default: empty list,
-// which is interpreted as "all values accepted")
-std::string check_env(
-    const char* name,
-    const char* default_value = "UNSET",
-    const std::vector<std::string> valid_values = std::vector<std::string>()) {
-  auto envar = std::getenv(name);
-
-  // Check if envar is in the set of valid values (if any)
-  bool found = false;
-  for (auto& val : valid_values) {
-    if (val.compare(envar) == 0) {
-      found = true;
-    }
-  }
-
-  // Issue a warning if an invalid value was passed in
-  if (valid_values.size() > 0 && !found) {
-    std::stringstream ss;
-    ss << "Ignoring invalid value for flag " << name << ": " << envar << ". ";
-    ss << "Valid values are: ";
-    for (auto& val : valid_values) {
-      ss << val << ", ";
-    }
-    ss << ". Using default value " << default_value << "instead.";
-
-    TORCH_WARN(ss.str());
-
-    return default_value;
-  }
-
-  return envar;
+  return {};
 }
 } // namespace utils
 } // namespace c10
