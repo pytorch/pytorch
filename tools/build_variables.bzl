@@ -938,6 +938,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/FractionalMaxPool2d.cpp",
     "aten/src/ATen/native/FractionalMaxPool3d.cpp",
     "aten/src/ATen/native/FunctionOfAMatrixUtils.cpp",
+    "aten/src/ATen/native/Functions.cpp",
     "aten/src/ATen/native/GatedLinearUnit.cpp",
     "aten/src/ATen/native/GridSampler.cpp",
     "aten/src/ATen/native/Im2Col.cpp",
