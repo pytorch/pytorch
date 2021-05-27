@@ -168,9 +168,7 @@ void writeArchiveV4(
   writer.writeRecord(fname, data.data(), data.size());
 }
 
-bool backport_v5_to_v4(
-    std::stringstream& input_model_stream,
-    std::stringstream& ouput_model_stream) {
+std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   // 1) read from archive `bytecode` archive
   PyTorchStreamReader reader(&input_model_stream);
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader);
@@ -190,6 +188,7 @@ bool backport_v5_to_v4(
       "bytecode",
   };
 
+  std::stringstream ouput_model_stream;
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
     ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
     return !ouput_model_stream ? 0 : nbytes;
@@ -209,13 +208,11 @@ bool backport_v5_to_v4(
   // write `constants` archive
   auto constants_tuple =
       c10::ivalue::Tuple::create(std::move(constants_values));
-  writeArchiveV4(writer, kArchiveNameConstants, bytecode_tuple);
-  return true;
+  writeArchiveV4(writer, kArchiveNameConstants, constants_tuple);
+  return ouput_model_stream;
 }
 
-bool backport_v6_to_v5(
-    std::stringstream& input_model_stream,
-    std::stringstream& output_model_stream) {
+std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   std::shared_ptr<IStreamAdapter> rai =
       std::make_shared<IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
@@ -250,7 +247,7 @@ bool backport_v6_to_v5(
 // * PyTorchStreamWriter has access to the output model backported to the
 // previous N-1 bytecode version. Returns true if successful, false otherwise.
 using BytecodeBackportFunction =
-    std::function<bool(std::stringstream&, std::stringstream&)>;
+    std::function<std::stringstream(std::stringstream&)>;
 
 BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
@@ -259,11 +256,11 @@ BackportManager::BackportManager() {
 
 std::unordered_map<
     int64_t,
-    std::function<bool(std::stringstream&, std::stringstream&)>>&
+    std::function<std::stringstream(std::stringstream&)>>&
 BackportManager::bytecodeBackportFunctions() const {
   static std::unordered_map<
       int64_t,
-      std::function<bool(std::stringstream&, std::stringstream&)>>
+      std::function<std::stringstream(std::stringstream&)>>
       backport_functions;
   return backport_functions;
 }
@@ -307,7 +304,7 @@ bool BackportManager::backport(
   bool backport_success = true;
 
   // 1) Given an istream_adapter (an adapter with access to the input model, the
-  // model can be from istrea, file and etc), copy all model content to
+  // model can be from istream, file and etc), copy all model content to
   // stringstream
   std::stringstream oss;
   get_model_stream(start_reader, oss);
@@ -338,12 +335,14 @@ bool BackportManager::backport(
           bytecode_version,
           ", but it gets ",
           input_model_stream_version);
+      return false;
     }
 
     // Keep backporting till request version
-    backport_success &= bytecodeBackportFunctions()[bytecode_version--](
-        input_model_stream, output_model_stream);
+    std::stringstream backport_model_stream =
+        bytecodeBackportFunctions()[bytecode_version--](input_model_stream);
 
+    output_model_stream.swap(backport_model_stream);
     auto output_model_stream_version =
         _get_model_bytecode_version(output_model_stream);
 
@@ -353,6 +352,7 @@ bool BackportManager::backport(
           bytecode_version,
           ", but it gets ",
           output_model_stream_version);
+      return false;
     }
   }
 
