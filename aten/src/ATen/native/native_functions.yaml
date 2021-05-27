@@ -2627,6 +2627,7 @@
   variants: function, method
 
 - func: matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
 
 - func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
 
@@ -9812,6 +9813,7 @@
   variants: function
 
 - func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   python_module: linalg
   variants: function
 

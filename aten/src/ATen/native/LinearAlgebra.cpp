@@ -1474,7 +1474,7 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   return result;
 }
 
-Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
+const Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, const Tensor &result) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
