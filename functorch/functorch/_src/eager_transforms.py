@@ -93,8 +93,8 @@ def vjp(f, *primals):
         primals = _wrap_all_tensors(primals, level)
         diff_primals = _create_differentiable(primals, level)
         primals_out = f(*diff_primals)
-        results = _undo_create_differentiable(primals_out, level)
 
+        results = _undo_create_differentiable(primals_out, level)
         flat_diff_primals, primals_spec = tree_flatten(diff_primals)
         flat_primals_out, primals_out_spec = tree_flatten(primals_out)
 

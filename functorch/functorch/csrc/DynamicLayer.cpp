@@ -356,7 +356,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   // 2. Unwrap all the args in the copy set
   // 3. Call the operator
   // 4. Wrap the output
-  // 5. (!) refreshSizesAndStrides for all the args in the original set
+  // 5. (!) refreshMetadata for all the args in the original set
   // 6. (!) Pop those args off.
 
   // Step 1 & 2
@@ -404,7 +404,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
       if (!maybe_tensor_wrapper) {
         continue;
       }
-      maybe_tensor_wrapper->refreshSizesAndStrides();
+      maybe_tensor_wrapper->refreshMetadata();
     }
 
     // Step 6
