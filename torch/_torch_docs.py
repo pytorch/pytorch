@@ -4179,6 +4179,18 @@ Args:
     {input}
 """.format(**common_args))
 
+add_docstr(torch.is_grad_enabled, r"""
+is_grad_enabled() -> (bool)
+
+Returns True if grad mode is currently enabled.
+""".format(**common_args))
+
+add_docstr(torch.is_inference_mode_enabled, r"""
+is_inference_mode_enabled() -> (bool)
+
+Returns True if inference mode is currently enabled.
+""".format(**common_args))
+
 add_docstr(torch.is_nonzero, r"""
 is_nonzero(input) -> (bool)
 
@@ -10404,7 +10416,7 @@ Returns:
 
 add_docstr(torch.repeat_interleave,
            r"""
-repeat_interleave(input, repeats, dim=None) -> Tensor
+repeat_interleave(input, repeats, dim=None, *, output_size=None) -> Tensor
 
 Repeat elements of a tensor.
 
@@ -10419,6 +10431,8 @@ Args:
     dim (int, optional): The dimension along which to repeat values.
         By default, use the flattened input array, and return a flat output
         array.
+
+Keyword args:
     output_size (int, optional): Total output size for the given axis
         ( e.g. sum of repeats). If given, it will avoid stream syncronization
         needed to calculate output shape of the tensor.
@@ -10446,7 +10460,7 @@ Example::
             [3, 4],
             [3, 4]])
 
-.. function:: repeat_interleave(repeats) -> Tensor
+.. function:: repeat_interleave(repeats, *, output_size=None) -> Tensor
 
 If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,

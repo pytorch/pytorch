@@ -1026,7 +1026,7 @@ def main() -> None:
         'native_function_declarations': list(concatMap(
             # Convert to a set first to remove duplicate kernel names.
             # Backends are allowed to repeat kernel names; only generate the declaration once!
-            lambda f: list(set(concatMap(
+            lambda f: list(OrderedDict.fromkeys(concatMap(
                 lambda backend_idx:
                     dest.compute_native_function_declaration(f, backend_idx),
                 backend_indices.values()))),

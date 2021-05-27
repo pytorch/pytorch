@@ -1018,6 +1018,35 @@ class TestUnaryUfuncs(TestCase):
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
 
+    @skipIfNoSciPy
+    @dtypes(torch.float, torch.double)
+    def test_mish(self, device, dtype):
+        input_np = np.random.randn(5, 8)
+        special_input = [[-1000, -1, -0.1, 0, 0.5, 1, 2, 1000]]
+        input_np = np.concatenate((input_np, special_input), axis=0).astype(
+            torch_to_numpy_dtype_dict[dtype])
+        expected_output_np = input_np * np.tanh(np.log1p(np.exp(input_np)))
+
+        expected_output = torch.from_numpy(expected_output_np).to(device)
+        expected_output_noncontig = expected_output.transpose(0, 1)
+
+        atol = 1e-6
+        rtol = 1e-6
+
+        input = torch.from_numpy(input_np).clone().contiguous().to(device)
+        self.assertEqual(torch.nn.functional.mish(input), expected_output,
+                         atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.mish(input, inplace=True),
+                         expected_output, atol=atol, rtol=rtol)
+
+        input = torch.from_numpy(input_np).clone().to(device)
+        input_noncontig = input.transpose(0, 1)
+        self.assertEqual(torch.nn.functional.mish(input_noncontig),
+                         expected_output_noncontig, atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.mish(
+            input_noncontig, inplace=True), expected_output_noncontig,
+            atol=atol, rtol=rtol)
+
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
@@ -1408,6 +1437,34 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.Size([0, 0]), y.shape)
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_nonzero_noncontiguous(self, device, dtype):
+        x = make_tensor((10, 10, 10), dtype=dtype, device=device,
+                        low=1, noncontiguous=False)
+        mask = make_tensor((10, 10, 10), dtype=torch.bool, device=device)
+        x[mask] = 0
+
+        def permute_storage(tensor, dims):
+            dest_dims = tuple(range(len(dims)))
+            return tensor.permute(dims).contiguous().movedim(dims, dest_dims)
+
+        # Assume contiguous case is correct
+        expect = x.nonzero()
+
+        # Dense, permuted
+        self.assertEqual(permute_storage(x, [0, 2, 1]).nonzero(), expect)
+        self.assertEqual(permute_storage(x, [2, 1, 0]).nonzero(), expect)
+
+        # Non-dense
+        nondense = torch.empty((40, 10, 20), dtype=dtype, device=device)[::4, :, ::2]
+        nondense[:] = x
+        self.assertEqual(nondense.nonzero(), expect)
+
+        # Non-dense, permuted
+        nondense = nondense.permute([0, 2, 1])
+        nondense[:] = x
+        self.assertEqual(nondense.nonzero(), expect)
 
     # TODO: rationalize with exp OpInfo
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False) +
