@@ -3621,1245 +3621,1235 @@ struct to_ir {
             (*rhs_type)->repr_str());
       }
 
-      const char* ErrorReport::what() const noexcept {
-        std::stringstream msg;
-        msg << "\n" << ss.str();
-        msg << ":\n";
-        context.highlight(msg);
-
-        msg << get_stacked_errors(error_stack);
-
-        the_message = msg.str();
-        return the_message.c_str();
-
-        if (*rhs_type == AnyType::get()) {
-          TORCH_WARN(
-              "List consists of heterogeneous types, which means",
-              " that it has been typed as `List[Any]`. To use "
-              "any of the values in the List, it will be "
-              "necessary to add an `assert isinstance` statement "
-              "before first use to trigger type refinement\n",
-              ll.range().str());
-        }
-      }
-
-      Value* result =
-          graph->insertNode(graph->createList(elem_type, values))->output();
-      return result;
-    }
-
-    Value* emitSimpleExpr(
-        const TreeRef& tree, const TypePtr& type_hint = nullptr) {
-      switch (tree->kind()) {
-        case TK_FLOOR_DIV:
-        case '@': {
-          const auto& inputs = tree->trees();
-          auto kind = getNodeKind(tree->kind(), inputs.size());
-          auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-          return emitBuiltinCall(
-              tree->range(), *method.graph(), kind, named_values, {});
-        }
-        case '%': {
-          auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
-                         ->asValue(tree->tree(0)->range(), method);
-          auto const& lhs_type = lhs->type();
-          if (lhs_type == StringType::get()) {
-            auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
-            auto node = graph->create(aten::percentFormat, values, 1)
-                            ->setSourceRange(tree->range());
-            Value* output = graph->insertNode(node)->output();
-            output->setType(StringType::get());
-            return output;
-          } else {
-            return emitBinaryOp(tree);
-          }
-        }
-        case TK_IN:
-        case TK_POW:
-        case TK_NE:
-        case TK_EQ:
-        case '<':
-        case '>':
-        case TK_LE:
-        case TK_GE:
-        case '*':
-        case '/':
-        case '+':
-        case '-':
-        case '&':
-        case '|':
-        case '^':
-        case TK_LSHIFT:
-        case TK_RSHIFT:
-          return emitBinaryOp(tree);
-        case TK_IS:
-        case TK_ISNOT:
-        case TK_AND:
-        case TK_OR:
-        case TK_NOT: {
-          return emitCondExpr(Expr(tree)).value();
-        }
-        case TK_UNARY_MINUS: {
-          return emitUnaryOp(tree, "__neg__", aten::neg);
-        }
-        case '~': {
-          return emitUnaryOp(tree, "__invert__", aten::bitwise_not);
-        }
-        case TK_STARRED: {
-          throw ErrorReport(tree)
-              << "Unexpected starred expansion. File a bug report";
-        }
-        case TK_CONST: {
-          return emitConst(Const(tree));
-        } break;
-        case TK_TRUE: {
-          return graph->insertConstant(true, tree->range());
-        } break;
-        case TK_FALSE: {
-          return graph->insertConstant(false, tree->range());
-        } break;
-        case TK_NONE: {
-          return graph->insertConstant(IValue(), tree->range());
-        } break;
-        case TK_IF_EXPR: {
-          return emitTernaryIf(TernaryIf(tree), type_hint);
-        } break;
-        case TK_STRINGLITERAL: {
-          return emitStringLiteral(StringLiteral(tree));
-        } break;
-        case TK_LIST_LITERAL: {
-          auto ll = ListLiteral(tree);
-          return emitListLiteral(ll, type_hint);
-        } break;
-        case TK_TUPLE_LITERAL: {
-          auto ll = TupleLiteral(tree);
-          auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
-          return graph->insertNode(graph->createTuple(values))->output();
-        } break;
-        case TK_DICT_LITERAL: {
-          auto dl = DictLiteral(tree);
-          auto key_trees = dl.key_inputs().tree()->trees();
-          auto value_trees = dl.value_inputs().tree()->trees();
-          AT_ASSERT(key_trees.size() == value_trees.size());
-          std::vector<Value*> keys, values;
-
-          for (size_t i = 0; i < key_trees.size(); ++i) {
-            keys.push_back(emitExpr(Expr(key_trees[i])));
-            values.push_back(emitExpr(Expr(value_trees[i])));
-          }
-
-          TypePtr key_type = nullptr;
-          TypePtr value_type = nullptr;
-
-          if (type_hint && type_hint->kind() == TypeKind::DictType) {
-            auto dict_type = type_hint->expect<DictType>();
-            key_type = dict_type->getKeyType();
-            value_type = dict_type->getValueType();
-          } else if (keys.empty()) {
-            key_type = StringType::get();
-            value_type = TensorType::get();
-          } else {
-            key_type = keys.at(0)->type();
-            value_type = values.at(0)->type();
-          }
-          AT_ASSERT(key_type != nullptr && value_type != nullptr);
-
-          for (size_t i = 0, N = keys.size(); i < N; ++i) {
-            std::stringstream ss;
-            if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss)) {
-              throw ErrorReport(key_trees[i])
-                  << "Dict keys must contain "
-                  << "only a single type, expected: " << key_type->repr_str()
-                  << " but found " << keys[i]->type()->repr_str()
-                  << " instead.\n"
-                  << ss.str();
-            }
-          }
-
-          if (!values.empty()) {
-            // Get the smallest common supertype of all the values. We
-            // need to use the O(N^2) algorithm instead of using
-            // `std::accumulate` to account for the case that two types
-            // cannot themselves be unified, but there exists some mutual
-            // parent type later in `values`. (E.g. T2 <: T1, T3 <: T1,
-            // `values` = {T2, T3, T1}. The real supertype should be `T1`,
-            // not `Any`)
-
-            // List of possible parent types
-            std::vector<TypePtr> seen;
-
-            auto get_greater_type =
-                [](const TypePtr t1,
-                   const TypePtr t2) -> c10::optional<TypePtr> {
-              if (t1->isSubtypeOf(t2)) {
-                return t2;
-              } else if (t2->isSubtypeOf(t1)) {
-                return t1;
-              } else {
-                return c10::nullopt;
-              }
-            };
-
-            for (const TypePtr type : values) {
-              bool added = false;
-              for (size_t i = 0; i < seen.size(); ++i) {
-                // Don't bother compare if it's already in our list of
-                // possible supertypes
-                if (type == seen[i]) {
-                  continue;
-                }
-                auto maybe_parent = get_greater_type(type, seen[i]);
-                if (maybe_parent && *maybe_parent == type) {
-                  seen[i] = type;
-                  added = true;
-                }
-              }
-              if (!added) {
-                seen.push_back(type);
-              }
-            }
-
-            TypePtr inferred_type = seen.size() == 1 ? seen[0] : AnyType::get();
-
-            std::stringstream ss;
-            TORCH_CHECK(
-                !type_hint || inferred_type->isSubtypeOfExt(type_hint),
-                "Type hint for dict values was ",
-                type_hint->repr_str(),
-                " but the greatest common supertype of the given values",
-                " was ",
-                inferred_type->repr_str(),
-                "\n",
-                *ss);
-
-            value_type = inferred_type;
-          }
-
-          return graph
-              ->insertNode(
-                  graph->createDict(key_type, value_type, keys, values))
-              ->output();
-        } break;
-        case TK_LIST_COMP: {
-          auto lc = ListComp(tree);
-          return emitListComprehension(lc, type_hint);
-        } break;
-        case TK_DICT_COMP: {
-          auto dc = DictComp(tree);
-          return emitDictComprehension(dc, type_hint);
-        } break;
-        default:
-          throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
+      if (*rhs_type == AnyType::get()) {
+        TORCH_WARN(
+            "List consists of heterogeneous types, which means",
+            " that it has been typed as `List[Any]`. To use "
+            "any of the values in the List, it will be "
+            "necessary to add an `assert isinstance` statement "
+            "before first use to trigger type refinement\n",
+            ll.range().str());
       }
     }
 
-    Value* emitConst(const Const& c) {
-      if (c.isFloatingPoint())
-        return materializeConstant(
-            c.asFloatingPoint(), *graph, c.range(), fp_constants);
-      else if (c.isComplex())
-        return materializeConstant(
-            c.asComplex(), *graph, c.range(), complex_constants);
-      else
-        return materializeConstant(
-            c.asIntegral(), *graph, c.range(), integral_constants);
-    }
+    Value* result =
+        graph->insertNode(graph->createList(elem_type, values))->output();
+    return result;
+  }
 
-    Value* emitStringLiteral(const StringLiteral& c) {
-      return insertConstant(*graph, c.text(), c.range());
-    }
-
-    // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
-    Value* emitSelect(
-        const SourceRange& loc, Value* input, Value* dim, Value* index) {
-      return emitBuiltinCall(
-          loc, *graph, aten::select, {input, dim, index}, {});
-    }
-
-    Value* emitSliceOp(
-        const SourceRange& loc,
-        Value* sliceable,
-        Value* dim,
-        Value* start,
-        Value* end,
-        Value* step) {
-      std::vector<NamedValue> args;
-      args.reserve(4);
-      args.emplace_back(loc, "self", sliceable);
-
-      // XXX: If list slicing becomes more complicated or stops using
-      // aten::slice, we should separate it from this function.
-      if (dim) {
-        AT_ASSERT(sliceable->type()->isSubtypeOf(TensorType::get()));
-
-        args.emplace_back(dim);
-      } else {
-        AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
+  Value* emitSimpleExpr(
+      const TreeRef& tree,
+      const TypePtr& type_hint = nullptr) {
+    switch (tree->kind()) {
+      case TK_FLOOR_DIV:
+      case '@': {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+        return emitBuiltinCall(
+            tree->range(), *method.graph(), kind, named_values, {});
       }
-      // TODO for now let's deal with TupleType first. Ideally all list, tensor,
-      // string, and tuple slicing should be same (tugsbayasgalan)
-      if (sliceable->type()->cast<TupleType>()) {
-        std::vector<at::optional<NamedValue>> tuple_args;
-        // since we are only dealing with tuple slicing for now, we try to keep
-        // tuple args seperate for now
-        tuple_args.reserve(3);
-
-        start ? tuple_args.emplace_back(start)
-              : tuple_args.emplace_back(c10::nullopt);
-        end ? tuple_args.emplace_back(end)
-            : tuple_args.emplace_back(c10::nullopt);
-        step ? tuple_args.emplace_back(step)
-             : tuple_args.emplace_back(c10::nullopt);
-
-        return emitTupleSlice(loc, args[0], tuple_args);
-      }
-
-      // TODO this needs to be cleaned for list slicing
-      // Default value for start is 0.
-      if (!start) {
-        start = graph->insertConstant(0, loc);
-      }
-      args.emplace_back(loc, "start", start);
-
-      if (end) {
-        args.emplace_back(loc, "end", end);
-      }
-
-      if (!step) {
-        step = graph->insertConstant(1, loc);
-      }
-      NamedValue step_nv = NamedValue(loc, "step", step);
-      return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
-    }
-
-    // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin,
-    // end, 1)
-    Value* emitSlice(
-        const SourceRange& loc,
-        Value* input,
-        Value* dim, // Only used for tensor slicing
-        const SliceExpr& slice) {
-      Value* start = nullptr;
-      Value* end = nullptr;
-      Value* step = nullptr;
-      if (slice.start().present()) {
-        start = emitExpr(Expr(slice.start().get()));
-      }
-      if (slice.end().present()) {
-        end = emitExpr(Expr(slice.end().get()));
-      }
-      if (slice.step().present()) {
-        step = emitExpr(Expr(slice.step().get()));
-      }
-      return emitSliceOp(loc, input, dim, start, end, step);
-    }
-
-    Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
-      return emitBuiltinCall(
-          loc, *graph, aten::unsqueeze, {input, dim_val}, {});
-    }
-
-    Value* emitIndex(
-        const SourceRange& loc, Value* input, at::ArrayRef<Value*> indices) {
-      // NB: the index of aten::index should be a type of
-      // List[Optional[Tensor]], this is to support the case like t[:, :, 1]
-      // where : here indicates a None/undefined tensor(optional tensor)
-      auto* index =
-          graph
-              ->insertNode(graph->createList(OptionalType::ofTensor(), indices))
-              ->output();
-      return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {});
-    }
-
-    // Emits multidimensional slicing with int and slice indices.
-    // Returns:
-    // - Value*: the input after it has been indexed by int and slice indices.
-    // - vector<Value*>: A list of tensor Value* indices that have not been
-    // applied yet.
-    //   Should be NULL at indices where sliceable (post-slicing) isn't indexed
-    //   by a tensor.
-    std::pair<Value*, std::vector<Value*>> emitIntAndSliceIndexing(
-        const SourceRange& loc,
-        Value* sliceable,
-        const List<Expr>& subscript_exprs) {
-      // Overall, to handle indexing (other than Tensors), we need to handle a
-      // couple different things. For example, for x[1:3, None, 4], each of
-      // these different index types (slice, None, and integer) result in
-      // different number of dimensions. Slicing doesn't change the number of
-      // dimensions, None adds a dimension, and integer removes a dimension. As
-      // these indexing operations are applied left to right, the actual index
-      // that it's being applied to depends on the previous operations. Ellipses
-      // indexing throws another wrinkle. Ellipses selects any remaining
-      // unspecified dimensions. Thus, for indexes following an ellipses, the
-      // actual index an indexing operation is being applied to depends on the
-      // operations to the right. Thus, we do two passes, one from left to right
-      // up until the ellipses, and one from right to left.
-
-      std::vector<Value*> tensor_indices;
-
-      auto insert_value_for_dim = [&](int64_t dim) {
-        return graph->insertConstant(dim, loc);
-      };
-      std::vector<int64_t> dims(subscript_exprs.size());
-      std::vector<c10::optional<Value*>> exprs(
-          subscript_exprs.size(), c10::nullopt);
-
-      auto handle_indexing = [&](const Expr& subscript_expr,
-                                 int expr_idx,
-                                 int64_t dim,
-                                 bool is_reverse = false) {
-        dims[expr_idx] = dim;
-
-        // Slice expression case, does not represent a single index.
-        if (subscript_expr.kind() == TK_SLICE_EXPR) {
-          if (is_reverse) {
-            return dim - 1;
-          } else {
-            return dim + 1;
-          }
-        }
-
-        // Slice object case, does not represent a single index.
-        auto subscript_sv = emitSugaredExpr(subscript_expr, 1);
-        if (dynamic_cast<SliceValue*>(subscript_sv.get())) {
-          if (is_reverse) {
-            return dim - 1;
-          } else {
-            return dim + 1;
-          }
-        }
-
-        TypePtr type_hint;
-        if (subscript_expr.kind() == TK_NONE) {
-          type_hint = NoneType::get();
-        }
-        auto index = emitExpr(subscript_expr, type_hint);
-
-        // Accept list as subscript but convert it to a Tensor
-        // since it's equivalent to indexing with Tensor.
-        // The list can be a list literal or list variable.
-        // Advanced indexing using list:
-        // @torch.jit.script
-        // def f(x):
-        //   return x[[0, 1, 5]]  # or
-        //   return x[[0, 1], [0, 1]]  # or
-        //   return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]  # or
-        //   ls = [0, 1]
-        //   return x[ls]
-        // Statements above are equivalent to advanced indexing using Tensor:
-        // @torch.jit.script
-        // def f(x):
-        //   return x[torch.tensor([0, 1, 5])]  # or
-        //   return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
-        //   return x[torch.tensor([[0, 1], [0, 1]]),
-        //            torch.tensor([[0, 1], [0, 1]])]  # or
-        //   ls = [0, 1]
-        //   return x[torch.tensor(ls)]
-        if (index->type()->kind() == c10::TypeKind::ListType) {
-          // Always create index tensor as LongTensor.
-          // This is to match Pytorch eager frontend behavior which accepts
-          // indexing with float list.
-          index = graph->insert(
-              aten::tensor, {index}, {NamedValue("dtype", c10::kLong)});
-        }
-
-        exprs[expr_idx] = index;
-        if (index->type()->isSubtypeOf(NoneType::get())) {
-          if (is_reverse) {
-            return dim;
-          } else {
-            return dim + 1;
-          }
-        } else if (index->type() == IntType::get()) {
-          if (is_reverse) {
-            return dim - 1;
-          } else {
-            return dim;
-          }
-        } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
-          if (is_reverse) {
-            throw ErrorReport(loc)
-                << "Ellipses followed by tensor indexing is currently not supported";
-          } else {
-            return dim + 1;
-          }
+      case '%': {
+        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
+                       ->asValue(tree->tree(0)->range(), method);
+        auto const& lhs_type = lhs->type();
+        if (lhs_type == StringType::get()) {
+          auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
+          auto node = graph->create(aten::percentFormat, values, 1)
+                          ->setSourceRange(tree->range());
+          Value* output = graph->insertNode(node)->output();
+          output->setType(StringType::get());
+          return output;
         } else {
-          throw ErrorReport(loc)
-              << "Unsupported operation: indexing tensor with unsupported index type '"
-              << index->type()->repr_str()
-              << "'. Only ints, slices, lists and tensors are supported";
+          return emitBinaryOp(tree);
         }
-      };
-
-      size_t idx = 0;
-      int64_t dim = 0;
-      for (; idx < subscript_exprs.size(); idx++) {
-        auto subscript_expr = subscript_exprs[idx];
-        if (subscript_expr.kind() == TK_DOTS) {
-          break;
-        }
-        dim = handle_indexing(subscript_expr, idx, dim, /*is_reverse=*/false);
       }
-      int64_t rdim = -1;
-      for (size_t rev_idx = subscript_exprs.size() - 1; rev_idx > idx;
-           rev_idx--) {
-        auto subscript_expr = subscript_exprs[rev_idx];
-        if (subscript_expr.kind() == TK_DOTS) {
-          throw ErrorReport(loc)
-              << "An index can only have a single ellipsis ('...')";
-        }
-        rdim =
-            handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
+      case TK_IN:
+      case TK_POW:
+      case TK_NE:
+      case TK_EQ:
+      case '<':
+      case '>':
+      case TK_LE:
+      case TK_GE:
+      case '*':
+      case '/':
+      case '+':
+      case '-':
+      case '&':
+      case '|':
+      case '^':
+      case TK_LSHIFT:
+      case TK_RSHIFT:
+        return emitBinaryOp(tree);
+      case TK_IS:
+      case TK_ISNOT:
+      case TK_AND:
+      case TK_OR:
+      case TK_NOT: {
+        return emitCondExpr(Expr(tree)).value();
       }
-      for (size_t i = 0; i < exprs.size(); i++) {
-        if (!exprs[i].has_value()) {
-          if (subscript_exprs[i].kind() == TK_SLICE_EXPR) {
-            sliceable = emitSlice(
-                loc,
-                sliceable,
-                insert_value_for_dim(dims[i]),
-                SliceExpr(subscript_exprs[i]));
-            continue;
+      case TK_UNARY_MINUS: {
+        return emitUnaryOp(tree, "__neg__", aten::neg);
+      }
+      case '~': {
+        return emitUnaryOp(tree, "__invert__", aten::bitwise_not);
+      }
+      case TK_STARRED: {
+        throw ErrorReport(tree)
+            << "Unexpected starred expansion. File a bug report";
+      }
+      case TK_CONST: {
+        return emitConst(Const(tree));
+      } break;
+      case TK_TRUE: {
+        return graph->insertConstant(true, tree->range());
+      } break;
+      case TK_FALSE: {
+        return graph->insertConstant(false, tree->range());
+      } break;
+      case TK_NONE: {
+        return graph->insertConstant(IValue(), tree->range());
+      } break;
+      case TK_IF_EXPR: {
+        return emitTernaryIf(TernaryIf(tree), type_hint);
+      } break;
+      case TK_STRINGLITERAL: {
+        return emitStringLiteral(StringLiteral(tree));
+      } break;
+      case TK_LIST_LITERAL: {
+        auto ll = ListLiteral(tree);
+        return emitListLiteral(ll, type_hint);
+      } break;
+      case TK_TUPLE_LITERAL: {
+        auto ll = TupleLiteral(tree);
+        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
+        return graph->insertNode(graph->createTuple(values))->output();
+      } break;
+      case TK_DICT_LITERAL: {
+        auto dl = DictLiteral(tree);
+        auto key_trees = dl.key_inputs().tree()->trees();
+        auto value_trees = dl.value_inputs().tree()->trees();
+        AT_ASSERT(key_trees.size() == value_trees.size());
+        std::vector<Value*> keys, values;
+
+        for (size_t i = 0; i < key_trees.size(); ++i) {
+          keys.push_back(emitExpr(Expr(key_trees[i])));
+          values.push_back(emitExpr(Expr(value_trees[i])));
+        }
+
+        TypePtr key_type = nullptr;
+        TypePtr value_type = nullptr;
+
+        if (type_hint && type_hint->kind() == TypeKind::DictType) {
+          auto dict_type = type_hint->expect<DictType>();
+          key_type = dict_type->getKeyType();
+          value_type = dict_type->getValueType();
+        } else if (keys.empty()) {
+          key_type = StringType::get();
+          value_type = TensorType::get();
+        } else {
+          key_type = keys.at(0)->type();
+          value_type = values.at(0)->type();
+        }
+        AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+        for (size_t i = 0, N = keys.size(); i < N; ++i) {
+          std::stringstream ss;
+          if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss)) {
+            throw ErrorReport(key_trees[i])
+                << "Dict keys must contain "
+                << "only a single type, expected: " << key_type->repr_str()
+                << " but found " << keys[i]->type()->repr_str() << " instead.\n"
+                << ss.str();
+          }
+        }
+
+        if (!values.empty()) {
+          // Get the smallest common supertype of all the values. We
+          // need to use the O(N^2) algorithm instead of using
+          // `std::accumulate` to account for the case that two types
+          // cannot themselves be unified, but there exists some mutual
+          // parent type later in `values`. (E.g. T2 <: T1, T3 <: T1,
+          // `values` = {T2, T3, T1}. The real supertype should be `T1`,
+          // not `Any`)
+
+          // List of possible parent types
+          std::vector<TypePtr> seen;
+
+          auto get_greater_type =
+              [](const TypePtr t1, const TypePtr t2) -> c10::optional<TypePtr> {
+            if (t1->isSubtypeOf(t2)) {
+              return t2;
+            } else if (t2->isSubtypeOf(t1)) {
+              return t1;
+            } else {
+              return c10::nullopt;
+            }
+          };
+
+          auto value_types =
+              c10::fmap(values, [](Value* v) { return v->type(); });
+
+          for (const TypePtr type : value_types) {
+            bool added = false;
+            for (size_t i = 0; i < seen.size(); ++i) {
+              // Don't bother compare if it's already in our list of
+              // possible supertypes
+              if (type == seen[i]) {
+                continue;
+              }
+              auto maybe_parent = get_greater_type(type, seen[i]);
+              if (maybe_parent && *maybe_parent == type) {
+                seen[i] = type;
+                added = true;
+              }
+            }
+            if (!added) {
+              seen.push_back(type);
+            }
           }
 
-          if (subscript_exprs[i].kind() == TK_DOTS) {
-            continue;
-          }
+          TypePtr inferred_type = seen.size() == 1 ? seen[0] : AnyType::get();
 
-          auto subscript_sv = emitSugaredExpr(subscript_exprs[i], 1);
-          if (const auto slice_value =
-                  dynamic_cast<SliceValue*>(subscript_sv.get())) {
-            sliceable = emitSliceOp(
-                loc,
-                sliceable,
-                insert_value_for_dim(dims[i]),
-                slice_value->start(),
-                slice_value->stop(),
-                slice_value->step());
-          }
+          std::stringstream ss;
+          TORCH_CHECK(
+              !type_hint ||
+                  inferred_type->isSubtypeOf(
+                      type_hint->expect<DictType>()->getValueType()),
+              "Type hint for dict values was ",
+              type_hint->repr_str(),
+              " but the greatest common supertype of the given values",
+              " was ",
+              inferred_type->repr_str(),
+              "\n",
+              ss.str());
 
+          value_type = inferred_type;
+        }
+
+        return graph
+            ->insertNode(graph->createDict(key_type, value_type, keys, values))
+            ->output();
+      } break;
+      case TK_LIST_COMP: {
+        auto lc = ListComp(tree);
+        return emitListComprehension(lc, type_hint);
+      } break;
+      case TK_DICT_COMP: {
+        auto dc = DictComp(tree);
+        return emitDictComprehension(dc, type_hint);
+      } break;
+      default:
+        throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
+    }
+  }
+
+  Value* emitConst(const Const& c) {
+    if (c.isFloatingPoint())
+      return materializeConstant(
+          c.asFloatingPoint(), *graph, c.range(), fp_constants);
+    else if (c.isComplex())
+      return materializeConstant(
+          c.asComplex(), *graph, c.range(), complex_constants);
+    else
+      return materializeConstant(
+          c.asIntegral(), *graph, c.range(), integral_constants);
+  }
+
+  Value* emitStringLiteral(const StringLiteral& c) {
+    return insertConstant(*graph, c.text(), c.range());
+  }
+
+  // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
+  Value* emitSelect(
+      const SourceRange& loc,
+      Value* input,
+      Value* dim,
+      Value* index) {
+    return emitBuiltinCall(loc, *graph, aten::select, {input, dim, index}, {});
+  }
+
+  Value* emitSliceOp(
+      const SourceRange& loc,
+      Value* sliceable,
+      Value* dim,
+      Value* start,
+      Value* end,
+      Value* step) {
+    std::vector<NamedValue> args;
+    args.reserve(4);
+    args.emplace_back(loc, "self", sliceable);
+
+    // XXX: If list slicing becomes more complicated or stops using
+    // aten::slice, we should separate it from this function.
+    if (dim) {
+      AT_ASSERT(sliceable->type()->isSubtypeOf(TensorType::get()));
+
+      args.emplace_back(dim);
+    } else {
+      AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
+    }
+    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
+    // string, and tuple slicing should be same (tugsbayasgalan)
+    if (sliceable->type()->cast<TupleType>()) {
+      std::vector<at::optional<NamedValue>> tuple_args;
+      // since we are only dealing with tuple slicing for now, we try to keep
+      // tuple args seperate for now
+      tuple_args.reserve(3);
+
+      start ? tuple_args.emplace_back(start)
+            : tuple_args.emplace_back(c10::nullopt);
+      end ? tuple_args.emplace_back(end)
+          : tuple_args.emplace_back(c10::nullopt);
+      step ? tuple_args.emplace_back(step)
+           : tuple_args.emplace_back(c10::nullopt);
+
+      return emitTupleSlice(loc, args[0], tuple_args);
+    }
+
+    // TODO this needs to be cleaned for list slicing
+    // Default value for start is 0.
+    if (!start) {
+      start = graph->insertConstant(0, loc);
+    }
+    args.emplace_back(loc, "start", start);
+
+    if (end) {
+      args.emplace_back(loc, "end", end);
+    }
+
+    if (!step) {
+      step = graph->insertConstant(1, loc);
+    }
+    NamedValue step_nv = NamedValue(loc, "step", step);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+  }
+
+  // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin,
+  // end, 1)
+  Value* emitSlice(
+      const SourceRange& loc,
+      Value* input,
+      Value* dim, // Only used for tensor slicing
+      const SliceExpr& slice) {
+    Value* start = nullptr;
+    Value* end = nullptr;
+    Value* step = nullptr;
+    if (slice.start().present()) {
+      start = emitExpr(Expr(slice.start().get()));
+    }
+    if (slice.end().present()) {
+      end = emitExpr(Expr(slice.end().get()));
+    }
+    if (slice.step().present()) {
+      step = emitExpr(Expr(slice.step().get()));
+    }
+    return emitSliceOp(loc, input, dim, start, end, step);
+  }
+
+  Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
+    return emitBuiltinCall(loc, *graph, aten::unsqueeze, {input, dim_val}, {});
+  }
+
+  Value* emitIndex(
+      const SourceRange& loc,
+      Value* input,
+      at::ArrayRef<Value*> indices) {
+    // NB: the index of aten::index should be a type of
+    // List[Optional[Tensor]], this is to support the case like t[:, :, 1]
+    // where : here indicates a None/undefined tensor(optional tensor)
+    auto* index =
+        graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
+            ->output();
+    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {});
+  }
+
+  // Emits multidimensional slicing with int and slice indices.
+  // Returns:
+  // - Value*: the input after it has been indexed by int and slice indices.
+  // - vector<Value*>: A list of tensor Value* indices that have not been
+  // applied yet.
+  //   Should be NULL at indices where sliceable (post-slicing) isn't indexed
+  //   by a tensor.
+  std::pair<Value*, std::vector<Value*>> emitIntAndSliceIndexing(
+      const SourceRange& loc,
+      Value* sliceable,
+      const List<Expr>& subscript_exprs) {
+    // Overall, to handle indexing (other than Tensors), we need to handle a
+    // couple different things. For example, for x[1:3, None, 4], each of
+    // these different index types (slice, None, and integer) result in
+    // different number of dimensions. Slicing doesn't change the number of
+    // dimensions, None adds a dimension, and integer removes a dimension. As
+    // these indexing operations are applied left to right, the actual index
+    // that it's being applied to depends on the previous operations. Ellipses
+    // indexing throws another wrinkle. Ellipses selects any remaining
+    // unspecified dimensions. Thus, for indexes following an ellipses, the
+    // actual index an indexing operation is being applied to depends on the
+    // operations to the right. Thus, we do two passes, one from left to right
+    // up until the ellipses, and one from right to left.
+
+    std::vector<Value*> tensor_indices;
+
+    auto insert_value_for_dim = [&](int64_t dim) {
+      return graph->insertConstant(dim, loc);
+    };
+    std::vector<int64_t> dims(subscript_exprs.size());
+    std::vector<c10::optional<Value*>> exprs(
+        subscript_exprs.size(), c10::nullopt);
+
+    auto handle_indexing = [&](const Expr& subscript_expr,
+                               int expr_idx,
+                               int64_t dim,
+                               bool is_reverse = false) {
+      dims[expr_idx] = dim;
+
+      // Slice expression case, does not represent a single index.
+      if (subscript_expr.kind() == TK_SLICE_EXPR) {
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim + 1;
+        }
+      }
+
+      // Slice object case, does not represent a single index.
+      auto subscript_sv = emitSugaredExpr(subscript_expr, 1);
+      if (dynamic_cast<SliceValue*>(subscript_sv.get())) {
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim + 1;
+        }
+      }
+
+      TypePtr type_hint;
+      if (subscript_expr.kind() == TK_NONE) {
+        type_hint = NoneType::get();
+      }
+      auto index = emitExpr(subscript_expr, type_hint);
+
+      // Accept list as subscript but convert it to a Tensor
+      // since it's equivalent to indexing with Tensor.
+      // The list can be a list literal or list variable.
+      // Advanced indexing using list:
+      // @torch.jit.script
+      // def f(x):
+      //   return x[[0, 1, 5]]  # or
+      //   return x[[0, 1], [0, 1]]  # or
+      //   return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]  # or
+      //   ls = [0, 1]
+      //   return x[ls]
+      // Statements above are equivalent to advanced indexing using Tensor:
+      // @torch.jit.script
+      // def f(x):
+      //   return x[torch.tensor([0, 1, 5])]  # or
+      //   return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
+      //   return x[torch.tensor([[0, 1], [0, 1]]),
+      //            torch.tensor([[0, 1], [0, 1]])]  # or
+      //   ls = [0, 1]
+      //   return x[torch.tensor(ls)]
+      if (index->type()->kind() == c10::TypeKind::ListType) {
+        // Always create index tensor as LongTensor.
+        // This is to match Pytorch eager frontend behavior which accepts
+        // indexing with float list.
+        index = graph->insert(
+            aten::tensor, {index}, {NamedValue("dtype", c10::kLong)});
+      }
+
+      exprs[expr_idx] = index;
+      if (index->type()->isSubtypeOf(NoneType::get())) {
+        if (is_reverse) {
+          return dim;
+        } else {
+          return dim + 1;
+        }
+      } else if (index->type() == IntType::get()) {
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim;
+        }
+      } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
+        if (is_reverse) {
+          throw ErrorReport(loc)
+              << "Ellipses followed by tensor indexing is currently not supported";
+        } else {
+          return dim + 1;
+        }
+      } else {
+        throw ErrorReport(loc)
+            << "Unsupported operation: indexing tensor with unsupported index type '"
+            << index->type()->repr_str()
+            << "'. Only ints, slices, lists and tensors are supported";
+      }
+    };
+
+    size_t idx = 0;
+    int64_t dim = 0;
+    for (; idx < subscript_exprs.size(); idx++) {
+      auto subscript_expr = subscript_exprs[idx];
+      if (subscript_expr.kind() == TK_DOTS) {
+        break;
+      }
+      dim = handle_indexing(subscript_expr, idx, dim, /*is_reverse=*/false);
+    }
+    int64_t rdim = -1;
+    for (size_t rev_idx = subscript_exprs.size() - 1; rev_idx > idx;
+         rev_idx--) {
+      auto subscript_expr = subscript_exprs[rev_idx];
+      if (subscript_expr.kind() == TK_DOTS) {
+        throw ErrorReport(loc)
+            << "An index can only have a single ellipsis ('...')";
+      }
+      rdim =
+          handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
+    }
+    for (size_t i = 0; i < exprs.size(); i++) {
+      if (!exprs[i].has_value()) {
+        if (subscript_exprs[i].kind() == TK_SLICE_EXPR) {
+          sliceable = emitSlice(
+              loc,
+              sliceable,
+              insert_value_for_dim(dims[i]),
+              SliceExpr(subscript_exprs[i]));
           continue;
         }
-        auto expr = exprs[i].value();
-        if (expr->type()->isSubtypeOf(NoneType::get())) {
-          sliceable =
-              emitUnsqueeze(loc, sliceable, insert_value_for_dim(dims[i]));
-        } else if (expr->type() == IntType::get()) {
-          sliceable =
-              emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
-        } else if (expr->type()->isSubtypeOf(OptionalType::ofTensor())) {
-          tensor_indices.resize(dims[i] + 1);
-          tensor_indices[dims[i]] = expr;
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              false, "Trying to process index type that we don't support.");
+
+        if (subscript_exprs[i].kind() == TK_DOTS) {
+          continue;
         }
-      }
-      // at::index takes in a List[Optional[Tensor]] where some dims can be
-      // None. create None node with optional tensor output type and pass to
-      // at::index.
-      for (auto& index : tensor_indices) {
-        if (index == nullptr) {
-          index = graph->insertNode(graph->createNone())->output();
-        }
-      }
-      return std::make_pair(sliceable, tensor_indices);
-    }
 
-    // Desugars multidim slicing into slice/select/index/unsqueeze calls.
-    //
-    // XXX: Errors in user code are not elegantly reported.
-    // Let's say someone were to do the following:
-    //   @torch.jit.script
-    //   def fn(x):
-    //       return x[0, 1]
-    //   fn(torch.randn(5))
-    // Because we desugar this into two aten::select ops, the error message
-    // complains about aten::select failing rather than there "not being
-    // enough dimensions to index".
-    //
-    // The strategy is to slice and select the tensor for int and slices first
-    // in one pass and then apply at::index on the result of the
-    // slicing/selecting. Call the tensor after we've applied slice / select the
-    // `sliced`. tensor_indices should have the same size as sliced.dim():
-    // - tensor_indices[i] = NULL if we should not index `sliced` at dim i
-    // - tensor_indices[i] = t if we should index `sliced` at dim i with tensor
-    // t.
-    Value* emitMultidimSlicing(
-        const SourceRange& loc,
-        Value* sliceable,
-        const List<Expr>& subscript_exprs) {
-      if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
-        throw ErrorReport(loc)
-            << "Unsupported operation: attempted to use multidimensional "
-            << "indexing on a non-tensor type";
-      }
-
-      std::vector<Value*> tensor_indices;
-      std::tie(sliceable, tensor_indices) =
-          emitIntAndSliceIndexing(loc, sliceable, subscript_exprs);
-
-      if (tensor_indices.empty()) {
-        // XXX: Might need to at::alias this when we support mutability
-        return sliceable;
-      }
-
-      return emitIndex(loc, sliceable, tensor_indices);
-    }
-
-    // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
-    // end).
-    Value* emitBasicSlice(
-        const SourceRange& loc,
-        Value* sliceable,
-        const List<Expr>& subscript_exprs) {
-      AT_ASSERT(subscript_exprs.size() == 1);
-      AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
-      auto slice_exp = SliceExpr(subscript_exprs[0]);
-      Value* maybe_dim = nullptr;
-      if (sliceable->type()->isSubtypeOf(TensorType::get())) {
-        // If the sliceable object is a tensor, specify a default dimension
-        maybe_dim = graph->insertConstant(0, loc);
-      }
-      return emitSlice(loc, sliceable, maybe_dim, slice_exp);
-    }
-
-    int64_t getAdjTupleIndex(
-        const SourceRange& loc,
-        const TupleTypePtr& tuple_type,
-        int64_t input_index,
-        bool allow_out_of_bounds) {
-      // set index to be positive to simplify logic in runtime
-      int64_t adj_index = input_index;
-      int64_t tuple_len = tuple_type->elements().size();
-      if (input_index < 0) {
-        adj_index = tuple_len + input_index;
-      }
-      if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
-        throw ErrorReport(loc) << "Tuple index out of range. Tuple is length "
-                               << tuple_len << " and index is " << input_index;
-      }
-      return adj_index;
-    }
-
-    // When a list is marked const in a module, it gets converted to a tuple.
-    // The result is indexing into a Tuple which contains only one type
-    // is quite common. since indexing will likely be done in a for loop,
-    // we do not want to invoke the overhead of converting the tuple to a list
-    // each iter.
-    Value* emitTupleIndex(
-        const SourceRange& loc, Value* tuple_val, Value* idx_val) {
-      auto tuple_typ = tuple_val->type()->cast<TupleType>();
-      auto elems = tuple_typ->elements();
-      TypePtr output_type;
-      if (idx_val->type() != IntType::get()) {
-        throw ErrorReport(loc) << "tuple index must be an integer";
-      }
-      auto idx = toIValue(idx_val);
-      if (!idx) {
-        if (elems.size() == 0 ||
-            !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
-          throw ErrorReport(loc)
-              << "Cannot index into a " << tuple_typ->repr_str()
-              << " with a non-integer literal because we cannot resolve the output type";
-        }
-        output_type = elems[0];
-      } else {
-        auto adj_index = getAdjTupleIndex(
-            loc, tuple_typ, idx->toInt(), /*allow_out_of_bounds*/ false);
-        output_type = elems[adj_index];
-      }
-      return graph
-          ->insertNode(graph->createTupleIndex(tuple_val, idx_val, output_type))
-          ->output();
-    }
-
-    int64_t getSliceInd(Value * idx_val, const SourceRange& loc) {
-      auto ivalue = toIValue(idx_val);
-      if (ivalue && ivalue->isInt()) {
-        return ivalue->to<int64_t>();
-      } else {
-        throw ErrorReport(loc)
-            << "tuple slice indices must be integer constants";
-      }
-    }
-
-    Value* emitTupleSlice(
-        const SourceRange& loc,
-        const NamedValue& tuple_val,
-        const std::vector<at::optional<NamedValue>>& tuple_args) {
-      auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
-      int64_t tuple_len = tuple_type->elements().size();
-      auto beg_val = tuple_args[0];
-      auto end_val = tuple_args[1];
-      auto step = tuple_args[2];
-
-      int64_t step_size = 1;
-      if (step) {
-        auto val = toIValue(step->value(*graph));
-        TORCH_CHECK(val->isInt(), "Step size should always be an integer");
-        step_size = val->to<int64_t>();
-      }
-
-      int64_t beg = std::numeric_limits<int64_t>::max();
-      if (beg_val) {
-        beg = getAdjTupleIndex(
-            loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
-      }
-
-      int64_t end = std::numeric_limits<int64_t>::max();
-      if (end_val) {
-        end = getAdjTupleIndex(
-            loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
-      }
-
-      int64_t num_values =
-          slice_indices_adjust(tuple_len, &beg, &end, step_size);
-
-      return graph
-          ->insertNode(graph->createTupleSlice(
-              tuple_val.value(*graph), beg, step_size, num_values))
-          ->output();
-    }
-
-    std::shared_ptr<SugaredValue> emitSubscript(
-        const Subscript& subscript, TypePtr type_hint = nullptr) {
-      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-      const SourceRange& range = subscript.range();
-      const SourceRange& val_range = subscript.value().range();
-      if (subscript_exprs.size() != 1) {
-        return std::make_shared<SimpleValue>(emitMultidimSlicing(
-            range, sv->asValue(val_range, method), subscript_exprs));
-      }
-      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-        // TODO @wconstab refactor using Symbol instead of string compare
-        if (sv->kind() == "module") {
-          // Slicing isn't currently implemented for Sequential/ModuleList,
-          // but is implemented for Tuples, so a quick workaround is to
-          // convert to a tuple of Modules for slicing support.
-          auto s_tuple_val =
-              sv->asTupleValue(val_range, method)->asValue(val_range, method);
-          const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
-          std::vector<at::optional<NamedValue>> tuple_args;
-          tuple_args.reserve(3);
-          if (slice.start().present()) {
-            auto begin = NamedValue(
-                val_range, "begin", emitExpr(Expr(slice.start().get())));
-            tuple_args.emplace_back(begin);
-          } else {
-            tuple_args.emplace_back(c10::nullopt);
-          }
-
-          if (slice.end().present()) {
-            auto end =
-                NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
-            tuple_args.emplace_back(end);
-          } else {
-            tuple_args.emplace_back(c10::nullopt);
-          }
-
-          if (slice.step().present()) {
-            auto step = NamedValue(
-                val_range, "step", emitExpr(Expr(slice.step().get())));
-            tuple_args.emplace_back(step);
-          } else {
-            tuple_args.emplace_back(c10::nullopt);
-          }
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, tuple_args);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
-        } else {
-          return std::make_shared<SimpleValue>(emitBasicSlice(
-              range, sv->asValue(val_range, method), subscript_exprs));
-        }
-      } else {
-        AT_ASSERT(subscript_exprs.size() == 1);
-        Value* sliceable = sv->asValue(val_range, method);
-
-        // In case of subscript expression being a Python Slice object.
-        auto subscript_sv = emitSugaredExpr(subscript_exprs[0], 1);
+        auto subscript_sv = emitSugaredExpr(subscript_exprs[i], 1);
         if (const auto slice_value =
                 dynamic_cast<SliceValue*>(subscript_sv.get())) {
-          Value* dim = nullptr;
-          // aten::slice.tensor needs an additional `dim` input.
-          if (sliceable->type()->isSubtypeOf(TensorType::get())) {
-            dim = method.graph()->insertConstant(0, val_range);
-          }
-
-          Value* sliced = emitSliceOp(
-              val_range,
+          sliceable = emitSliceOp(
+              loc,
               sliceable,
-              dim,
+              insert_value_for_dim(dims[i]),
               slice_value->start(),
               slice_value->stop(),
               slice_value->step());
-          return std::make_shared<SimpleValue>(sliced);
         }
 
-        // subscript is not a slice object, then it must be convertible to
-        // a normal value.
-        // Desugars gather syntactic sugar foo[i]
-        Value* idx = subscript_sv->asValue(val_range, method);
-        if (sliceable->type()->cast<TupleType>()) {
-          return std::make_shared<SimpleValue>(
-              emitTupleIndex(range, sv->asValue(val_range, method), idx));
-        } else if (sliceable->type()->isSubtypeOf(TensorType::get())) {
-          return std::make_shared<SimpleValue>(
-              emitMultidimSlicing(range, sliceable, subscript_exprs));
-        } else {
-          return sv->getitem(range, method, idx, std::move(type_hint));
-        }
+        continue;
       }
-    }
-  };
-
-  struct FunctionResolver : public Resolver {
-    explicit FunctionResolver(
-        Resolver* otherResolver,
-        const std::unordered_map<std::string, Function*>& functionTable)
-        : otherResolver_(otherResolver), functionTable_(functionTable) {}
-
-    std::shared_ptr<SugaredValue> resolveValue(
-        const std::string& name,
-        Function& m,
-        const SourceRange& loc) override {
-      auto it = functionTable_.find(name);
-      if (it != functionTable_.end()) {
-        return std::make_shared<FunctionValue>(it->second);
-      }
-      return otherResolver_->resolveValue(name, m, loc);
-    }
-
-    TypePtr resolveType(const std::string& name, const SourceRange& loc)
-        override {
-      return otherResolver_->resolveType(name, loc);
-    }
-
-   private:
-    Resolver* otherResolver_;
-    const std::unordered_map<std::string, Function*>& functionTable_;
-  };
-
-  CompilationUnit::CompilationUnit(const std::string& source)
-      : CompilationUnit() {
-    // calles the define with native resolver to generate the graph for
-    // functions
-    define(c10::nullopt, source, nativeResolver(), nullptr);
-  }
-
-  // This pair represents a pair of functions (getter and setter) obtained from
-  // compiling a Property.
-  struct CompilationUnit::PropertyPair
-      : public std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> {
-    PropertyPair(
-        std::unique_ptr<Function> getter,
-        std::unique_ptr<Function> setter) {
-      TORCH_INTERNAL_ASSERT(getter, "Property pair must have defined getter")
-      this->first = std::move(getter);
-      this->second = std::move(setter);
-    }
-
-    std::unique_ptr<Function>& getGetter() {
-      return this->first;
-    }
-
-    std::unique_ptr<Function>& getSetter() {
-      return this->second;
-    }
-  };
-
-  CompilationUnit::PropertyPair CompilationUnit::define_property(
-      const c10::optional<c10::QualifiedName>& prefix,
-      const Property& prop,
-      const ResolverPtr& resolver,
-      const Self* self,
-      const std::unordered_map<std::string, Function*>& function_table,
-      bool shouldMangle) const {
-    // self must be defined because properties are features of classes and
-    // modules.
-    TORCH_INTERNAL_ASSERT(self);
-
-    // Compile the getter function.
-    std::unique_ptr<Function> getter_fn = define(
-        prefix, prop.getter(), resolver, self, function_table, shouldMangle);
-
-    // Compile the setter function if it exists.
-    std::unique_ptr<Function> setter_fn = nullptr;
-    if (prop.setter().present()) {
-      setter_fn = define(
-          prefix,
-          prop.setter().get(),
-          resolver,
-          self,
-          function_table,
-          shouldMangle);
-    }
-
-    // Add the property to the class type definition.
-    self->getClassType()->addProperty(
-        prop.name().name(), getter_fn.get(), setter_fn.get());
-
-    return PropertyPair(std::move(getter_fn), std::move(setter_fn));
-  }
-
-  std::unique_ptr<Function> CompilationUnit::define(
-      const c10::optional<QualifiedName>& prefix,
-      const Def& def,
-      const ResolverPtr& resolver,
-      const Self* self,
-      const std::unordered_map<std::string, Function*>& function_table,
-      bool shouldMangle,
-      CompilationUnit::FunctionType type) const {
-    TORCH_INTERNAL_ASSERT(resolver);
-    auto _resolver = resolver;
-    if (!self) {
-      // if self is defined, then these are methods and do not go into the
-      // global namespace otherwise, they get defined together so we add them to
-      // the function table so the methods can see each other
-      _resolver =
-          std::make_shared<FunctionResolver>(resolver.get(), function_table);
-    }
-    auto creator = [def, _resolver, self](Function& method) {
-      // Store the function name so that it can be referenced if there is an
-      // error while compiling this function
-      std::string call_name = method.qualname().name();
-      if (self) {
-        auto atoms = method.qualname().atoms();
-        // There should be at least a ClassName.method_name
-        TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
-        call_name =
-            atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
-      }
-      ErrorReport::CallStack call(call_name, def.range());
-      to_ir(def, _resolver, self, method);
-    };
-    auto name = prefix ? QualifiedName(*prefix, def.name().name())
-                       : QualifiedName(def.name().name());
-    if (shouldMangle) {
-      // If `shouldMangle` is set, we should generate a unique name for this
-      // function if there is already an existing one.
-      if (auto fn = find_function(name)) {
-        name = mangle(name);
-      }
-    }
-    auto fn = torch::make_unique<GraphFunction>(
-        std::move(name), std::make_shared<Graph>(), creator);
-    if (self) {
-      // Register this as a method on `self`'s type
-      if (type == CompilationUnit::FunctionType::Hook) {
-        self->getClassType()->addForwardHook(fn.get());
-      } else if (type == CompilationUnit::FunctionType::PreHook) {
-        self->getClassType()->addForwardPreHook(fn.get());
+      auto expr = exprs[i].value();
+      if (expr->type()->isSubtypeOf(NoneType::get())) {
+        sliceable =
+            emitUnsqueeze(loc, sliceable, insert_value_for_dim(dims[i]));
+      } else if (expr->type() == IntType::get()) {
+        sliceable =
+            emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
+      } else if (expr->type()->isSubtypeOf(OptionalType::ofTensor())) {
+        tensor_indices.resize(dims[i] + 1);
+        tensor_indices[dims[i]] = expr;
       } else {
-        self->getClassType()->addMethod(fn.get());
+        TORCH_INTERNAL_ASSERT(
+            false, "Trying to process index type that we don't support.");
       }
     }
-    return fn;
+    // at::index takes in a List[Optional[Tensor]] where some dims can be
+    // None. create None node with optional tensor output type and pass to
+    // at::index.
+    for (auto& index : tensor_indices) {
+      if (index == nullptr) {
+        index = graph->insertNode(graph->createNone())->output();
+      }
+    }
+    return std::make_pair(sliceable, tensor_indices);
   }
 
-  std::vector<Function*> CompilationUnit::define(
-      const c10::optional<c10::QualifiedName>& prefix,
-      const std::vector<Property>& properties,
-      const std::vector<ResolverPtr>& propResolvers,
-      const std::vector<Def>& definitions,
-      const std::vector<ResolverPtr>& defResolvers,
-      const Self* self,
-      bool shouldMangle) {
-    TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
-    TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
-    std::vector<Function*> functions;
-    std::unordered_map<std::string, Function*> function_table;
-
-    // Records fn in function_table, functions and with register_function.
-    // This is done several times below, so this lambda helps avoid repeating
-    // code.
-    auto record_function = [&](std::unique_ptr<Function> fn) {
-      function_table[fn->name()] = fn.get();
-      functions.emplace_back(fn.get());
-      this->register_function(std::move(fn));
-    };
-
-    for (size_t i = 0; i < properties.size(); i++) {
-      PropertyPair property_fns = define_property(
-          prefix,
-          properties[i],
-          propResolvers[i],
-          self,
-          function_table,
-          shouldMangle);
-
-      auto& getter_fn = property_fns.getGetter();
-      auto& setter_fn = property_fns.getSetter();
-
-      record_function(std::move(getter_fn));
-
-      if (setter_fn) {
-        record_function(std::move(setter_fn));
-      }
+  // Desugars multidim slicing into slice/select/index/unsqueeze calls.
+  //
+  // XXX: Errors in user code are not elegantly reported.
+  // Let's say someone were to do the following:
+  //   @torch.jit.script
+  //   def fn(x):
+  //       return x[0, 1]
+  //   fn(torch.randn(5))
+  // Because we desugar this into two aten::select ops, the error message
+  // complains about aten::select failing rather than there "not being
+  // enough dimensions to index".
+  //
+  // The strategy is to slice and select the tensor for int and slices first
+  // in one pass and then apply at::index on the result of the
+  // slicing/selecting. Call the tensor after we've applied slice / select the
+  // `sliced`. tensor_indices should have the same size as sliced.dim():
+  // - tensor_indices[i] = NULL if we should not index `sliced` at dim i
+  // - tensor_indices[i] = t if we should index `sliced` at dim i with tensor
+  // t.
+  Value* emitMultidimSlicing(
+      const SourceRange& loc,
+      Value* sliceable,
+      const List<Expr>& subscript_exprs) {
+    if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
+      throw ErrorReport(loc)
+          << "Unsupported operation: attempted to use multidimensional "
+          << "indexing on a non-tensor type";
     }
 
-    for (size_t i = 0; i < definitions.size(); i++) {
-      auto fn = define(
-          prefix,
-          definitions[i],
-          defResolvers[i],
-          self,
-          function_table,
-          shouldMangle,
-          CompilationUnit::FunctionType::Method);
+    std::vector<Value*> tensor_indices;
+    std::tie(sliceable, tensor_indices) =
+        emitIntAndSliceIndexing(loc, sliceable, subscript_exprs);
 
-      record_function(std::move(fn));
+    if (tensor_indices.empty()) {
+      // XXX: Might need to at::alias this when we support mutability
+      return sliceable;
     }
 
-    // We need to compile `__init__` first, since it can determine what
-    // attributes are available to other methods. So reorder the definitions
-    // accordingly.
-    for (auto& kv : function_table) {
-      if (kv.first == "__init__") {
-        kv.second->ensure_defined();
-      }
-    }
-
-    for (Function* function : functions) {
-      function->ensure_defined();
-    }
-
-    return functions;
+    return emitIndex(loc, sliceable, tensor_indices);
   }
 
-  void CompilationUnit::define_hooks(
-      const c10::optional<c10::QualifiedName>& prefix,
-      const std::vector<Def>& hookDefs,
-      const std::vector<ResolverPtr>& hookResolvers,
-      const std::vector<Def>& preHookDefs,
-      const std::vector<ResolverPtr>& preHookResolvers,
-      const Self* self,
-      bool shouldMangle) {
-    TORCH_INTERNAL_ASSERT(hookDefs.size() == hookResolvers.size());
-    TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookResolvers.size());
-    std::vector<Function*> functions;
-    std::unordered_map<std::string, Function*> function_table;
-
-    // check hook for name collisions and redefinition
-    auto check_collisions = [&](const Def& hook) -> Function* {
-      auto name = prefix ? QualifiedName(*prefix, hook.name().name()).name()
-                         : QualifiedName(hook.name().name()).name();
-      // check if hook is already defined for this module
-      auto found_hook = function_table.find(name);
-      auto existing_hook =
-          found_hook != function_table.end() ? found_hook->second : nullptr;
-      // check if hook name is already defined on module as method
-      if (existing_hook == nullptr) {
-        TORCH_CHECK(
-            self->getClassType()->findMethod(name) == nullptr &&
-                self->getClassType()->findHook(name) == nullptr,
-            "Can't define hook: ",
-            name,
-            " on class: ",
-            self->getClassType()->repr_str(),
-            " because a method or hook with that name already exists.");
-      }
-      return existing_hook;
-    };
-
-    // build_schema for checking
-    auto build_schema = [&](const Def& hook_def,
-                            const ResolverPtr& hook_res) -> FunctionSchema {
-      ScriptTypeParser typeParser(hook_res);
-      FunctionSchema schema =
-          typeParser.parseSchemaFromDef(hook_def, true /* skip_self*/);
-      // need to add self as the first because we skipped it
-      std::vector<Argument> arguments;
-      arguments.emplace_back(Argument(
-          hook_def.decl().params()[0].ident().name(), self->getClassType()));
-      arguments.insert(
-          arguments.end(),
-          schema.arguments().begin(),
-          schema.arguments().end());
-      return schema.cloneWithArguments(arguments);
-    };
-
-    // define hooks
-    for (size_t i = 0; i < hookDefs.size(); i++) {
-      // check to see if already defined this hook
-      auto existing_fn = check_collisions(hookDefs[i]);
-      if (existing_fn != nullptr) {
-        // add it to class type again so it's called
-        self->getClassType()->addForwardHook(existing_fn);
-        continue;
-      }
-      // define hook
-      auto fn = define(
-          prefix,
-          hookDefs[i],
-          hookResolvers[i],
-          self,
-          function_table,
-          shouldMangle,
-          CompilationUnit::FunctionType::Hook);
-
-      function_table[fn->name()] = fn.get();
-      functions.emplace_back(fn.get());
-      this->register_function(std::move(fn));
-      self->getClassType()->checkForwardHookSchema(
-          i, build_schema(hookDefs[i], hookResolvers[i]));
-      functions.back()->ensure_defined();
+  // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
+  // end).
+  Value* emitBasicSlice(
+      const SourceRange& loc,
+      Value* sliceable,
+      const List<Expr>& subscript_exprs) {
+    AT_ASSERT(subscript_exprs.size() == 1);
+    AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
+    auto slice_exp = SliceExpr(subscript_exprs[0]);
+    Value* maybe_dim = nullptr;
+    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+      // If the sliceable object is a tensor, specify a default dimension
+      maybe_dim = graph->insertConstant(0, loc);
     }
+    return emitSlice(loc, sliceable, maybe_dim, slice_exp);
+  }
 
-    // define pre_hooks
-    for (size_t i = 0; i < preHookDefs.size(); i++) {
-      // check to see if already defined this hook
-      auto existing_fn = check_collisions(preHookDefs[i]);
-      if (existing_fn != nullptr) {
-        // add it to class type again so it's called
-        self->getClassType()->addForwardPreHook(existing_fn);
-        continue;
+  int64_t getAdjTupleIndex(
+      const SourceRange& loc,
+      const TupleTypePtr& tuple_type,
+      int64_t input_index,
+      bool allow_out_of_bounds) {
+    // set index to be positive to simplify logic in runtime
+    int64_t adj_index = input_index;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (input_index < 0) {
+      adj_index = tuple_len + input_index;
+    }
+    if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
+      throw ErrorReport(loc) << "Tuple index out of range. Tuple is length "
+                             << tuple_len << " and index is " << input_index;
+    }
+    return adj_index;
+  }
+
+  // When a list is marked const in a module, it gets converted to a tuple.
+  // The result is indexing into a Tuple which contains only one type
+  // is quite common. since indexing will likely be done in a for loop,
+  // we do not want to invoke the overhead of converting the tuple to a list
+  // each iter.
+  Value* emitTupleIndex(
+      const SourceRange& loc,
+      Value* tuple_val,
+      Value* idx_val) {
+    auto tuple_typ = tuple_val->type()->cast<TupleType>();
+    auto elems = tuple_typ->elements();
+    TypePtr output_type;
+    if (idx_val->type() != IntType::get()) {
+      throw ErrorReport(loc) << "tuple index must be an integer";
+    }
+    auto idx = toIValue(idx_val);
+    if (!idx) {
+      if (elems.size() == 0 ||
+          !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
+        throw ErrorReport(loc)
+            << "Cannot index into a " << tuple_typ->repr_str()
+            << " with a non-integer literal because we cannot resolve the output type";
       }
-      // define pre_hook
-      auto fn = define(
-          prefix,
-          preHookDefs[i],
-          preHookResolvers[i],
-          self,
-          function_table,
-          shouldMangle,
-          CompilationUnit::FunctionType::PreHook);
+      output_type = elems[0];
+    } else {
+      auto adj_index = getAdjTupleIndex(
+          loc, tuple_typ, idx->toInt(), /*allow_out_of_bounds*/ false);
+      output_type = elems[adj_index];
+    }
+    return graph
+        ->insertNode(graph->createTupleIndex(tuple_val, idx_val, output_type))
+        ->output();
+  }
 
-      function_table[fn->name()] = fn.get();
-      functions.emplace_back(fn.get());
-      this->register_function(std::move(fn));
-      self->getClassType()->checkForwardPreHookSchema(
-          i, build_schema(preHookDefs[i], preHookResolvers[i]));
-      functions.back()->ensure_defined();
+  int64_t getSliceInd(Value* idx_val, const SourceRange& loc) {
+    auto ivalue = toIValue(idx_val);
+    if (ivalue && ivalue->isInt()) {
+      return ivalue->to<int64_t>();
+    } else {
+      throw ErrorReport(loc) << "tuple slice indices must be integer constants";
     }
   }
 
-  std::vector<Function*> CompilationUnit::define(
-      const c10::optional<QualifiedName>& prefix,
-      const std::string& source,
-      const ResolverPtr& resolver,
-      const Self* self) {
-    Parser p(std::make_shared<Source>(source, "<string>", 1));
-    std::vector<Def> definitions;
-    std::vector<ResolverPtr> resolvers;
-    while (p.lexer().cur().kind != TK_EOF) {
-      auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
-      definitions.push_back(def);
-      resolvers.push_back(resolver);
+  Value* emitTupleSlice(
+      const SourceRange& loc,
+      const NamedValue& tuple_val,
+      const std::vector<at::optional<NamedValue>>& tuple_args) {
+    auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
+    int64_t tuple_len = tuple_type->elements().size();
+    auto beg_val = tuple_args[0];
+    auto end_val = tuple_args[1];
+    auto step = tuple_args[2];
+
+    int64_t step_size = 1;
+    if (step) {
+      auto val = toIValue(step->value(*graph));
+      TORCH_CHECK(val->isInt(), "Step size should always be an integer");
+      step_size = val->to<int64_t>();
     }
-    return define(
+
+    int64_t beg = std::numeric_limits<int64_t>::max();
+    if (beg_val) {
+      beg = getAdjTupleIndex(
+          loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
+    }
+
+    int64_t end = std::numeric_limits<int64_t>::max();
+    if (end_val) {
+      end = getAdjTupleIndex(
+          loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
+    }
+
+    int64_t num_values = slice_indices_adjust(tuple_len, &beg, &end, step_size);
+
+    return graph
+        ->insertNode(graph->createTupleSlice(
+            tuple_val.value(*graph), beg, step_size, num_values))
+        ->output();
+  }
+
+  std::shared_ptr<SugaredValue> emitSubscript(
+      const Subscript& subscript,
+      TypePtr type_hint = nullptr) {
+    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+    const SourceRange& range = subscript.range();
+    const SourceRange& val_range = subscript.value().range();
+    if (subscript_exprs.size() != 1) {
+      return std::make_shared<SimpleValue>(emitMultidimSlicing(
+          range, sv->asValue(val_range, method), subscript_exprs));
+    }
+    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+      // TODO @wconstab refactor using Symbol instead of string compare
+      if (sv->kind() == "module") {
+        // Slicing isn't currently implemented for Sequential/ModuleList,
+        // but is implemented for Tuples, so a quick workaround is to
+        // convert to a tuple of Modules for slicing support.
+        auto s_tuple_val =
+            sv->asTupleValue(val_range, method)->asValue(val_range, method);
+        const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        std::vector<at::optional<NamedValue>> tuple_args;
+        tuple_args.reserve(3);
+        if (slice.start().present()) {
+          auto begin = NamedValue(
+              val_range, "begin", emitExpr(Expr(slice.start().get())));
+          tuple_args.emplace_back(begin);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
+
+        if (slice.end().present()) {
+          auto end =
+              NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
+          tuple_args.emplace_back(end);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
+
+        if (slice.step().present()) {
+          auto step =
+              NamedValue(val_range, "step", emitExpr(Expr(slice.step().get())));
+          tuple_args.emplace_back(step);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
+        auto tupleSliceValue =
+            emitTupleSlice(val_range, s_tuple_val, tuple_args);
+        return std::make_shared<SimpleValue>(tupleSliceValue);
+      } else {
+        return std::make_shared<SimpleValue>(emitBasicSlice(
+            range, sv->asValue(val_range, method), subscript_exprs));
+      }
+    } else {
+      AT_ASSERT(subscript_exprs.size() == 1);
+      Value* sliceable = sv->asValue(val_range, method);
+
+      // In case of subscript expression being a Python Slice object.
+      auto subscript_sv = emitSugaredExpr(subscript_exprs[0], 1);
+      if (const auto slice_value =
+              dynamic_cast<SliceValue*>(subscript_sv.get())) {
+        Value* dim = nullptr;
+        // aten::slice.tensor needs an additional `dim` input.
+        if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+          dim = method.graph()->insertConstant(0, val_range);
+        }
+
+        Value* sliced = emitSliceOp(
+            val_range,
+            sliceable,
+            dim,
+            slice_value->start(),
+            slice_value->stop(),
+            slice_value->step());
+        return std::make_shared<SimpleValue>(sliced);
+      }
+
+      // subscript is not a slice object, then it must be convertible to
+      // a normal value.
+      // Desugars gather syntactic sugar foo[i]
+      Value* idx = subscript_sv->asValue(val_range, method);
+      if (sliceable->type()->cast<TupleType>()) {
+        return std::make_shared<SimpleValue>(
+            emitTupleIndex(range, sv->asValue(val_range, method), idx));
+      } else if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+        return std::make_shared<SimpleValue>(
+            emitMultidimSlicing(range, sliceable, subscript_exprs));
+      } else {
+        return sv->getitem(range, method, idx, std::move(type_hint));
+      }
+    }
+  }
+};
+
+struct FunctionResolver : public Resolver {
+  explicit FunctionResolver(
+      Resolver* otherResolver,
+      const std::unordered_map<std::string, Function*>& functionTable)
+      : otherResolver_(otherResolver), functionTable_(functionTable) {}
+
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) override {
+    auto it = functionTable_.find(name);
+    if (it != functionTable_.end()) {
+      return std::make_shared<FunctionValue>(it->second);
+    }
+    return otherResolver_->resolveValue(name, m, loc);
+  }
+
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      override {
+    return otherResolver_->resolveType(name, loc);
+  }
+
+ private:
+  Resolver* otherResolver_;
+  const std::unordered_map<std::string, Function*>& functionTable_;
+};
+
+CompilationUnit::CompilationUnit(const std::string& source)
+    : CompilationUnit() {
+  // calles the define with native resolver to generate the graph for
+  // functions
+  define(c10::nullopt, source, nativeResolver(), nullptr);
+}
+
+// This pair represents a pair of functions (getter and setter) obtained from
+// compiling a Property.
+struct CompilationUnit::PropertyPair
+    : public std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> {
+  PropertyPair(
+      std::unique_ptr<Function> getter,
+      std::unique_ptr<Function> setter) {
+    TORCH_INTERNAL_ASSERT(getter, "Property pair must have defined getter")
+    this->first = std::move(getter);
+    this->second = std::move(setter);
+  }
+
+  std::unique_ptr<Function>& getGetter() {
+    return this->first;
+  }
+
+  std::unique_ptr<Function>& getSetter() {
+    return this->second;
+  }
+};
+
+CompilationUnit::PropertyPair CompilationUnit::define_property(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const Property& prop,
+    const ResolverPtr& resolver,
+    const Self* self,
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
+  // self must be defined because properties are features of classes and
+  // modules.
+  TORCH_INTERNAL_ASSERT(self);
+
+  // Compile the getter function.
+  std::unique_ptr<Function> getter_fn = define(
+      prefix, prop.getter(), resolver, self, function_table, shouldMangle);
+
+  // Compile the setter function if it exists.
+  std::unique_ptr<Function> setter_fn = nullptr;
+  if (prop.setter().present()) {
+    setter_fn = define(
         prefix,
-        /*properties=*/{},
-        /*propResolvers=*/{},
-        definitions,
-        resolvers,
-        self);
+        prop.setter().get(),
+        resolver,
+        self,
+        function_table,
+        shouldMangle);
   }
 
-  void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
-    liftClosures(to_clean);
-    inlineForkedClosures(to_clean);
-    if (getInlineEverythingMode()) {
-      Inline(*to_clean);
+  // Add the property to the class type definition.
+  self->getClassType()->addProperty(
+      prop.name().name(), getter_fn.get(), setter_fn.get());
+
+  return PropertyPair(std::move(getter_fn), std::move(setter_fn));
+}
+
+std::unique_ptr<Function> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
+    const Def& def,
+    const ResolverPtr& resolver,
+    const Self* self,
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle,
+    CompilationUnit::FunctionType type) const {
+  TORCH_INTERNAL_ASSERT(resolver);
+  auto _resolver = resolver;
+  if (!self) {
+    // if self is defined, then these are methods and do not go into the
+    // global namespace otherwise, they get defined together so we add them to
+    // the function table so the methods can see each other
+    _resolver =
+        std::make_shared<FunctionResolver>(resolver.get(), function_table);
+  }
+  auto creator = [def, _resolver, self](Function& method) {
+    // Store the function name so that it can be referenced if there is an
+    // error while compiling this function
+    std::string call_name = method.qualname().name();
+    if (self) {
+      auto atoms = method.qualname().atoms();
+      // There should be at least a ClassName.method_name
+      TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
+      call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
     }
+    ErrorReport::CallStack call(call_name, def.range());
+    to_ir(def, _resolver, self, method);
+  };
+  auto name = prefix ? QualifiedName(*prefix, def.name().name())
+                     : QualifiedName(def.name().name());
+  if (shouldMangle) {
+    // If `shouldMangle` is set, we should generate a unique name for this
+    // function if there is already an existing one.
+    if (auto fn = find_function(name)) {
+      name = mangle(name);
+    }
+  }
+  auto fn = torch::make_unique<GraphFunction>(
+      std::move(name), std::make_shared<Graph>(), creator);
+  if (self) {
+    // Register this as a method on `self`'s type
+    if (type == CompilationUnit::FunctionType::Hook) {
+      self->getClassType()->addForwardHook(fn.get());
+    } else if (type == CompilationUnit::FunctionType::PreHook) {
+      self->getClassType()->addForwardPreHook(fn.get());
+    } else {
+      self->getClassType()->addMethod(fn.get());
+    }
+  }
+  return fn;
+}
 
-    // remove any uses of tuples that we inserted that are not needed
-    LowerSimpleTuples(to_clean);
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Property>& properties,
+    const std::vector<ResolverPtr>& propResolvers,
+    const std::vector<Def>& definitions,
+    const std::vector<ResolverPtr>& defResolvers,
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
+  TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
+  std::vector<Function*> functions;
+  std::unordered_map<std::string, Function*> function_table;
 
-    // full constant propagation runs ops with mutable inputs if it can
-    // prove that the inputs are not mutated anywhere in the graph.
-    // if a mutating node is removed in the graph (e.g. constant prop inlined a
-    // a constant if) then the next time constant prop is run it might be able
-    // to run nodes it was not able to previously, and the graph may change
-    // (jitter) So we run only constant prop w immutable types here bc
-    // successive runs of immutable constant prop does not change the graph
-    ConstantPropagationImmutableTypes(to_clean);
+  // Records fn in function_table, functions and with register_function.
+  // This is done several times below, so this lambda helps avoid repeating
+  // code.
+  auto record_function = [&](std::unique_ptr<Function> fn) {
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+  };
 
-    // Constant Pooling pass must be after ConstantPropogation, which can create
-    // new constants that needs to be pooled.
-    ConstantPooling(to_clean);
+  for (size_t i = 0; i < properties.size(); i++) {
+    PropertyPair property_fns = define_property(
+        prefix,
+        properties[i],
+        propResolvers[i],
+        self,
+        function_table,
+        shouldMangle);
 
-    // For jitter
-    CanonicalizeOutputs(to_clean);
+    auto& getter_fn = property_fns.getGetter();
+    auto& setter_fn = property_fns.getSetter();
 
-    // Annotate aten::warns so that each has its unique ID. This enables us to
-    // mimic Python behavior of only emitting each warning only once.
-    AnnotateWarns(to_clean);
+    record_function(std::move(getter_fn));
+
+    if (setter_fn) {
+      record_function(std::move(setter_fn));
+    }
   }
 
-  // we consider _N where N is a number, to be a non-meaningful name
-  // and do not record it as a unique name. This allows python printing to
-  // be able to export and import more consistently named graphs
-  bool meaningfulName(const std::string& name) {
-    if (name.size() == 0)
-      return false;
-    if (name[0] == '$')
-      return false;
-    if (name[0] != '_')
-      return true;
-    for (size_t i = 1; i < name.size(); ++i) {
-      if (!isdigit(name[i]))
-        return true;
+  for (size_t i = 0; i < definitions.size(); i++) {
+    auto fn = define(
+        prefix,
+        definitions[i],
+        defResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::Method);
+
+    record_function(std::move(fn));
+  }
+
+  // We need to compile `__init__` first, since it can determine what
+  // attributes are available to other methods. So reorder the definitions
+  // accordingly.
+  for (auto& kv : function_table) {
+    if (kv.first == "__init__") {
+      kv.second->ensure_defined();
     }
+  }
+
+  for (Function* function : functions) {
+    function->ensure_defined();
+  }
+
+  return functions;
+}
+
+void CompilationUnit::define_hooks(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Def>& hookDefs,
+    const std::vector<ResolverPtr>& hookResolvers,
+    const std::vector<Def>& preHookDefs,
+    const std::vector<ResolverPtr>& preHookResolvers,
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(hookDefs.size() == hookResolvers.size());
+  TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookResolvers.size());
+  std::vector<Function*> functions;
+  std::unordered_map<std::string, Function*> function_table;
+
+  // check hook for name collisions and redefinition
+  auto check_collisions = [&](const Def& hook) -> Function* {
+    auto name = prefix ? QualifiedName(*prefix, hook.name().name()).name()
+                       : QualifiedName(hook.name().name()).name();
+    // check if hook is already defined for this module
+    auto found_hook = function_table.find(name);
+    auto existing_hook =
+        found_hook != function_table.end() ? found_hook->second : nullptr;
+    // check if hook name is already defined on module as method
+    if (existing_hook == nullptr) {
+      TORCH_CHECK(
+          self->getClassType()->findMethod(name) == nullptr &&
+              self->getClassType()->findHook(name) == nullptr,
+          "Can't define hook: ",
+          name,
+          " on class: ",
+          self->getClassType()->repr_str(),
+          " because a method or hook with that name already exists.");
+    }
+    return existing_hook;
+  };
+
+  // build_schema for checking
+  auto build_schema = [&](const Def& hook_def,
+                          const ResolverPtr& hook_res) -> FunctionSchema {
+    ScriptTypeParser typeParser(hook_res);
+    FunctionSchema schema =
+        typeParser.parseSchemaFromDef(hook_def, true /* skip_self*/);
+    // need to add self as the first because we skipped it
+    std::vector<Argument> arguments;
+    arguments.emplace_back(Argument(
+        hook_def.decl().params()[0].ident().name(), self->getClassType()));
+    arguments.insert(
+        arguments.end(), schema.arguments().begin(), schema.arguments().end());
+    return schema.cloneWithArguments(arguments);
+  };
+
+  // define hooks
+  for (size_t i = 0; i < hookDefs.size(); i++) {
+    // check to see if already defined this hook
+    auto existing_fn = check_collisions(hookDefs[i]);
+    if (existing_fn != nullptr) {
+      // add it to class type again so it's called
+      self->getClassType()->addForwardHook(existing_fn);
+      continue;
+    }
+    // define hook
+    auto fn = define(
+        prefix,
+        hookDefs[i],
+        hookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::Hook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+    self->getClassType()->checkForwardHookSchema(
+        i, build_schema(hookDefs[i], hookResolvers[i]));
+    functions.back()->ensure_defined();
+  }
+
+  // define pre_hooks
+  for (size_t i = 0; i < preHookDefs.size(); i++) {
+    // check to see if already defined this hook
+    auto existing_fn = check_collisions(preHookDefs[i]);
+    if (existing_fn != nullptr) {
+      // add it to class type again so it's called
+      self->getClassType()->addForwardPreHook(existing_fn);
+      continue;
+    }
+    // define pre_hook
+    auto fn = define(
+        prefix,
+        preHookDefs[i],
+        preHookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::PreHook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+    self->getClassType()->checkForwardPreHookSchema(
+        i, build_schema(preHookDefs[i], preHookResolvers[i]));
+    functions.back()->ensure_defined();
+  }
+}
+
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
+    const std::string& source,
+    const ResolverPtr& resolver,
+    const Self* self) {
+  Parser p(std::make_shared<Source>(source, "<string>", 1));
+  std::vector<Def> definitions;
+  std::vector<ResolverPtr> resolvers;
+  while (p.lexer().cur().kind != TK_EOF) {
+    auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
+    definitions.push_back(def);
+    resolvers.push_back(resolver);
+  }
+  return define(
+      prefix,
+      /*properties=*/{},
+      /*propResolvers=*/{},
+      definitions,
+      resolvers,
+      self);
+}
+
+void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
+  liftClosures(to_clean);
+  inlineForkedClosures(to_clean);
+  if (getInlineEverythingMode()) {
+    Inline(*to_clean);
+  }
+
+  // remove any uses of tuples that we inserted that are not needed
+  LowerSimpleTuples(to_clean);
+
+  // full constant propagation runs ops with mutable inputs if it can
+  // prove that the inputs are not mutated anywhere in the graph.
+  // if a mutating node is removed in the graph (e.g. constant prop inlined a
+  // a constant if) then the next time constant prop is run it might be able
+  // to run nodes it was not able to previously, and the graph may change
+  // (jitter) So we run only constant prop w immutable types here bc
+  // successive runs of immutable constant prop does not change the graph
+  ConstantPropagationImmutableTypes(to_clean);
+
+  // Constant Pooling pass must be after ConstantPropogation, which can create
+  // new constants that needs to be pooled.
+  ConstantPooling(to_clean);
+
+  // For jitter
+  CanonicalizeOutputs(to_clean);
+
+  // Annotate aten::warns so that each has its unique ID. This enables us to
+  // mimic Python behavior of only emitting each warning only once.
+  AnnotateWarns(to_clean);
+}
+
+// we consider _N where N is a number, to be a non-meaningful name
+// and do not record it as a unique name. This allows python printing to
+// be able to export and import more consistently named graphs
+bool meaningfulName(const std::string& name) {
+  if (name.size() == 0)
     return false;
+  if (name[0] == '$')
+    return false;
+  if (name[0] != '_')
+    return true;
+  for (size_t i = 1; i < name.size(); ++i) {
+    if (!isdigit(name[i]))
+      return true;
   }
+  return false;
+}
 
-  void CompilationUnit::define_interface(
-      const c10::QualifiedName& qualifiedName,
-      const ClassDef& classDef,
-      ResolverPtr rcb,
-      bool is_module) {
-    ScriptTypeParser typeParser(std::move(rcb));
-    InterfaceTypePtr iface =
-        InterfaceType::create(c10::QualifiedName(qualifiedName), is_module);
-    for (const Stmt& stmt : classDef.body()) {
-      if (stmt.kind() != TK_DEF) {
-        throw ErrorReport(stmt)
-            << "interface declartions can only contain method definitions";
-      }
-      auto method_def = Def(stmt);
-      if (!method_def.decl().return_type().present()) {
-        throw ErrorReport(method_def)
-            << "interface declarations must have a return type annotated.";
-      }
-      FunctionSchema schema =
-          typeParser.parseSchemaFromDef(method_def, /* skip_self*/ true);
-      // need to add self as the first because we skipped it
-      std::vector<Argument> arguments;
-      arguments.emplace_back(
-          Argument(method_def.decl().params()[0].ident().name(), iface));
-      arguments.insert(
-          arguments.end(),
-          schema.arguments().begin(),
-          schema.arguments().end());
-      iface->addMethod(schema.cloneWithArguments(std::move(arguments)));
-      // we need to make sure everything but the last element is just string
-      // literals (aka comments) unless there is "pass" in between
-      auto stmts_size = method_def.statements().size();
-      for (size_t i = 0; i < stmts_size - 1; i++) {
-        auto cur_statement = method_def.statements()[i];
-        if (cur_statement.kind() == TK_EXPR_STMT) {
-          auto expr = ExprStmt(cur_statement).expr();
-          if (expr.kind() != TK_STRINGLITERAL) {
-            throw ErrorReport(method_def.range())
-                << "interfaces declarations should only contain a single 'pass' statement.";
-          }
-        }
-        // if we see a "pass", we just stop there
-        if (cur_statement.kind() == TK_PASS) {
-          this->register_type(iface);
-          return;
+void CompilationUnit::define_interface(
+    const c10::QualifiedName& qualifiedName,
+    const ClassDef& classDef,
+    ResolverPtr rcb,
+    bool is_module) {
+  ScriptTypeParser typeParser(std::move(rcb));
+  InterfaceTypePtr iface =
+      InterfaceType::create(c10::QualifiedName(qualifiedName), is_module);
+  for (const Stmt& stmt : classDef.body()) {
+    if (stmt.kind() != TK_DEF) {
+      throw ErrorReport(stmt)
+          << "interface declartions can only contain method definitions";
+    }
+    auto method_def = Def(stmt);
+    if (!method_def.decl().return_type().present()) {
+      throw ErrorReport(method_def)
+          << "interface declarations must have a return type annotated.";
+    }
+    FunctionSchema schema =
+        typeParser.parseSchemaFromDef(method_def, /* skip_self*/ true);
+    // need to add self as the first because we skipped it
+    std::vector<Argument> arguments;
+    arguments.emplace_back(
+        Argument(method_def.decl().params()[0].ident().name(), iface));
+    arguments.insert(
+        arguments.end(), schema.arguments().begin(), schema.arguments().end());
+    iface->addMethod(schema.cloneWithArguments(std::move(arguments)));
+    // we need to make sure everything but the last element is just string
+    // literals (aka comments) unless there is "pass" in between
+    auto stmts_size = method_def.statements().size();
+    for (size_t i = 0; i < stmts_size - 1; i++) {
+      auto cur_statement = method_def.statements()[i];
+      if (cur_statement.kind() == TK_EXPR_STMT) {
+        auto expr = ExprStmt(cur_statement).expr();
+        if (expr.kind() != TK_STRINGLITERAL) {
+          throw ErrorReport(method_def.range())
+              << "interfaces declarations should only contain a single 'pass' statement.";
         }
       }
-
-      if (method_def.statements()[stmts_size - 1].kind() != TK_PASS) {
-        throw ErrorReport(method_def.range())
-            << "interfaces declarations should contain 'pass' statement.";
+      // if we see a "pass", we just stop there
+      if (cur_statement.kind() == TK_PASS) {
+        this->register_type(iface);
+        return;
       }
     }
-    this->register_type(iface);
+
+    if (method_def.statements()[stmts_size - 1].kind() != TK_PASS) {
+      throw ErrorReport(method_def.range())
+          << "interfaces declarations should contain 'pass' statement.";
+    }
   }
+  this->register_type(iface);
+}
 
 } // namespace jit
 } // namespace torch
