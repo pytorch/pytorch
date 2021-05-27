@@ -11,6 +11,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Type,
     TypeVar,
     Union,
 )
@@ -110,7 +111,7 @@ class _RemoteModule(nn.Module):
     def __init__(
         self,
         remote_device: str,
-        module_cls: nn.Module,
+        module_cls: Type[nn.Module],
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
         _module_interface_cls: Any = None,
@@ -517,7 +518,7 @@ class RemoteModule(_RemoteModule):
     def __init__(
         self,
         remote_device: str,
-        module_cls: nn.Module,
+        module_cls: Type[nn.Module],
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
     ):
