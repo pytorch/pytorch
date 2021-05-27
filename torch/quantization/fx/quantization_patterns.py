@@ -335,7 +335,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[operator]
                     scale = float(scale)
                     zero_point = int(zero_point)
-                    scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
+                    scale_arg, zero_point_arg = \
+                        create_qparam_nodes(
+                            quantizer, node.name, scale, zero_point, modules,
+                            quantized_graph, node_name_to_scope)
                     kwargs = {**self.binary_op_node.kwargs}
                     add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
                     op = quantized_graph.create_node(
@@ -573,7 +576,10 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     assert activation_post_process is not None
 
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
-                    scale_node, zero_point_node = create_qparam_nodes(quantizer, self.conv_node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
+                    scale_node, zero_point_node = \
+                        create_qparam_nodes(
+                            quantizer, self.conv_node.name, scale, zero_point, modules,
+                            quantized_graph, node_name_to_scope)
                     qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
                     kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                     op = quantized_graph.create_node(
@@ -761,8 +767,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         self._maybe_get_last_node_only_observer(quantizer, modules)
                     assert activation_post_process is not None
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
-
-                    scale_node, zero_point_node = create_qparam_nodes(quantizer, self.linear_node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
+                    scale_node, zero_point_node = \
+                        create_qparam_nodes(
+                            quantizer, self.linear_node.name, scale, zero_point, modules,
+                            quantized_graph, node_name_to_scope)
 
                     qlinear_args = (linear_input, packed_weight, scale_node, zero_point_node)
                     op = quantized_graph.create_node(
@@ -969,6 +977,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.InstanceNorm3d)
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
+@register_quant_pattern(torch.nn.Mish)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
@@ -978,6 +987,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
+@register_quant_pattern(torch.nn.functional.mish)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
@@ -1035,6 +1045,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.InstanceNorm3d: int8_dtypes,
             torch.nn.LayerNorm: all_dtypes,
             torch.nn.SiLU: fp16_dtypes,
+            torch.nn.Mish: fp16_dtypes,
             torch.nn.GELU: int8_dtypes,
             torch.nn.Softmax: int8_dtypes,
             torch.nn.functional.hardswish: int8_dtypes,
@@ -1042,6 +1053,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.functional.layer_norm: all_dtypes,
             torch.nn.functional.leaky_relu: int8_dtypes,
             torch.nn.functional.silu: fp16_dtypes,
+            torch.nn.functional.mish: fp16_dtypes,
             torch.nn.functional.gelu: int8_dtypes,
             torch.nn.functional.softmax: int8_dtypes,
         }
@@ -1077,8 +1089,10 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[operator]
                     scale = float(scale)
                     zero_point = int(zero_point)
-
-                    scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
+                    scale_arg, zero_point_arg = \
+                        create_qparam_nodes(
+                            quantizer, node.name, scale, zero_point, modules,
+                            quantized_graph, node_name_to_scope)
 
                     assert not isinstance(node.target, str), "Expecting node.target for "
                     "call_function to be a function instead of a string"
@@ -1141,8 +1155,8 @@ class ELUQuantizeHandler(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[operator]
         scale = float(scale)
         zero_point = int(zero_point)
-
-        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
+        scale_arg, zero_point_arg = create_qparam_nodes(
+            quantizer, node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
 
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
