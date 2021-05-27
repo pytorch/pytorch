@@ -830,7 +830,7 @@ class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
     The scale factor :math:`S` is then computed as:
 
     .. math::
-        S = \sqrt{\frac{x_{max} - x_{min}}{w_{max} - w{min}}} 
+        S = \sqrt{\frac{x_{max} - x_{min}}{w_{max} - w{min}}}
 
     where :math:`X` is the observed tensor.
 
@@ -858,7 +858,7 @@ class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
     def forward(self, x_orig, w_orig):
         if not (x_orig.ndim == 2 and w_orig.ndim == 2 and x_orig.shape[1] == w_orig.shape[1]):
             raise ValueError(
-                "Input and Weight must have the same column dimension. " + 
+                "Input and Weight must have the same column dimension. " +
                 f"Found {x_orig.shape} and {w_orig.shape} instead."
             )
 
@@ -877,7 +877,7 @@ class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
 
     def calculate_scale(self):
         self.S = torch.sqrt((self.max_weights - self.min_weights) / (self.max_vals - self.min_vals))
-        return self.S 
+        return self.S
 
 class HistogramObserver(_ObserverBase):
     r"""

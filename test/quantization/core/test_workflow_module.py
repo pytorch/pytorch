@@ -3,6 +3,7 @@ import torch
 from torch.quantization import (
     MinMaxObserver,
     PerChannelMinMaxObserver,
+    InputWeightMinMaxObserver,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
     HistogramObserver,
@@ -56,6 +57,27 @@ from torch.testing._internal.common_quantized import (
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
+
+# Reference for calculating the Scale value for input weight equalization
+def _get_input_weight_scale(x, w):
+    r"""
+    Args:
+        x: Inputs
+        w: Weights
+    Return:
+        x_min: Minimum values of the input columns
+        x_max: Maximum values of the input columns
+        w_min: Minimum values of the weight columns
+        w_max: Maximum values of the weight columns
+        scale: Scale value for input-weight equalization
+    """
+    x_min = x.min(axis=0)
+    x_max = x.max(axis=0)
+    w_min = w.min(axis=0)
+    w_max = w.max(axis=0)
+
+    scale = np.sqrt((w_max - w_min) / (x_max - x_min))
+    return (x_min, x_max, w_min, w_max, scale)
 
 class TestObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
@@ -227,6 +249,71 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
+           reduce_range=st.booleans())
+    def test_input_weight_observer_fixed(self, qdtype, qscheme, reduce_range):
+        # reduce_range cannot be true for symmetric quantization with uint8
+        if qscheme == torch.per_channel_affine_float_qparams:
+            reduce_range = False
+        if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
+            reduce_range = False
+
+        myobs = InputWeightMinMaxObserver(reduce_range=reduce_range, dtype=qdtype, qscheme=qscheme)
+
+        x = torch.tensor([[1.0, 2.0], [2.0, 2.5], [3.0, 4.0], [4.5, 6.0]])
+        w = torch.tensor([[-4.0, -3.0], [5.0, 5.0], [6.0, 3.0], [7.0, 8.0]])
+
+        result = myobs(x, w)
+        self.assertEqual(result, (x, w))
+
+        ref_min_vals = [1.0, 2.0]
+        ref_max_vals = [4.5, 6.0]
+        self.assertEqual(myobs.min_vals, ref_min_vals)
+        self.assertEqual(myobs.max_vals, ref_max_vals)
+
+        ref_min_weights = [-4.0, -3.0]
+        ref_max_weights = [7.0, 8.0]
+        self.assertEqual(myobs.min_weights, ref_min_weights)
+        self.assertEqual(myobs.max_weights, ref_max_weights)
+
+        scale = myobs.calculate_scale()
+        ref_scale = [np.sqrt((7.0 + 4.0) / (4.5 - 1.0)), np.sqrt((8.0 + 3.0) / (6.0 - 2.0))]
+        self.assertEqual(scale, ref_scale)
+
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
+           reduce_range=st.booleans())
+    def test_input_weight_observer_random(self, qdtype, qscheme, reduce_range):
+        # reduce_range cannot be true for symmetric quantization with uint8
+        if qscheme == torch.per_channel_affine_float_qparams:
+            reduce_range = False
+        if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
+            reduce_range = False
+
+        myobs = InputWeightMinMaxObserver(reduce_range=reduce_range, dtype=qdtype, qscheme=qscheme)
+
+        width = np.random.randint(10) + 1
+        x_height = np.random.randint(10) + 2
+        w_height = np.random.randint(10) + 2
+
+        x = (np.random.random(size=(x_height, width)) * 10).round(decimals=2).astype(np.float32)
+        w = (np.random.random(size=(w_height, width)) * 10).round(decimals=2).astype(np.float32)
+
+        result = myobs(torch.tensor(x), torch.tensor(w))
+        scale = myobs.calculate_scale()
+
+        ref_min_vals, ref_max_vals, ref_min_weights, ref_max_weights, ref_scale = _get_input_weight_scale(x, w)
+
+        self.assertEqual(result, (x, w))
+
+        self.assertEqual(myobs.min_vals, ref_min_vals)
+        self.assertEqual(myobs.max_vals, ref_max_vals)
+
+        self.assertEqual(myobs.min_weights, ref_min_weights)
+        self.assertEqual(myobs.max_weights, ref_max_weights)
+
+        self.assertEqual(scale, ref_scale)
 
     def test_observer_scriptable(self):
         obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
