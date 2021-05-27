@@ -913,7 +913,7 @@ const std::vector<std::string> functions = {
         def hardsigmoid(self):
             result = torch.hardsigmoid(self)
             def backward(grad_output):
-                return torch.where((result > -3.) & (result < 3.), 0., grad_output * (1.0 / 6.0))
+                return torch.where((result > -3.) & (result < 3.), grad_output * (1.0 / 6.0), 0.)
             return result, backward
 
         def erfc(self):
