@@ -4820,6 +4820,8 @@
 
 - func: sparse_csr_tensor.crow_col_value(Tensor crow_indices, Tensor col_indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
+- func: _sparse_csr_tensor_unsafe(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
 - func: sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4829,6 +4831,8 @@
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size) -> ()
+
+- func: _validate_sparse_csr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
@@ -4901,7 +4905,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _nnz_sparse
-    SparseCsrCPU: _nnz_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: _nnz_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -4960,21 +4964,21 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
-    SparseCsrCPU: values_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: values_sparse_csr
   device_check: NoCheck
   device_guard: False
 
 - func: crow_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU: crow_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: crow_indices_sparse_csr
   device_check: NoCheck
   device_guard: False
 
 - func: col_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU: col_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: col_indices_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -5728,18 +5732,6 @@
   variants: method
   dispatch:
     CPU, CUDA: fmod_
-
-- func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-  dispatch:
-    CPU, CUDA: remainder_
-
-- func: remainder_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-  dispatch:
-    CPU, CUDA: remainder_
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -6739,26 +6731,35 @@
     CompositeExplicitAutograd: nextafter_
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: remainder_out
+    CompositeExplicitAutograd: remainder_out
 
 - func: remainder.Scalar(Tensor self, Scalar other) -> Tensor
-  device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: remainder
+    CompositeExplicitAutograd: remainder
+
+- func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: remainder_
 
 - func: remainder.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: remainder_out
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: remainder.Tensor_out
   variants: method, function
-  dispatch:
-    CPU, CUDA: remainder
+
+- func: remainder_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: remainder.Tensor_out
+  variants: method
 
 - func: min(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
