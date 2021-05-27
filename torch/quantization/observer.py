@@ -801,6 +801,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         self.max_vals.copy_(max_vals)
         return x_orig
 
+
 class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
     r"""Observer module for computing the scale factor needed for input-weight
     equalization based on the running min and max values of the input and weight
@@ -837,8 +838,12 @@ class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
-    min_weights: torch.Tensor
-    max_weights: torch.Tensor
+    min_inputs_col: torch.Tensor
+    max_inputs_col: torch.Tensor
+    min_weights_col: torch.Tensor
+    max_weights_col: torch.Tensor
+    min_weights_row: torch.Tensor
+    max_weights_row: torch.Tensor
 
     def __init__(self, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False,
@@ -852,32 +857,73 @@ class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
 
         # We want to get the columns of the weights and inputs
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        self.register_buffer('min_weights', torch.tensor([], **factory_kwargs))
-        self.register_buffer('max_weights', torch.tensor([], **factory_kwargs))
+        self.register_buffer('min_inputs_col', torch.tensor([], **factory_kwargs)) 
+        self.register_buffer('max_inputs_col', torch.tensor([], **factory_kwargs))
+        self.register_buffer('min_weights_col', torch.tensor([], **factory_kwargs))
+        self.register_buffer('max_weights_col', torch.tensor([], **factory_kwargs))
+        self.register_buffer('min_weights_row', torch.tensor([], **factory_kwargs))
+        self.register_buffer('max_weights_row', torch.tensor([], **factory_kwargs))
 
-    def forward(self, x_orig, w_orig):
+    def forward(self, x_orig: torch.Tensor, w_orig: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         if not (x_orig.ndim == 2 and w_orig.ndim == 2 and x_orig.shape[1] == w_orig.shape[1]):
             raise ValueError(
                 "Input and Weight must have the same column dimension. " +
                 f"Found {x_orig.shape} and {w_orig.shape} instead."
             )
 
-        return (super()._forward(x_orig), self._forward(w_orig))
+        return self._forward(x_orig, w_orig)
 
-    def _forward(self, w_orig):
+    def _forward(self, x_orig: torch.Tensor, w_orig: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        r"""
+        Calculates the min/max values of each input column, weight column, and weight row.
+        """
         if w_orig.numel() == 0:
             return w_orig
 
-        min_weights, max_weights = super()._find_minmax(w_orig, self.min_weights, self.max_weights)
-        self.min_weights.resize_(min_weights.shape)
-        self.max_weights.resize_(max_weights.shape)
-        self.min_weights.copy_(min_weights)
-        self.max_weights.copy_(max_weights)
-        return w_orig
+        # Calculate the min/max of input columns
+        self.ch_axis = 1
+        min_inputs_col, max_inputs_col = self._find_minmax(x_orig, self.min_inputs_col, self.max_inputs_col)
+        self.min_inputs_col.resize_(min_inputs_col.shape)
+        self.max_inputs_col.resize_(max_inputs_col.shape)
+        self.min_inputs_col.copy_(min_inputs_col)
+        self.max_inputs_col.copy_(max_inputs_col)
 
-    def calculate_scale(self):
-        self.S = torch.sqrt((self.max_weights - self.min_weights) / (self.max_vals - self.min_vals))
+        # Calculate the min/max of weight columns
+        min_weights_col, max_weights_col = self._find_minmax(w_orig, self.min_weights_col, self.max_weights_col)
+        self.min_weights_col.resize_(min_weights_col.shape)
+        self.max_weights_col.resize_(max_weights_col.shape)
+        self.min_weights_col.copy_(min_weights_col)
+        self.max_weights_col.copy_(max_weights_col)
+
+        # Calculate the min/max of weight rows
+        self.ch_axis = 0
+        min_weights_row, max_weights_row = self._find_minmax(w_orig, self.min_weights_row, self.max_weights_row)
+        self.min_weights_row.resize_(min_weights_row.shape)
+        self.max_weights_row.resize_(max_weights_row.shape)
+        self.min_weights_row.copy_(min_weights_row)
+        self.max_weights_row.copy_(max_weights_row)
+
+        return x_orig, w_orig
+
+    def calculate_scale(self) -> torch.Tensor:
+        self.S = torch.sqrt((self.max_weights_col - self.min_weights_col) / (self.max_inputs_col - self.min_inputs_col))
         return self.S
+
+    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        r"""
+        Returns the scale/zero_point for the input and weight rows
+        """
+
+        # Calculate qparams for the scaled inputs
+        min_input_scaled = torch.mul(torch.min(self.min_inputs_col), self.S)
+        max_input_scaled = torch.mul(torch.max(self.max_inputs_col), self.S)
+        (scale_input, zero_point_input) = self._calculate_qparams(min_input_scaled, max_input_scaled)
+
+        # Calculate qparams for the weights
+        (scale_weight, zero_point_weight) = self._calculate_qparams(self.min_weights_row, self.max_weights_row)
+
+        return (scale_input, zero_point_input, scale_weight, zero_point_weight)
+
 
 class HistogramObserver(_ObserverBase):
     r"""

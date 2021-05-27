@@ -58,27 +58,6 @@ from torch.testing._internal.common_quantized import (
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
-# Reference for calculating the Scale value for input weight equalization
-def _get_input_weight_scale(x, w):
-    r"""
-    Args:
-        x: Inputs
-        w: Weights
-    Return:
-        x_min: Minimum values of the input columns
-        x_max: Maximum values of the input columns
-        w_min: Minimum values of the weight columns
-        w_max: Maximum values of the weight columns
-        scale: Scale value for input-weight equalization
-    """
-    x_min = x.min(axis=0)
-    x_max = x.max(axis=0)
-    w_min = w.min(axis=0)
-    w_max = w.max(axis=0)
-
-    scale = np.sqrt((w_max - w_min) / (x_max - x_min))
-    return (x_min, x_max, w_min, w_max, scale)
-
 class TestObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
@@ -267,19 +246,26 @@ class TestObserver(QuantizationTestCase):
         result = myobs(x, w)
         self.assertEqual(result, (x, w))
 
-        ref_min_vals = [1.0, 2.0]
-        ref_max_vals = [4.5, 6.0]
-        self.assertEqual(myobs.min_vals, ref_min_vals)
-        self.assertEqual(myobs.max_vals, ref_max_vals)
+        ref_min_inputs = [1.0, 2.0]
+        ref_max_inputs = [4.5, 6.0]
+        self.assertEqual(myobs.min_inputs_col, ref_min_inputs)
+        self.assertEqual(myobs.max_inputs_col, ref_max_inputs)
 
-        ref_min_weights = [-4.0, -3.0]
-        ref_max_weights = [7.0, 8.0]
-        self.assertEqual(myobs.min_weights, ref_min_weights)
-        self.assertEqual(myobs.max_weights, ref_max_weights)
+        ref_min_weights_col = [-4.0, -3.0]
+        ref_max_weights_col = [7.0, 8.0]
+        self.assertEqual(myobs.min_weights_col, ref_min_weights_col)
+        self.assertEqual(myobs.max_weights_col, ref_max_weights_col)
+
+        ref_min_weights_row = [-4.0, 5.0, 3.0, 7.0]
+        ref_max_weights_row = [-3.0, 5.0, 6.0, 8.0]
+        self.assertEqual(myobs.min_weights_row, ref_min_weights_row)
+        self.assertEqual(myobs.max_weights_row, ref_max_weights_row)
 
         scale = myobs.calculate_scale()
         ref_scale = [np.sqrt((7.0 + 4.0) / (4.5 - 1.0)), np.sqrt((8.0 + 3.0) / (6.0 - 2.0))]
         self.assertEqual(scale, ref_scale)
+
+        qparams = myobs.calculate_qparams()
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
@@ -301,18 +287,25 @@ class TestObserver(QuantizationTestCase):
         w = (np.random.random(size=(w_height, width)) * 10).round(decimals=2).astype(np.float32)
 
         result = myobs(torch.tensor(x), torch.tensor(w))
-        scale = myobs.calculate_scale()
-
-        ref_min_vals, ref_max_vals, ref_min_weights, ref_max_weights, ref_scale = _get_input_weight_scale(x, w)
-
         self.assertEqual(result, (x, w))
 
-        self.assertEqual(myobs.min_vals, ref_min_vals)
-        self.assertEqual(myobs.max_vals, ref_max_vals)
+        ref_min_inputs = x.min(axis=0)
+        ref_max_inputs = x.max(axis=0)
+        self.assertEqual(myobs.min_inputs_col, ref_min_inputs)
+        self.assertEqual(myobs.max_inputs_col, ref_max_inputs)
 
-        self.assertEqual(myobs.min_weights, ref_min_weights)
-        self.assertEqual(myobs.max_weights, ref_max_weights)
+        ref_min_weights_col = w.min(axis=0)
+        ref_max_weights_col = w.max(axis=0)
+        self.assertEqual(myobs.min_weights_col, ref_min_weights_col)
+        self.assertEqual(myobs.max_weights_col, ref_max_weights_col)
 
+        ref_min_weights_row = w.min(axis=1)
+        ref_max_weights_row = w.max(axis=1)
+        self.assertEqual(myobs.min_weights_row, ref_min_weights_row)
+        self.assertEqual(myobs.max_weights_row, ref_max_weights_row)
+
+        scale = myobs.calculate_scale()
+        ref_scale = np.sqrt((ref_max_weights_col - ref_min_weights_col) / (ref_max_inputs - ref_min_inputs))
         self.assertEqual(scale, ref_scale)
 
     def test_observer_scriptable(self):
