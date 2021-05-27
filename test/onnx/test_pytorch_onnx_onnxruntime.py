@@ -7769,6 +7769,45 @@ class TestONNXRuntime(unittest.TestCase):
         model_export.eval()
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.PRESERVE, rtol=1e-3, atol=1e-5)
 
+    def test_instancenorm_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.insnorm = torch.nn.InstanceNorm2d(3, affine=True)
+
+            def forward(self, x):
+                insnorm = self.insnorm(x)
+                return insnorm
+
+        x = torch.randn(3, 3, 1, 2)
+        model_export = MyModule()
+
+        model_export.train()
+        outs = model_export(x)
+        pytorch_out = [outs.detach().numpy()]
+
+        ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version, example_outputs=outs,
+                                   training=torch.onnx.TrainingMode.TRAINING)
+
+        ort_outs = run_ort(ort_sess, input=(x,))
+        assert len(pytorch_out) == len(ort_outs)
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in
+         zip(pytorch_out, ort_outs)]
+
+        model_export = torch.jit.script(MyModule())
+        model_export.train()
+        outs = model_export(x)
+        pytorch_out = [outs.detach().numpy()]
+        ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
+                                   example_outputs=outs,
+                                   training=torch.onnx.TrainingMode.TRAINING,
+                                   onnx_shape_inference=True)
+
+        ort_outs = run_ort(ort_sess, input=(x,))
+        assert len(pytorch_out) == len(ort_outs)
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in
+         zip(pytorch_out, ort_outs)]
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
