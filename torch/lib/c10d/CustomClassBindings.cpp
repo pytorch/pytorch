@@ -13,12 +13,6 @@
 namespace c10 {
 namespace {
 
-
-// NOTE: Below are TorchBind bindings for c10d, these bindings will
-// live together with those pybind11 bindings above until we resolve
-// all the TorchBind issues and merge these two together. we shouldn't
-// document this until we finish the migration.
-
 static const auto StoreTorchBind =
     torch::class_<::c10d::Store>("dist_c10d", "Store");
 
