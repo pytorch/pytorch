@@ -125,14 +125,6 @@ void erfinv_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-void ndtr_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtr_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return calc_ndtr(a);
-    });
-  });
-}
-
 void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, double beta_){
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
     using T_ACC = acc_type<scalar_t, true>;
@@ -178,7 +170,6 @@ REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
 REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
-REGISTER_DISPATCH(special_ndtr_stub, &ndtr_kernel_cuda);
 
 } // namespace native
 } // namespace at

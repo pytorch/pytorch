@@ -713,9 +713,6 @@
 - name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
   self: grad * log1p(other.toDouble())
 
-- name: special_ndtr(Tensor self) -> Tensor
-  self: 1.0 / sqrt(M_PI * 2.0) * exp(-((self/sqrt(2.0)).pow(2))) * grad
-
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 

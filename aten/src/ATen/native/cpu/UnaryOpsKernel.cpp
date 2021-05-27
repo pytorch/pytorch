@@ -582,12 +582,6 @@ static void entr_kernel(TensorIteratorBase& iter) {
       });
 }
 
-static void ndtr_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtr_cpu", [&] {
-    cpu_kernel(iter, [](scalar_t x) -> scalar_t { return calc_ndtr(x); });
-  });
-}
-
 static void frexp_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf,
     // The iter.dtype() here is the dtype of mantissa output.
@@ -751,8 +745,6 @@ REGISTER_DISPATCH(special_entr_stub, &entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(special_ndtr_stub, &ndtr_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

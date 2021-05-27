@@ -9269,17 +9269,12 @@
   python_module: special
 
 - func: special_ndtr(Tensor self) -> Tensor
-  structured_delegate: special_ndtr.out
   python_module: special
   variants: function
 
 - func: special_ndtr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  structured: True
-  structured_inherits: TensorIteratorBase
   python_module: special
   variants: function
-  dispatch:
-    CPU, CUDA: special_ndtr_out
 
 - func: special_xlog1py(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator

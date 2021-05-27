@@ -1291,27 +1291,3 @@ calc_i0e(T _x) {
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
 inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
-
-/*
- * This function is derived from the implementation of the ndtr function in the
- * Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
- * Library].
- *
- * Computes the area under the Gaussian probability density function, integrated
- * from minus infinity to x. Computation is via the functions erf and erfc.
- */
-template <typename T>
-inline C10_HOST_DEVICE T calc_ndtr(const T x) {
-  constexpr T SQRTH = 7.07106781186547524401E-1; /* sqrt(2)/2 */
-  constexpr T HALF = 0.5;
-  const T x_mul_SQRTH = x * SQRTH;
-  const T z = std::abs(x_mul_SQRTH);
-
-  if (z < SQRTH) {
-    return (HALF + HALF * std::erf(x_mul_SQRTH));
-  }
-  if (x_mul_SQRTH > 0) {
-    return 1.0 - (HALF * std::erfc(z));
-  }
-  return HALF * std::erfc(z);
-}

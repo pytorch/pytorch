@@ -61,7 +61,6 @@ CREATE_UNARY_FLOAT_META_FUNC(sin)
 CREATE_UNARY_FLOAT_META_FUNC(sinc)
 CREATE_UNARY_FLOAT_META_FUNC(sinh)
 CREATE_UNARY_FLOAT_META_FUNC(special_entr)
-CREATE_UNARY_FLOAT_META_FUNC(special_ndtr)
 CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
@@ -165,7 +164,6 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_entr)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
-CREATE_UNARY_TORCH_IMPL_FUNC(special_ndtr)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
@@ -408,6 +406,16 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
+
+// special_ndtr
+Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
+  auto x_sqrt_2 = self / std::sqrt(2.);
+  return at::erf_out(result, x_sqrt_2).add_(1.).mul_(0.5);
+}
+Tensor special_ndtr(const Tensor& self) {
+  auto x_sqrt_2 = self / std::sqrt(2.);
+  return (1 + at::erf(x_sqrt_2)) * 0.5;
+}
 
 Tensor& sgn_out(const Tensor& self, Tensor& result) {
   if (self.is_complex()) {
@@ -663,7 +671,6 @@ DEFINE_DISPATCH(cos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 DEFINE_DISPATCH(cosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(digamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_entr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(special_ndtr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfinv_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
