@@ -789,6 +789,36 @@ class DistributedTest:
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
 
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_new_default_subgroups_nccl(self):
+            world_size = dist.get_world_size()
+            cur_subgroup, subgroups = dist.new_subgroups()
+            # By default, since this test runs on a single machine, only one subgroup will be generated,
+            # which should be equal to the main process group that contains all the ranks.
+            self.assertEqual(cur_subgroup.size(), world_size)
+            self.assertEqual(len(subgroups), 1)
+            self.assertEqual(cur_subgroup, subgroups[0])
+            self.assertFalse(dist._rank_not_in_group(cur_subgroup))
+
+        @skip_if_lt_x_gpu(4)
+        def test_new_2subgroups_nccl(self):
+            group, _, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+
+            # Divide into two subgroups, each of which has two processors.
+            # The device ids in the same subgroup are not neighboring numbers.
+            cur_subgroup, subgroups = dist.new_subgroups(ranks_per_subgroup_list=[[0, 2], [1, 3]], group=group)
+            if device_id >= 4:
+                self.assertIsNone(cur_subgroup)
+            else:
+                self.assertEqual(cur_subgroup.size(), 2)
+                self.assertEqual(len(subgroups), 2)
+                if device_id == 0 or device_id == 2:
+                    self.assertEqual(cur_subgroup, subgroups[0])
+                else:
+                    self.assertEqual(cur_subgroup, subgroups[1])
+
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
