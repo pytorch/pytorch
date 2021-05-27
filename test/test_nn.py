@@ -5504,6 +5504,7 @@ class TestNN(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
+    @skipIfRocm
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -12866,55 +12867,56 @@ class TestNNDeviceType(NNTestCase):
         inp = torch.randn(0, 7, device=device)
         self._test_module_empty_input(mod, inp)
 
-    def test_one_hot(self, device):
+    @dtypes(torch.uint8, torch.long, torch.bool)
+    def test_one_hot(self, device, dtype):
         if self.device_type != 'cuda':  # cuda throws device assert for invalid data
             with self.assertRaises(RuntimeError):
-                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
+                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device, dtype=dtype), -1)
 
             with self.assertRaises(RuntimeError):
-                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
+                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device, dtype=dtype), 3)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1, dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6, dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
                                  [0, 1, 0, 0, 0, 0],
-                                 [1, 0, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([[3, 4], [1, 0]], device=device))
+        t = torch.nn.functional.one_hot(torch.tensor([[3, 4], [1, 0]], device=device), dtype=dtype)
         expected = torch.tensor([[[0, 0, 0, 1, 0],
                                   [0, 0, 0, 0, 1]],
                                  [[0, 1, 0, 0, 0],
-                                  [1, 0, 0, 0, 0]]], device=device)
+                                  [1, 0, 0, 0, 0]]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor(4, device=device))
-        expected = torch.tensor([0, 0, 0, 0, 1], device=device)
+        t = torch.nn.functional.one_hot(torch.tensor(4, device=device), dtype=dtype)
+        expected = torch.tensor([0, 0, 0, 0, 1], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100)
-        expected = torch.empty([4, 0, 100], dtype=torch.long)
+        t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100, dtype=dtype)
+        expected = torch.empty([4, 0, 100], dtype=dtype)
         self.assertEqual(t, expected)
 
         with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device))
+            torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), dtype=dtype)
 
         with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
+            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2, dtype=dtype)
 
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
@@ -16082,6 +16084,12 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
+    @onlyOnCPUAndCUDA
+    def test_mish_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.mish(x, inplace=True)
+
     def test_softplus_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -16222,8 +16230,7 @@ class TestNNDeviceType(NNTestCase):
         # Test meta module instantiation.
         input = torch.randn(5, 10, device=device, dtype=dtype)
         m = MyModule(10, 1, device='meta', dtype=dtype)
-        with self.assertRaises(NotImplementedError):
-            m(input)
+        m(input)
 
         # Test materializing meta module on a real device.
         m.to_empty(device=device)
@@ -16234,8 +16241,19 @@ class TestNNDeviceType(NNTestCase):
 
         # Test creating meta module from materialized module.
         m.to_empty(device='meta')
-        with self.assertRaises(NotImplementedError):
-            m(input)
+        m(input)
+
+    @skipMeta
+    def test_skip_init(self, device):
+        torch.manual_seed(1)
+        m_initialized = torch.nn.Linear(5, 1)
+        m_initialized.to(device)
+
+        torch.manual_seed(1)
+        m_uninitialized = torch.nn.utils.skip_init(torch.nn.Linear, 5, 1, device=device)
+
+        self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
+        self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
 class TestModuleGlobalHooks(TestCase):
 

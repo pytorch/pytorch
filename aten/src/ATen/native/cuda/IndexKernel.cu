@@ -373,6 +373,10 @@ template <typename mask_t>
 void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
   auto srcSize = source.numel();
 
+  if (self.numel() == 0) {
+    return;
+  }
+
   auto mask_cont = mask.contiguous();
 
   // Use a prefix sum to determine the output locations of the masked elements
@@ -400,10 +404,10 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .add_borrowed_output(self)
-      .add_borrowed_input(self)
-      .add_borrowed_input(mask_cont)
-      .add_borrowed_input(maskPrefixSum)
+      .add_output(self)
+      .add_input(self)
+      .add_input(mask_cont)
+      .add_input(maskPrefixSum)
       .build();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -435,11 +439,6 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
       self.scalar_type(),
       " and ",
       source.scalar_type());
-
-  TensorArg self_arg{self, "self", 1};
-  TensorArg mask_arg{mask, "mask", 2};
-  TensorArg source_arg{source, "source", 3};
-  checkAllSameGPU(__func__, {self_arg, mask_arg, source_arg});
 
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
 

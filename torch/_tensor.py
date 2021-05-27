@@ -953,10 +953,14 @@ class Tensor(torch._C._TensorBase):
                 while i < row_indices.size()[0] and row_indices[i] == irow:
                     i += 1
                 ro.append(i)
-
-            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=row_indices.dtype),
-                                           coalesced_self.indices()[1], coalesced_self.values(),
-                                           size=coalesced_self.shape, dtype=coalesced_self.dtype)
+            device = coalesced_self.values().device
+            crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
+            return torch.sparse_csr_tensor(crow_indices,
+                                           coalesced_self.indices()[1].contiguous(),
+                                           coalesced_self.values(),
+                                           size=coalesced_self.shape,
+                                           dtype=coalesced_self.dtype,
+                                           device=device)
         elif self.is_sparse_csr:
             return self
         else:
