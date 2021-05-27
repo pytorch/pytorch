@@ -5,6 +5,14 @@ import torch.nn.functional as F
 from functorch import make_functional, grad_and_value, vmap, functional_init
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html
+# The original code comes with the following citation:
+# @misc{Whitney2021Parallelizing,
+#     author = {William F. Whitney},
+#     title = { {Parallelizing neural networks on one GPU with JAX} },
+#     year = {2021},
+#     url = {http://willwhitney.com/parallel-training-jax.html},
+# }
+
 # GOAL: Demonstrate that it is possible to use eager-mode vmap
 # to parallelize training over models.
 
