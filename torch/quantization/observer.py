@@ -857,14 +857,14 @@ class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
 
         # We want to get the columns of the weights and inputs
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        self.register_buffer('min_inputs_col', torch.tensor([], **factory_kwargs)) 
+        self.register_buffer('min_inputs_col', torch.tensor([], **factory_kwargs))
         self.register_buffer('max_inputs_col', torch.tensor([], **factory_kwargs))
         self.register_buffer('min_weights_col', torch.tensor([], **factory_kwargs))
         self.register_buffer('max_weights_col', torch.tensor([], **factory_kwargs))
         self.register_buffer('min_weights_row', torch.tensor([], **factory_kwargs))
         self.register_buffer('max_weights_row', torch.tensor([], **factory_kwargs))
 
-    def forward(self, x_orig: torch.Tensor, w_orig: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x_orig, w_orig):
         if not (x_orig.ndim == 2 and w_orig.ndim == 2 and x_orig.shape[1] == w_orig.shape[1]):
             raise ValueError(
                 "Input and Weight must have the same column dimension. " +
@@ -873,12 +873,12 @@ class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
 
         return self._forward(x_orig, w_orig)
 
-    def _forward(self, x_orig: torch.Tensor, w_orig: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _forward(self, x_orig, w_orig):
         r"""
         Calculates the min/max values of each input column, weight column, and weight row.
         """
         if w_orig.numel() == 0:
-            return w_orig
+            return (x_orig, w_orig)
 
         # Calculate the min/max of input columns
         self.ch_axis = 1
@@ -909,7 +909,7 @@ class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
         self.S = torch.sqrt((self.max_weights_col - self.min_weights_col) / (self.max_inputs_col - self.min_inputs_col))
         return self.S
 
-    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self):
         r"""
         Returns the scale/zero_point for the input and weight rows
         """
