@@ -1045,7 +1045,7 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   auto self_scale_neg_zp_premul_vec = self_scale_vec * self_zero_point_vec.neg();
   auto other_scale_zp_premul_vec = other_scale_vec * other_zero_point_vec.neg();
 
-  auto iter = TensorIterator::binary_op(out, self, other);
+  auto iter = TensorIterator::borrowing_binary_op(out, self, other);
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -1105,7 +1105,7 @@ void qmul_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
 
   float multiplier = self_scale * other_scale * inv_scale;
 
-  auto iter = TensorIterator::binary_op(out, self, other);
+  auto iter = TensorIterator::borrowing_binary_op(out, self, other);
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qmul", [&]() {
     using Vec = Vectorized<scalar_t>;
