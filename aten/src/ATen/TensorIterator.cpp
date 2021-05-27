@@ -1,4 +1,4 @@
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 
 #include <array>
 #include <ATen/ExpandUtils.h>
@@ -7,6 +7,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/TensorIteratorInternal.h>
 
 #include <c10/util/irange.h>
 
@@ -576,17 +577,6 @@ StrideVector TensorIteratorBase::get_dim_strides(int dim) const {
   return inner_strides;
 }
 
-SmallVector<char*, 4> TensorIteratorBase::get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const {
-  auto ptrs = SmallVector<char*, 4>(base);
-  for (int dim = 0; dim < ndim(); dim++) {
-    int64_t value = counter[dim];
-    for (int arg = 0; arg < ntensors(); arg++) {
-      ptrs[arg] += value * operands_[arg].stride_bytes[dim];
-    }
-  }
-  return ptrs;
-}
-
 SmallVector<char*, 4> TensorIteratorBase::get_base_ptrs() const {
   auto ptrs = SmallVector<char*, 4>();
   for (int i = 0; i < ntensors(); i++) {
@@ -671,29 +661,7 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
   if (range.size() == 0) {
     return;
   }
-  auto strides = get_strides();
-  while (strides.size() < 2U * ntensors()) {
-    strides.push_back(0);
-  }
-
-
-  auto base_ptrs = get_base_ptrs();
-  if (ndim() <= 1) {
-    if (range.begin > 0) {
-      auto ptrs = get_data_ptrs(base_ptrs, {range.begin});
-      loop(ptrs.data(), strides.data(), range.size(), 1);
-    } else {
-      loop(base_ptrs.data(), strides.data(), range.size(), 1);
-    }
-  } else {
-    auto counter = DimCounter(shape_, range);
-    while (!counter.is_done()) {
-      auto ptrs = get_data_ptrs(base_ptrs, counter.values);
-      auto step = counter.max_2d_step();
-      loop(ptrs.data(), strides.data(), step[0], step[1]);
-      counter.increment(step);
-    }
-  }
+  at::internal::serial_for_each(shape_, get_strides(), get_base_ptrs(), loop, range);
 }
 
 bool TensorIteratorBase::is_trivial_1d() const {

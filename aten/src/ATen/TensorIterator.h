@@ -66,19 +66,6 @@ namespace internal {
 constexpr int64_t GRAIN_SIZE = 32768;
 } // namespace internal
 
-struct DimCounter {
-  DimCounter(IntArrayRef shape, Range range);
-
-  void increment(const std::array<int64_t, 2>& step);
-  bool is_done() const;
-  std::array<int64_t, 2> max_2d_step() const;
-
-  IntArrayRef shape;
-  Range range;
-  DimVector values;
-  int64_t offset;
-};
-
 struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
@@ -310,7 +297,6 @@ public:
   StrideVector get_dim_strides(int dim) const;
   StrideVector get_strides() const;
   StrideVector get_inner_strides() const { return get_dim_strides(0); }
-  PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const;
   PtrVector get_base_ptrs() const;
 
   /// true if the stride computation can use 32-bit arithmetic. Used by GPU kernels
