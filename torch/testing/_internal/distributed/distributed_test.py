@@ -688,7 +688,19 @@ class DistributedTest:
             # Only execute barrier on rank == 0, causing it to timeout
             if local_rank == 0:
                 expected_time = time.time() + timeout.total_seconds()
-                with self.assertRaisesRegex(Exception, " (Timed out|closed|timeout) "):
+                # In debug mode, we execute a monitored_barrier before the
+                # collective, so assert on that.
+                if dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL:
+                    exception_ctx = self.assertRaisesRegex(
+                        Exception,
+                        "failed to pass monitoredBarrier"
+                    )
+                else:
+                    exception_ctx = self.assertRaisesRegex(
+                        Exception,
+                        " (Timed out|closed|timeout) "
+                    )
+                with exception_ctx:
                     dist.barrier(group_id)
                 self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.1)
             else:
@@ -1733,13 +1745,18 @@ class DistributedTest:
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_profiling_event(profiling_title_postfix, autograd_profiler_ctx)
-                self.assertEqual(len(events), len(op_calls))
+                # DETAIL debug mode can use a pg wrapper that issues more collectives
+                # under the hood
+                if dist._get_debug_mode() != dist._DistributedDebugLevel.DETAIL:
+                    self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertTrue(e.is_async)
                     self.assertEqual(e.count, 1)
                     self.assertGreaterEqual(e.cpu_time, 0)
                     # Verify tensor shapes if given
-                    if tensor_shapes is not None:
+                    # DETAIL debug mode can use a pg wrapper that issues more collectives
+                    # under the hood
+                    if tensor_shapes is not None and dist._get_debug_mode() != dist._DistributedDebugLevel.DETAIL:
                         self.assertEqual(e.input_shapes, tensor_shapes, f"event shape: {e.input_shapes} vs tensor {tensor_shapes}")
 
         # ALL REDUCE
@@ -3389,7 +3406,12 @@ class DistributedTest:
                 loss.backward()
 
             ddp_logging_data = ddp_model._get_ddp_logging_data()
-            self.assertEqual(ddp_logging_data.get("comm_hook"), None)
+            # Note: DETAIL debug mode logs DDP logging data to stdout and
+            # thus accesses std::map, which fills in a default value for the
+            # type if it didn't exist.
+            self.assertEqual(
+                ddp_logging_data.get("comm_hook", ""), ""
+            )
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
@@ -4199,7 +4221,12 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("nccl_nthreads"), None)
             self.assertEqual(ddp_logging_data.get("nccl_ib_timeout"), None)
             # test runtime logging fields
-            self.assertEqual(ddp_logging_data.get("unused_parameter_size"), None)
+            # Note: DETAIL debug mode logs DDP logging data to stdout and
+            # thus accesses std::map, which fills in a default value for the
+            # type if it didn't exist.
+            self.assertEqual(
+                ddp_logging_data.get("unused_parameter_size", 0), 0
+            )
             self.assertEqual(ddp_logging_data.get("has_rebuilt_buckets"), 1)
             self.assertEqual(ddp_logging_data.get("rebuilt_bucket_sizes"), str(param_size))
             # It is hard to test accurate latency, but it can test whether the latency is
@@ -5816,10 +5843,12 @@ class DistributedTest:
             net = EmbeddingNet(self.rank)
             # When running with NCCL backend, we don't expect an error on rank 0,
             # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
-            # running with Gloo, we expect the error to be caught inline.
+            # running with Gloo or with debug mode wrapper, we expect the error
+            # to be caught inline.
+            is_detail_dbg_mode = dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL
             rank_0_ctx = (
                 suppress()
-                if dist.get_backend() == dist.Backend.NCCL
+                if dist.get_backend() == dist.Backend.NCCL and not is_detail_dbg_mode
                 # Gloo can raise various exception messages, so just assert
                 # Runtime error here.
                 else self.assertRaises(RuntimeError)
@@ -6120,7 +6149,15 @@ class DistributedTest:
             # practice, we don't need NCCL_BLOCKING_WAIT, but we use it in this
             # test to ensure it exits cleanly.
             if self.rank != 0:
-                with self.assertRaisesRegex(RuntimeError, "Caught collective operation timeout"):
+                # Can get different errors here depending on whether gloo-based
+                # wrapper PG is enabled or not, since with wrapper pg, it will
+                # fail in a collective synchronization check and not actually
+                # call into the nccl pg.
+                if dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL:
+                    err_regex = "Timed out waiting"
+                else:
+                    err_regex = "Caught collective operation timeout"
+                with self.assertRaisesRegex(RuntimeError, err_regex):
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
             else:
                 # Rank 0 should report first (in order) timed out rank or all ranks
