@@ -119,15 +119,24 @@ struct TORCH_API UnionType : public Type {
 
   bool operator==(const Type& rhs) const override;
 
-  at::ArrayRef<TypePtr> types() const {
-    return types_;
-  }
-
   at::ArrayRef<TypePtr> containedTypes() const override {
     return types_;
   }
 
-  bool can_hold_none() const {
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    return create(contained_types);
+  }
+
+  // `getTypes` is for testing purposes only. We need to have some way
+  // to get the underlying `types` vector even if this Union is actually
+  // an Optional (in which case only `containedTypes` is overridden for
+  // BC purposes). This method should be deleted once we canonicalize
+  // `Optional[T]` as `Union[T, None]`
+  at::ArrayRef<TypePtr> getTypes() const {
+    return types_;
+  }
+
+  bool canHoldNone() const {
     return can_hold_none_;
   }
 
@@ -135,15 +144,9 @@ struct TORCH_API UnionType : public Type {
     return has_free_variables_;
   }
 
-  UnionTypePtr unionOf(std::vector<TypePtr>& rhs_types) const;
-  UnionTypePtr unionOf(const UnionTypePtr rhs) const;
-
-  UnionTypePtr intersectionOf(std::vector<TypePtr>& rhs_types) const;
-  UnionTypePtr intersectionOf(const UnionTypePtr rhs) const;
+  c10::optional<TypePtr> toOptional(bool unification_allowed=false) const;
 
   UnionTypePtr withoutNone() const;
-
-  c10::optional<TypePtr> to_optional() const;
 
  protected:
     UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
@@ -156,10 +159,10 @@ struct TORCH_API UnionType : public Type {
   std::string annotation_str_impl(TypePrinter printer) const {
     std::stringstream ss;
     ss << "Union[";
-    for (size_t i = 0; i < types().size(); ++i) {
+    for (size_t i = 0; i < types_.size(); ++i) {
       if (i > 0)
         ss << ", ";
-      ss << types()[i]->annotation_str(printer);
+      ss << types_[i]->annotation_str(printer);
     }
     ss << "]";
     return ss.str();
@@ -189,7 +192,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   bool operator==(const Type& rhs) const override {
     if (auto union_rhs = rhs.cast<UnionType>()) {
-      auto optional_rhs = union_rhs->to_optional();
+      auto optional_rhs = union_rhs->toOptional();
       if (optional_rhs) {
         return *this == *((optional_rhs.value())->cast<OptionalType>());
       }
@@ -221,20 +224,7 @@ struct TORCH_API OptionalType : public UnionType {
     return create(contained_types[0]);
   }
 
-  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
-    if (Type::isSubtypeOfExt(rhs, why_not)) {
-      return true;
-    }
-    if (auto rhs_ = rhs->cast<OptionalType>()) {
-      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
-    }
-    if (auto rhs_ = rhs->cast<UnionType>()) {
-      auto inner = this->getElementType();
-      return rhs_->types().size() == 2 && rhs_->can_hold_none()
-        && (rhs_->types()[0]->isSubtypeOf(inner) ^ rhs_->types()[1]->isSubtypeOf(inner));
-    }
-    return false;
-  }
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
 
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
