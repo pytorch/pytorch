@@ -270,8 +270,15 @@ static std::pair<Value*, Value*> PrepareListAppendAndInsertForONNX(Node* n) {
   return std::make_pair(n->input(0), n->output());
 }
 
-static std::pair<Value*, Value*> PrepareListSetItemForONNX(Node* n) {
+static std::pair<Value*, Value*> PrepareSetItemForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::_set_item);
+  // It seems the JIT does not always produce an output for _set_item.
+  // In particular it seems to for list but not for dict.
+  // So we add one if needed.
+  if (n->outputs().size() == 0) {
+    n->addOutput();
+    n->output()->setType(n->inputs().at(0)->type());
+  }
   return std::make_pair(n->input(0), n->output());
 }
 
@@ -807,7 +814,7 @@ void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
       } else if (nkind == aten::Delete) {
         std::tie(orig_data, new_out) = PrepareListDeleteForONNX(n);
       } else if (nkind == aten::_set_item) {
-        std::tie(orig_data, new_out) = PrepareListSetItemForONNX(n);
+        std::tie(orig_data, new_out) = PrepareSetItemForONNX(n);
       } else {
         // Not inplace op.
         continue;
