@@ -24,7 +24,7 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
 
-  void refreshSizesAndStrides();
+  void refreshMetadata();
 
   const Tensor& value() const {
     return value_;

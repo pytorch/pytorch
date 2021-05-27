@@ -34,7 +34,7 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
     else:
         something = [(out, go) for out, go in zip(outputs, grad_outputs)
                      if out.requires_grad]
-        if len(result) == 0:
+        if len(something) == 0:
             diff_outputs, grad_outputs = (), ()
         else:
             diff_outputs, grad_outputs = zip(*something)
@@ -101,6 +101,27 @@ def ref_vjp(f, *primals):
         return _autograd_grad(_as_tuple(result), primals, _as_tuple(cotangents))
 
     return result, wrapped
+
+
+def normalize_op_for_vjp_vjp(f, sample):
+    fn, primals = normalize_op_for_vjp(f, sample)
+    result = fn(*primals)
+    cotangents = _as_tuple(
+        tree_map(lambda x: torch.randn_like(x, requires_grad=True), result))
+    num_primals = len(primals)
+    args = (*primals, *cotangents)
+
+    @functools.wraps(f)
+    def wrapped(*args):
+        primals = args[:num_primals]
+        cotangents = args[num_primals:]
+        result, vjp_fn = vjp(fn, *primals)
+        if isinstance(result, torch.Tensor):
+            assert len(cotangents) == 1
+            cotangents = cotangents[0]
+        return vjp_fn(cotangents)
+
+    return wrapped, args
 
 
 class TestGradOpInfo(TestCase):
@@ -205,6 +226,60 @@ class TestGradOpInfo(TestCase):
             result_vjps = vjp_fn(cotangents)
 
             _, vjp_fn = ref_vjp(fn, *primals)
+            expected_vjps = vjp_fn(cotangents)
+
+            self.assertEqual(result_vjps, expected_vjps)
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_vjpvjp(self, device, dtype, op):
+        op_skip = {
+            '__getitem__',
+            '__rpow__',
+            'linalg.cholesky',
+            'linalg.inv',
+            'linalg.matrix_norm',
+            'linalg.matrix_power',
+            'linalg.norm',
+            'nanquantile',
+            'quantile',
+            'tensor_split',
+        }
+        if op.name in op_skip:
+            self.skipTest("Skipped; Expected failures")
+            return
+
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+            return
+        if not op.supports_gradgrad:
+            self.skipTest("Skipped! Operation does not support gradgrad")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        def is_inplace(variant):
+            if hasattr(variant, "__wrapped__"):
+                return variant.__wrapped__ is op.get_inplace()
+            return variant is op.get_inplace()
+
+        for sample in samples:
+            # TODO: test in-place
+            if is_inplace(op.get_op()):
+                self.skipTest("Skipped! NYI: inplace-testing not supported.")
+                continue
+
+            fn, args = normalize_op_for_vjp_vjp(op, sample)
+            result = fn(*args)
+            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+
+            # Compute vjp of vjp
+            _, vjp_fn = vjp(fn, *args)
+            result_vjps = vjp_fn(cotangents)
+
+            # Compute ref_vjp of vjp. We could have done ref_vjp of ref_vjp,
+            # but since we're confident that vjp works by itself, this is
+            # an equivalent way to test that.
+            _, vjp_fn = ref_vjp(fn, *args)
             expected_vjps = vjp_fn(cotangents)
 
             self.assertEqual(result_vjps, expected_vjps)

@@ -41,10 +41,11 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
   ss << "]";
 }
 
-void TensorWrapper::refreshSizesAndStrides() {
+void TensorWrapper::refreshMetadata() {
   auto dim = value_.dim();
   auto sizes = value_.sizes();
   auto strides = value_.strides();
+  storage_offset_ = value_.storage_offset();
   sizes_and_strides_.resize(value_.dim());
   for (int64_t i = 0; i < dim; i++) {
     sizes_and_strides_.size_at_unchecked(i) = sizes[i];
@@ -146,7 +147,7 @@ TensorWrapper::TensorWrapper(
 
   // TODO: need to reset sizes/strides on mutation
   TORCH_INTERNAL_ASSERT(use_value_sizes_strides);
-  refreshSizesAndStrides();
+  refreshMetadata();
 }
 
 // The following are some internal inherited methods that we do not support.
