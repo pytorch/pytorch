@@ -1,5 +1,6 @@
 
 from sys import maxsize
+from numpy.core.fromnumeric import shape
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
@@ -7,7 +8,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
-from torch.onnx.symbolic_opset9 import expand, unused
+from torch.onnx.symbolic_opset9 import expand, unused, zeros_like
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -994,3 +995,54 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     # along the dimension provided, some post-processing is required
     loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
     return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
+
+# For example:
+#   x = torch.randint(5, (4, 2, 1, 4))
+#   y = torch.randint(5, (2, 1, 1))
+# Steps:
+# 1. Unpack the tensor list.
+# 2. Find out the max rank.
+# 3. Find out the shape of each tensor.
+# 4. unsqueeze 0 of each tensor so that all of them have the same rank.
+# 5. Slice the tensor with dim=1.
+# 6. Leverage Unique to make sure each slice is qualified for broad cast.
+# 7. Along with dim=1, find out the max value of each slice to construct a new shape.
+# 8. Expand each tensor in self to the new shape.
+
+# Solution 2:
+# Go to ORT, expose an operator for broadcast directly.
+
+# Solution 3:
+# Leverage Add/Sum:
+#     1. Construct a constant zero_like tensor.
+#     2. Add all tensors into above tensor.
+#     3. Get the final shape.
+#     4. Exapnd each tensors in self list to final shape.
+
+def broadcast_tensors(g, self):
+    from torch.onnx.symbolic_opset9 import expand_as
+
+    all_tensors = sym_help._unpack_list(self)
+    final_result = zeros_like(g, all_tensors[0])
+
+    for t in all_tensors:
+        final_result = add(g, final_result, t)
+
+    outputs = g.op("SequenceEmpty", dtype_i=sym_help.cast_pytorch_to_onnx["Float"])
+    for t in all_tensors:
+        outputs = g.op("SequenceInsert", outputs, expand_as(g, t, final_result))
+
+    return outputs
+
+@parse_args("f", "f", "v")
+def normal(g, loc, scale, shape):
+    print('access normal', loc, scale, shape)
+    # result = g.op("RandomNormal", dtype_i=1, mean_f=0.0, scale_f=1.0, shape_i=[1])
+    result = g.op("RandomNormal", loc, scale)
+    return result
+
+def uniform(g, low, high, shape):
+    print('access uniform', low, high, shape)
+    # result = g.op("RandomNormal", dtype_i=1, mean_f=0.0, scale_f=1.0, shape_i=[1])
+    result = g.op("RandomNormal", low, high)
+    return result
