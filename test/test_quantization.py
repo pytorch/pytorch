@@ -73,13 +73,13 @@ except ImportError:
     pass
 
 # Tooling: numeric_suite
-from quantization.numeric_suite.test_numeric_suite_eager import TestEagerModeNumericSuite  # noqa: F401
+from quantization.eager.test_numeric_suite_eager import TestEagerModeNumericSuite  # noqa: F401
 
 try:
-    from quantization.numeric_suite.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
-    from quantization.numeric_suite.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
-    from quantization.numeric_suite.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
-    from quantization.numeric_suite.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
+    from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
+    from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
+    from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
+    from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
 except ImportError:
     pass
 
@@ -87,9 +87,9 @@ except ImportError:
 from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
 
 # Equalization
-from quantization.equalization.test_equalize_eager import TestEqualizeEager  # noqa: F401
+from quantization.eager.test_equalize_eager import TestEqualizeEager  # noqa: F401
 # Bias Correction
-from quantization.equalization.test_bias_correction_eager import TestBiasCorrection  # noqa: F401
+from quantization.eager.test_bias_correction_eager import TestBiasCorrection  # noqa: F401
 
 if __name__ == '__main__':
     run_tests()
