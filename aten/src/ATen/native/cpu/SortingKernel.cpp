@@ -41,16 +41,16 @@ void _dim_apply(
     .resize_outputs(false)
     // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(values.sizes(), /*squash_dim=*/dim)
-    .add_borrowed_output(values)
-    .add_borrowed_output(indices)
+    .add_output(values)
+    .add_output(indices)
     .build();
 
   auto values_dim_stride = values.stride(dim);
   auto indices_dim_stride = indices.stride(dim);
   auto dim_size = values.size(dim);
 
-  AT_DISPATCH_ALL_TYPES_AND2(
-    ScalarType::Bool, ScalarType::Half, iter.dtype(),
+  AT_DISPATCH_ALL_TYPES_AND3(
+    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
     "sorting_kernel_method_name", [&] {
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* values_data_bytes = data[0];
