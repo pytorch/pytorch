@@ -37,9 +37,9 @@
 // Note [Order of Construction]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // When setting up the tensor iterator configuration, the output Tensors
-// have to be added first via TensorIteratorConfig::add_output(at::Tensor).
+// have to be added first via TensorIteratorConfig::add_owned_output(at::Tensor).
 // After adding all outputs, the inputs can be added via
-// TensorIteratorConfig::add_input(at::Tensor).
+// TensorIteratorConfig::add_owned_input(at::Tensor).
 // Adding another output after inputs have been added will rise an exception.
 //
 // Note [Common Dtype Computation]
@@ -341,13 +341,27 @@ public:
 
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
+#define TORCH_DISALLOW_TEMPORARIES_IMPL(methodname, maybestatic)                               \
+  maybestatic void methodname(Tensor&& out, const Tensor& a, const Tensor& b) = delete; \
+  maybestatic void methodname(const Tensor& out, Tensor&& a, const Tensor& b) = delete; \
+  maybestatic void methodname(const Tensor& out, const Tensor& a, Tensor&& b) = delete; \
+  maybestatic void methodname(Tensor&& out, Tensor&& a, const Tensor& b) = delete; \
+  maybestatic void methodname(Tensor&& out, const Tensor& a, Tensor&& b) = delete; \
+  maybestatic void methodname(const Tensor& out, Tensor&& a, Tensor&& b) = delete; \
+  maybestatic void methodname(Tensor&& out, Tensor&& a, Tensor&& b) = delete;
+
+#define TORCH_DISALLOW_TEMPORARIES(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL(methodname,)
+
   void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_float_op)
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_op)
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
 
+#undef TORCH_DISALLOW_TEMPORARIES
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
@@ -464,16 +478,22 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
   TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
 
+#define TORCH_DISALLOW_TEMPORARIES(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL(methodname, static)
+
   static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator borrowing_binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  TORCH_DISALLOW_TEMPORARIES(borrowing_binary_op)
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
   static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);
-  static TensorIterator borrowing_nullary_op(Tensor& out);
+  static TensorIterator borrowing_nullary_op(const Tensor& out);
+  static TensorIterator borrowing_nullary_op(Tensor&& out) = delete;
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
+#undef TORCH_DISALLOW_TEMPORARIES
+#undef TORCH_DISALLOW_TEMPORARIES_IMPL
 
   const Tensor& maybe_get_output(int64_t output_idx) override;
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
@@ -489,10 +509,25 @@ public:
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
-  // Stores input/output Tensors while incrementing the reference count.
+  // Stores input/output Tensors without incrementing the reference count.
   // Important: the outputs have to be added before the inputs.
-  TensorIteratorConfig& add_output(const Tensor& output);
-  TensorIteratorConfig& add_input(const Tensor& input);
+  TensorIteratorConfig& add_output(const Tensor& output) {
+    return add_borrowed_output(output);
+  }
+  TensorIteratorConfig& add_input(const Tensor& input) {
+    return add_borrowed_input(input);
+  }
+
+  // Borrowing from temporaries is unlikely to go well.
+  TensorIteratorConfig& add_output(Tensor&& output) = delete;
+  TensorIteratorConfig& add_input(Tensor&& input) = delete;
+
+  // Stores input/output Tensors while incrementing the reference count.
+  // Note that add_{in,out}put are nearly always what you
+  // want, and the exception (adding an unnamed temporary) won't
+  // compile.
+  TensorIteratorConfig& add_owned_output(const Tensor& output);
+  TensorIteratorConfig& add_owned_input(const Tensor& input);
 
   // Advanced API: stores input/output Tensors without incrementing
   // the reference count. The caller must ensure that these Tensors
