@@ -674,7 +674,11 @@ def adjust_observers_for_cat(
 
     # TODO(future PR): delete the orphaned observer modules
 
-def swap_custom_module_to_observed(node: Node, qconfig: QConfigAny, modules: Dict[str, torch.nn.Module], prepare_custom_config_dict: Dict[str, Any]):
+def swap_custom_module_to_observed(
+        node: Node,
+        qconfig: QConfigAny,
+        modules: Dict[str, torch.nn.Module],
+        prepare_custom_config_dict: Dict[str, Any]):
     custom_module = modules[node.target]  # type: ignore[index]
     custom_module_class_mapping = prepare_custom_config_dict.get(
         "float_to_observed_custom_module_class", {})
@@ -1049,12 +1053,13 @@ def restore_state(
     return patterns, node_name_to_scope, prepare_custom_config_dict
 
 def find_matches(
-    graph: Graph, modules: Dict[str, torch.nn.Module],
-    patterns: Dict[Pattern, QuantizeHandler],
-    qconfig_map: Dict[str, QConfigAny],
-    standalone_module_names: List[str] = None,
-    standalone_module_classes: List[Callable] = None,
-    custom_module_classes: List[Any] = None) -> Dict[str, MatchResult]:
+        graph: Graph,
+        modules: Dict[str, torch.nn.Module],
+        patterns: Dict[Pattern, QuantizeHandler],
+        qconfig_map: Dict[str, QConfigAny],
+        standalone_module_names: List[str] = None,
+        standalone_module_classes: List[Callable] = None,
+        custom_module_classes: List[Any] = None) -> Dict[str, MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and
     outputs the information needed to quantize them in future steps.
