@@ -367,7 +367,7 @@ class OpInfo(object):
             assert isinstance(sample, SampleInput)
             # make sure that every SampleInput has a sensible name: if the
             # name was not given, use the index instead
-            if sample.name is None:
+            if not sample.name:
                 sample.name = str(i)
             self._current_sample = sample
             yield sample
