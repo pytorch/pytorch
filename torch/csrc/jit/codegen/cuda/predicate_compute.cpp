@@ -96,9 +96,11 @@ std::vector<kir::Bool*> PredicateCompute::computePredicates(
       extent = nullptr;
       continue;
     } else if (zero_ind) {
-      if (root[i]->extent()->isOneInt()) {
-        continue;
-      }
+      // There used to be a branch for this, but it should never
+      // hit. Leave it here as an assertion just for safety.
+      TORCH_INTERNAL_ASSERT(
+          !root[i]->extent()->isOneInt(),
+          "Invalid root extent. Non-broadcast axis has zero index and extent of one.");
       if (extent == nullptr) {
         extent = root[i]->extent();
       } else {
