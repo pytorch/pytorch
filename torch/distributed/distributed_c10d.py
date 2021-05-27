@@ -2893,7 +2893,7 @@ def new_subgroups(
 
     # By default, create one subgroup per machine.
     # Assume that each machine has the same number of devices.
-    num_devices_per_machine = (
+    num_devices_per_machine : int = (
         torch.cuda.device_count() if torch.cuda.is_available() else os.cpu_count()
     )
     # If the given main group does not use all the devices,
