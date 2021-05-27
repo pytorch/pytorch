@@ -361,10 +361,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::unordered_map<size_t, std::string>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "initialize_buckets",
-          &::c10d::Reducer::initialize_buckets,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
           py::call_guard<py::gil_scoped_release>())
