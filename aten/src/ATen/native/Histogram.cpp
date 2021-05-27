@@ -93,12 +93,12 @@ inline void histogram_pre_check(const Tensor& input, const Tensor& bin_edges_in,
 std::pair<double, double> select_outer_bin_edges(const Tensor& input,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
     if (min.has_value() && max.has_value()) {
-        return {min.value().to<double>(), max.value().to<double>()};
+        return std::make_pair(min.value().to<double>(), max.value().to<double>());
     }
 
     // Default range for empty input matching numpy.histogram's default
     if (input.numel() == 0) {
-        return {0., 1.};
+        return std::make_pair(0., 1.);
     }
 
     auto extrema = _aminmax(input);
@@ -115,7 +115,7 @@ std::pair<double, double> select_outer_bin_edges(const Tensor& input,
         rightmost_edge += 0.5;
     }
 
-    return {leftmost_edge, rightmost_edge};
+    return std::make_pair(leftmost_edge, rightmost_edge);
 }
 
 } // namespace
@@ -128,7 +128,7 @@ histogram_out_cpu(const Tensor& self, const Tensor& bin_edges,
     histogram_pre_check(self, bin_edges, weight, density, hist, bin_edges_out);
     bin_edges_out.copy_(bin_edges);
     histogram_stub(self.device().type(), self, weight, density, hist, bin_edges_out);
-    return {hist, bin_edges_out};
+    return std::forward_as_tuple(hist, bin_edges_out);
 }
 
 std::tuple<Tensor, Tensor>
@@ -150,7 +150,7 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct,
 
     histogram_pre_check(self, bin_edges_out, weight, density, hist, bin_edges_out);
     histogram_linear_stub(self.device().type(), self, weight, density, hist, bin_edges_out);
-    return {hist, bin_edges_out};
+    return std::forward_as_tuple(hist, bin_edges_out);
 }
 
 std::tuple<Tensor, Tensor>

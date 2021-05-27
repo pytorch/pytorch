@@ -115,7 +115,7 @@ histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weig
         hist.div_(hist_sum);
     }
 
-    return {hist, bin_edges};
+    return std::forward_as_tuple(hist, bin_edges);
 }
 
 //static std::tuple<Tensor&, Tensor&>
