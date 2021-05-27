@@ -3381,23 +3381,23 @@ from_buffer(buffer, dtype=None, count=-1, offset=0, *, device=None, requires_gra
 
 Create a 1-dimensional :class:`Tensor` from an object that implements
 the Python buffer protocol.
-           
+
 Interpret :attr:`buffer` as a 1-dimensional buffer of type :attr:`dtype`
 with :attr:`count` elements after the first :attr:`offset` bytes.
 
 The returned tensor and buffer share the same memory. Modifications to
 the tensor will be reflected in the buffer and vice versa. The returned
 tensor is not resizable.
-           
+
 .. note::
     This function increments the reference count for the object that
     owns the shared memory. Therefore, such memory will not be deallocated
     before the returned tensor goes out of scope.
-        
+
 .. warning::
     Passing a pointer that lives in a different device than the specified
     one results in ``RuntimeError``.
-           
+
 Args:
     buffer (object): a Python object that exposes the buffer interface
     {dtype}

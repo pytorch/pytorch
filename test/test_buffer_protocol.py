@@ -79,8 +79,8 @@ class TestBufferProtocol(common.TestCase):
         # Count should be valid for any valid in the interval
         # [-1, len(input)], except for 0
         for i in range(-1, len(input) + 1):
-            if i == 0: continue
-            self._run_test(dtype, input, count=i)
+            if i != 0:
+                self._run_test(dtype, input, count=i)
 
     @onlyCPU
     @dtypes(*all_types())
@@ -88,8 +88,8 @@ class TestBufferProtocol(common.TestCase):
         input = self.INPUT
         # Explicit default count [-1, 1, 2, ..., len]
         for i in range(-1, len(input) + 1):
-            if i == 0: continue
-            self._run_test(dtype, input, count=i)
+            if i != 0:
+                self._run_test(dtype, input, count=i)
         # Explicit default offset [0, 1, ..., len - 1]
         for i in range(len(input)):
             self._run_test(dtype, input, first=i)
@@ -125,7 +125,7 @@ class TestBufferProtocol(common.TestCase):
             with self.assertRaises(ValueError):
                 count = len(input) - first + 1
                 self._run_test(dtype, input, count=count, first=first)
-        
+
     @onlyCPU
     @dtypes(*all_types())
     def test_invalid_device(self, device, dtype):
@@ -147,9 +147,10 @@ class TestBufferProtocol(common.TestCase):
         # Modify the whole tensor from all valid offsets, given
         # a count value
         for count in range(-1, len(input) + 1):
-            if count == 0: continue
-            actual_count = count if count > 0 else len(input)
+            if count == 0:
+                continue
 
+            actual_count = count if count > 0 else len(input)
             for first in range(len(input) - actual_count):
                 last = first + actual_count
                 arr, tensor = self._run_test(dtype, input, first=first, count=count)
