@@ -13,7 +13,7 @@ from ._src.eager_transforms import grad, grad_and_value, vjp, jacrev
 from ._src.make_functional import make_functional, make_functional_with_buffers, load_state
 from ._src.make_functional import functional_init, functional_init_with_buffers
 from ._src.python_key import wrap_key, PythonTensor, pythonkey_trace, hasPythonKey, removePythonKey, addPythonKey, make_fx, nnc_jit, make_nnc
-from ._src.nnc_compile import nnc_compile
+from ._src.nnc_compile import nnc_compile, get_ops
 
 # Monkeypatching lol
 _old_cross_entropy = torch.nn.functional.cross_entropy
