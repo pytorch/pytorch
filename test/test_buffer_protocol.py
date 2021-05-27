@@ -1,5 +1,3 @@
-import unittest
-
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
