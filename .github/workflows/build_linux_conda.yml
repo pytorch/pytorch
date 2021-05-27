@@ -29,8 +29,7 @@ jobs:
     needs: generate-build-matrix
     runs-on: linux.2xlarge
     strategy:
-      matrix:
-        ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
       fail-fast: false
     container:
       image: ${{ matrix.container_image }}
@@ -41,7 +40,7 @@ jobs:
       DESIRED_CUDA: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_VERSION: ${{ matrix.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
-      NO_BUILD_SUFFIX: True
+      NO_BUILD_SUFFIX: true
       # TODO: This is a legacy variable, we should just default all build to use
       #       this folder within the conda/build_pytorch.sh script
       TORCH_CONDA_BUILD_FOLDER: pytorch-nightly
@@ -93,3 +92,7 @@ jobs:
           name: pytorch-conda-py${{ matrix.python_version }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
           path: /remote/**/*.bz2
       # TODO: Add a step here for uploading binaries
+
+concurrency:
+  group: build-linux-conda-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
