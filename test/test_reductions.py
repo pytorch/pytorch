@@ -1814,7 +1814,7 @@ class TestReductions(TestCase):
                 if size % 2 == 1:
                     # We can only test agains numpy for odd reductions because numpy
                     # returns the mean of the two medians and torch returns the lower
-                    self.assertEqual(res[0].cpu().numpy(), np.median(t_numpy, dim, keepdims=True))
+                    self.assertEqual(res[0].cpu().numpy(), np.median(t_numpy, dim, keepdims=True), exact_dtype=False)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -2086,7 +2086,7 @@ class TestReductions(TestCase):
                 return
             self.fail("Failed to hit RuntimeError!")
 
-        exact_dtype = input.dtype != torch.bfloat16
+        exact_dtype = input.dtype not in (torch.bfloat16, torch.complex32, torch.complex64, torch.complex128)
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -2397,21 +2397,21 @@ class TestReductions(TestCase):
             error_msg = f"test function: {name}"
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2), msg=error_msg)
             self.assertEqual(np_function(np_input, axis=2),
-                             fn(master_input, dim=2).cpu().numpy(), msg=error_msg)
+                             fn(master_input, dim=2).cpu().numpy(), msg=error_msg, exact_dtype=False)
 
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=-1), msg=error_msg)
             self.assertEqual(np_function(np_input, axis=-1),
-                             fn(master_input, dim=-1).cpu().numpy(), msg=error_msg)
+                             fn(master_input, dim=-1).cpu().numpy(), msg=error_msg, exact_dtype=False)
 
             self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True),
                              msg=error_msg)
             self.assertEqual(np_function(np_input, axis=2, keepdims=True),
-                             fn(master_input, dim=2, keepdim=True).cpu().numpy(), msg=error_msg)
+                             fn(master_input, dim=2, keepdim=True).cpu().numpy(), msg=error_msg, exact_dtype=False)
 
             self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True),
                              msg=error_msg)
             self.assertEqual(np_function(np_input, axis=-1, keepdims=True),
-                             fn(master_input, dim=-1, keepdim=True).cpu().numpy(), msg=error_msg)
+                             fn(master_input, dim=-1, keepdim=True).cpu().numpy(), msg=error_msg, exact_dtype=False)
 
             # Check if function raises error on specified zero'd dimension as reduction dim.
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
@@ -2476,18 +2476,20 @@ class TestReductions(TestCase):
             # Check if reduction happens along the specified dimension.
             error_msg = f"test function: {name}"
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2), msg=error_msg)
-            self.assertEqual(np_function(np_input, axis=2), fn(master_input, dim=2).cpu().numpy(), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=2), fn(master_input, dim=2).cpu().numpy(), msg=error_msg,
+                             exact_dtype=False)
 
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=-1), msg=error_msg)
-            self.assertEqual(np_function(np_input, axis=-1), fn(master_input, dim=-1).cpu().numpy(), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=-1), fn(master_input, dim=-1).cpu().numpy(), msg=error_msg,
+                             exact_dtype=False)
 
             self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True), msg=error_msg)
             self.assertEqual(np_function(np_input, axis=2, keepdims=True), fn(master_input, dim=2, keepdim=True),
-                             msg=error_msg)
+                             msg=error_msg, exact_dtype=False)
 
             self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
             self.assertEqual(np_function(np_input, axis=-1, keepdims=True), fn(master_input, dim=-1, keepdim=True),
-                             msg=error_msg)
+                             msg=error_msg, exact_dtype=False)
 
             # Check if returned data is correct.
             check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else

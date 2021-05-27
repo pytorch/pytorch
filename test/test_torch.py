@@ -4952,7 +4952,7 @@ else:
                 spacing = [space.cpu().detach().numpy() for space in spacing]
             expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=1)
             actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
-            self.assertEqual(actual, expected, equal_nan="relaxed")
+            self.assertEqual(actual, expected, equal_nan="relaxed", exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)
@@ -4970,7 +4970,7 @@ else:
         coordinates = [torch.tensor(coordinates_np, device=device)]
         actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=1)
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=1)]
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     def test_gradient_type_promotion(self, device):
@@ -5009,13 +5009,13 @@ else:
             expected = np.gradient(input_np, *spacing_or_coord_np, axis=(0, 1), edge_order=1)
             if actual[0].dtype == torch.complex64 and input.dtype != torch.complex64:
                 for i in range(len(actual)):
-                    self.assertEqual(actual[i].real, expected[i].real)
+                    self.assertEqual(actual[i].real, expected[i].real, exact_dtype=False)
                     # Type promotion fails on Numpy when spacing is given as complex number and input is given as real.
                     # Result is given just as real number and all the imaginary parts to be equal to zero.
-                    self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape))
+                    self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape), exact_dtype=False)
             else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
-                self.assertEqual(actual, expected, equal_nan="relaxed")
+                self.assertEqual(actual, expected, equal_nan="relaxed", exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)

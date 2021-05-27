@@ -8267,7 +8267,7 @@ class TestNN(NNTestCase):
                     X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
                 res = F.gelu(X)
                 ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                self.assertEqual(res, ref, rtol=rtol, atol=atol)
+                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
                 if dtype == torch.float64:
                     gradcheck(F.gelu, [X], eps=1e-4)
 
@@ -12077,7 +12077,7 @@ class TestNNDeviceType(NNTestCase):
             for r in range(affine_tensor.size(1)):
                 for c in range(affine_tensor.size(2)):
                     grid_out = np.dot(grid_ary, [r, c, 1])
-                    self.assertEqual(affine_tensor[0, r, c], grid_out[:2])
+                    self.assertEqual(affine_tensor[0, r, c], grid_out[:2], exact_dtype=False)
 
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
@@ -12132,7 +12132,7 @@ class TestNNDeviceType(NNTestCase):
                 for r in range(affine_tensor.size(2)):
                     for c in range(affine_tensor.size(3)):
                         grid_out = np.dot(grid_ary, [i, r, c, 1])
-                        self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3])
+                        self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3], exact_dtype=False)
 
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
