@@ -5,6 +5,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
+    EnumerableShardingSpec,
     ShardMetadata,
     ShardingSpec,
 )
@@ -95,40 +96,44 @@ class ShardedTensor(object):
         self._sharding_metadata: List[ShardMetadata] = []
         if isinstance(self._sharding_spec, ChunkShardingSpec):
             self._init_chunked(
-                self._sharding_spec,
-                self._dims,
                 dtype,
                 layout,
                 requires_grad,
                 pin_memory,
                 memory_format,
-                process_group,
             )
+        elif isinstance(self._sharding_spec, EnumerableShardingSpec):
+            self._init_enumerable(
+                dtype,
+                layout,
+                requires_grad,
+                pin_memory,
+                memory_format,
+            )
+        else:
+            raise ValueError(f'Unsupported sharding_spec: {self._sharding_spec}')
 
     def _init_chunked(
         self,
-        sharding_spec: ChunkShardingSpec,
-        dims,
         dtype,
         layout,
         requires_grad,
         pin_memory,
         memory_format,
-        process_group,
     ):
-        current_rank = dist.get_rank(process_group)
-        sharding_dim = sharding_spec.dim
+        current_rank = dist.get_rank(self._process_group)
+        sharding_dim = self._sharding_spec.dim
 
         # Validate the sharding spec.
         if not isinstance(sharding_dim, int):
             raise ValueError(
                 f"Sharding dim needs to be an integer, found: {sharding_dim}"
             )
-        if sharding_dim >= len(dims) or sharding_dim < -len(dims):
+        if sharding_dim >= len(self._dims) or sharding_dim < -len(self._dims):
             raise ValueError(f"Invalid sharding dim: {sharding_dim}")
 
-        dim_size = dims[sharding_dim]
-        devices = sharding_spec.placements
+        dim_size = self._dims[sharding_dim]
+        devices = self._sharding_spec.placements
         chunks = len(devices)
         # split_size computed similar to 'torch.chunk'
         split_size = (dim_size + chunks - 1) // chunks
@@ -137,11 +142,7 @@ class ShardedTensor(object):
             if not is_valid_device(device):
                 raise ValueError(f"{device} is not a valid device")
 
-            rank, local_device = _parse_remote_device(device)  # type: ignore[arg-type]
-
-            # Validate rank.
-            if not isinstance(rank, int) or (rank < 0 or rank >= dist.get_world_size(process_group)):
-                raise ValueError(f'Invalid rank: {rank}')
+            rank, local_device = self._parse_and_validate_remote_device(device)
 
             # Adjust the sharding dim for this rank.
             sharded_dim_size = min(dim_size, split_size * (idx + 1)) - split_size * idx
@@ -150,9 +151,9 @@ class ShardedTensor(object):
                 # Build sharding_metadata.
 
                 # deepcopy for modification.
-                rank_dims = dims.copy()
+                rank_dims = self._dims.copy()
 
-                rank_offsets = [0] * len(dims)
+                rank_offsets = [0] * len(self._dims)
                 rank_offsets[sharding_dim] = split_size * idx
                 rank_dims[sharding_dim] = sharded_dim_size
 
@@ -173,6 +174,47 @@ class ShardedTensor(object):
                     )
 
                     self._local_shards.append(Shard(local_shard, shard_metadata))
+
+    def _init_enumerable(
+        self,
+        dtype,
+        layout,
+        requires_grad,
+        pin_memory,
+        memory_format,
+    ):
+        # Validate the sharding spec is compatible with the tensor.
+        self._sharding_spec.check_tensor(self._dims)
+
+        current_rank = dist.get_rank(self._process_group)
+
+        for shard_metadata in self._sharding_spec.shards:
+            rank, local_device = self._parse_and_validate_remote_device(shard_metadata.placement)
+            self._sharding_metadata.append(shard_metadata)
+
+            if current_rank == rank:
+                # Initialize the local shard.
+                local_shard = torch.empty(
+                    *shard_metadata.shard_lengths,
+                    dtype=dtype,
+                    layout=layout,
+                    device=local_device,
+                    requires_grad=requires_grad,
+                    memory_format=memory_format,
+                    pin_memory=pin_memory,
+                )
+
+                self._local_shards.append(Shard(local_shard, shard_metadata))
+
+    def _parse_and_validate_remote_device(self, device):
+
+        rank, local_device = _parse_remote_device(device)  # type: ignore[arg-type]
+
+        # Validate rank.
+        if not isinstance(rank, int) or (rank < 0 or rank >= dist.get_world_size(self._process_group)):
+            raise ValueError(f'Invalid rank: {rank}')
+
+        return rank, local_device
 
     def sharding_spec(self) -> ShardingSpec:
         """
@@ -197,3 +239,9 @@ class ShardedTensor(object):
         does not host any shards for this Tensor.
         """
         return self._local_shards
+
+    def size(self) -> torch.Size:
+        """
+        Returns the size of the self tensor. The returned value is a subclass of tuple.
+        """
+        return torch.Size(self._dims)
