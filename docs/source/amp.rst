@@ -191,6 +191,7 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``cross``,
 ``dot``,
 ``equal``,
+``grid_sample``,
 ``index_put``,
 ``scatter_add``,
 ``stack``,
