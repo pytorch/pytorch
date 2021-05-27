@@ -360,7 +360,7 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_cuda)
 TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
     const Tensor& input,
     IntArrayRef padding,
-    Tensor& grad_input) {
+    const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("reflection_pad1d_backward_out_cuda");
