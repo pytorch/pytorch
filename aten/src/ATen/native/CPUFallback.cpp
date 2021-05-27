@@ -114,9 +114,11 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       if (return_tens.defined()) {
         const auto& alias_info = schema_returns[idx].alias_info();
         if (alias_info.has_value() && alias_info.value().isWrite()) {
-          // mutable alias case: move the input ivalue directly onto the stack
+          // Case (1): mutable alias case. Move the input ivalue directly onto the stack
           // in place of the existing cpu output tensor.
           bool found_alias = false;
+          // We could store some extra metadata on the function schema to avoid the loop here
+          // if we need to improve perf.
           for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
             auto input_tensor_idx = tensor_args_indices[i];
             const auto& input_tensor = cpu_tensors[i];
@@ -131,15 +133,17 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
           }
           TORCH_CHECK(found_alias, "The operator ", op.schema().operator_name(), " appears to have invalid alias information. ",
                       "Found a return tensor argument with a mismatched mutable alias: ", schema_returns[idx]);
-        } else if (alias_info.has_value() && !alias_info.value().isWrite()) {
-          // immutable alias (view) case: Fail here. If this operator is needed, the backend should provide a kernel for it.
-          // See Note [CPU Fallback Does Not Handle View Operators]
-          auto tgt_device = tensor_args[0].device();
-          TORCH_CHECK(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
-                      "but it has no implementation for the backend \"", tgt_device, "\". View operators don't support ",
-                      "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
         } else {
-          // copy case: copy the cpu output tensor to the original device.
+          if (alias_info.has_value() && !alias_info.value().isWrite()) {
+            // immutable alias (view) case: Warn here, since we're copying and not creating a view.
+            //If this operator is needed, the backend should provide a kernel for it.
+            // See Note [CPU Fallback Does Not Handle View Operators]
+            auto tgt_device = tensor_args[0].device();
+            TORCH_WARN(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
+                        "but it has no implementation for the backend \"", tgt_device, "\". View operators don't support ",
+                        "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+          }
+          // Case (2): copy case. Copy the cpu output tensor to the original device.
           auto tgt_device = tensor_args[0].device();
           (*stack)[returns_begin + idx] = c10::IValue(returns[idx].toTensor().to(tgt_device));
         }
