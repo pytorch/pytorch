@@ -34,6 +34,7 @@ class DirectoryReader(object):
     N.B.: ScriptObjects are not depickleable or accessible via this DirectoryReader
     class due to ScriptObjects requiring an actual PyTorchFileReader instance.
     """
+
     def __init__(self, directory):
         self.directory = directory
 

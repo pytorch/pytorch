@@ -13,6 +13,7 @@ from weakref import WeakValueDictionary
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
+from ._directory_reader import DirectoryReader
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -21,7 +22,6 @@ from ._importlib import (
     _sanity_check,
 )
 from ._mangling import PackageMangler, demangle
-from ._directory_reader import DirectoryReader
 from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
