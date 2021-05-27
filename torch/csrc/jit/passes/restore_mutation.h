@@ -11,7 +11,7 @@ namespace torch {
 namespace jit {
 
 // A map which stores if an activation operator can perform type promotion
-TORCH_API const std::unordered_map<Symbol, bool>
+const std::unordered_map<Symbol, bool>
     activation_type_promotion_mapping = {
         {aten::sigmoid, true},
         {aten::tanh, true},

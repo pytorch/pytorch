@@ -125,7 +125,7 @@ class Linear(torch.nn.Module):
         torch.Size([128, 30])
     """
     _version = 3
-    _FLOAT_MODULE = (nn.Linear, nn.modules.linear._LinearWithBias)
+    _FLOAT_MODULE = (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear)
 
     def __init__(self, in_features, out_features, bias_=True,
                  dtype=torch.qint8):

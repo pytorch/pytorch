@@ -845,13 +845,6 @@ void checkScopeCallbacks() {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static bool should_run = false;
-
-static bool shouldRunCallback(const RecordFunctionCallback&) {
-  return should_run;
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TracedTestValues traced_inputs;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TracedTestValues traced_outputs;
@@ -1197,25 +1190,31 @@ TEST(RecordFunctionTest, ShouldRun) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
-  should_run = false;
   static bool ran = false;
-  addGlobalCallback(
-      RecordFunctionCallback(
-          [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-            ran = true;
-            return nullptr;
-          })
-          .setShouldRun(shouldRunCallback));
+  auto handle = addGlobalCallback(RecordFunctionCallback(
+      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        ran = true;
+        return nullptr;
+      }));
 
   { RECORD_USER_SCOPE("test"); }
 
-  TORCH_CHECK(!ran);
+  EXPECT_TRUE(ran) << "first run didn't happen";
+  ran = false;
 
-  should_run = true;
+  disableCallback(handle);
 
   { RECORD_USER_SCOPE("test"); }
 
-  TORCH_CHECK(ran);
+  EXPECT_FALSE(ran) << "second run happened but shouldn't have";
+  ran = false;
+
+  reenableCallback(handle);
+
+  { RECORD_USER_SCOPE("test"); }
+
+  EXPECT_TRUE(ran) << "run after re-enable didn't happen";
+  ran = false;
 
   clearCallbacks();
 }
