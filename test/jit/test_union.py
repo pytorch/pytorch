@@ -230,6 +230,16 @@ class TestUnion(JitTestCase):
         FileCheck().check("x : Union[int, str]")    \
                    .run(s)
 
+    def test_union_redundant_arguments_are_skipped_optional(self):
+        @torch.jit.script
+        def fn(x: Union[int, Optional[float], Optional[int]]) -> str:
+            return "foo"
+
+        s = fn.graph
+
+        FileCheck().check("x : Union[float, int, NoneType]")    \
+                   .run(s)
+
     def test_union_redundant_arguments_are_skipped_subtyping(self):
         @torch.jit.script
         def fn(x: Union[str, Tuple[Optional[int], int], Tuple[int, int]]) -> str:

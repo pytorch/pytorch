@@ -749,7 +749,7 @@ bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
       !type()->cast<OptionalType>() &&
       !(type()->cast<UnionType>() &&
-        type()->expect<UnionType>()->can_hold_none());
+        type()->expect<UnionType>()->canHoldNone());
 }
 
 std::string Value::debugNameBase() const {
@@ -1419,8 +1419,7 @@ Node* Node::insertBefore(Node* n) {
 }
 
 Node* Node::insertAfter(Node* n) {
-  AT_ASSERT(!inBlockList());
-  AT_ASSERT(n->inBlockList());
+  AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
   AT_ASSERTM(
       n->kind() != prim::Return,
