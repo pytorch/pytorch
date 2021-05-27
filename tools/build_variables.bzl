@@ -621,6 +621,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
+    "torch/csrc/jit/python/python_dict.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
     "torch/csrc/jit/python/python_ir.cpp",
     "torch/csrc/jit/python/python_tracer.cpp",
