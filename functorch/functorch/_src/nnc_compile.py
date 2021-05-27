@@ -204,7 +204,6 @@ lowering_functions[torch.ops.aten.view] = reshape_lower
 
 
 func_to_aten = {
-    operator.getitem: torch.ops.aten.slice,
     operator.add: torch.ops.aten.add,
     operator.mul: torch.ops.aten.mul,
     torch.mul: torch.ops.aten.mul,
@@ -215,20 +214,20 @@ func_to_aten = {
 
 def process_shape(x):
     if len(x) == 0:
-        return [1]
+        return torch.Size([1])
     return x
 
 def lower_function(node, op, nnc_args, args):
     inp_shapes = fx.node.map_aggregate(args, lambda arg: (process_shape(arg.meta['tensor_meta'].shape), arg.meta['tensor_meta'].dtype) if isinstance(arg, fx.Node) and 'tensor_meta' in arg.meta else None)
     nnc_args = [x.data() if isinstance(x, te.Placeholder) else x for x in nnc_args]
+    out_shape = pytree.tree_map(lambda x: process_shape(x.shape), node.meta['tensor_meta'])
     if op in lowering_functions:
-        out = lowering_functions[op](node.name, process_shape(node.meta['tensor_meta'].shape), inp_shapes, nnc_args)
+        out = lowering_functions[op](node.name, out_shape, inp_shapes, nnc_args)
     else:
-        if op in func_to_aten:
-            op = func_to_aten[op]
+        out_shape = pytree.tree_map(lambda x: get_te_shapes(x), out_shape)
         aten_str = f'aten::{op.__name__}'
-        out_shape = get_te_shapes(process_shape(node.meta['tensor_meta'].shape))
-        out = te.lower(aten_str, list(nnc_args), out_shape, get_nnc_type(node.meta['tensor_meta'].dtype))
+        out_type = pytree.tree_map(lambda x: get_nnc_type(x.dtype), node.meta['tensor_meta'])
+        out = te.lower(aten_str, list(nnc_args), out_shape, out_type)
     if isinstance(out, te.Tensor):
         return out.buf(), [out.stmt()]
     else:
@@ -242,7 +241,6 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     tensors with the same shapes as example_inputs), and passes them to an
     NNC executor.
     """
-    # fx_model = fx.symbolic_trace(model)
     t = fx_model.graph.flatten_inps(*example_inputs)
     ShapeProp(fx_model).propagate(*fx_model.graph.flatten_inps(*example_inputs))
 
@@ -363,6 +361,13 @@ def make_nnc(f):
         return compiled_f
 
     return wrapped
+
+def get_ops(fx_model: fx.GraphModule):
+    vals = set()
+    for node in fx_model.graph.nodes:
+        if node.op == 'call_function':
+            vals.add(node.target.__name__)
+    return vals
 
 ################################
 # Example usage and Benchmarking
