@@ -821,7 +821,7 @@ class TestFakeQuantizeOps(TestCase):
             X_base, 'cuda', scale_base, zero_point_base, axis)
 
     def test_numerical_consistency(self):
-        r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
+        r"""Comparing numerical consistency between quantize/dequantize op and the fake quantize op across devices and dtypes
         """
         torch.random.manual_seed(NP_RANDOM_SEED)
         torch_types = [torch.qint8, torch.quint8]
