@@ -910,6 +910,12 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def hardsigmoid(self):
+            result = torch.hardsigmoid(self)
+            def backward(grad_output):
+                return torch.where((result > -3.) & (result < 3.), 0., grad_output * (1.0 / 6.0))
+            return result, backward
+
         def erfc(self):
             def backward(grad_output):
                 # Precomputed constant C = -2.0 / math.sqrt(math.pi)
