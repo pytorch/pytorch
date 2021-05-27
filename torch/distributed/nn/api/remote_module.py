@@ -20,7 +20,7 @@ import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
 from torch.distributed.rpc.internal import _internal_rpc_pickler
-from torch.distributed.rpc.utils import _parse_remote_device
+from torch.distributed.utils import _parse_remote_device
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
@@ -47,9 +47,10 @@ _REMOTE_MODULE_PICKLED_ATTRIBUTES = (
 
 _SerializedRemoteModule = collections.namedtuple("_SerializedRemoteModule", _REMOTE_MODULE_PICKLED_ATTRIBUTES)  # type: ignore[misc]
 
-# These attributes are mostly from RemoteModule's parent class and are not pickled.
-# A new attribute of RemoteModule must be either in _REMOTE_MODULE_PICKLED_ATTRIBUTES
+# These attributes are mostly from RemoteModule's parent class and are intentionally not pickled.
+# A new attribute of RemoteModule should be either in _REMOTE_MODULE_PICKLED_ATTRIBUTES
 # or _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
+# Otherwise, it will not be pickled.
 _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "training",
     "_parameters",
@@ -84,7 +85,10 @@ def _create_module(module_cls, args, kwargs, device):
     module.to(device)
     return module
 
-def _create_module_with_interface(module_cls, args, kwargs, device, module_interface_cls):
+
+def _create_module_with_interface(
+    module_cls, args, kwargs, device, module_interface_cls
+):
     module = _create_module(module_cls, args, kwargs, device)
     if module_interface_cls is not None:
         module = torch.jit.script(module)
@@ -150,8 +154,12 @@ class _RemoteModule(nn.Module):
 
         Args:
             remote_device (str): Device on the destination worker where we'd like to place this module.
-                The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
-                E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
+                The device can be a local device or a remote device specified by one of the following remote
+                formats:
+
+                    1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
+                    2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
+
                 In addition, the device field can be optional and the default value is "cpu".
             module_cls (nn.Module): For example,
                 >>> class MyModule(nn.Module):
@@ -269,6 +277,17 @@ class _RemoteModule(nn.Module):
             method_name = method.__name__
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
+
+        # Sanity check: whether to be pickled must be explicitly defined for every attribute.
+        for k in self.__dict__.keys():
+            if (
+                k not in _REMOTE_MODULE_PICKLED_ATTRIBUTES
+                and k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
+            ):
+                raise AttributeError(
+                    "Attribute {} must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
+                    "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k)
+                )
 
     def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
         """
@@ -544,8 +563,8 @@ def _remote_module_reducer(remote_module):
         elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:  # type: ignore[attr-defined]
             print(
                 "The new attribute ``{}`` of RemoteModule is ignored during RPC pickling. "
-                "To pickle this attribute, it must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
-                "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k),
+                "To pickle this attribute, please add it to ``_REMOTE_MODULE_PICKLED_ATTRIBUTES``. "
+                "Otherwise, please explicitly add it to ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k),
                 file=sys.stderr,
             )
 

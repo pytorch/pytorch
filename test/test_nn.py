@@ -1145,6 +1145,25 @@ class TestNN(NNTestCase):
         s = nn.Sequential(l1, l2, l1, l2, subnet)
         self.assertEqual(list(s.children()), [l1, l2, subnet])
 
+    def test_train_errors_for_invalid_mode(self):
+        class SubclassNet(nn.Module):
+            def __init__(self):
+                super(SubclassNet, self).__init__()
+                self.l1 = nn.Linear(2, 2)
+
+            def forward(self, inputs):
+                return self.l1(inputs)
+
+        subclass_net = SubclassNet()
+        sequential_net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+
+        error_modes = ["invalid_str", torch.device('cpu')]
+        modules_to_check = [subclass_net, sequential_net]
+
+        for error_mode, module in itertools.product(error_modes, modules_to_check):
+            with self.assertRaises(ValueError):
+                module.train(error_mode)
+
     def test_dir(self):
         linear = nn.Linear(2, 2)
         linear._test_submodule = nn.Linear(2, 2)
@@ -5485,6 +5504,7 @@ class TestNN(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
+    @skipIfRocm
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -8881,6 +8901,12 @@ class TestNN(NNTestCase):
         torch.cosine_similarity(input1, input2, 0).sum().backward()
         self.assertEqual(input1.grad, torch.zeros_like(input1))
         self.assertEqual(input2.grad, input1 * 1e8)
+
+        # Check error when inputs are not the same shape
+        input1 = torch.randn(2, 2, 1)
+        input2 = torch.randn(2, 1, 3)
+        with self.assertRaises(RuntimeError):
+            F.cosine_similarity(input1, input2)
 
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
@@ -12841,55 +12867,56 @@ class TestNNDeviceType(NNTestCase):
         inp = torch.randn(0, 7, device=device)
         self._test_module_empty_input(mod, inp)
 
-    def test_one_hot(self, device):
+    @dtypes(torch.uint8, torch.long, torch.bool)
+    def test_one_hot(self, device, dtype):
         if self.device_type != 'cuda':  # cuda throws device assert for invalid data
             with self.assertRaises(RuntimeError):
-                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
+                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device, dtype=dtype), -1)
 
             with self.assertRaises(RuntimeError):
-                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
+                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device, dtype=dtype), 3)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1, dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6, dtype=dtype)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
                                  [0, 1, 0, 0, 0, 0],
-                                 [1, 0, 0, 0, 0, 0]], device=device)
+                                 [1, 0, 0, 0, 0, 0]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([[3, 4], [1, 0]], device=device))
+        t = torch.nn.functional.one_hot(torch.tensor([[3, 4], [1, 0]], device=device), dtype=dtype)
         expected = torch.tensor([[[0, 0, 0, 1, 0],
                                   [0, 0, 0, 0, 1]],
                                  [[0, 1, 0, 0, 0],
-                                  [1, 0, 0, 0, 0]]], device=device)
+                                  [1, 0, 0, 0, 0]]], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor(4, device=device))
-        expected = torch.tensor([0, 0, 0, 0, 1], device=device)
+        t = torch.nn.functional.one_hot(torch.tensor(4, device=device), dtype=dtype)
+        expected = torch.tensor([0, 0, 0, 0, 1], device=device, dtype=dtype)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100)
-        expected = torch.empty([4, 0, 100], dtype=torch.long)
+        t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100, dtype=dtype)
+        expected = torch.empty([4, 0, 100], dtype=dtype)
         self.assertEqual(t, expected)
 
         with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device))
+            torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), dtype=dtype)
 
         with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
+            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2, dtype=dtype)
 
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
@@ -13156,8 +13183,7 @@ class TestNNDeviceType(NNTestCase):
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     output = module(input)
 
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.double)
+    @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None,
@@ -15014,8 +15040,9 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
 
-    def _test_batchnorm_eval(self, device, dtype=torch.float):
-        module = nn.BatchNorm1d(3).to(device, dtype)
+    def _test_batchnorm_eval(self, device, dtype, module_dtype=None):
+        module_dtype = module_dtype or dtype
+        module = nn.BatchNorm1d(3).to(device, module_dtype)
         module.eval()
 
         data = torch.rand(4, 3, device=device, dtype=dtype, requires_grad=True)
@@ -15037,7 +15064,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(grad1, grad2)
 
         # track_running_stats=False
-        module = nn.BatchNorm1d(3, track_running_stats=False).to(device, dtype)
+        module = nn.BatchNorm1d(3, track_running_stats=False).to(device, module_dtype)
 
         data = torch.rand(4, 3, device=device, dtype=dtype, requires_grad=True)
         grad = torch.rand(4, 3, device=device, dtype=dtype)
@@ -15060,21 +15087,30 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(grad1, grad2)
 
-    def test_batchnorm_eval(self, device):
-        self._test_batchnorm_eval(device)
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.bfloat16)
+    def test_batchnorm_eval(self, device, dtype):
+        self._test_batchnorm_eval(device, dtype)
 
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_batchnorm_eval(device)
+                self._test_batchnorm_eval(device, dtype)
 
     @onlyCUDA
-    def test_batchnorm_eval_bfloat16(self, device):
-        self._test_batchnorm_eval(device, torch.bfloat16)
+    @dtypes(torch.bfloat16, torch.half)
+    def test_batchnorm_eval_mixed(self, device, dtype):
+        # Test bfloat16 input with float module
+        self._test_batchnorm_eval(device, dtype, torch.float)
 
-    def _test_batchnorm_simple_average(self, device, dtype):
-        module = nn.BatchNorm1d(3, momentum=None).to(dtype=dtype, device=device)
-        zeros = torch.zeros(3, dtype=dtype, device=device)
-        ones = torch.ones(3, dtype=dtype, device=device)
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_eval(device, dtype, torch.float)
+
+    def _test_batchnorm_simple_average(self, device, dtype, module_dtype=None):
+        module_dtype = module_dtype or dtype
+        module = nn.BatchNorm1d(3, momentum=None).to(dtype=module_dtype, device=device)
+        zeros = torch.zeros(3, dtype=module_dtype, device=device)
+        ones = torch.ones(3, dtype=module_dtype, device=device)
         self.assertEqual(module.running_mean, zeros)
         self.assertEqual(module.running_var, ones)
 
@@ -15114,12 +15150,22 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(module.running_var, (running_var1 + running_var2) / 2)
 
     @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.bfloat16)
     def test_batchnorm_simple_average(self, device, dtype):
         self._test_batchnorm_simple_average(device, dtype)
 
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_simple_average(device, dtype)
+
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.half)
+    def test_batchnorm_simple_average_mixed(self, device, dtype):
+        self._test_batchnorm_simple_average(device, dtype, torch.float)
+
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_simple_average(device, dtype, torch.float)
 
     def _test_maxpool_indices(self, num_dim, adaptive=False, device="cpu", dtype=torch.float):
         def expected_indices(dim):
@@ -16038,6 +16084,12 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
+    @onlyOnCPUAndCUDA
+    def test_mish_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.mish(x, inplace=True)
+
     def test_softplus_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -16178,8 +16230,7 @@ class TestNNDeviceType(NNTestCase):
         # Test meta module instantiation.
         input = torch.randn(5, 10, device=device, dtype=dtype)
         m = MyModule(10, 1, device='meta', dtype=dtype)
-        with self.assertRaises(NotImplementedError):
-            m(input)
+        m(input)
 
         # Test materializing meta module on a real device.
         m.to_empty(device=device)
@@ -16190,8 +16241,19 @@ class TestNNDeviceType(NNTestCase):
 
         # Test creating meta module from materialized module.
         m.to_empty(device='meta')
-        with self.assertRaises(NotImplementedError):
-            m(input)
+        m(input)
+
+    @skipMeta
+    def test_skip_init(self, device):
+        torch.manual_seed(1)
+        m_initialized = torch.nn.Linear(5, 1)
+        m_initialized.to(device)
+
+        torch.manual_seed(1)
+        m_uninitialized = torch.nn.utils.skip_init(torch.nn.Linear, 5, 1, device=device)
+
+        self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
+        self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
 class TestModuleGlobalHooks(TestCase):
 
