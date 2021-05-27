@@ -1,6 +1,4 @@
 from io import BytesIO, StringIO
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from textwrap import dedent
 from unittest import skipIf
 
