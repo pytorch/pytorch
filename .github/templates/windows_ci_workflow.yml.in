@@ -31,6 +31,10 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+      - name: Install 7zip if not already installed
+        shell: powershell
+        run: |
+          choco install 7zip.install -y
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -73,6 +77,10 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+      - name: Install 7zip if not already installed
+        shell: powershell
+        run: |
+          choco install 7zip.install -y
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
