@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Exceptions.h>
+#include <c10/util/Exception.h>
 #include <cstring>
 #include <iostream>
 #include <sstream>
@@ -55,8 +55,6 @@ std::string check_env(
 
   // Issue a warning if an invalid value was passed in
   if (valid_values.size() > 0 && !found) {
-    std::string valid_values_str;
-
     std::stringstream ss;
     ss << "Ignoring invalid value for flag " << name << ": " << envar << ". ";
     ss << "Valid values are: ";
