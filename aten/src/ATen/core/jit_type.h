@@ -127,11 +127,20 @@ struct TORCH_API UnionType : public Type {
 
   bool operator==(const Type& rhs) const override;
 
-  at::ArrayRef<TypePtr> types() const {
+  at::ArrayRef<TypePtr> containedTypes() const override {
     return types_;
   }
 
-  at::ArrayRef<TypePtr> containedTypes() const override {
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    return create(contained_types);
+  }
+
+  // `getTypes` is for testing purposes only. We need to have some way
+  // to get the underlying `types` vector even if this Union is actually
+  // an Optional (in which case only `containedTypes` is overridden for
+  // BC purposes). This method should be deleted once we canonicalize
+  // `Optional[T]` as `Union[T, None]`
+  at::ArrayRef<TypePtr> getTypes() const {
     return types_;
   }
 
@@ -147,18 +156,9 @@ struct TORCH_API UnionType : public Type {
     return has_free_variables_;
   }
 
-  UnionTypePtr unionOf(std::vector<TypePtr>& rhs_types) const;
-  UnionTypePtr unionOf(const UnionTypePtr rhs) const;
-
-  UnionTypePtr intersectionOf(std::vector<TypePtr>& rhs_types) const;
-  UnionTypePtr intersectionOf(const UnionTypePtr rhs) const;
+  c10::optional<TypePtr> toOptional(bool unification_allowed=false) const;
 
   TypePtr withoutNone() const;
-
-  // This method will ONLY create an OptionalTypePtr with a non-Union
-  // inner type. So, `Union[T1, T2, None]` -> `c10::nullopt`, but
-  // `Union[T1, None]` -> `Optional[T1]`
-  c10::optional<OptionalTypePtr> toOptional() const;
 
  protected:
     UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
@@ -239,19 +239,7 @@ struct TORCH_API OptionalType : public UnionType {
     return create(contained_types[0]);
   }
 
-  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
-    if (Type::isSubtypeOfExt(rhs, why_not)) {
-      return true;
-    }
-    if (auto rhs_ = rhs->cast<OptionalType>()) {
-      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
-    }
-    if (auto rhs_ = rhs->cast<UnionType>()) {
-      auto inner = this->getElementType();
-      return rhs_->canHoldNone() && inner->isSubtypeOf(rhs_);
-    }
-    return false;
-  }
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
 
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
