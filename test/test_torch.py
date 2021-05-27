@@ -4885,7 +4885,7 @@ else:
             scalar = torch.tensor(2, device=device, dtype=dtype)
             torch.diff(scalar)
 
-    def _test_histogram_numpy(self, t, bins, weights, density):
+    def _test_histogram_numpy(self, t, bins, bin_range, weights, density):
         # Helper for test_histogram to compare with NumPy reference implementation
         def to_np(t):
             if not torch.is_tensor(t):
@@ -4899,8 +4899,26 @@ else:
         np_bins = to_np(bins)
         np_weights = to_np(weights)
 
-        (actual_hist, actual_bin_edges) = torch.histogram(t, bins, weight=weights, density=density)
-        (expected_hist, expected_bin_edges) = map(torch.from_numpy, np.histogram(np_t, np_bins, weights=np_weights, density=density))
+        (minv, maxv) = bin_range if bin_range else (None, None)
+
+        (actual_hist, actual_bin_edges) = torch.histogram(t, bins, min=minv, max=maxv, weight=weights, density=density)
+        (expected_hist, expected_bin_edges) = map(torch.from_numpy, \
+                np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density))
+
+        """
+        Works around linspace discrepancies by passing torch's constructed bin_edges to numpy.
+
+        When bin edges are not explicitly defined, histogram uses the linspace operator internally
+        to construct the sequence of bin edges. In some cases, torch.linspace output differs slightly
+        from numpy.linspace output.
+        Issue: https://github.com/pytorch/pytorch/issues/58758
+        """
+        if not torch.is_tensor(bins):
+            self.assertEqual(actual_bin_edges, expected_bin_edges.to(actual_bin_edges.dtype), atol=1e-5, rtol=1e-5)
+
+            # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins argument
+            (expected_hist, expected_bin_edges) = map(torch.from_numpy, \
+                    np.histogram(np_t, to_np(actual_bin_edges), range=bin_range, weights=np_weights, density=density))
 
         self.assertEqual(actual_hist, expected_hist.to(actual_hist.dtype))
         self.assertEqual(actual_bin_edges, expected_bin_edges.to(actual_bin_edges.dtype))
@@ -4915,16 +4933,27 @@ else:
             (1, 5, 1),
             (2, 3, 5))
 
-        for contig, bin_ct, weighted, density, shape in product([True], range(1, 10), [True, False], [True, False], shapes):
+        for contig, bin_ct, minmax, weighted, density, shape in \
+                product([True], range(1, 10), [True, False], [True, False], [True, False], shapes):
             values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous = not contig)
+            bin_range = sorted((random.uniform(-9, 9), random.uniform(-9, 9))) if minmax else None
             weights = make_tensor(shape, device, dtype, low=0, high=9) if weighted else None
 
-            # test passing just the bin_ct
-            self._test_histogram_numpy(values, bin_ct, weights, density)
+            # Tests passing just the bin_ct
+            self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
 
-            # test with caller-specified bin edges
-            bin_edges = make_tensor((bin_ct + 1), device, dtype, low=-9, high=9).sort()[0]
-            self._test_histogram_numpy(values, bin_edges, weights, density)
+            # Tests with caller-specified bin edges
+            bin_edges = make_tensor((bin_ct + 1), device, dtype, low=-9, high=9).msort()
+            self._test_histogram_numpy(values, bin_edges, bin_range, weights, density)
+
+        # Tests values of default args
+        for bin_ct, shape in product(range(1, 10), shapes):
+            values = make_tensor(shape, device, dtype, low=-9, high=9)
+            (actual_hist, actual_bin_edges) = torch.histogram(values, bin_ct)
+            (expected_hist, expected_bin_edges) = torch.histogram(values, bin_ct, \
+                    min=None, max=None, weight=None, density=False)
+            self.assertEqual(actual_hist, expected_hist)
+            self.assertEqual(actual_bin_edges, expected_bin_edges)
 
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):
