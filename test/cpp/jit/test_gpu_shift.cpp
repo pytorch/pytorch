@@ -1907,6 +1907,100 @@ TEST(NVFuserTest, FusionShiftBcast3_CUDA) {
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
+// 3x3 max pooling
+TEST(NVFuserTest, FusionMaxPooling_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Format: CHW
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+
+  // 3x3 pooling of the HW spatial domain
+  std::vector<std::vector<int>> offsets;
+  for (int i = -1; i <= 1; ++i) {
+    for (int j = -1; j <= 1; ++j) {
+      if (i == 0 && j == 0) {
+        continue;
+      }
+      offsets.push_back({i, j});
+    }
+  }
+
+  std::vector<TensorView*> inp_tile({inp});
+  for (auto offset : offsets) {
+    offset.insert(offset.begin(), 0);
+    inp_tile.push_back(shift(inp, offset));
+  }
+
+  TensorView* max_tensor = nullptr;
+  for (auto tv : inp_tile) {
+    if (max_tensor == nullptr) {
+      max_tensor = tv;
+    } else {
+      max_tensor = binaryOp(BinaryOpType::Max, max_tensor, tv);
+    }
+  }
+
+  fusion.addOutput(max_tensor);
+
+  ////////////////////////////////////
+
+  // Cache the input and weight tensors
+  auto inp_cache = inp->cache_after();
+
+  // Tiling the spatial domain
+  const int tile_x = 32;
+  const int tile_y = 8;
+
+  max_tensor->split(-2, tile_y);
+  max_tensor->axis(-2)->parallelize(ParallelType::TIDy);
+  max_tensor->split(-1, tile_x);
+  max_tensor->axis(-1)->parallelize(ParallelType::TIDx);
+  max_tensor->reorder({{-3, -2}});
+
+  inp_cache->computeAt(max_tensor, 3);
+  inp_cache->axis(-2)->parallelize(ParallelType::TIDy);
+  inp_cache->axis(-1)->parallelize(ParallelType::TIDx);
+  inp_cache->setMemoryType(MemoryType::Shared);
+
+  auto max_tensor_dep =
+      DependencyCheck::getAllValsBetween({inp_cache}, {max_tensor});
+  for (auto tv : ir_utils::filterByType<TensorView>(max_tensor_dep)) {
+    if (tv == inp_cache || tv == max_tensor) {
+      continue;
+    }
+    tv->computeAt(max_tensor, -1);
+  }
+
+  max_tensor->axis(0)->parallelize(ParallelType::BIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int hw = 50;
+  const int num_channels = 20;
+  const int pooling_window = 3;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_inp = at::randn({num_channels, hw, hw}, options);
+  // shift always pads by zero, so if all surrounding values are
+  // negative, max pooling would pick a padded value, which isn't the
+  // correct behavior. We need to be able to choose the value of
+  // padding. In this case, padding by the minimum value would not
+  // have this problem. For now, avoid the problem by making sure all
+  // values are not negative.
+  aten_inp = at::abs(aten_inp);
+  std::vector<IValue> inputs = {aten_inp};
+
+  auto outputs = fe.runFusion(inputs);
+
+  auto ref = at::max_pool2d(
+      aten_inp, {pooling_window, pooling_window}, {1, 1}, {1, 1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
