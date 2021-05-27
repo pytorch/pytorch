@@ -14,6 +14,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
+#include <ATen/Operators.h>
 
 namespace at {
 
@@ -40,32 +41,49 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
-${function_declarations}
+${function_definitions}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
 // So, for example std(0) would select the std(unbiased=False) overload
-TORCH_API Tensor var(const Tensor& self, int dim);
-TORCH_API std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim);
-TORCH_API Tensor std(const Tensor& self, int dim);
-TORCH_API std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim);
+TORCH_API inline Tensor var(const Tensor& self, int dim) {
+  return at::var(self, IntArrayRef{dim});
+}
+TORCH_API inline std::tuple<Tensor, Tensor> var_mean(const Tensor& self, int dim) {
+  return at::var_mean(self, IntArrayRef{dim});
+}
+TORCH_API inline Tensor std(const Tensor& self, int dim) {
+  return at::std(self, IntArrayRef{dim});
+}
+TORCH_API inline std::tuple<Tensor, Tensor> std_mean(const Tensor& self, int dim) {
+  return at::std_mean(self, IntArrayRef{dim});
+}
 
 
 // Special C++ only overloads for convnd functions (See gh-45667)
 // These are needed because {1, 2} is ambiguous between string and IntArrayRef overloads
-TORCH_API at::Tensor conv1d(
+TORCH_API inline at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
-    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
-TORCH_API at::Tensor conv2d(
+    std::initializer_list<int64_t> padding_, IntArrayRef dilation = 1, int64_t groups = 1) {
+  auto padding = IntArrayRef(padding_);
+  return at::conv1d(input, weight, bias, stride, padding, dilation, groups);
+}
+TORCH_API inline at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
-    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
-TORCH_API at::Tensor conv3d(
+    std::initializer_list<int64_t> padding_, IntArrayRef dilation = 1, int64_t groups = 1) {
+  auto padding = IntArrayRef(padding_);
+  return at::conv2d(input, weight, bias, stride, padding, dilation, groups);
+}
+TORCH_API inline at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
-    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
+    std::initializer_list<int64_t> padding_, IntArrayRef dilation = 1, int64_t groups = 1) {
+  auto padding = IntArrayRef(padding_);
+  return at::conv3d(input, weight, bias, stride, padding, dilation, groups);
+}
 
 namespace detail {
 
-TORCH_API void noopDelete(void*);
+TORCH_API inline void noopDelete(void*) {}
 
 } // namespace detail
 

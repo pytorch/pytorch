@@ -1454,6 +1454,18 @@ class OperatorName:
         else:
             return f"{self.name}"
 
+    # NB: This must be synchronized with the naming scheme in
+    # aten/src/ATen/templates/Operators.h
+    # Given a function schema "aten::op.overload(...)",
+    # If there is no overload name, this returns f"{op}"
+    # If there is an overload name, this returns f"{op}_{overload}"
+    def unambiguous_name(self) -> str:
+        if self.overload_name:
+            return f"{self.name}_{self.overload_name}"
+        else:
+            return f"{self.name}"
+
+
 def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGroup, b: BackendIndex) -> bool:
     return f.func.kind() is not SchemaKind.functional and \
         not b.has_kernel(f) and \
