@@ -119,6 +119,7 @@ _(aten, _sparse_addmm) \
 _(aten, _sparse_coo_tensor_with_dims) \
 _(aten, _sparse_coo_tensor_with_dims_and_tensors) \
 _(aten, _sparse_coo_tensor_unsafe) \
+_(aten, _sparse_csr_tensor_unsafe) \
 _(aten, _sparse_dense_add) \
 _(aten, _sparse_div_scalar) \
 _(aten, _sparse_div_zerodim) \
@@ -495,6 +496,7 @@ _(aten, miopen_depthwise_convolution_backward_input) \
 _(aten, miopen_depthwise_convolution_backward_weight) \
 _(aten, miopen_rnn) \
 _(aten, miopen_rnn_backward) \
+_(aten, mish) \
 _(aten, mkldnn_convolution) \
 _(aten, mkldnn_convolution_backward) \
 _(aten, mkldnn_convolution_backward_input) \
@@ -654,6 +656,7 @@ _(aten, softshrink_forward) \
 _(aten, solve) \
 _(aten, sort) \
 _(aten, sparse_coo_tensor) \
+_(aten, sparse_csr_tensor) \
 _(aten, sparse_mask) \
 _(aten, sparse_resize) \
 _(aten, sparse_resize_and_clear) \

@@ -49,6 +49,7 @@ CREATE_UNARY_FLOAT_META_FUNC(erfinv)
 CREATE_UNARY_FLOAT_META_FUNC(exp)
 CREATE_UNARY_FLOAT_META_FUNC(exp2)
 CREATE_UNARY_FLOAT_META_FUNC(expm1)
+CREATE_UNARY_FLOAT_META_FUNC(i0)
 CREATE_UNARY_FLOAT_META_FUNC(lgamma)
 CREATE_UNARY_FLOAT_META_FUNC(log)
 CREATE_UNARY_FLOAT_META_FUNC(log10)
@@ -78,8 +79,8 @@ TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   }
 CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
-CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
+CREATE_UNARY_META_FUNC(sgn)
 
 TORCH_META_FUNC(neg)(const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
@@ -407,16 +408,14 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
-Tensor& sgn_out(const Tensor& self, Tensor& result) {
+// FIXME: remove const_cast once unary_op_impl_out is updated
+TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {
-    return unary_op_impl_out(result, self, sgn_stub);
+    sgn_stub(device_type(), *this);
   } else {
-    return unary_op_impl_out(result, self, sign_stub);
+    sign_stub(device_type(), *this);
   }
 }
-
-Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
-Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 // arccosh, alias for acosh
 Tensor& arccosh_out(const Tensor& self, Tensor& result) { return at::acosh_out(result, self); }
