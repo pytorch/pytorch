@@ -1327,6 +1327,7 @@ class TestCuda(TestCase):
             finally:
                 out = lib.cudaStreamDestroy(ctypes.c_ulonglong(p.value))
 
+    @skipIfRocm
     def test_external_streams(self):
         device = torch.cuda.device(0)
         with self._get_external_stream(device) as stream_v:
@@ -1334,6 +1335,7 @@ class TestCuda(TestCase):
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
 
+    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_external_streams_multi_device(self):
         device = torch.cuda.device(1)
