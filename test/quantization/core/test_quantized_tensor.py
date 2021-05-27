@@ -904,7 +904,6 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(y[0].numpy(), ref[0])
             self.assertEqual(y[1].numpy(), ref[1])
 
-class TestQTensorSerialization(TestCase):
     def _test_pickle_checkpoint_qtensor(self, device):
         with TemporaryFileName() as fname:
             class M(torch.jit.ScriptModule):
@@ -936,7 +935,7 @@ class TestQTensorSerialization(TestCase):
     def test_pickle_checkpoint_qtensor(self):
         self._test_pickle_checkpoint_qtensor('cpu')
 
-    def test_serialize_qtensor(self):
+    def test_jit_serialization(self):
         class SimpleQTensor(torch.jit.ScriptModule):
             def __init__(self, per_channel):
                 super(SimpleQTensor, self).__init__()

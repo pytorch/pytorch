@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import run_tests
 # - quantized tensor
 
 # 1. Quantized Kernels
+# TODO: merge the different quantized op tests into one test class
 from quantization.core.test_quantized_op import TestQuantizedOps  # noqa: F401
 from quantization.core.test_quantized_op import TestQNNPackOps  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedLinear  # noqa: F401
@@ -24,7 +25,6 @@ from quantization.core.test_quantized_functional import TestQuantizedFunctionalO
 from quantization.core.test_workflow_ops import TestFakeQuantizeOps  # noqa: F401
 # 3. Quantized Tensor
 from quantization.core.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
-from quantization.core.test_quantized_tensor import TestQTensorSerialization  # noqa: F401
 # 4. Modules
 from quantization.core.test_workflow_module import TestFakeQuantize  # noqa: F401
 from quantization.core.test_workflow_module import TestObserver  # noqa: F401
