@@ -47,17 +47,16 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
   Tensor t = *expand_size(self, {sparse.size(0), dense.size(1)}, "addmm_out_sparse_csr");
 
-  TORCH_INTERNAL_ASSERT(t.is_cuda());
-
+  TORCH_CHECK(t.is_cuda(),  "Expected all tensors to be on the same device. addmm expected 't' to be CUDA tensor");
   TORCH_CHECK(
       r.is_cuda(),
-      "addmm: expected 'out' to be CUDA tensor, but got CPU tensor");
+      "Expected all tensors to be on the same device. addmm: expected 'out' to be CUDA tensor, but got CPU tensor");
   TORCH_CHECK(
       sparse.is_cuda(),
-      "addmm: expected 'mat1' to be a CUDA tensor, but got a CPU tensor");
+      "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CUDA tensor, but got a CPU tensor");
   TORCH_CHECK(
       dense.is_cuda(),
-      "addmm: expected 'mat2' to be a CUDA tensor, but got a CPU tensor");
+      "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CUDA tensor, but got a CPU tensor");
 
   TORCH_CHECK(
       sparse.dim() == 2,

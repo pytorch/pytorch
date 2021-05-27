@@ -353,6 +353,20 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Only 2D"):
             sparse = dense.to_sparse_csr()
 
+    # TODO: Support auto generation of device check for sparse tensors
+    # See: https://github.com/pytorch/pytorch/issues/59058
+    @dtypes(torch.double)
+    def test_matmul_device_mismatch(self, device, dtype):
+        cpu = torch.rand((10, 10))
+        cuda = cpu.cuda()
+        for s, m1, m2 in itertools.product((cpu, cuda), repeat=3):
+            csr = m1.to_sparse()
+            if s.device == csr.device == m2.device:
+                torch.addmm(s, csr, m2)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+                    torch.addmm(s, csr, m2)
+
     @dtypes(torch.float, torch.double)
     def test_csr_matvec(self, device, dtype):
         side = 100
