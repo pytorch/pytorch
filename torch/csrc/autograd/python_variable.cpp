@@ -65,6 +65,12 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
     // too late to rescue the object, so just stub out the PyObject
     // so that it fails on subsequent uses.  Don't raise an error here;
     // you're probably in a destructor.
+    TORCH_WARN(
+      "Deallocating Tensor that still has live PyObject references.  "
+      "This probably happened because you took out a weak reference to "
+      "Tensor and didn't call _fix_weakref() after dereferencing it.  "
+      "Subsequent accesses to this tensor via the PyObject will now fail."
+    );
     ((THPVariable*)pyobj)->cdata = MaybeOwned<Variable>();
   }
   Py_DECREF(pyobj);
