@@ -27,8 +27,6 @@ from quantization.test_quantized_module import TestDynamicQuantizedModule  # noq
 from quantization.test_fusion_passes import TestFusionPasses  # noqa: F401
 
 # Module
-# TODO: some of the tests are actually operator tests, e.g. test_forward_per_tensor, and
-# should be moved to test_quantized_op
 from quantization.test_workflow_module import TestFakeQuantize  # noqa: F401
 from quantization.test_workflow_module import TestObserver  # noqa: F401
 # TODO: merge with TestObserver
@@ -36,6 +34,8 @@ from quantization.test_workflow_module import TestObserver  # noqa: F401
 from quantization.test_workflow_module import TestRecordHistogramObserver  # noqa: F401
 from quantization.test_workflow_module import TestHistogramObserver  # noqa: F401
 from quantization.test_workflow_module import TestDistributed  # noqa: F401
+
+from quantization.test_workflow_ops import TestFakeQuantizeOps  # noqa: F401
 
 # Workflow
 # 1. Eager mode post training quantization
