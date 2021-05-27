@@ -197,7 +197,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       // Sort; a stable sort is not required
       auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
       thrust::sort_by_key(policy, sorted_data, sorted_data + numel, orig_data,
-                          ThrustLTOp<index_t>());
+                          LTOp<index_t>());
     }
 
     if (scale_grad_by_freq) {

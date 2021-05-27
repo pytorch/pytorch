@@ -110,7 +110,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
 
   thrust::sort_by_key(policy,
     indicesIter, indicesIter + nnz,
-    origIndicesIter, ThrustLTOp<int64_t>()
+    origIndicesIter, LTop<int64_t>()
   );
 
   // this forces device-host synchronization!

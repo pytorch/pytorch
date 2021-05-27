@@ -83,7 +83,7 @@ void sortKeyValueInplace(const Tensor& key,
                                                                         \
     if (dir) {                                                          \
       bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
-          ThrustGTOp<scalar_t, true>, TYPE, SIZE>                           \
+          GTOp<scalar_t, true>, TYPE, SIZE>                           \
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
           keyInfo,                                                      \
           keySlices,                                                    \
@@ -91,11 +91,11 @@ void sortKeyValueInplace(const Tensor& key,
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          ThrustGTOp<scalar_t, true>());                                    \
+          GTOp<scalar_t, true>());                                    \
       C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     } else {                                                            \
       bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
-      ThrustLTOp<scalar_t, true>, TYPE, SIZE>                               \
+      LTOp<scalar_t, true>, TYPE, SIZE>                               \
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
           keyInfo,                                                      \
           keySlices,                                                    \
@@ -103,7 +103,7 @@ void sortKeyValueInplace(const Tensor& key,
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          ThrustLTOp<scalar_t, true>());                                    \
+          LTOp<scalar_t, true>());                                    \
       C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     }                                                                   \
   } while (0)
