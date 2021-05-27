@@ -1419,8 +1419,7 @@ Node* Node::insertBefore(Node* n) {
 }
 
 Node* Node::insertAfter(Node* n) {
-  AT_ASSERT(!inBlockList());
-  AT_ASSERT(n->inBlockList());
+  AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
   AT_ASSERTM(
       n->kind() != prim::Return,
