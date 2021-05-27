@@ -35,7 +35,7 @@ namespace utils {
   //
   // You can optionally pass in a list of valid values (default: empty list,
   // which is interpreted as "all values accepted")
-  std::string getenv(const char *name,
+  std::string check_env(const char *name,
       const char *default_value = "UNSET",
       const std::vector<std::string> valid_values= std::vector<std::string>()) {
     auto envar = std::getenv(name);
