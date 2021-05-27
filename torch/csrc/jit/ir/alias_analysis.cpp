@@ -99,7 +99,7 @@ class MutableTypePtrHelper {
         return c10::optional<TypePtr>(unshapedContainerTypeWithCache(type));
       case TypeKind::UnionType: {
         std::vector<TypePtr> mutable_types;
-        for (TypePtr inner : type->expect<UnionType>()->types()) {
+        for (TypePtr inner : type->expect<UnionType>()->containedTypes()) {
           if (auto maybe_mut_type = getMutableType(inner)) {
             mutable_types.emplace_back(*maybe_mut_type);
           }
@@ -1753,7 +1753,7 @@ std::vector<Element*> AliasDb::getWildcard(const TypePtr& type) const {
   if ((*maybe_mut_type)->kind() == UnionType::Kind) {
     std::vector<Element*> res;
     const auto union_type = (*maybe_mut_type)->expect<UnionType>();
-    res.reserve(union_type->types().size() + 1);
+    res.reserve(union_type->containedTypes().size() + 1);
     // Get a <TypePtr, Element*> pair where the TypePtr is this Union
     // type and the Element is the corresponding Wildcard
     auto maybe_union_pair = wildcardIndex_.find(union_type);
@@ -1761,7 +1761,7 @@ std::vector<Element*> AliasDb::getWildcard(const TypePtr& type) const {
       res.push_back((*maybe_union_pair).second);
     }
     // Get the Wildcards for all applicable inner types
-    for (const auto& inner : union_type->types()) {
+    for (const auto& inner : union_type->containedTypes()) {
       auto inner_pair = wildcardIndex_.find(inner);
       if (inner_pair != wildcardIndex_.end()) {
         res.push_back(inner_pair->second);
