@@ -544,6 +544,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::relu6:
     case aten::gelu:
     case aten::batch_norm:
     case aten::isnan:
@@ -1869,6 +1870,19 @@ Tensor* tensorexpr::computeOperandValue(
           });
     } break;
 
+    case aten::relu6: {
+      return computeOneOperand(
+          "aten_relu6",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            auto zero = Cast::make(a.dtype(), 0);
+            auto six = Cast::make(a.dtype(), 6.);
+            return clamp(zero, six, a);
+          });
+    } break;
+
     case aten::gelu: {
       return computeOneOperand(
           "aten_gelu",
@@ -2580,6 +2594,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg:
     case aten::isnan:
     case aten::relu:
+    case aten::relu6:
     case aten::leaky_relu:
     case aten::hardswish:
     case aten::gelu:
