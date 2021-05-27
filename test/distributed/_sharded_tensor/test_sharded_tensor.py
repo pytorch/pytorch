@@ -7,9 +7,16 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ASAN,
+)
+import unittest
 
-
+@unittest.skipIf(
+    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+)
 class TestShardedTensorChunked(MultiProcessTestCase):
+
     @property
     def world_size(self):
         return 4
