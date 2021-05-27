@@ -5,6 +5,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
 #include <c10/core/TensorOptions.h>
