@@ -472,7 +472,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
       // (i15 ^ 2, ..., i0 ^ 2)
       __m256i sq_lo_epi16 = _mm512_castsi512_si256(sq_epi16);
       // (i31 ^ 2, ..., i16 ^ 2)
-      __m256i sq_hi_epi16 = 
+      __m256i sq_hi_epi16 =
           _mm256_castps_si256(_mm512_extractf32x8_ps(_mm512_castsi512_ps(sq_epi16), 1));
       // widen to epi32
       __m512i sq_lo_epi32 = _mm512_cvtepi16_epi32(sq_lo_epi16);
