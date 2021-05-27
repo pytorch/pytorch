@@ -97,7 +97,9 @@ class TestSaveLoad(PackageTestCase):
         """Test to ensure bad __imports__ don't cause PackageExporter to fail."""
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as e:
-            e.save_source_string('m',  '__import__("these", dont, have, to, be, contants)')
+            e.save_source_string(
+                "m", '__import__(these, unresolvable, "things", wont, crash, me)'
+            )
 
     def test_save_module_binary(self):
         f = BytesIO()
