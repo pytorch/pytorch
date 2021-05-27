@@ -4,7 +4,7 @@ import unittest
 import random
 import itertools
 from torch.testing._internal.common_utils import \
-    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
+    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU, onlyCUDA)
 
@@ -411,6 +411,32 @@ class TestSparseCSR(TestCase):
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
+
+    @dtypes(*torch.testing.floating_types())
+    def test_sparse_addmm(self, device, dtype):
+        def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
+            if alpha_beta is None:
+                alpha = random.random()
+                beta = random.random()
+            else:
+                alpha, beta = alpha_beta
+            if broadcast:
+                D1 = make_tensor((), dtype=dtype, device=device)
+            else:
+                D1 = make_tensor([n, p], dtype=dtype, device=device)
+            D2 = make_tensor([m, p], dtype=dtype, device=device)
+            S = self.genSparseCSRTensor([n, m], nnz, dtype=dtype, device=device, index_dtype=torch.int32)
+            S_dense = S.to_dense()
+            Y = torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
+            Y_dense = torch.addmm(D1, S_dense, D2, beta=beta, alpha=alpha)
+            self.assertEqual(Y, Y_dense)
+
+        test_shape(7, 8, 9, 20, False, None)
+        test_shape(7, 8, 9, 20, True, None)
+        test_shape(7, 8, 9, 20, False, (1, 0))
+        test_shape(7, 8, 9, 20, True, (1, 0))
+        test_shape(7, 8, 9, 20, False, (1, 1))
+        test_shape(7, 8, 9, 20, True, (1, 1))
 
     @dtypes(torch.float, torch.double)
     def test_add(self, device, dtype):

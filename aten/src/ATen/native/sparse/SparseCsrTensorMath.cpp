@@ -97,15 +97,15 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
   Tensor t = *expand_size(self, {sparse.size(0), dense.size(1)}, "addmm_out_sparse_csr");
 
-  TORCH_INTERNAL_ASSERT(t.device().type() == kCPU);
+  TORCH_INTERNAL_ASSERT(!t.is_cuda());
   TORCH_CHECK(
-      r.device().type() == kCPU,
+      !r.is_cuda(),
       "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(
-      sparse.device().type() == kCPU,
+      !sparse.is_cuda(),
       "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   TORCH_CHECK(
-      dense.device().type() == kCPU,
+      !dense.is_cuda(),
       "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(
@@ -286,12 +286,12 @@ Tensor& add_out_dense_sparse_csr_cpu(
               auto out_strides0 = resultBuffer.strides()[0];
               auto out_strides1 = resultBuffer.strides()[1];
 
-              for (int32_t irow = 0; irow < src_crow_indices.size(0) - 1;
+              for (index_t irow = 0; irow < src_crow_indices.size(0) - 1;
                    ++irow) {
-                int32_t start_index = crow_indices_accessor[irow];
-                int32_t end_index = crow_indices_accessor[irow + 1];
+                index_t start_index = crow_indices_accessor[irow];
+                index_t end_index = crow_indices_accessor[irow + 1];
 
-                for (int i = start_index; i < end_index; ++i) {
+                for (index_t i = start_index; i < end_index; ++i) {
                   auto icol = col_indices_accessor[i];
                   auto index = resultBuffer.storage_offset() + irow * out_strides0 +
                       icol * out_strides1;
