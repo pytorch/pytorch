@@ -10,7 +10,7 @@ import ruamel.yaml
 from pathlib import Path
 
 
-yaml = ruamel.yaml.YAML()
+yaml = ruamel.yaml.YAML()  # type: ignore[attr-defined]
 yaml.preserve_quotes = True
 yaml.boolean_representation = ['False', 'True']
 yaml.default_flow_style = False

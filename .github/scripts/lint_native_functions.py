@@ -20,13 +20,13 @@ import sys
 from pathlib import Path
 from io import StringIO
 
-def fn(base):
+def fn(base: str) -> str:
     return str(base / Path("aten/src/ATen/native/native_functions.yaml"))
 
 with open(Path(__file__).parent.parent.parent / fn('.'), "r") as f:
     contents = f.read()
 
-yaml = ruamel.yaml.YAML()
+yaml = ruamel.yaml.YAML()  # type: ignore[attr-defined]
 yaml.preserve_quotes = True
 yaml.width = 1000
 yaml.boolean_representation = ['False', 'True']
