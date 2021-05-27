@@ -18,7 +18,7 @@ using loop2d_t = TensorIteratorBase::loop2d_t;
 using StrideVector = TensorIteratorBase::StrideVector;
 
 /// Construction
-TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output) {
+TensorIteratorConfig& TensorIteratorConfig::add_owned_output(const Tensor& output) {
   TORCH_INTERNAL_ASSERT(
       num_inputs_ == 0,
       "Keep in mind that you have to add all outputs first before adding any input. "
@@ -28,7 +28,7 @@ TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output) {
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::add_input(const Tensor& input) {
+TensorIteratorConfig& TensorIteratorConfig::add_owned_input(const Tensor& input) {
   tensors_.push_back(c10::MaybeOwned<Tensor>::owned(c10::in_place, input));
   num_inputs_++;
   return *this;
@@ -59,7 +59,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_dtype_and_device(Scal
 TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape) {
   // WARNING:
   //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
-  //   are expected to check shapes before calling `add_input` or `add_output`.
+  //   are expected to check shapes before calling `add_owned_input` or `add_owned_output`.
   TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
   static_shape_ = c10::make_optional(DimVector(shape));
   return *this;
@@ -655,7 +655,7 @@ StrideVector TensorIteratorBase::get_strides() const {
   StrideVector strides;
   for (int dim = 0; dim < ndim(); dim++) {
     for (int arg = 0; arg < ntensors(); arg++) {
-      strides.push_back(operands_[arg].stride_bytes[dim]);
+      strides.emplace_back(operands_[arg].stride_bytes[dim]);
     }
   }
   return strides;
@@ -670,10 +670,15 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
     strides.push_back(0);
   }
 
+
   auto base_ptrs = get_base_ptrs();
   if (ndim() <= 1) {
-    auto ptrs = get_data_ptrs(base_ptrs, { range.begin });
-    loop(ptrs.data(), strides.data(), range.size(), 1);
+    if (range.begin > 0) {
+      auto ptrs = get_data_ptrs(base_ptrs, {range.begin});
+      loop(ptrs.data(), strides.data(), range.size(), 1);
+    } else {
+      loop(base_ptrs.data(), strides.data(), range.size(), 1);
+    }
   } else {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
@@ -776,16 +781,16 @@ void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indic
 // Helper to construct a binary op that promotes integer inputs to float.
 void TensorIteratorBase::build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b) {
   build(BINARY_FLOAT_OP_CONFIG()
-        .add_output(out)
-        .add_input(a)
-        .add_input(b));
+        .add_owned_output(out)
+        .add_owned_input(a)
+        .add_owned_input(b));
 }
 
 void TensorIteratorBase::build_borrowing_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b) {
   build(BINARY_FLOAT_OP_CONFIG()
-        .add_borrowed_output(out)
-        .add_borrowed_input(a)
-        .add_borrowed_input(b));
+        .add_output(out)
+        .add_input(a)
+        .add_input(b));
 }
 
 // This cannot be a function because TensorIteratorConfig is not
@@ -800,23 +805,23 @@ void TensorIteratorBase::build_borrowing_binary_float_op(const Tensor& out, cons
 
 void TensorIteratorBase::build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
   build(BINARY_OP_CONFIG()
+      .add_owned_output(out)
+      .add_owned_input(a)
+      .add_owned_input(b));
+}
+
+void TensorIteratorBase::build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
+  build(BINARY_OP_CONFIG()
       .add_output(out)
       .add_input(a)
       .add_input(b));
 }
 
-void TensorIteratorBase::build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
-  build(BINARY_OP_CONFIG()
-      .add_borrowed_output(out)
-      .add_borrowed_input(a)
-      .add_borrowed_input(b));
-}
-
 void TensorIteratorBase::build_unary_float_op(const Tensor& out, const Tensor& a) {
   build(TensorIteratorConfig()
       .set_check_mem_overlap(true)
-      .add_output(out)
-      .add_input(a)
+      .add_owned_output(out)
+      .add_owned_input(a)
       .promote_inputs_to_common_dtype(true)
       .cast_common_dtype_to_outputs(true)
       .enforce_safe_casting_to_output(true)
@@ -826,8 +831,8 @@ void TensorIteratorBase::build_unary_float_op(const Tensor& out, const Tensor& a
 void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
   build(TensorIteratorConfig()
       .set_check_mem_overlap(true)
-      .add_output(out)
-      .add_input(a)
+      .add_owned_output(out)
+      .add_owned_input(a)
       .cast_common_dtype_to_outputs(false)
       .enforce_safe_casting_to_output(false)
       .check_all_same_dtype(true));
@@ -839,7 +844,7 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Ten
   return iter;
 }
 
-TensorIterator TensorIterator::borrowing_binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+TensorIterator TensorIterator::borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_borrowing_binary_op(out, a, b);
   return iter;
@@ -863,18 +868,18 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   if (out.scalar_type() == kBool) {
     return TensorIteratorConfig()
     .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .add_input(b)
+    .add_owned_output(out)
+    .add_owned_input(a)
+    .add_owned_input(b)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .build();
   } else {
     return TensorIteratorConfig()
     .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .add_input(b)
+    .add_owned_output(out)
+    .add_owned_input(a)
+    .add_owned_input(b)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -894,13 +899,22 @@ TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
   return iter;
 }
 
-TensorIterator TensorIterator::nullary_op(Tensor& out) {
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .check_all_same_dtype(false)
-    .add_output(out)
-    // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
+#define NULLARY_OP_CONFIG()                                     \
+  TensorIteratorConfig()                                        \
+    .set_check_mem_overlap(true)                                \
+    .check_all_same_dtype(false)                                \
+  /* FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342 */ \
     .resize_outputs(false)
+
+TensorIterator TensorIterator::nullary_op(Tensor& out) {
+  return NULLARY_OP_CONFIG()
+    .add_owned_output(out)
+    .build();
+}
+
+TensorIterator TensorIterator::borrowing_nullary_op(const Tensor& out) {
+  return NULLARY_OP_CONFIG()
+    .add_output(out)
     .build();
 }
 
@@ -908,8 +922,8 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out.defined());
   return TensorIteratorConfig()
     .set_check_mem_overlap(false)
-    .add_output(out)
-    .add_input(a)
+    .add_owned_output(out)
+    .add_owned_input(a)
     .resize_outputs(false)
     .is_reduction(true)
     // TODO: not supporting casting to outputs is only really necessary for arg{min,max}
@@ -931,9 +945,9 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
       " and output2 has ", out2.strides());
   return TensorIteratorConfig()
     .set_check_mem_overlap(false)
-    .add_output(out1)
-    .add_output(out2)
-    .add_input(a)
+    .add_owned_output(out1)
+    .add_owned_output(out2)
+    .add_owned_input(a)
     .resize_outputs(false)
     .is_reduction(true)
     .check_all_same_dtype(false)
@@ -1003,7 +1017,9 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
     assert_no_internal_overlap(*output);
     for (int j = num_outputs_; j < ntensors(); j++) {
       const auto& input = operands_[j].tensor;
-      assert_no_partial_overlap(*output, *input);
+      if (input->unsafeGetTensorImpl()!=output->unsafeGetTensorImpl()) {
+        assert_no_partial_overlap(*output, *input);
+      }
     }
   }
 }

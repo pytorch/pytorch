@@ -174,8 +174,10 @@ static int THPVariable_clear(THPVariable* self) {
     // Two situations to consider:
     //    PyObject -owns-> Tensor
     //        unsafeIsBorrowed() is FALSE.  We're obligated to look through
-    //        Tensor to break references.  Clearing cdata could induce the
-    //        destruction of the C++ Tensor.
+    //        Tensor to break references.  Clearing cdata must induce the
+    //        destruction of the C++ Tensor.  If there were other references
+    //        to C++ tensor, the Python object would have been resurrected
+    //        by flipping the ownership.
     //    Tensor -owns-> PyObject
     //        unsafeIsBorrowed() is TRUE.  We're deallocating the PyObject
     //        because Tensor asked us to (it's already destructing).
@@ -217,8 +219,6 @@ static int THPVariable_clear(THPVariable* self) {
         grad_acc->pre_hooks().clear();
       }
     }
-    // TODO: figure out why this is necessary
-    // tensor.unsafeGetTensorImpl()->unchecked_clear_pyobj(self_interpreter.get());
   }
   self->cdata = MaybeOwned<Variable>();
   return 0;

@@ -27,7 +27,10 @@ except ImportError:
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_resnet(self):
         resnet = resnet18()
 

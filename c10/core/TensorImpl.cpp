@@ -331,6 +331,12 @@ void TensorImpl::release_resources() {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     pyobj_interpreter_.load(std::memory_order_acquire)->decref(pyobj_);
+    // NB: this destructor can only be entered when there are no
+    // references to this C++ object (obviously), NOR any references
+    // to the PyObject (if there are references to the PyObject,
+    // then the PyObject holds an owning reference to the tensor).
+    // So it is OK to clear pyobj_ here as it is impossible for it to
+    // be used again (modulo weak reference races)
     pyobj_ = nullptr; // for safety
   }
 }
