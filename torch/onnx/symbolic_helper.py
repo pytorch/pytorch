@@ -216,6 +216,12 @@ def _is_tensor_list(x):
     return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
 
 def _is_scalar_list(x):
+    """
+    Check if x is a scalar list, for example: List[float], List[int].
+
+    Besides checking the type is ListType, we also check if the data type is 
+    a valid ONNX data type.
+    """
     return isinstance(x.type(), torch._C.ListType) and \
         (scalar_name_to_pytorch[str(x.type().getElementType())] in cast_pytorch_to_onnx.keys())
 
