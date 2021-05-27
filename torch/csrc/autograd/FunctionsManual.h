@@ -148,8 +148,10 @@ Tensor slice_backward_wrapper(
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
     int64_t step);
-Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                    bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v);
+Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                           const Tensor& L, const Tensor& V);
+Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                    bool eigenvectors, const Tensor& L, const Tensor& V);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & grad_x, const Tensor & grad_m,
     const Tensor & b, const Tensor & a, const Tensor & x,

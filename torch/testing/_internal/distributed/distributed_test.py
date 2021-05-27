@@ -1707,10 +1707,6 @@ class DistributedTest:
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_profiling_event(profiling_title_postfix, autograd_profiler_ctx)
-                print(f'profiling title postfix: {profiling_title_postfix}')
-                print(f'all events: {prof.function_events}')
-                print(f'events: {events}')
-                print(f'op_calls: {op_calls}')
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertTrue(e.is_async)
@@ -3333,11 +3329,11 @@ class DistributedTest:
                     torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
                     device_ids=[self.rank]
                 )
-                ddp_logging_data = ddp_model.get_ddp_logging_data()
+                ddp_logging_data = ddp_model._get_ddp_logging_data()
                 # Hook not registered yet, so should be empty
                 self.assertEqual(ddp_logging_data.get("comm_hook"), None)
                 ddp_model.register_comm_hook(None, hook)
-                ddp_logging_data = ddp_model.get_ddp_logging_data()
+                ddp_logging_data = ddp_model._get_ddp_logging_data()
                 self.assertEqual(ddp_logging_data.get("comm_hook"), hook.__qualname__)
 
             for hook in cpp_builtin_hooks:
@@ -3345,11 +3341,11 @@ class DistributedTest:
                     torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
                     device_ids=[self.rank]
                 )
-                ddp_logging_data = ddp_model.get_ddp_logging_data()
+                ddp_logging_data = ddp_model._get_ddp_logging_data()
                 # Hook not registered yet, so should be empty
                 self.assertEqual(ddp_logging_data.get("comm_hook"), None)
                 ddp_model._register_builtin_comm_hook(hook)
-                ddp_logging_data = ddp_model.get_ddp_logging_data()
+                ddp_logging_data = ddp_model._get_ddp_logging_data()
                 self.assertEqual(ddp_logging_data.get("comm_hook"), str(hook))
 
             # No hook registered
@@ -3357,7 +3353,7 @@ class DistributedTest:
                 torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
                 device_ids=[self.rank]
             )
-            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
             # Hook not registered yet, so should be empty
             self.assertEqual(ddp_logging_data.get("comm_hook"), None)
             # After second forward pass, hook should still be empty string
@@ -3366,7 +3362,7 @@ class DistributedTest:
                 loss = ddp_model(inp).sum()
                 loss.backward()
 
-            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.get("comm_hook"), None)
 
         def _test_ddp_hook_parity(self, state, hook):
@@ -4085,7 +4081,7 @@ class DistributedTest:
                 input = input.cuda(rank)
                 target = target.cuda(rank)
 
-            model_DDP.set_ddp_runtime_logging_sample_rate(2)
+            model_DDP._set_ddp_runtime_logging_sample_rate(2)
 
             for idx in range(20):
                 offset = rank * local_bs
@@ -4106,7 +4102,7 @@ class DistributedTest:
                 # the sampled iteration for measuring run time stats,
                 # the run time stats for this idx-th iteration will not
                 # be zeros.
-                ddp_logging_data = model_DDP.get_ddp_logging_data()
+                ddp_logging_data = model_DDP._get_ddp_logging_data()
                 if (idx > 0 and (idx < 10 or idx % 2 == 0)):
                     self.assertGreaterEqual(ddp_logging_data.get("forward_compute_time"), 1)
                     self.assertGreaterEqual(ddp_logging_data.get("backward_compute_time"), 1)
@@ -4139,7 +4135,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=False)
 
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP._get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.get("world_size"), dist.get_world_size())
             self.assertEqual(ddp_logging_data.get("rank"), dist.get_rank())
             self.assertEqual(ddp_logging_data.get("module_name"), 'Net')
@@ -4196,7 +4192,7 @@ class DistributedTest:
             model.float()
             model.fc1.double()
             model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1.5)
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP._get_ddp_logging_data()
             params = list(model_DDP.parameters())
             self.assertEqual(ddp_logging_data.get("bucket_cap_bytes"), int(1.5 * 1024 * 1024))
             bucket_sizes = [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()]
@@ -4211,7 +4207,7 @@ class DistributedTest:
         def test_ddp_logging_data_gpu(self):
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=True)
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP._get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.get("device_ids"), str(rank))
             self.assertEqual(ddp_logging_data.get("output_device"), rank)
             # test runtime logging fields
@@ -4232,7 +4228,7 @@ class DistributedTest:
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
             model_DDP._set_static_graph()
-            self.assertEqual(model_DDP.get_ddp_logging_data().get("static_graph"), True)
+            self.assertEqual(model_DDP._get_ddp_logging_data().get("static_graph"), True)
             with self.assertRaisesRegex(RuntimeError, 'should be called before training loop starts'):
                 local_bs = 2
                 batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
@@ -4879,7 +4875,7 @@ class DistributedTest:
                 # Ensure that all models are the same across ranks after all have joined.
                 self.validate_net_equivalence(net)
                 # Ensure that running with DDP uneven inputs was logged.
-                ddp_logging_data = net.get_ddp_logging_data()
+                ddp_logging_data = net._get_ddp_logging_data()
                 self.assertTrue(ddp_logging_data.get("join_uneven_inputs"))
                 dist.barrier()
 
@@ -5935,9 +5931,9 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_different_graph_across_ranks(self):
             base_model = self._test_different_graph_across_ranks(find_unused_parameters=True)
-            self.assertFalse(base_model.get_ddp_logging_data().get("has_rebuilt_buckets", 0))
+            self.assertFalse(base_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0))
             static_model = self._test_different_graph_across_ranks(static_graph=True)
-            self.assertTrue(static_model.get_ddp_logging_data().get("has_rebuilt_buckets", 0))
+            self.assertTrue(static_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0))
             for i, j in zip(base_model.parameters(), static_model.parameters()):
                 self.assertEqual(i, j)
 
@@ -6379,3 +6375,91 @@ class DistributedTest:
                 # Ensure sync does not occur in eval() mode.
                 all_gather_calls = get_profiling_event("all_gather", prof)
                 self.assertEqual([], all_gather_calls)
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_static_graph_nested_types(self):
+            # Tests for static graph training when outputs are not just tensors
+            # but can be (nested) tuple, list, dict, etc.
+            rank = self.rank
+            torch.cuda.set_device(rank)
+
+            class NestedOutputModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.lin = nn.Linear(100, 1, bias=False)
+
+                def forward(self, inp, output_type):
+                    if output_type == "tuple":
+                        return (
+                            self.lin(inp),
+                            (
+                                self.lin(inp),
+                                self.lin(inp),
+                            ),
+                        )
+                    elif output_type == "list":
+                        return [
+                            self.lin(inp),
+                            [
+                                self.lin(inp),
+                                self.lin(inp),
+                            ],
+                        ]
+                    elif output_type == "dict":
+                        return {
+                            "a": self.lin(inp),
+                            "b": {
+                                "c": self.lin(inp),
+                            },
+                        }
+
+            def get_loss(model_output):
+                loss = 0.0
+                if isinstance(model_output, torch.Tensor):
+                    return model_output.sum()
+                elif isinstance(model_output, dict):
+                    for value in model_output.values():
+                        loss += get_loss(value)
+                elif isinstance(model_output, tuple) or isinstance(model_output, list):
+                    for x in model_output:
+                        loss += get_loss(x)
+                else:
+                    raise ValueError(f"Unknown model output type {type(model_output)}")
+                return loss
+
+            model = NestedOutputModule().cuda(rank)
+            model_static_graph = copy.deepcopy(model)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+            )
+            model_static_graph = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+            )
+            model_static_graph._set_static_graph()
+            inp = torch.randn(10, 100)
+            type_mapping = {
+                "list": list,
+                "tuple": tuple,
+                "dict": dict,
+            }
+            for output_type in type_mapping.keys():
+                for i in range(6):
+                    out = model(inp, output_type=output_type)
+                    loss = get_loss(out)
+                    loss.backward()
+                    self._model_step(model)
+                    out_static = model_static_graph(inp, output_type=output_type)
+                    self.assertTrue(isinstance(out_static, type_mapping[output_type]))
+                    loss_static = get_loss(out_static)
+                    loss_static.backward()
+                    self._model_step(model_static_graph)
+                    for (p, p_static) in zip(
+                        model.parameters(), model_static_graph.parameters()
+                    ):
+                        self.assertEqual(p, p_static)

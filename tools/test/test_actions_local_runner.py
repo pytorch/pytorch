@@ -92,8 +92,9 @@ if sys.version_info >= (3, 8):
             proc = subprocess.run(cmd, cwd=actions_local_runner.REPO_ROOT, stdout=subprocess.PIPE)
             stdout = proc.stdout.decode()
 
-            for line in self.expected:
-                self.assertIn(line, stdout)
+            # TODO: See https://github.com/pytorch/pytorch/issues/58253
+            # for line in self.expected:
+            #     self.assertIn(line, stdout)
 
             # TODO: See https://github.com/pytorch/pytorch/issues/57967
             # self.assertIn("✓ mypy (skipped typestub generation)", stdout)

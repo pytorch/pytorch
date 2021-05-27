@@ -1580,11 +1580,6 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_builtin_comm_hook or register_comm_hook can only be called once.");
-  // TODO: Support GLOO and MPI backends for DDP communication hook.
-  TORCH_CHECK(
-      process_group_->getBackendName() == "nccl",
-      "register_builtin_comm_hook currently can only support NCCL backend, but the current backend is %s.",
-      process_group_->getBackendName());
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:

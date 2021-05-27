@@ -2046,18 +2046,18 @@ class TestBinaryUfuncs(TestCase):
 
     @onlyCUDA
     def test_heaviside_cross_device(self, device):
-        x = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        x = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
         y = torch.tensor(0)
         result = torch.heaviside(x, y)
-        expect = torch.tensor([0, 1, 0, 1, 0, 1], device='cuda')
+        expect = torch.tensor([0, 1, 0, 1, 0, 1], device=device)
         self.assertEqual(result, expect)
 
         result = torch.heaviside(y, x)
-        expect = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        expect = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
         self.assertEqual(result, expect)
 
         x = torch.tensor([-9, 5, 0, 6, -2, 2])
-        y = torch.tensor(0, device='cuda')
+        y = torch.tensor(0, device=device)
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             torch.heaviside(x, y)
 

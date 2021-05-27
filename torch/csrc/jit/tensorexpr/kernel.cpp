@@ -32,7 +32,7 @@ static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_must_use_llvm_on_cpu = true;
-static bool cat_wo_conditionals = false; // NOLINT
+static bool cat_wo_conditionals = true; // NOLINT
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -1153,8 +1153,9 @@ Tensor* computeCatWoConditionals(
 
 Tensor* computeCat(
     const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape) {
-  if (getCatWoConditionals()) {
+    const std::vector<ExprHandle>& outputShape,
+    at::Device device) {
+  if (device == at::kCPU && getCatWoConditionals()) {
     return computeCatWoConditionals(inputs, outputShape);
   }
   auto inputList = c10::get<BufList>(inputs[0]);
@@ -1536,7 +1537,8 @@ Tensor* tensorexpr::computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   switch (op) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -2214,7 +2216,6 @@ Tensor* tensorexpr::computeOperandValue(
             return CompareSelect::make(mm, max_val, max_val, mm, kGT);
           });
     } break;
-
     case aten::hardswish: {
       return computeOneOperand(
           "aten_hardswish",
@@ -2230,7 +2231,21 @@ Tensor* tensorexpr::computeOperandValue(
             return a * clamp(zero, six, a + three) / six;
           });
     } break;
-
+    case aten::hardshrink: {
+      return computeTwoOperand(
+          "aten_hardshrink",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a, const ExprHandle& lambd) {
+            auto pos_clambd = Cast::make(a.dtype(), lambd);
+            auto neg_clambd =
+                Cast::make(a.dtype(), ExprHandle(-0)) - pos_clambd;
+            auto zero = Cast::make(a.dtype(), 0);
+            auto mm = CompareSelect::make(a, neg_clambd, a, zero, kLT);
+            return CompareSelect::make(a, pos_clambd, a, mm, kGT);
+          });
+    } break;
     case aten::sqrt: {
       return computeOneOperand(
           "aten_sqrt",
@@ -2314,7 +2329,7 @@ Tensor* tensorexpr::computeOperandValue(
       // need to handle the first input
       return computeOneOperand(
           "aten_to",
-          inputs,
+          {inputs[0]},
           outputShape,
           outputType,
           [outputType](const ExprHandle& a) {
@@ -2475,7 +2490,7 @@ Tensor* tensorexpr::computeOperandValue(
       return computeMatmul(inputs, outputShape, outputType);
     }
     case aten::cat: {
-      return computeCat(inputs, outputShape);
+      return computeCat(inputs, outputShape, device);
     }
     case aten::sum: {
       return computeSum(inputs, outputType);
@@ -2565,6 +2580,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::atan2:
     case aten::tanh:
     case aten::hardtanh:
+    case aten::hardshrink:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -2573,7 +2589,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::round:
     case aten::trunc:
     case aten::_cast_Float:
-    case aten::to:
     case aten::threshold:
     case aten::where:
     case aten::frac:
@@ -2602,7 +2617,20 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
         outputShape = sizesForValue(v);
       }
       return computeOperandValue(
-          v->node()->kind(), argInputs, outputShape, outputType);
+          v->node()->kind(), argInputs, outputShape, outputType, device_);
+    } break;
+
+    case aten::to: {
+      std::vector<ArgValue> argInputs;
+      argInputs.push_back(toArg(inputs[0]));
+      auto outputType = findDtypeForValue(v->node()->output());
+      std::vector<ExprHandle> outputShape = {};
+      // shape inference not implemented for sum
+      if (v->node()->kind() != aten::sum) {
+        outputShape = sizesForValue(v);
+      }
+      return computeOperandValue(
+          v->node()->kind(), argInputs, outputShape, outputType, device_);
     } break;
 
     case prim::ConstantChunk: {
@@ -3029,9 +3057,12 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
         std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
         for (size_t stride_index : sorted_stride_indices) {
           auto stride = strides[stride_index];
+          auto size = sizes[stride_index];
           auto index = Div::make(absolute_position, IntImm::make(stride));
-          absolute_position =
-              Mod::make(absolute_position, IntImm::make(stride));
+          if (size != 1) {
+            absolute_position =
+                Mod::make(absolute_position, IntImm::make(stride));
+          }
           new_axes[stride_index] = index;
         }
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -3073,6 +3104,8 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
+  device_ = *pickDeviceType(graph_->inputs());
+
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});
 
@@ -3107,8 +3140,6 @@ void TensorExprKernel::compile() {
           "Cannot support broadcast and random within one kernel");
     }
   }
-
-  device_ = *pickDeviceType(graph_->inputs());
 
   // Move output operands from `bufs_` to `bufOutputs_`
   for (const auto& output : graph_->outputs()) {

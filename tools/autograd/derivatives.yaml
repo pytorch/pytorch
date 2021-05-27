@@ -178,7 +178,7 @@
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sgn()
-  result: auto_element_wise
+  result: handle_r_to_c(result.scalar_type(), self_t.conj() * self_p.sgn())
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt()).conj()
@@ -636,8 +636,8 @@
 - name: inverse(Tensor self) -> Tensor
   self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
 
-- name: linalg_inv(Tensor self) -> Tensor
-  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
+- name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
+  self: -at::matmul(inverse.conj().transpose(-2, -1), at::matmul(grad, inverse.conj().transpose(-2, -1)))
 
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
@@ -845,7 +845,7 @@
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
   self: mul_tensor_backward(grad, other, self.scalar_type())
   other: mul_tensor_backward(grad, self, other.scalar_type())
-  result: other_t * self_p.conj() + self_t * other_p.conj()
+  result: other_t * self_p + self_t * other_p
 
 - name: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   self: mul_tensor_backward(grad, other, self.scalar_type())
@@ -1062,7 +1062,7 @@
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh().conj()
 
-- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
+- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
   self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
   result: auto_linear
 
@@ -1153,13 +1153,13 @@
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: symeig_backward(grads, self, eigenvectors, upper, eigenvalues, eigenvectors_return)
+  self: eigh_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
 
 - name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: symeig_backward(grads, self, /*eigenvectors=*/true, /*upper=*/true, eigenvalues, eigenvectors)
+  self: eigh_backward(grads, self, /*eigenvectors=*/true, eigenvalues, eigenvectors)
 
-- name: linalg_eigvals(Tensor self) -> Tensor
-  self: non_differentiable
+- name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
+  self: linalg_eig_backward(grads, self, eigenvalues, eigenvectors)
 
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
@@ -1272,9 +1272,11 @@
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
+  result: at::view_as_real(self_t)
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
   self: at::view_as_real(grad.contiguous()) # [gx, gy]
+  result: at::view_as_complex(self_t)
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable

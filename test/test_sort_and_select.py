@@ -596,6 +596,15 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
+    @onlyOnCPUAndCUDA
+    @dtypes(*(torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
+    def test_topk_zero(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/49205
+        t = torch.rand(2, 2, device=device).to(dtype=dtype)
+        val, idx = torch.topk(t, k=0, largest=False)
+        self.assertEqual(val.size(), torch.Size([2, 0]))
+        self.assertEqual(idx.size(), torch.Size([2, 0]))
+
     def _test_unique_scalar_empty(self, dtype, device, f):
         # test scalar
         x = torch.tensor(0, dtype=dtype, device=device)

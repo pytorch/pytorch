@@ -26,6 +26,20 @@
 #include <ATen/native/TensorIterator.h>
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+
+  auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
+  set_output(0, IntArrayRef({mat1.sizes()[0], mat2.sizes()[1]}), {}, self.options(), names);
+  auto result = maybe_get_output(0);
+  //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
+  TORCH_CHECK(((result.dim() == 2) && (result.sizes()[0] == mat1.sizes()[0]) && (result.sizes()[1] == mat2.sizes()[1])),
+  "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
+  "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
+}
+} // namespace meta
 namespace native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -918,6 +932,8 @@ static void addmm_impl_cpu_(
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
 
+  // keeping TORCH_CHECKs here because othe mm methods also utilize this impl.
+  // TODO move this to meta once all methods have migrated to structured kernel.
   TORCH_CHECK(
       m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
       m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
@@ -1070,7 +1086,8 @@ Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch
     at::NoNamesGuard guard;
     addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
   }
-  at::namedinference::propagate_names_for_addmm(result, batch1, batch2, self);
+  auto names = at::namedinference::propagate_names_for_addmm(batch1, batch2, self);
+  at::namedinference::propagate_names_if_nonempty(result, names);
   return result;
 }
 
@@ -1083,42 +1100,27 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
   return native::addbmm_out(self, batch1, batch2, beta, alpha, result);
 }
 
-Tensor& addmm_cpu_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
     at::NoNamesGuard guard;
-    addmm_impl_cpu_(result, *b_self, mat1, mat2, beta, alpha);
+    addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
   }
-  at::namedinference::propagate_names_for_addmm(result, mat1, mat2, self);
-  return result;
-}
-
-Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
-  Tensor result = at::empty({0}, self.options());
-  return addmm_cpu_out(self, mat1, mat2, beta, alpha, result);
-}
-
-Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK(((self.dim() == 2) && (self.sizes()[0] == mat1.sizes()[0]) && (self.sizes()[1] == mat2.sizes()[1])),
-  "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", self.dim(),
-  "-D tensor with size ", self.sizes()[0], "x", self.sizes()[1]);
-  return addmm_cpu_out(self, mat1, mat2, beta, alpha, self);
 }
 
 Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
-  return addmm_cpu_out(result, self, mat2, 0, 1, result);
+  addmm_impl_cpu_(result, result, self, mat2, 0, 1);
+  auto names = at::namedinference::propagate_names_for_addmm(self, mat2, result);
+  at::namedinference::propagate_names_if_nonempty(result, names);
+  return result;
 }
 
 Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   Tensor result = at::empty({self.sizes()[0], mat2.sizes()[1]}, self.options());
-  return addmm_cpu_out(result, self, mat2, 0, 1, result);
+  return native::mm_cpu_out(self, mat2, result);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -2423,45 +2425,19 @@ Tensor& linalg_norm_out(const Tensor& self, std::string ord, optional<IntArrayRe
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
-Tensor _linalg_cond_exception_helper(const Tensor& self) {
-  // For batched input if at least one matrix in the batch is not invertible,
-  // we can't get the result for all other (possibly) invertible matrices in the batch without an explicit for loop.
-  // This should change when at::inverse works with silent errors
-  if (self.dim() > 2) {
-    TORCH_CHECK(false,
-      "One or more matrices in the batch was not invertible! "
-      "linalg_cond does not support yet this case.");
-  }
-  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
-  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
-  Tensor result = at::full(result_shape, INFINITY, options);
-  return result;
-}
-
 // This function helps to dispatch norm computations depending on 'ord' of variant type
 Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string> ord_variant) {
-  // Ignore errors if not invertible, result is INFINITY in this case
-  // Currently checking for error in at::inverse causes cross-device data movement
-  // For batched input if at least one matrix in the batch is not invertible,
-  // then the result for all other (possibly) invertible matrices will be infinity as well
-  // since there is currently no way to use at::inverse with silent errors
-  Tensor self_inverse;
-  try {
-    self_inverse = at::inverse(self);
-  } catch (const std::exception& e) {
-    if (strstr(e.what(), "singular")) {
-      return _linalg_cond_exception_helper(self);
-    } else {
-      TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
-    }
-  }
-  std::array<int64_t, 2> dim_arr = {-2, -1};
-  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
+  Tensor inverse, info;
+  std::tie(inverse, info) = at::linalg_inv_ex(self);
+  info.unsqueeze_(-1).unsqueeze_(-1);
+  inverse.masked_fill_(info > 0, INFINITY);
 
   return c10::visit([&](auto&& ord) {
-    Tensor norm_self = at::linalg_norm(self, ord, dim);
-    Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
+    Tensor norm_self = at::linalg_matrix_norm(self, ord);
+    Tensor norm_inverse = at::linalg_matrix_norm(inverse, ord);
     Tensor result = norm_self * norm_inverse;
+    // fix multiplication of zero and infinity for NumPy compatibility
+    result.nan_to_num_(INFINITY, INFINITY, -INFINITY);
     return result;
   }, ord_variant);
 }
@@ -2518,7 +2494,8 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
     } else {
       result = s_max / s_min;
     }
-    return result;
+    // squeeze the result for NumPy compatibility
+    return result.squeeze(-1);
   }
 
   // ord == ±1 ord == ±inf
@@ -2557,6 +2534,14 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
   if (self.numel() == 0) {
     return _linalg_cond_empty_matrix(self, self.scalar_type());
+  }
+
+  if (ord == "nuc") {
+    // calling matrix_norm with "nuc" on inputs with infinities raises an error
+    // therefore we use the mathematical definition of nuclear norm directly
+    // instead of going through the matrix_norm
+    auto singular_values = at::linalg_svdvals(self);
+    return singular_values.sum(-1) * (singular_values.reciprocal().sum(-1));
   }
 
   return _linalg_cond_helper(self, ord_variant);
@@ -2659,9 +2644,8 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
 
   self_ = self_.reshape({result_product, result_product});
 
-  // 0th output of at::solve is the solution
-  // normally `other` would be flattened by at::solve expects 2D input
-  Tensor result = std::get<0>(at::solve(other.reshape({other.numel(), 1}), self_));
+  // normally `other` would be flattened by at::linalg_solve expects 2D input
+  Tensor result = at::linalg_solve(self_, other.flatten());
   return result.reshape(result_shape);
 }
 

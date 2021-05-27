@@ -1416,6 +1416,35 @@ class TestFreezing(JitTestCase):
         self.assertEqual(model(inp), script_model(inp))
         FileCheck().check_not("GetAttr").run(script_model.graph)
 
+    def test_freeze_module_with_tupleoutput_submodule(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return (x + 1, x + 2)
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                y1, y2 = self.sub(x)
+                return y1 + y2
+
+        m = torch.jit.script(TestModule())
+        m = m.eval()
+        mf = torch.jit.freeze(m)
+        inp = torch.randn(2, 2)
+        expected = m.forward(inp)
+        output = mf.forward(inp)
+        # Check if prim::TupleConstruct and prim::TupleUnpack
+        # Don't exist in frozen graph
+        FileCheck().check_not("prim::TupleConstruct").run(mf.graph)
+        FileCheck().check_not("prim::TupleUnpack").run(mf.graph)
+        self.assertEqual(output, expected)
+
 class TestFrozenOptimizations(JitTestCase):
     def setUp(self):
         self.default_dtype = torch.get_default_dtype()

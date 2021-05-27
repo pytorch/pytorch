@@ -305,27 +305,6 @@ LLVMCodeGen::LLVMCodeGen(
     : CodeGen(stmt, args, device, kernel_func_name),
       impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
 
-static void* argToPtr(
-    const CodeGen::BufferArg& bufferArg,
-    const CodeGen::CallArg& callArg) {
-  if (!bufferArg.isVar()) {
-    return callArg.data();
-  }
-
-  switch (bufferArg.dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-  case ScalarType::Name:    \
-    return callArg.Name##Ptr();
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    default:
-      throw unsupported_dtype();
-  }
-  return nullptr;
-}
-
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
   USE_TRIGGER(llvm_codegen_executed);

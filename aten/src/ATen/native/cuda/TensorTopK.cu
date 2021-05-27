@@ -166,6 +166,10 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
   Tensor input = self.contiguous();
 
+  // If k is 0 the result is an empty tensor, so we don't need to launch a kernel.
+  if (k == 0) {
+    return;
+  }
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
 

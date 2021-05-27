@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Union, Callable
 
 
 import torch
@@ -851,7 +851,8 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]] = None):
+def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
+                example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None):
     # This is a private API, intended for internal use only. Usage of this API is only for experimental
     # purposes only and is highly discouraged.
     global type_trace_db
@@ -869,20 +870,34 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
     if isinstance(obj, ScriptFunction):
         return obj
 
-    # If MonkeyType is installed, enable profile directed type annotation
-    # Check if example_inputs are defined and generate call traces
-    # for the method by running eager mode version of the method with
-    # the provide example inputs. This logs all the traces in type_trace_db
-    type_trace_db = JitTypeTraceStore()
-    if monkeytype_trace:
-        monkeytype_config = JitTypeTraceConfig(type_trace_db)
-        with monkeytype_trace(monkeytype_config):
-            for example_input in example_inputs:  # type: ignore[union-attr]
-                obj(*example_input)
-    else:
-        warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
-                      "to enable Profile-Directed Typing in TorchScript. Refer to "
-                      "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
+    if example_inputs:
+        # If MonkeyType is installed, enable profile directed type annotation
+        # Check if example_inputs are defined and generate call traces
+        # for the method by running eager mode version of the method with
+        # the provide example inputs. This logs all the traces in type_trace_db
+        type_trace_db = JitTypeTraceStore()
+        if monkeytype_trace:
+            monkeytype_config = JitTypeTraceConfig(type_trace_db)
+            with monkeytype_trace(monkeytype_config):
+                if isinstance(example_inputs, Dict):
+                    # If the obj is an nn.Module or a class, then each method is
+                    # executed with the arguments provided in the example inputs.
+                    # example inputs here will be of type Dict(class.method, (arguments))
+                    # This is used to infer type annotations for those methods
+                    # which are not called directly under the hood of monkeytype.
+                    for module, example_input in example_inputs.items():
+                        for example in example_input:
+                            module(*example)
+                elif isinstance(example_inputs, List):
+                    for examples in example_inputs:
+                        obj(*examples)
+                else:
+                    warnings.warn("Error: Unable to infer types. Please format the inputs to type `List[Tuple]`"
+                                  " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
+        else:
+            warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
+                          "to enable Profile-Directed Typing in TorchScript. Refer to "
+                          "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
     return script(obj, optimize, _frames_up, _rcb)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):

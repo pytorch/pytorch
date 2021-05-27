@@ -63,6 +63,19 @@ TORCH_META_FUNC2(copysign, Tensor) (
   build_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(heaviside) (
+  const Tensor& self, const Tensor& other
+) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex() &&
+              (maybe_get_output().defined() ? !maybe_get_output().is_complex() : true),
+              "heaviside is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.dtype() == other.dtype() &&
+              (maybe_get_output().defined() ? maybe_get_output().dtype() == self.dtype() : true),
+              "heaviside is not yet implemented for tensors with different dtypes.");
+
+  build_binary_op(maybe_get_output(), self, other);
+}
+
 TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
   build_binary_float_op(maybe_get_output(), self, other);
 }
@@ -1061,31 +1074,10 @@ Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, cons
   return self - (other * alpha);
 }
 
-Tensor& heaviside_out(const Tensor& self, const Tensor& values, Tensor& result) {
-  TORCH_CHECK(!self.is_complex() && !result.is_complex() && !values.is_complex(),
-              "heaviside is not yet implemented for complex tensors.");
-  TORCH_CHECK(self.dtype() == values.dtype() &&  result.dtype() == self.dtype(),
-              "heaviside is not yet implemented for tensors with different dtypes.");
-
-  auto iter = TensorIterator::binary_op(result, self, values);
-  heaviside_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor heaviside(const Tensor& self, const Tensor& values) {
-  TORCH_CHECK(!self.is_complex() && !values.is_complex(),
-              "heaviside is not yet implemented for complex tensors.");
-  TORCH_CHECK(self.dtype() == values.dtype(),
-              "heaviside is not yet implemented for tensors with different dtypes.");
-
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, values);
-  heaviside_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& heaviside_(Tensor& self, const Tensor& values) {
-  return at::heaviside_out(self, self, values);
+TORCH_IMPL_FUNC(heaviside_out) (
+  const Tensor& self, const Tensor& other, const Tensor& result
+) {
+  heaviside_stub(device_type(), *this);
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {

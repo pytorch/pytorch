@@ -33,9 +33,6 @@
 namespace torch {
 namespace jit {
 
-static constexpr const char* kArchiveNameConstants = "constants";
-static constexpr const char* kArchiveNameBytecode = "bytecode";
-
 char const* toString(OpCode op);
 
 namespace {
@@ -72,8 +69,15 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   Inline(*graph);
 
-  torch::jit::MobileCode code(graph, func.name());
-  auto instructions_copy = code.instructions();
+  std::shared_ptr<MobileCode> code;
+  if (caffe2::serialize::kProducedBytecodeVersion == 6) {
+    code = std::make_shared<MobileCode>(
+        graph, func.name(), false /* emit_default_input_instructions */);
+  } else {
+    code = std::make_shared<MobileCode>(
+        graph, func.name(), true /* emit_default_input_instructions */);
+  }
+  auto instructions_copy = code->instructions();
 
   // operator names
   std::vector<c10::OperatorName> opnames;
@@ -82,7 +86,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
-      auto node = code.instructions_source()[i];
+      auto node = code->instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
@@ -91,11 +95,11 @@ std::pair<IValue, IValue> getFunctionTuple(
     // s.t. at runtime, we will look up the Function* on the Type of the
     // 0th argument in the stack and call that directly.
     if (ins.op == CALL) {
-      auto node = code.instructions_source()[i];
+      auto node = code->instructions_source()[i];
       if (node->kind() == prim::CallMethod) {
         // NB: replacing instruction
         auto method_name_idx =
-            code.constant_table().size() + method_names.size();
+            code->constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
         Instruction new_instr{
             INTERFACE_CALL,
@@ -107,7 +111,7 @@ std::pair<IValue, IValue> getFunctionTuple(
             false, "Unsupported node kind on CALL opcode for mobile");
       }
     } else if (ins.op == RET) {
-      auto node = code.instructions_source()[i];
+      auto node = code->instructions_source()[i];
       for (const auto& input : node->inputs()) {
         const auto& input_type = input->type();
         if (input_type->kind() == TypeKind::TupleType) {
@@ -140,7 +144,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           toString(ins.op),
           " is not supported in mobile module.");
     }
-    auto node = code.instructions_source()[i];
+    auto node = code->instructions_source()[i];
     int64_t debug_handle =
         debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(node);
     // Note 1-to-1 correspondence between instructions and debug handles
@@ -156,26 +160,42 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // operators
   std::vector<IValue> operators;
+  auto op_to_specified_args = code->op_to_num_specified_args();
   operators.reserve(opnames.size());
   for (const auto& opname : opnames) {
-    operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    auto unique_name = c10::toString(opname);
+    // For operator with vararg, adding default arguments would be confusing and
+    // is not allowed. For an operator with num_args = -1, it means the number
+    // of arguments is not available for this operator, we don't do any backward
+    // compatibility adaptation at runtime.
+    int num_args = -1;
+    auto it = op_to_specified_args.find(unique_name);
+    if (it != op_to_specified_args.end()) {
+      num_args = it->second;
+    }
+    if (caffe2::serialize::kProducedBytecodeVersion == 6) {
+      operators.emplace_back(
+          Tup({opname.name, opname.overload_name, num_args}));
+    } else {
+      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    }
   }
 
   // constants
   //
   // Make a copy of the constants and append the method names
   // that we emitted for the converted INTERFACE_CALL nodes above.
-  auto constants = code.constant_table();
+  auto constants = code->constant_table();
   for (auto& method_name : method_names) {
     constants.emplace_back(std::move(method_name));
   }
 
   // types
   std::vector<IValue> types;
-  types.reserve(code.type_table().size());
+  types.reserve(code->type_table().size());
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
-  for (const TypePtr& t : code.type_table()) {
+  for (const TypePtr& t : code->type_table()) {
     auto type_str = t->annotation_str();
     if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
@@ -190,12 +210,12 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // since the register location is embedded into the bytecode, pass the
   // register size
-  auto register_size = static_cast<int>(code.register_size());
+  auto register_size = static_cast<int>(code->register_size());
 
   auto codeTable = Table(
       {{"instructions", Tup(instructions)},
        {"operators", Tup(operators)},
-       {kArchiveNameConstants, Tup(constants)},
+       {"constants", Tup(constants)},
        {"types", Tup(types)},
        {"register_size", register_size}});
 
@@ -350,8 +370,7 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    writeArchive(
-        kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
+    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
       writeByteCode(module, save_mobile_debug_info);
       writeMobileMetadata(module, extra_files);
@@ -364,10 +383,7 @@ class ScriptModuleSerializer {
   }
 
  private:
-  void writeArchive(
-      const std::string& archive_name,
-      const IValue& value,
-      bool use_tensors_archive_table = false) {
+  void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
     std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -380,48 +396,15 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
-    if (use_tensors_archive_table && !tensors_archive_table_.empty()) {
-      data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
-    }
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
     size_t i = 0;
     std::string prefix = archive_name + "/";
-
-    // TODO: currently there exists logic only for archive constant and
-    // bytecode, to avoid exporting duplicate tensors. The logic can be more
-    // generic such that it can be used by other tensors from other archive, to
-    // avoid deduplicating tensors among different archives.
-
-    // Store all tensors from archives `constants` to tensors_archive_table_
-    if (archive_name == kArchiveNameConstants) {
-      const auto tensor_candidates = data_pickle.tensorData();
-      for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
-           tensor_index++) {
-        tensors_archive_table_[tensor_candidates[tensor_index]] =
-            std::make_pair(kArchiveNameConstants, tensor_index);
-      }
-    }
-
-    // Export deduplicate tensors only if use_tensors_archive_table is set to
-    // true and archive name is `bytecode`
-    bool can_use_tensors_archive_table =
-        (use_tensors_archive_table && archive_name == kArchiveNameBytecode);
-
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      if (can_use_tensors_archive_table) {
-        const auto found = tensors_archive_table_.find(td);
-        if (found == tensors_archive_table_.end()) {
-          writer_.writeRecord(
-              fname, writable_td.data(), writable_td.sizeInBytes());
-        }
-      } else {
-        writer_.writeRecord(
-            fname, writable_td.data(), writable_td.sizeInBytes());
-      }
+      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
@@ -542,7 +525,7 @@ class ScriptModuleSerializer {
     moduleMethodsTuple(
         module, elements, debug_info_elements, debug_handle_manager);
     auto telements = Tup(std::move(elements));
-    writeArchive("bytecode", telements, false);
+    writeArchive("bytecode", telements);
     auto debug_info_telements = Tup(std::move(debug_info_elements));
 
     // At the moment keeping this feature experimental
@@ -610,10 +593,6 @@ class ScriptModuleSerializer {
 
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
-
-  // key: tensor, value: pair(arhive_name, index)
-  TensorIndexMap tensors_archive_table_;
-
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;
@@ -704,8 +683,10 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
+          op_item.size() >= 2,
+          "There should be either two parts (name and overload name), ",
+          "or three parts (name, overload name and number of specified args) ",
+          "for an operator.");
       auto opname = op_item[0].toString()->string();
       auto overload = op_item[1].toString()->string();
       // NOLINTNEXTLINE(performance-inefficient-string-concatenation)

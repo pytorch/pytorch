@@ -578,6 +578,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/context.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/registry.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/random.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})

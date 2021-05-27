@@ -1855,8 +1855,13 @@ def slice(g, self, *args):
         step = _parse_arg(step, 'i')
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
-        if start.node().kind() != 'onnx::Constant' or \
-                end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
+        is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
+        is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
+        is_start_onnx_const = start.node().kind() == 'onnx::Constant'
+        is_end_onnx_const = end.node().kind() == 'onnx::Constant'
+        if ((not is_start_none) and (not is_start_onnx_const)) or \
+           ((not is_end_none) and (not is_end_onnx_const)) or \
+           dim.node().kind() != 'onnx::Constant':
             if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
                 raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
                                    'is a deprecated experimental op. Please use statically allocated '
@@ -1867,16 +1872,18 @@ def slice(g, self, *args):
                 dim_unsqueezed = sym_help._unsqueeze_helper(g, dim, [0])
                 return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
         else:
-            start = _parse_arg(start, 'i')
-            end = _parse_arg(end, 'i')
+            start = 0 if is_start_none else _parse_arg(start, 'i')
+            end = 9223372036854775807 if is_end_none else _parse_arg(end, 'i')
             dim = _parse_arg(dim, 'i')
             return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     elif len(args) == 3:
         # aten::slice(t[] l, int start, int end, int step) -> t[]
         start, end, step = args
         dim = 0
-        start = _parse_arg(start, 'i')
-        end = _parse_arg(end, 'i')
+        is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
+        is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
+        start = 0 if is_start_none else _parse_arg(start, 'i')
+        end = 9223372036854775807 if is_end_none else _parse_arg(end, 'i')
         return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     else:
         raise NotImplementedError("Unknown aten::slice signature")
@@ -1959,15 +1966,26 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
     if len(args) == 4:
-        if args[0].type().isSubtypeOf(ListType.ofInts()):
+        if args[0].node().kind() == 'prim::device' or args[0].type().isSubtypeOf(ListType.ofInts()):
             # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
-            dtype = sym_help._maybe_get_const(args[0], 'i')
-            if sym_help._is_value(dtype):
+            # TestONNXRuntime::test_ones_bool shows args[0] of aten::to() can be onnx::Constant[value=<Tensor>]()
+            # In this case, the constant value is a tensor not int,
+            # so sym_help._maybe_get_const(args[0], 'i') would not work.
+            dtype = args[0]
+            if sym_help._is_value(args[0]) and args[0].node().kind() == 'onnx::Constant':
+                tval = args[0].node()['value']
+                if isinstance(tval, torch.Tensor):
+                    if len(tval.shape) == 0:
+                        tval = tval.item()
+                        dtype = int(tval)
+                    else:
+                        dtype = tval
+
+            if sym_help._is_value(dtype) or isinstance(dtype, torch.Tensor):
                 # aten::to(Tensor, Tensor, bool, bool, memory_format)
-                other = args[0]
-                dtype = other.type().scalarType()
+                dtype = args[0].type().scalarType()
                 return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype])
             else:
                 # aten::to(Tensor, ScalarType, bool, bool, memory_format)
@@ -2938,6 +2956,10 @@ def __getitem_(g, self, i):
     return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
 
 
+def item(g, self):
+    return self
+
+
 def take(g, self, index):
     self_flattened = g.op('Reshape', self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
     out = index_select(g, self_flattened, 0, index)
@@ -3066,3 +3088,14 @@ def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device
 
 def mv(g, self, vec):
     return matmul(g, self, vec)
+
+
+@parse_args('v', 'v')
+def fill(g, self, value):
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = 6  # float
+    else:
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+
+    return full_like(g, self, value, dtype)

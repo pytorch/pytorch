@@ -389,6 +389,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             weight.stride(0), weight.stride(1), bag_size.data_ptr<index_t>(),
             max_indices.data_ptr<index_t>(),
             padding_idx);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         EmbeddingBag_updateOutputKernel_sum_mean<scalar_t, index_t><<<grid, block, 0, stream>>>(
             indices.data_ptr<index_t>(), offsets.data_ptr<index_t>(),
@@ -398,8 +399,8 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
             padding_idx);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   });
 

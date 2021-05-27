@@ -681,7 +681,7 @@ class Module:
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self: T) -> T:
-        r"""Casts all floating point parameters and buffers to float datatype.
+        r"""Casts all floating point parameters and buffers to ``float`` datatype.
 
         .. note::
             This method modifies the module in-place.

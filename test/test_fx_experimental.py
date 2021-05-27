@@ -1314,6 +1314,7 @@ class TestNormalizeOperators(JitTestCase):
                    'index_put',
                    'polygamma',
                    'repeat',
+                   'reshape_as',
                    'view',
                    'view_as',
                    'unfold',
