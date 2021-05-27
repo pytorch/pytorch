@@ -117,20 +117,6 @@ class TestTyping(JitTestCase):
 
         FileCheck().check(r"(str, Any)[]").run(graph)
 
-    # TODO: @gmagogsfm: Should we allow this?
-    # def test_list_value_type_refinement_defaults_to_Any_list_append(self):
-    #    def fn(x):
-    #        tup1 = ("foo", torch.tensor(2))
-    #        tup2 = ("bar", {"23": torch.tensor(3)})
-    #        l = [tup1]
-    #        l.append(tup2)
-    #        t = l[0][1]
-    #        if isinstance(t, torch.Tensor):
-    #            l[0][1] = torch.add(t, t)
-    #        return l
-
-    #    self.checkScript(fn, (torch.rand(2, 3),))
-
     def test_dict_value_type_refinement_defaults_to_Any_dict_creation(self):
         def fn(x):
             d = dict(foo=torch.tensor(2),
@@ -162,18 +148,6 @@ class TestTyping(JitTestCase):
         graph = torch.jit.script(fn).graph
 
         FileCheck().check("Dict(str, Any)").run(graph)
-
-    # TODO: @gmagogsfm: Should we allow this?
-    # def test_dict_value_type_refinement_defaults_to_Any_dict_append(self):
-    #    def fn(x):
-    #        d = {"foo": torch.tensor(2)}
-    #        d["bar"] = {"23": torch.tensor(3)}
-    #        t = d["foo"]
-    #        if isinstance(t, torch.Tensor):
-    #            d["bar"] = torch.add(t, t)
-    #        return d
-
-    #    self.checkScript(fn, (torch.rand(2, 3),))
 
     def test_dict_invalid_annotations(self):
         # Check for invalid value type annotation
