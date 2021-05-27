@@ -7,6 +7,7 @@
 // and also copied into 'torch' module.
 
 #include <Python.h>
+#include <pybind11/pybind11.h>
 
 // Undefine the copysign macro so that at::copysign works as intended with MSVC
 // https://github.com/python/cpython/blob/c60394c7fc9cc09b16e9675a3eeb5844b6d8523f/PC/pyconfig.h#L196
@@ -37,6 +38,7 @@
 #include <initializer_list>
 #include <stdexcept>
 #include <utility>
+#include <fmt/format.h>
 
 using at::Tensor;
 using at::Device;
@@ -465,6 +467,109 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "from_buffer(PyObject* buffer, ScalarType dtype=None, int64_t count=-1, int64_t offset=0, *, Device? device=None, bool requires_grad=False)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<6> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+      auto buffer = r.pyobject(0);
+      auto dtype = r.scalartype(1);
+      auto count = r.toInt64(2);
+      auto offset = r.toInt64(3);
+      auto device_opt = r.deviceOptional(4);
+      auto requires_grad = r.toBool(5);
+
+      auto elsize = at::elementSize(dtype);
+      size_t actual_count = 0;
+
+      Py_buffer view;
+
+      if (PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) < 0) {
+          return nullptr;
+      }
+
+      auto len = view.len;
+      auto buf = view.buf;
+      auto obj = view.obj;
+      PyBuffer_Release(&view);
+
+      if (len == 0 || count == 0) {
+        PyErr_SetString(
+            PyExc_ValueError,
+            fmt::format(
+                "both buffer length ({}) and 'count' ({}) must not be empty",
+                len,
+                count));
+        return nullptr;
+      }
+
+      if (offset < 0 || offset >= len) {
+        PyErr_SetString(
+            PyExc_ValueError,
+            fmt::format(
+                "offset must be non-negative and no greater than buffer length"
+                "({}) minus 1, but got: {}",
+                len,
+                offset));
+        return nullptr;
+      }
+
+      if (count < 0) {
+        if ((len - offset) % elsize != 0) {
+          PyErr_SetString(
+              PyExc_ValueError,
+              fmt::format(
+                  "buffer size ({}) after offset ({}) must be a multiple of "
+                  "element size ({})",
+                  len,
+                  offset,
+                  elsize));
+          return nullptr;
+        }
+        actual_count = (len - offset) / elsize;
+      } else {
+        actual_count = static_cast<uint64_t>(count);
+      }
+
+      if (offset + actual_count * elsize > len) {
+        PyErr_SetString(
+            PyExc_ValueError,
+            fmt::format(
+                "buffer has only {} elements after offset {}, but specified a size of {}",
+                (len - offset) / elsize,
+                offset,
+                actual_count));
+        return nullptr;
+      }
+
+      auto offset_buf = static_cast<char*>(buf) + offset;
+      auto options = TensorOptions()
+          .dtype(dtype)
+          .requires_grad(requires_grad)
+          .device(device_opt);
+
+      Py_INCREF(obj);
+      auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
+          .options(options)
+          .deleter([=](void*) {
+              pybind11::gil_scoped_acquire gil;
+              Py_DECREF(obj);
+          })
+          .make_tensor();
+
+      return wrap(tensor);
+  }
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs);
 
 // generated forward declarations start here
@@ -494,6 +599,7 @@ static PyMethodDef torch_functions[] = {
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", castPyCFunctionWithKeywords(THPVariable_mm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
+  {"from_buffer", castPyCFunctionWithKeywords(THPVariable_from_buffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"hsmm", castPyCFunctionWithKeywords(THPVariable_hspmm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
