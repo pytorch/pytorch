@@ -1,7 +1,7 @@
-# This example code was adapated from https://github.com/ericjang/maml-jax .
+# This example code was modified from https://github.com/ericjang/maml-jax .
+#
 # The original code comes with the following license:
 # https://github.com/ericjang/maml-jax/blob/master/LICENSE
-#
 # Copyright Eric Jang
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
