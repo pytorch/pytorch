@@ -8439,6 +8439,7 @@
 
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: avg_pool3d_backward_out_cpu
     CUDA: avg_pool3d_backward_out_cuda
@@ -8446,9 +8447,8 @@
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
+  structured_delegate: avg_pool3d_backward.grad_input
   dispatch:
-    CPU: avg_pool3d_backward_cpu
-    CUDA: avg_pool3d_backward_cuda
     MkldnnCPU: mkldnn_avg_pool3d_backward
 
 # Return: (Tensor output, Tensor indices)
