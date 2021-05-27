@@ -1353,6 +1353,18 @@ class TestCase(expecttest.TestCase):
                     assert debug_msg_generic is not None
                     debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+        # Tensor x Numpy array
+        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
+            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Numpy array x Tensor
+        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
+            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Numpy array x Numpy array
+        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
+            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
                          f"Expected: {repr(x)}; Actual: {repr(y)}.")
@@ -1398,18 +1410,6 @@ class TestCase(expecttest.TestCase):
                 assert debug_msg_scalars is not None
                 debug_msg = "Scalars failed to compare as equal! " + debug_msg_scalars
             super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        # Tensor x Numpy array
-        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
-            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Tensor
-        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
-            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Numpy array
-        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
         else:
             super().assertEqual(x, y, msg=msg)
 
