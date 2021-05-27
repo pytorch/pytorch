@@ -73,14 +73,14 @@ inline void histogram_pre_check(const Tensor& input, const Tensor& bin_edges_in,
                 ", and weight(", weight_sizes, ")");
     }
 
-    TORCH_CHECK(hist.is_contiguous(), "torch.histogram(): hist tensor must be contiguous");
-
     TORCH_CHECK(bin_edges_in.numel() > 0, "torch.histogram(): bin_edges tensor should have at least 1 element,",
             " but got ", bin_edges_in.numel(), " elements");
 
     at::native::resize_output(hist, {bin_edges_in.numel() - 1});
 
     at::native::resize_output(bin_edges_out, {bin_edges_in.numel()});
+
+    TORCH_CHECK(hist.is_contiguous(), "torch.histogram(): hist tensor must be contiguous");
 }
 
 /* Determines the outermost bin edges.
