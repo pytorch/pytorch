@@ -15,6 +15,9 @@ from quantization.core.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.core.test_quantized_op import TestPadding  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
 from quantization.core.test_quantized_op import TestDynamicQuantizedRNNOp  # noqa: F401
+from quantization.core.test_quantized_functional import TestQuantizedFunctionalOps  # noqa: F401
+from quantization.core.test_quantized_module import TestStaticQuantizedModule  # noqa: F401
+from quantization.core.test_quantized_module import TestDynamicQuantizedModule  # noqa: F401
 
 
 # Quantization specific fusion passes
@@ -38,9 +41,6 @@ from quantization.eager.test_quantize_eager_ptq import TestPostTrainingDynamic  
 from quantization.eager.test_quantize_eager_ptq import TestEagerModeActivationOps  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestFunctionalModule  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeONNXExport  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestQuantizedFunctionalOps  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestStaticQuantizedModule  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestDynamicQuantizedModule  # noqa: F401
 
 # Eager mode quantization aware training
 from quantization.eager.test_quantize_eager_qat import TestQuantizationAwareTraining  # noqa: F401
