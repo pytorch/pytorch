@@ -186,7 +186,7 @@ NoneStatus canBeNone(Value* v) {
   }
   if (v->type()->kind() == OptionalType::Kind ||
       (v->type()->kind() == UnionType::Kind &&
-       v->type()->expect<UnionType>()->can_hold_none())) {
+       v->type()->expect<UnionType>()->canHoldNone())) {
     return MAYBE;
   }
   return NEVER;
@@ -659,8 +659,7 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
-    auto schema = emitDef(def, self, graph->block());
-    method.setSchema(schema);
+    method.setSchema(emitDef(def, self, graph->block()));
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
@@ -1023,14 +1022,24 @@ struct to_ir {
     TypePtr declared_return_type =
         def_stack_.back().declared_return_type_; // nullptr if not annotated
     TypePtr type_hint = nullptr;
+
+    // If 1) we have a return statement in one or more branches, and 2)
+    // the type of the expression returned is a subtype of the declared
+    // return type for all branches, then we should use the declared
+    // return type as the `type_hint` when we emit each return
+    // statement. If we don't do this, we'll get an error like "x is set
+    // to type T1 in the true branch and type T2 in the false branch"--
+    // even if `unifyTypes(T1, T2)->isSubtypeOf(declared_return_type)`
     if (declared_return_type &&
         (declared_return_type == AnyType::get() ||
          declared_return_type->kind() == UnionType::Kind ||
          declared_return_type->kind() == OptionalType::Kind)) {
       type_hint = declared_return_type;
     }
+
     Value* actual_return = emitExpr(stmt.expr(), type_hint);
     TypePtr actual_return_type = actual_return->type();
+
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1758,8 +1767,8 @@ struct to_ir {
         }
         if (const auto union_type = actual_type->cast<UnionType>()) {
           return std::any_of(
-              union_type->types().begin(),
-              union_type->types().end(),
+              union_type->containedTypes().begin(),
+              union_type->containedTypes().end(),
               [&](const TypePtr contained) {
                 return contained->kind() == kind;
               });
@@ -1816,7 +1825,7 @@ struct to_ir {
         std::unordered_set<TypePtr, std::hash<TypePtr>, c10::TypeEqual> dict{
           gathered.types.begin(), gathered.types.end()};
 
-        for (auto type : union_type->types()) {
+        for (auto type : union_type->containedTypes()) {
           // Fast path
           if (!dict.count(type)) {
             not_isinstance_types.emplace_back(type);
@@ -2948,7 +2957,7 @@ struct to_ir {
         // has the type Optional[T]
         if ((type->kind() == OptionalType::Kind ||
              (type->kind() == UnionType::Kind &&
-              type->expect<UnionType>()->can_hold_none())) &&
+              type->expect<UnionType>()->canHoldNone())) &&
             expr->type()->isSubtypeOf(NoneType::get())) {
           Node* none = graph->createNone();
           none->output()->setType(type);
