@@ -1875,6 +1875,7 @@ works_list = [
     'nn.functional.hardswish',
     'nn.functional.hardtanh',
     'nn.functional.leaky_relu',
+    'nn.functional.relu6',
     'pow',
     'reciprocal',
     'round',
