@@ -324,9 +324,6 @@ CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
 
 cudaStream_t CUDAStream::stream() const {
   int64_t stream_id = unwrap().id();
-  // the stream_ids managed from the pool have only 8 bits
-  // so any value higher than that can be reinterpreted
-  // as an externally allocated stream
   if (streamIdType(stream_id) == StreamIdType::EXT) {
     // In this case this is a externally allocated stream
     // we don't need to manage its life cycle
