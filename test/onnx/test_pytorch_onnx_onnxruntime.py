@@ -7779,7 +7779,7 @@ class TestONNXRuntime(unittest.TestCase):
                 insnorm = self.insnorm(x)
                 return insnorm
 
-        x = torch.randn(3, 3, 1, 2)
+        x = torch.randn(10, 3, 128, 128)
         model_export = MyModule()
 
         model_export.train()
