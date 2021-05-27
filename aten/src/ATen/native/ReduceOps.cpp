@@ -1746,19 +1746,6 @@ Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
 }
 
-Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
-  auto mask = (self != 0);
-  return mask.sum(dims);
-}
-
-Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
-  if (dim){
-    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
-    return at::count_nonzero(self, IntArrayRef{wrap_dim});
-  }
-  return at::count_nonzero(self, IntArrayRef{});
-}
-
 bool cpu_equal(const Tensor& self, const Tensor& other) {
   if (!at::namedinference::are_names_equal(
         self.unsafeGetTensorImpl(), other.unsafeGetTensorImpl())) {
@@ -1775,8 +1762,8 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   }
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
-    .add_borrowed_input(self)
-    .add_borrowed_input(other)
+    .add_input(self)
+    .add_input(other)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .build();
