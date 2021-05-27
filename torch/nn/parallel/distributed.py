@@ -939,7 +939,7 @@ class DistributedDataParallel(Module):
         work = dist.all_reduce(
             requires_sync_tensor, group=self.process_group, async_op=True
         )
-        return work, requires_sync_tensor
+        return work
 
     # When running in join mode, checks and performs sync of module buffers if
     # the models have buffers that should be synchronized in the forward pass.
@@ -1144,15 +1144,12 @@ class DistributedDataParallel(Module):
                         # buffers in the forward pass.
                         self._check_and_sync_module_buffers()
 
-                        (
-                            work,
-                            should_sync_backwards_tensor,
-                        ) = self._check_global_requires_backward_grad_sync(
+                        work = self._check_global_requires_backward_grad_sync(
                             is_joined_rank=True
                         )
                         work.wait()
                         # If nonzero, then we should sync in the bwd pass.
-                        should_sync_backwards = should_sync_backwards_tensor.item() != 0
+                        should_sync_backwards = work.result().item() != 0
                         # Forward param sync is disabled in the next iteration
                         # if we are skipping grad sync this iteration. Hence, we
                         # set require_forward_param_sync appropriately here.
