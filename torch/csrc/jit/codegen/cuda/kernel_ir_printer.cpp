@@ -190,10 +190,6 @@ void IrPrinter::visit(const kir::Predicate* node) {
       ir_str_ << "Inline";
       break;
     }
-    case PredicateType::InternalSync: {
-      ir_str_ << "InternalSync";
-      break;
-    }
     case PredicateType::Manual: {
       ir_str_ << node->value();
       break;

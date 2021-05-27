@@ -218,6 +218,7 @@ class ShiftPredicateInserter {
       const kir::Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
       kir::TensorView* out_tv,
+      kir::Bool* thread_pred,
       bool isShiftPredicate);
 };
 

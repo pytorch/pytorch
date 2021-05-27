@@ -169,14 +169,9 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
   if (is_block_reduce) {
     block_reduction_op = ir_builder_.create<kir::ReductionOp>(
         rop->operation(), rop->init(), out, in);
-
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    const auto pred = ir_builder.create<kir::Predicate>(
-        PredicateType::InternalSync,
-        rop,
-        GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()));
-
-    block_reduction_op->setPredicate(pred);
+    if (rop->predicate()) {
+      block_reduction_op->setPredicate(rop->predicate());
+    }
     pushBack(block_reduction_op);
   }
 
@@ -255,10 +250,9 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
         grid_reduction_op, reduce_buffer, sync_buffer);
     grid_reduction->setThreadPredicate(thread_pred);
 
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    const auto pred = ir_builder.create<kir::Predicate>(
-        PredicateType::InternalSync, rop, ir_builder_.trueVal());
-    grid_reduction->setPredicate(pred);
+    if (rop->predicate()) {
+      grid_reduction->setPredicate(rop->predicate());
+    }
 
     pushBack(reduce_buffer);
     pushBack(sync_buffer);
@@ -358,14 +352,9 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
 
   if (is_block_reduce) {
     block_welford_op = welford_op;
-
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    const auto pred = ir_builder.create<kir::Predicate>(
-        PredicateType::InternalSync,
-        wop,
-        GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv()));
-
-    block_welford_op->setPredicate(pred);
+    if (wop->predicate()) {
+      block_welford_op->setPredicate(wop->predicate());
+    }
     pushBack(block_welford_op);
   }
 
@@ -402,13 +391,12 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
         out_avg_buffer,
         out_N_buffer,
         sync_buffer);
+
     grid_welford->setThreadPredicate(thread_pred);
 
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    const auto pred = ir_builder.create<kir::Predicate>(
-        PredicateType::InternalSync, wop, ir_builder_.trueVal());
-
-    grid_welford->setPredicate(pred);
+    if (wop->predicate()) {
+      grid_welford->setPredicate(wop->predicate());
+    }
 
     pushBack(out_var_buffer);
     pushBack(out_avg_buffer);
@@ -425,22 +413,15 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
 void IndexLowering::visit(const kir::BroadcastOp* bop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(bop));
 
-  const auto out_tv = bop->out()->as<kir::TensorView>();
-  const auto out_domain = out_tv->domain();
-
-  const bool is_block_broadcast = out_domain->hasBlockBroadcast();
-
   const auto out = lowerDstIndex(bop->out());
   const auto in = lowerSrcIndex(bop->in(), bop->out());
   auto indexed_expr = ir_builder_.create<kir::BroadcastOp>(out, in);
-  pushBack(indexed_expr);
 
-  if (is_block_broadcast) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    const auto pred = ir_builder.create<kir::Predicate>(
-        PredicateType::InternalSync, bop, ir_builder_.trueVal());
-    indexed_expr->setPredicate(pred);
+  if (bop->predicate()) {
+    indexed_expr->setPredicate(bop->predicate());
   }
+
+  pushBack(indexed_expr);
 }
 
 void IndexLowering::visit(const kir::Allocate* allocate) {

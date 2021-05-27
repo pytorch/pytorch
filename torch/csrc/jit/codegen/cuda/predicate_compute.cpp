@@ -216,12 +216,6 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return thread_pred;
   }
 
-  // Handle these elsewhere
-  if (pred_type == PredicateType::Inline &&
-      ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
-    return kir::IrBuilder(GpuLower::current()->kernel()).trueVal();
-  }
-
   auto out_tv = firstTensorViewOutput(expr);
 
   // For the case of generating predicates, it's safe to assume all

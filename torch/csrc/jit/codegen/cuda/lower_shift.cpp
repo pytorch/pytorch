@@ -57,11 +57,6 @@ void ShiftPredicateInserter::insert(
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  // thread predication is not supported yet
-  TORCH_INTERNAL_ASSERT(
-      thread_pred->isConst() && thread_pred->value().value(),
-      "Thread predication is not supported for expressions with halo-extended outputs");
-
   kir::TensorView* out_tv = ir_utils::getTVOutput(expr);
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing kir::TensorView output");
 
@@ -82,8 +77,18 @@ void ShiftPredicateInserter::insert(
   //   }
   // }
 
-  kir::Predicate* shift_pred =
-      ir_builder.create<kir::Predicate>(PredicateType::Shift, expr);
+  kir::Predicate* shift_pred = ir_builder.create<kir::Predicate>(
+      PredicateType::Shift, expr, thread_pred);
+
+  // If the expr involves a thread-block barrier, set the predicate of
+  // the expre with shift_pred. Since the expr is not shift, the
+  // padding should be safe to omit. In fact, padding is probably not
+  // necessary for all non-shift exprs (see #877)
+  if (ir_utils::hasBlockSync(expr, gpu_lower->threadPredMap())) {
+    expr->setPredicate(shift_pred);
+    return;
+  }
+
   auto shift_ite = ir_builder.create<kir::IfThenElse>(shift_pred);
 
   auto& scope = loops.back()->body();
@@ -97,9 +102,9 @@ void ShiftPredicateInserter::insert(
   // Place the expr inside the if statement
   shift_ite->thenBody().push_back(expr);
 
-  // Pading by zero
-  kir::Predicate* padding_pred =
-      ir_builder.create<kir::Predicate>(PredicateType::Padding, expr);
+  // Padding by zero
+  kir::Predicate* padding_pred = ir_builder.create<kir::Predicate>(
+      PredicateType::Padding, expr, thread_pred);
   auto bounds_ite = ir_builder.create<kir::IfThenElse>(padding_pred);
   const int pad_value = 0;
   auto pad_expr = ir_builder.create<kir::UnaryOp>(
@@ -113,6 +118,7 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
     const kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
     kir::TensorView* out_tv,
+    kir::Bool* thread_pred,
     bool isShiftPredicate) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
@@ -134,14 +140,28 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
   // require shift predication, so other axes could use the actual
   // contiguity information. See a TODO item of issue #877.
   const auto pred_contiguity = std::vector<bool>(root_domain.size(), false);
-  auto indices =
-      Index::getConsumerRootPredIndices(out_tv, loops, pred_contiguity).first;
+  auto pred_indices =
+      Index::getConsumerRootPredIndices(out_tv, loops, pred_contiguity);
+  const auto& indices = pred_indices.first;
+  const bool buffer_init = pred_indices.second;
+
+  // No predication is needed when the expr is to initialize reduction
+  // buffer on local memory
+  if (out_tv->memoryType() == MemoryType::Local && buffer_init) {
+    return ir_builder.trueVal();
+  }
+
   TORCH_INTERNAL_ASSERT(indices.size() == root_domain.size());
 
   kir::Bool* predicate = nullptr;
 
   for (size_t i = 0; i < root_domain.size(); ++i) {
     auto root_id = root_domain[i];
+
+    if (root_id->isBroadcast() || (buffer_init && root_id->isReduction()) ||
+        gpu_lower->trivialReductionInfo().isDerived(root_id)) {
+      continue;
+    }
 
     const auto halo_info = gpu_lower->haloInfo().getRootAxisInfo(root_id);
 
@@ -196,6 +216,14 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
       predicate = makeAndExpr(
           predicate, ir_builder.ltExpr(indices[i], padding_max_offset));
     }
+  }
+
+  if (thread_pred->isConst()) {
+    if (!thread_pred->value().value()) {
+      predicate = ir_builder.create<kir::Bool>(false);
+    }
+  } else {
+    predicate = makeAndExpr(predicate, thread_pred);
   }
 
   return predicate;
@@ -332,6 +360,15 @@ void HaloInfo::propagateRootAxisInfo(
 
     auto p_info = getRootAxisInfo(p_id);
     const auto c_info = getRootAxisInfo(c_id);
+
+    // If the root axes are broadcast, no halo should be associated
+    // with them.
+    if (c_id->isBroadcast()) {
+      TORCH_INTERNAL_ASSERT(!c_info.hasHalo());
+      p_info.merge(c_info);
+      setRootAxisInfo(p_id, p_info);
+      continue;
+    }
 
     // If the defining expression is shift, adjust the producer halo
     // width based on the shift offset. If the shift offset is
@@ -708,7 +745,7 @@ std::string HaloInfo::toString() const {
 
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
     const auto& root = tv->getRootDomain();
-    ss << "TV" << tv->name() << ": ";
+    ss << "TV" << tv->name() << " root domain: ";
     for (auto axis : root) {
       ss << axis << " -> " << getRootAxisInfo(axis).toString() << ", ";
     }
@@ -725,7 +762,8 @@ bool HaloInfo::needsShiftPredicate(Expr* expr) {
     auto consumer_id = consumer_td->getRootDomain()[i];
     const auto consumer_halo_info = getRootAxisInfo(consumer_id);
     if (consumer_halo_info.hasHalo() ||
-        (shift_expr != nullptr && shift_expr->offset(i) != 0)) {
+        (shift_expr != nullptr && shift_expr->offset(i) != 0 &&
+         !consumer_id->isBroadcast())) {
       return true;
     }
   }
@@ -734,7 +772,6 @@ bool HaloInfo::needsShiftPredicate(Expr* expr) {
 
 bool HaloInfo::needsShiftPredicate(kir::Expr* expr) {
   const auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
-  // TODO: There can be two definitions for Rfactor tensors.
   auto fuser_expr = out_tv->fuserTv()->definition();
   TORCH_INTERNAL_ASSERT(fuser_expr != nullptr);
   return needsShiftPredicate(fuser_expr);

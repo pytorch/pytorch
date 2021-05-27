@@ -35,8 +35,6 @@ enum class ValType {
 // Inline corresponds with PredicateCompute::getInlinePredicate
 // Unswitch corresponds with UnswitchPredicate::get
 // Misaligned - PredicateCompute::getInlinePredicate + Misaligned flag
-// InternalSync  - PredicateCompute::getInlinePredicate
-// for GridReduction, BlockReduction, GridWelford, BlockWelford operations
 // Shift - ShiftPredicateInserter::getShiftPredicate
 // Padding - ShiftPredicateInserter::getPaddingPredicate
 enum class PredicateType {
@@ -45,7 +43,6 @@ enum class PredicateType {
   Unswitch,
   Vectorize,
   Misaligned,
-  InternalSync,
   Shift,
   Padding
 };

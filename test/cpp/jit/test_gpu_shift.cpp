@@ -1670,6 +1670,243 @@ TEST(NVFuserTest, FusionShift5ptStencilChain_CUDA) {
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
+// Shift a reduced tensor
+TEST(NVFuserTest, FusionShiftReduction1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = shift(tv2, {1});
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 4);
+  tv0->computeAt(tv3, 1);
+  tv0->computeAt(tv2, -1);
+
+  const int numel_x = 9;
+  const int numel_y = 11;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = sum(t1, {1});
+  auto t3 = shift(t2, {1});
+  auto ref = t3;
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Parallelized version of FusionShiftReduction1
+TEST(NVFuserTest, FusionShiftReduction2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = shift(tv2, {1});
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 4);
+  tv0->computeAt(tv3, 1);
+
+  tv2->split(-1, 32);
+  tv0->computeAt(tv2, -1);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv2->setMemoryType(MemoryType::Shared);
+
+  const int numel_x = 201;
+  const int numel_y = 301;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = sum(t1, {1});
+  auto t3 = shift(t2, {1});
+  auto ref = t3;
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionShiftRfactor1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = shift(tv2, {1});
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 4);
+  tv0->computeAt(tv3, 1);
+
+  tv2->split(-1, 32);
+  auto rf = tv2->rFactor({-2});
+  tv0->computeAt(tv2, -1);
+  tv0->computeAt(rf, -1);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv2->setMemoryType(MemoryType::Shared);
+
+  const int numel_x = 201;
+  const int numel_y = 301;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = sum(t1, {1});
+  auto t3 = shift(t2, {1});
+  auto ref = t3;
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionShiftBcast1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = broadcast(tv0, {false, true});
+  auto tv3 = shift(tv2, {0, 1});
+  auto tv4 = add(tv3, tv1);
+  fusion.addOutput(tv4);
+
+  tv0->computeAt(tv4, -1);
+  tv1->computeAt(tv4, -1);
+
+  const int numel_x = 9;
+  const int numel_y = 11;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x}, options);
+  at::Tensor t1 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t4 = t0.unsqueeze(-1).expand({numel_x, numel_y}) + t1;
+  auto ref = t4;
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionShiftBcast2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = broadcast(tv0, {false, true});
+  auto tv3 = shift(tv2, {1, 0});
+  auto tv4 = add(tv3, tv1);
+  fusion.addOutput(tv4);
+
+  tv4->split(0, 4);
+  tv0->computeAt(tv4, 1);
+
+  const int numel_x = 9;
+  const int numel_y = 11;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x}, options);
+  at::Tensor t1 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t2 = t0.unsqueeze(-1).expand({numel_x, numel_y});
+  auto t3 = shift(t2, {1, 0});
+  auto ref = t3 + t1;
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Combine ShiftBcast1 and ShiftBcast2 with parallelization
+TEST(NVFuserTest, FusionShiftBcast3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = broadcast(tv0, {false, true});
+  auto tv3 = shift(tv2, {1, 0});
+  auto tv4 = shift(tv2, {0, 1});
+  auto tv5 = shift(tv2, {-1, -1});
+  auto tv6 = add(tv3, tv4);
+  auto tv7 = add(tv6, tv5);
+  auto tv8 = add(tv7, tv1);
+  fusion.addOutput(tv8);
+
+  tv8->split(0, 4);
+  tv8->split(-1, 4);
+  tv0->computeAt(tv8, 1);
+
+  tv8->axis(-1)->parallelize(ParallelType::TIDx);
+  for (auto tv : {tv8, tv7, tv6, tv5, tv4, tv3, tv2}) {
+    tv->axis(1)->parallelize(ParallelType::TIDy);
+  }
+
+  tv2->setMemoryType(MemoryType::Shared);
+
+  const int numel_x = 101;
+  const int numel_y = 201;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x}, options);
+  at::Tensor t1 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t2 = t0.unsqueeze(-1).expand({numel_x, numel_y});
+  auto t3 = shift(t2, {1, 0});
+  auto t4 = t2;
+  auto t5 = shift(t2, {-1, 0});
+  auto ref = t3 + t4 + t5 + t1;
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

@@ -127,7 +127,21 @@ class AllocationInserter : public kir::MutableIrVisitor {
          init_loop_it != init_dims.rend();
          ++init_loop_it) {
       auto id = *init_loop_it;
-      kir::ForLoop* new_loop = ir_builder.create<kir::ForLoop>(id);
+      kir::ForLoop* new_loop = nullptr;
+      auto extent_with_halo = gpu_lower->haloInfo().getExtent(id);
+      if (extent_with_halo) {
+        new_loop = ir_builder.create<kir::ForLoop>(
+            id,
+            ir_builder.create<kir::Int>(c10::nullopt),
+            nullptr,
+            extent_with_halo,
+            nullptr,
+            false,
+            false,
+            nullptr);
+      } else {
+        new_loop = ir_builder.create<kir::ForLoop>(id);
+      }
       new_loop->body().push_back(init_expr);
       init_expr = new_loop;
     }

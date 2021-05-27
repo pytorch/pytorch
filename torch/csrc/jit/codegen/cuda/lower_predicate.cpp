@@ -92,8 +92,7 @@ class ConditionalFromPredicateModifier {
   kir::Bool* generateConditional(kir::Predicate* pred) {
     switch (pred->predicate_type()) {
       case PredicateType::Inline:
-      case PredicateType::Misaligned:
-      case PredicateType::InternalSync: {
+      case PredicateType::Misaligned: {
         return PredicateCompute::getInlinePredicate(
             pred->expr(),
             for_loops_structure_,
@@ -125,14 +124,22 @@ class ConditionalFromPredicateModifier {
         TORCH_INTERNAL_ASSERT(
             out_tv != nullptr, "Missing kir::TensorView output");
         return ShiftPredicateInserter::getPredicate(
-            pred->expr(), for_loops_structure_, out_tv, true);
+            pred->expr(),
+            for_loops_structure_,
+            out_tv,
+            pred->thread_pred(),
+            true);
       }
       case PredicateType::Padding: {
         kir::TensorView* out_tv = ir_utils::getTVOutput(pred->expr());
         TORCH_INTERNAL_ASSERT(
             out_tv != nullptr, "Missing kir::TensorView output");
         return ShiftPredicateInserter::getPredicate(
-            pred->expr(), for_loops_structure_, out_tv, false);
+            pred->expr(),
+            for_loops_structure_,
+            out_tv,
+            pred->thread_pred(),
+            false);
       }
       case PredicateType::Manual: {
         TORCH_INTERNAL_ASSERT(

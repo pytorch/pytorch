@@ -102,6 +102,19 @@ void UnrollPass::handle(kir::Expr* expr) {
       return;
     }
 
+    // For expr calling a device func with block sync, don't create
+    // if-then-else but pass the predicate to the device func
+    if (ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
+      // All threads should join blockBroadcast
+      auto thread_pred = expr->isA<kir::BroadcastOp>()
+          ? ir_builder.trueVal()
+          : GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv());
+      const auto pred = ir_builder.create<kir::Predicate>(
+          PredicateType::Inline, expr, thread_pred);
+      expr->setPredicate(pred);
+      return;
+    }
+
     // Vectorized expressions should never use inline predicates
     kir::Predicate* vectorized_pred = nullptr;
     if (std::any_of(

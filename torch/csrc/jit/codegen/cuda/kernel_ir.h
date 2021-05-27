@@ -472,8 +472,8 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
   Bool* thread_pred() {
     TORCH_INTERNAL_ASSERT(
         ptype_ == PredicateType::Inline ||
-        ptype_ == PredicateType::Misaligned ||
-        ptype_ == PredicateType::InternalSync);
+        ptype_ == PredicateType::Misaligned || ptype_ == PredicateType::Shift ||
+        ptype_ == PredicateType::Padding);
     return thread_pred_;
   }
 
