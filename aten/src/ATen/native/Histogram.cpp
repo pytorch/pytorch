@@ -83,7 +83,6 @@ inline void histogram_pre_check(const Tensor& input, const Tensor& bin_edges_in,
     at::native::resize_output(bin_edges_out, {bin_edges_in.numel()});
 
     // TODO: bring back support for non-contiguous input
-    TORCH_CHECK(input.is_contiguous(), "torch.histogram(): input tensor must be contiguous");
     TORCH_CHECK(!weight.has_value() || weight.value().is_contiguous(),
             "torch.histogram(): weight tensor must be contiguous");
 }

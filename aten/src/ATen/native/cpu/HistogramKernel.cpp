@@ -21,8 +21,8 @@ template<typename input_t, bool LinearBinEdges>
 void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
         const Tensor& input, const c10::optional<Tensor>& weight) {
     TORCH_INTERNAL_ASSERT(hist.is_contiguous());
+    TORCH_INTERNAL_ASSERT(bin_edges.is_contiguous());
     TORCH_INTERNAL_ASSERT(hist.numel() + 1 == bin_edges.numel());
-    TORCH_INTERNAL_ASSERT(input.is_contiguous());
     TORCH_INTERNAL_ASSERT(!weight.has_value() || weight.value().is_contiguous());
 
     int64_t numel_in = input.numel();
@@ -32,7 +32,9 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
 
     int64_t numel_be = bin_edges.numel();
 
-    const input_t *data_in = input.data_ptr<input_t>();
+    Tensor reshaped_in = input.reshape({numel_in});
+    TensorAccessor<input_t, 1> accessor_in = reshaped_in.accessor<input_t, 1>();
+
     const input_t *data_be = bin_edges.data_ptr<input_t>();
 
     input_t *data_out = hist.data_ptr<input_t>();
@@ -52,8 +54,10 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
         std::vector<input_t> data_out_local(numel_be - 1, input_t(0));
 
         for (int64_t i = start; i < end; ++i) {
+            const input_t elt = accessor_in[i];
+
             // Skips elements which fall outside the specified bins
-            if (data_in[i] < leftmost_bin_edge || rightmost_bin_edge < data_in[i]) {
+            if (elt < leftmost_bin_edge || rightmost_bin_edge < elt) {
                 continue;
             }
 
@@ -61,12 +65,12 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
             if (LinearBinEdges) {
                 // When bin_edges is known to be a linear progression, maps data_in[i] to
                 // the appropriate bin via simple division.
-                pos = static_cast<int64_t>((data_in[i] - leftmost_bin_edge)
+                pos = static_cast<int64_t>((elt - leftmost_bin_edge)
                         / (rightmost_bin_edge - leftmost_bin_edge)
                         * (numel_be - 1));
             } else {
                 // Handles the general case via binary search on the bin edges.
-                pos = std::upper_bound(data_be, data_be + numel_be, data_in[i]) - data_be - 1;
+                pos = std::upper_bound(data_be, data_be + numel_be, elt) - data_be - 1;
             }
 
             // Unlike other bins, the rightmost bin includes its right boundary
@@ -97,11 +101,11 @@ histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weig
 
     switch (self.scalar_type()) {
         case ScalarType::Double: {
-            histogram_cpu_contiguous<double, LinearBinEdges>(hist, bin_edges, self, weight);
+            histogram_cpu_contiguous<double, LinearBinEdges>(hist, bin_edges.contiguous(), self, weight);
             break;
         }
         case ScalarType::Float: {
-            histogram_cpu_contiguous<float, LinearBinEdges>(hist, bin_edges, self, weight);
+            histogram_cpu_contiguous<float, LinearBinEdges>(hist, bin_edges.contiguous(), self, weight);
             break;
         }
         default:

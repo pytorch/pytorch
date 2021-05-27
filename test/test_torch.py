@@ -4934,7 +4934,7 @@ else:
             (2, 3, 5))
 
         for contig, bin_ct, minmax, weighted, density, shape in \
-                product([True], range(1, 10), [True, False], [True, False], [True, False], shapes):
+                product([True, False], range(1, 10), [True, False], [True, False], [True, False], shapes):
             values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous = not contig)
             bin_range = sorted((random.uniform(-9, 9), random.uniform(-9, 9))) if minmax else None
             weights = make_tensor(shape, device, dtype, low=0, high=9) if weighted else None
@@ -4954,6 +4954,14 @@ else:
                     min=None, max=None, weight=None, density=False)
             self.assertEqual(actual_hist, expected_hist)
             self.assertEqual(actual_bin_edges, expected_bin_edges)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64)
+    def test_histogram_noncontig(self, device, dtype):
+        # Tests handling of non-contiguous bins tensor
+        values = make_tensor((3, 5), device, dtype, low=-9, high=9)
+        bin_edges = make_tensor(10, device, dtype, low=-9, high=9).msort()[::2]
+        self._test_histogram_numpy(values, bin_edges, None, None, False)
 
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):
