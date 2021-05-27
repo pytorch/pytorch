@@ -1091,11 +1091,11 @@ class HistogramObserver(_ObserverBase):
                     self.bins,
                 )
 
-            self.histogram.resize_(combined_histogram.shape)
+            self.histogram.detach_().resize_(combined_histogram.shape)
             self.histogram.copy_(combined_histogram)
-            self.min_val.resize_(combined_min.shape)
+            self.min_val.detach_().resize_(combined_min.shape)
             self.min_val.copy_(combined_min)
-            self.max_val.resize_(combined_max.shape)
+            self.max_val.detach_().resize_(combined_max.shape)
             self.max_val.copy_(combined_max)
         return x_orig
 
