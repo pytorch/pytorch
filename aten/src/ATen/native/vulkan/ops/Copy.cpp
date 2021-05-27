@@ -5,7 +5,7 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-Tensor& copy_(Tensor& self, const Tensor& src) {
+const Tensor& copy_(const Tensor& self, const Tensor& src) {
   api::Context* const context = api::context();
 
   api::Command::Pool& command_pool = context->command().pool;

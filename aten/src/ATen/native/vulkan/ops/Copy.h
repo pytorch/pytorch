@@ -9,7 +9,7 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-Tensor& copy_(Tensor& self, const Tensor& src);
+const Tensor& copy_(const Tensor& self, const Tensor& src);
 
 } // namespace ops
 } // namespace vulkan
