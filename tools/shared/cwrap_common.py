@@ -2,7 +2,6 @@
 # for now, I have put it in one place but right now is copied out of cwrap
 
 import copy
-import os
 from typing import Any, Dict, Iterable, List, Union
 
 Arg = Dict[str, Any]
