@@ -1855,6 +1855,7 @@ class TestNNCOpInfo(TestCase):
             'nn.functional.hardshrink',
             'nn.functional.hardswish',
             'nn.functional.hardtanh',
+            'permute',
             'pow',
             'reciprocal',
             'round',
@@ -1869,7 +1870,7 @@ class TestNNCOpInfo(TestCase):
             'trunc',
             'unsqueeze',
         ]
-        known_failures = ['matmul', 'permute', 'frac', '__rmatmul__']
+        known_failures = ['matmul', 'frac', '__rmatmul__']
         # If adding new OpInfo tests cause this test to fail, add it into here
         skip_ops = []
         if op.name in skip_ops:
