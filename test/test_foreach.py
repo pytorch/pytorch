@@ -130,7 +130,8 @@ class TestForeach(TestCase):
     @ops(foreach_unary_op_db)
     def test_unary(self, device, dtype, op):
         for N in N_values:
-            tensors = op.sample_inputs(device, dtype, N)
+            samples = op.sample_inputs(device, dtype, N)
+            tensors = [sample.input for sample in samples]
             expected = [op.ref(t) for t in tensors]
 
             method = op.get_method()

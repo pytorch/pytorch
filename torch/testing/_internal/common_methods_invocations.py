@@ -2203,8 +2203,8 @@ class ShapeFuncInfo(OpInfo):
         self.ref = ref
 
 def sample_inputs_foreach(self, device, dtype, N):
-    tensors = [make_tensor((N, N), device, dtype) for _ in range(N)]
-    return tensors
+    samples = [SampleInput(make_tensor((N, N), device, dtype)) for _ in range(N)]
+    return samples
 
 
 def get_foreach_method_names(name):
