@@ -21,6 +21,31 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
     bool ignore_custom_classes) {
   Stack stack;
+
+  if (n->kind() == aten::size) {
+    auto tt = n->input()->type()->expect<TensorType>();
+    auto s = tt->sizes().concrete_sizes();
+    if (s) {
+      c10::List<int64_t> l;
+      for (auto e : *s) {
+        l.push_back(e);
+      }
+      auto iv = IValue(l);
+      stack.push_back(iv);
+      return stack;
+    }
+  }
+  if (n->kind() == aten::dim) {
+    auto tt = n->input()->type()->expect<TensorType>();
+    auto s = tt->sizes().concrete_sizes();
+    if (s) {
+      int64_t len = (*s).size();
+      auto iv = IValue(len);
+      stack.push_back(iv);
+      return stack;
+    }
+  }
+
   for (auto input : n->inputs()) {
     if (auto ival = toIValue(input)) {
       stack.push_back(*ival);
@@ -372,7 +397,7 @@ struct ConstantPropagator {
         ConstantPropagation(n->blocks());
         removeExtraLoopOutputs(n);
       }
-    } else if (runnable_inputs && supportedNode(n)) {
+    } else if (supportedNode(n)) {
       propagateNode(n);
     } else {
       ConstantPropagation(n->blocks());
