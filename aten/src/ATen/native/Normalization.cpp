@@ -639,17 +639,29 @@ TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
                             const Scalar& maxnorm, const Tensor& out) {
   auto self_sizes = self.sizes();
   dim = c10::maybe_wrap_dim(dim, self_sizes.size());
-  DimVector row_sizes(self_sizes.size(), 1);
-  row_sizes[dim] = self_sizes[dim];
 
   DimVector reduce_dims(self_sizes.size());
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
-  auto norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims, /*keepdim=*/true);
 
-  auto iter = TensorIterator::unary_op(norm, norm);
+  // For cuda half, calculate norm in float precision then cast
+  // normalization factor to half
+  auto dtype = self.scalar_type();
+  auto acc_type = dtype == kHalf ? kFloat : dtype;
+  auto norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims,
+                                     /*keepdim=*/true, /*dtype=*/acc_type);
+
+  auto factor = (acc_type == dtype) ?
+      norm : at::empty(norm.sizes(), self.options());
+  auto iter = TensorIteratorConfig()
+      .add_output(factor)
+      .add_input(norm)
+      .set_check_mem_overlap(false)
+      .cast_common_dtype_to_outputs(true)
+      .build();
+
   renorm_scale_factor_stub(iter.device_type(), iter, maxnorm.toDouble());
-  at::mul_outf(self, norm, const_cast<Tensor&>(out));
+  at::mul_outf(self, factor, const_cast<Tensor&>(out));
 }
 
 }} // at::native

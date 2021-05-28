@@ -9,7 +9,7 @@ namespace native{
 namespace {
 
 void renorm_scale_factor_impl(TensorIteratorBase& iter, double maxnorm) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(), "renorm_scale_factor_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "renorm_scale_factor_cpu", [&] {
     const auto maxnorm_s = static_cast<scalar_t>(maxnorm);
     gpu_kernel(
       iter,
