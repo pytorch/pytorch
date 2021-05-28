@@ -273,7 +273,7 @@ Example::
 """.format(**common_args))
 
 i0 = _add_docstr(_special.special_i0,
-                  r"""
+                 r"""
 i0(input, *, out=None) -> Tensor
 
 Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
