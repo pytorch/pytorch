@@ -9321,6 +9321,14 @@
   python_module: special
   variants: function
 
+- func: special_psi(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_psi.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 - func: special_gammaln(Tensor self) -> Tensor
   python_module: special
   variants: function

@@ -21,6 +21,22 @@ inline Tensor& gammaln_out(Tensor& result, const Tensor& self) {
   return torch::special_gammaln_out(result, self);
 }
 
+/// Computes the logarithmic derivative of the gamma function on input
+/// See https://pytorch.org/docs/master/special.html#torch.special.psi
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::psi(t);
+/// ```
+inline Tensor psi(const Tensor& self) {
+  return torch::special_psi(self);
+}
+
+inline Tensor& psi_out(Tensor& result, const Tensor& self) {
+  return torch::special_psi_out(result, self);
+}
+
 /// Computes entropy of input, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.entr.
 ///
