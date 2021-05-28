@@ -1263,7 +1263,7 @@ void initCustomClassBindings() {
           .def_pickle(
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
                 auto base_process_group =
-                    static_intrusive_pointer_cast<::c10d::ProcessGroup>(self);
+                    ::c10::static_intrusive_pointer_cast<::c10d::ProcessGroup>(self);
                 auto name =
                     ::c10d::DistributedC10d::get()->getNameOfProcessGroup(self);
                 return std::vector<std::string>{name};
@@ -1283,7 +1283,7 @@ void initCustomClassBindings() {
                     "please create a process group with name: ",
                     process_group_name);
                 c10::intrusive_ptr<::c10d::ProcessGroupNCCL>
-                    process_group_nccl = dynamic_intrusive_pointer_cast<
+                    process_group_nccl = ::c10::dynamic_intrusive_pointer_cast<
                         ::c10d::ProcessGroupNCCL>(base_process_group);
                 TORCH_CHECK(
                     process_group_nccl.defined(),
