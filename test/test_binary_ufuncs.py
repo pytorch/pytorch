@@ -1262,10 +1262,10 @@ class TestBinaryUfuncs(TestCase):
 
             if alias is not None:
                 alias_result = alias(a_tensor, b_tensor)
-                self.assertEqual(alias_result, tensor_result)
+                self.assertEqual(alias_result, tensor_result, exact_dtype=False)
 
-            self.assertEqual(tensor_result, numpy_result)
-            self.assertEqual(out, numpy_result)
+            self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
+            self.assertEqual(out, numpy_result, exact_dtype=False)
 
     @dtypes(*(torch.testing.get_all_fp_dtypes()))
     def test_maximum_minimum_float_nan_and_inf(self, device, dtype):
@@ -1713,7 +1713,7 @@ class TestBinaryUfuncs(TestCase):
                 expected = torch.sqrt(input[0] * input[0] + input[1] * input[1])
             else:
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
@@ -1723,7 +1723,7 @@ class TestBinaryUfuncs(TestCase):
         t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
         actual = torch.gcd(t1, t2)
         expected = np.gcd([0, 10, 0], [0, 0, 10])
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, exact_dtype=False)
 
         if dtype == torch.uint8:
             # Test unsigned integers with potential sign issues (i.e., uint8 with value >= 128)
@@ -1731,6 +1731,7 @@ class TestBinaryUfuncs(TestCase):
             b = torch.tensor([190, 220], device=device, dtype=dtype)
             actual = torch.gcd(a, b)
             expected = torch.tensor([190, 10], device=device, dtype=dtype)
+            self.assertEqual(actual, expected)
         else:
             # Compares with NumPy
             a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
@@ -1747,14 +1748,14 @@ class TestBinaryUfuncs(TestCase):
         t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
         actual = torch.lcm(t1, t2)
         expected = np.lcm([0, 10, 0], [0, 0, 10])
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, exact_dtype=False)
 
         # Compares with NumPy
         a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
         b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
         actual = torch.lcm(a, b)
         expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64)
@@ -2476,14 +2477,14 @@ class TestBinaryUfuncs(TestCase):
             actual = torch.trapz(t, dx=dx, dim=dim)
             expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapz(t, x=torch.tensor(x, device=device), dim=dim)
             expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
-            self.assertEqual(expected, actual.cpu())
+            self.assertEqual(expected, actual.cpu(), exact_dtype=False)
 
         test_dx((2, 3, 4), 1, 1, device)
         test_dx((10, 2), 0, 0.1, device)

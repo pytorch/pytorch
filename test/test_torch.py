@@ -4960,7 +4960,7 @@ else:
         # Test behaviour for inf and nan values
         actual = torch.gradient(torch.tensor([2, -2, inf, inf, -inf, -inf, inf, 3, -inf, 2, nan, nan, 3, inf, nan]))
         expected = np.gradient(np.array([2, -2, inf, inf, -inf, -inf, inf, 3, -inf, 2, nan, nan, 3, inf, nan]))
-        self.assertEqual(actual, self._wrap_to_list(expected),)
+        self.assertEqual(actual, self._wrap_to_list(expected), exact_dtype=False)
 
         # Test behaviour in very big tensors
         large_size = 100000
