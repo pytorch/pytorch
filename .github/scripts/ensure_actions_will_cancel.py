@@ -11,12 +11,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 
-def concurrency_key(filename):
+def concurrency_key(filename: Path) -> str:
     workflow_name = filename.with_suffix("").name.replace("_", "-")
     return f"{workflow_name}-${{{{ github.event.pull_request.number || github.sha }}}}"
 
 
-def should_check(filename):
+def should_check(filename: Path) -> bool:
     with open(filename, "r") as f:
         content = f.read()
 
@@ -31,7 +31,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    files = WORKFLOWS.glob("*.yml")
+    files = list(WORKFLOWS.glob("*.yml"))
 
     errors_found = False
     files = [f for f in files if should_check(f)]
