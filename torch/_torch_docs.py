@@ -3396,7 +3396,8 @@ tensor is not resizable.
 
 .. warning::
     Passing a pointer that lives in a different device than the specified
-    one results in ``RuntimeError``.
+    one may result in either a :class:`RuntimeError` (if the buffer lives
+    on CPU) or in a segmentation fault (if the buffer lives in CUDA).
 
 Args:
     buffer (object): a Python object that exposes the buffer interface

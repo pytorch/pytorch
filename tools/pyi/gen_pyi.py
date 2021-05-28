@@ -277,6 +277,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
+        'from_buffer': ['def from_buffer(buffer: Any, dtype: Optional[_dtype]=None, '
+                        'count: int=-1, offset: int=0, device: Union[_device, str, None]=None, '
+                        'requires_grad: _bool=False) -> Tensor: ...'],
         'numel': ['def numel(self: Tensor) -> _int: ...'],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],

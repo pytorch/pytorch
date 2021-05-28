@@ -105,7 +105,6 @@ Tensor TensorMaker::make_tensor() {
 
   Tensor tensor = detail::make_tensor<TensorImpl>(
       std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
-  tensor.set_requires_grad(opts_.requires_grad());
 
   if (sizes_.size() != 1 || sizes_[0] != 0) {
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
