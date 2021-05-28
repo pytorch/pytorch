@@ -259,4 +259,7 @@ class TORCH_PYTHON_API DistributedC10d : public torch::CustomClassHolder {
   int64_t group_count_;
 };
 
+// Must be called to initialize Torchbind bindings for c10d.
+void initCustomClassBindings();
+
 } // namespace c10d

@@ -229,6 +229,8 @@ void _register_builtin_comm_hook(
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
+  ::c10d::initCustomClassBindings();
+
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
