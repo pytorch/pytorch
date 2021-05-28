@@ -102,7 +102,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
 #else
     mode = CUDNN_BATCHNORM_SPATIAL;
-#endif // CUDNN_VERSION >= 7400
+#endif // CUDNN_VERSION >= 8100
   } else {
     // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
     // introduced in CuDNN 7 for performance optimization, but it results in
@@ -293,7 +293,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
 #else
     mode = CUDNN_BATCHNORM_SPATIAL;
-#endif // CUDNN_VERSION >= 7400
+#endif // CUDNN_VERSION >= 8100
   } else {
     // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
     // introduced in CuDNN 7 for performance optimization, but it results in
