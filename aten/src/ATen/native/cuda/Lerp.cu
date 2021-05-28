@@ -11,10 +11,10 @@ inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor&
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
   at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_borrowed_output(ret)
-      .add_borrowed_input(self)
-      .add_borrowed_input(end)
-      .add_borrowed_input(weights)
+      .add_output(ret)
+      .add_input(self)
+      .add_input(end)
+      .add_input(weights)
       .build();
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -38,9 +38,9 @@ inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor&
 inline void lerp_scalar_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, const c10::Scalar& weight) {
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_borrowed_output(ret)
-      .add_borrowed_input(self)
-      .add_borrowed_input(end)
+      .add_output(ret)
+      .add_input(self)
+      .add_input(end)
       .build();
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
