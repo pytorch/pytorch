@@ -39,7 +39,7 @@ namespace at {
 namespace vec {
 namespace {
 
-#if defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 struct Vectorizedqi {
  protected:
@@ -733,6 +733,463 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
   return a.maximum(b);
 }
 
-#endif // defined(CPU_CAPABILITY_AVX512)
+#else
+
+// NOTE: These are low-performance implementations that we fall back on.
+
+template <
+    typename T,
+    typename float_vec_return_type_,
+    typename int_vec_return_type_,
+    int size_>
+struct VectorizedQuantizedConverter {
+  static constexpr int size() {
+    return size_;
+  }
+
+  static constexpr int float_num_vecs() {
+    return size() / 8;
+  }
+
+  static constexpr int int_num_vecs() {
+    return size() / 8;
+  }
+
+  using float_vec_return_type = float_vec_return_type_;
+  using int_vec_return_type = int_vec_return_type_;
+
+  using value_type = typename T::underlying;
+  std::array<value_type, size_> vals;
+
+  VectorizedQuantizedConverter(T val) {
+    for (size_t i = 0; i < size(); ++i) {
+      vals[i] = val.val_;
+    }
+  }
+
+  VectorizedQuantizedConverter(const void* ptr) {
+    memcpy(vals.data(), ptr, sizeof(value_type) * size());
+  }
+
+  void store(void* ptr, int count = size()) const {
+    memcpy(ptr, vals.data(), count * sizeof(value_type));
+  }
+
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point,
+      Vectorized<float> scale_zp_premul) const {
+    float_vec_return_type rv;
+    for (int i = 0; i < float_num_vecs(); ++i) {
+      float tmp_vals[16];
+      for (int j = 0; j < 16; ++j) {
+        tmp_vals[j] = at::native::dequantize_val<T>(
+            scale[j], zero_point[j], T(vals[16 * i + j]));
+      }
+      rv[i] = Vectorized<float>(tmp_vals[0],
+          tmp_vals[1],
+          tmp_vals[2],
+          tmp_vals[3],
+          tmp_vals[4],
+          tmp_vals[5],
+          tmp_vals[6],
+          tmp_vals[7],
+          tmp_vals[8],
+          tmp_vals[9],
+          tmp_vals[10],
+          tmp_vals[11],
+          tmp_vals[12],
+          tmp_vals[13],
+          tmp_vals[14],
+          tmp_vals[15]);
+    }
+    return rv;
+  }
+
+  void dump() const {
+      for (int i = 0; i < size(); ++i) {
+          std::cout << vals[i] << " ";
+      }
+      std::cout << std::endl;
+  }
+
+ protected:
+  VectorizedQuantizedConverter() {}
+};
+
+template <>
+struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
+                                 c10::qint32,
+                                 std::array<Vectorized<float>, 1>,
+                                 std::array<Vectorized<c10::qint32>, 1>,
+                                 16> {
+  Vectorized()
+      : VectorizedQuantizedConverter<
+            c10::qint32,
+            std::array<Vectorized<float>, 1>,
+            std::array<Vectorized<c10::qint32>, 1>,
+            16>() {}
+  Vectorized(c10::qint32 val)
+      : VectorizedQuantizedConverter<
+            c10::qint32,
+            std::array<Vectorized<float>, 1>,
+            std::array<Vectorized<c10::qint32>, 1>,
+            16>(val) {}
+  Vectorized(const void* ptr)
+      : VectorizedQuantizedConverter<
+            c10::qint32,
+            std::array<Vectorized<float>, 1>,
+            std::array<Vectorized<c10::qint32>, 1>,
+            16>(ptr) {}
+
+  static Vectorized<c10::qint32> loadu(const void* ptr) {
+    return Vectorized<c10::qint32>(ptr);
+  }
+
+  static Vectorized<c10::qint32> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point,
+      float inverse_scale) {
+    std::array<value_type, size()> qvals;
+    std::array<float, float_num_vecs() * 16> float_vals;
+
+    for (int i = 0; i < float_num_vecs(); ++i) {
+      rhs[i].store(&float_vals[i * 16], 16);
+    }
+
+    at::native::quantize_vec<c10::qint32, /*precision=*/32>(
+        scale,
+        zero_point,
+        float_vals.data(),
+        (c10::qint32*)qvals.data(),
+        16 * float_num_vecs());
+
+    return Vectorized<c10::qint32>::loadu(qvals.data());
+  }
+
+  Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
+    Vectorized<c10::qint32> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
+    Vectorized<c10::qint32> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const  {
+    return maximum(zero_point);
+  }
+
+
+  Vectorized<c10::qint32> relu6(
+      Vectorized<c10::qint32> zero_point,
+      Vectorized<c10::qint32> q_six) {
+    Vectorized<c10::qint32> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(
+          std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
+    }
+    return retval;
+  }
+
+  int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
+    int_vec_return_type retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval[0].vals[i] = vals[i] - b.vals[i];
+    }
+    return retval;
+  }
+
+  static Vectorized<c10::qint32> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    Vectorized<c10::qint32> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] =
+          nearbyint(static_cast<float>(inp[0].vals[i]) * multiplier) +
+          zero_point;
+    }
+    return retval;
+  }
+};
+
+template <>
+Vectorized<c10::qint32> inline maximum(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+  return a.maximum(b);
+}
+
+template <>
+Vectorized<c10::qint32> inline operator*(
+    const Vectorized<c10::qint32>& a,
+    const Vectorized<c10::qint32>& b) {
+  Vectorized<c10::qint32> retval;
+  for (size_t i = 0; i < std::decay_t<decltype(a)>::size(); ++i) {
+    retval.vals[i] = a.vals[i] * b.vals[i];
+  }
+  return retval;
+}
+
+template <>
+Vectorized<c10::qint32> inline operator+(
+    const Vectorized<c10::qint32>& a,
+    const Vectorized<c10::qint32>& b) {
+  Vectorized<c10::qint32> retval;
+  for (size_t i = 0; i < std::decay_t<decltype(a)>::size(); ++i) {
+    retval.vals[i] = a.vals[i] + b.vals[i];
+  }
+  return retval;
+}
+
+template <>
+struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
+                                c10::qint8,
+                                std::array<Vectorized<float>, 4>,
+                                std::array<Vectorized<c10::qint32>, 4>,
+                                64> {
+  Vectorized()
+      : VectorizedQuantizedConverter<
+            c10::qint8,
+            std::array<Vectorized<float>, 4>,
+            std::array<Vectorized<c10::qint32>, 4>,
+            64>() {}
+  Vectorized(c10::qint8 val)
+      : VectorizedQuantizedConverter<
+            c10::qint8,
+            std::array<Vectorized<float>, 4>,
+            std::array<Vectorized<c10::qint32>, 4>,
+            64>(val) {}
+  Vectorized(const void* ptr)
+      : VectorizedQuantizedConverter<
+            c10::qint8,
+            std::array<Vectorized<float>, 4>,
+            std::array<Vectorized<c10::qint32>, 4>,
+            64>(ptr) {}
+
+  static Vectorized<c10::qint8> loadu(const void* ptr) {
+    return Vectorized<c10::qint8>(ptr);
+  }
+
+  static Vectorized<c10::qint8> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point,
+      float inverse_scale) {
+    std::array<value_type, size()> qvals;
+    std::array<float, float_num_vecs() * 16> float_vals;
+
+    for (int i = 0; i < float_num_vecs(); ++i) {
+      rhs[i].store(&float_vals[i * 16], 16);
+    }
+
+    at::native::quantize_vec<c10::qint8>(
+        scale,
+        zero_point,
+        float_vals.data(),
+        (c10::qint8*)qvals.data(),
+        16 * float_num_vecs());
+
+    return Vectorized<c10::qint8>::loadu(qvals.data());
+  }
+
+  Vectorized<c10::qint8> maximum(Vectorized<c10::qint8> b) const {
+    Vectorized<c10::qint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vectorized<c10::qint8> minimum(Vectorized<c10::qint8> b) const {
+    Vectorized<c10::qint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vectorized<c10::qint8> relu(Vectorized<c10::qint8> zero_point) const {
+    return maximum(zero_point);
+  }
+
+  Vectorized<c10::qint8> relu6(
+      Vectorized<c10::qint8> zero_point,
+      Vectorized<c10::qint8> q_six) {
+    Vectorized<c10::qint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(
+          std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
+    }
+    return retval;
+  }
+
+  int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
+    int_vec_return_type retval;
+    constexpr int elem_per_int_vec = size() / int_num_vecs();
+    for (size_t i = 0; i < int_num_vecs(); ++i) {
+      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+        retval[i].vals[j] =
+            static_cast<int32_t>(vals[i * elem_per_int_vec + j]) -
+            static_cast<int32_t>(b.vals[i * elem_per_int_vec + j]);
+      }
+    }
+    return retval;
+  }
+  static Vectorized<c10::qint8> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    constexpr int elem_per_int_vec = size() / int_num_vecs();
+    constexpr auto min_val = std::numeric_limits<value_type>::min();
+    constexpr auto max_val = std::numeric_limits<value_type>::max();
+    Vectorized<c10::qint8> retval;
+    for (size_t i = 0; i < int_num_vecs(); ++i) {
+      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+        int32_t rounded =
+            nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
+            zero_point;
+        retval.vals[i * elem_per_int_vec + j] =
+            std::min<int32_t>(std::max<int32_t>(rounded, min_val), max_val);
+      }
+    }
+    return retval;
+  }
+};
+
+template <>
+Vectorized<c10::qint8> inline maximum(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return a.maximum(b);
+}
+
+template <>
+struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
+                                 c10::quint8,
+                                 std::array<Vectorized<float>, 4>,
+                                 std::array<Vectorized<c10::qint32>, 4>,
+                                 64> {
+  Vectorized()
+      : VectorizedQuantizedConverter<
+            c10::quint8,
+            std::array<Vectorized<float>, 4>,
+            std::array<Vectorized<c10::qint32>, 4>,
+            64>() {}
+  Vectorized(c10::quint8 val)
+      : VectorizedQuantizedConverter<
+            c10::quint8,
+            std::array<Vectorized<float>, 4>,
+            std::array<Vectorized<c10::qint32>, 4>,
+            64>(val) {}
+  Vectorized(const void* ptr)
+      : VectorizedQuantizedConverter<
+            c10::quint8,
+            std::array<Vectorized<float>, 4>,
+            std::array<Vectorized<c10::qint32>, 4>,
+            64>(ptr) {}
+
+  static Vectorized<c10::quint8> loadu(const void* ptr) {
+    return Vectorized<c10::quint8>(ptr);
+  }
+
+  static Vectorized<c10::quint8> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point,
+      float inverse_scale) {
+    std::array<value_type, size()> qvals;
+    std::array<float, float_num_vecs() * 16> float_vals;
+
+    for (int i = 0; i < float_num_vecs(); ++i) {
+      rhs[i].store(&float_vals[i * 16], 16);
+    }
+
+    at::native::quantize_vec<c10::quint8>(
+        scale,
+        zero_point,
+        float_vals.data(),
+        (c10::quint8*)qvals.data(),
+        16 * float_num_vecs());
+
+    return Vectorized<c10::quint8>::loadu(qvals.data());
+  }
+
+  Vectorized<c10::quint8> maximum(Vectorized<c10::quint8> b) const {
+    Vectorized<c10::quint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vectorized<c10::quint8> minimum(Vectorized<c10::quint8> b) const {
+    Vectorized<c10::quint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vectorized<c10::quint8> relu(Vectorized<c10::quint8> zero_point) const {
+    return maximum(zero_point);
+  }
+
+
+  Vectorized<c10::quint8> relu6(
+      Vectorized<c10::quint8> zero_point,
+      Vectorized<c10::quint8> q_six) {
+    Vectorized<c10::quint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(
+          std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
+    }
+    return retval;
+  }
+
+  int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
+    int_vec_return_type retval;
+    constexpr int elem_per_int_vec = size() / int_num_vecs();
+    for (size_t i = 0; i < int_num_vecs(); ++i) {
+      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+        retval[i].vals[j] =
+            static_cast<int32_t>(vals[i * elem_per_int_vec + j]) -
+            static_cast<int32_t>(b.vals[i * elem_per_int_vec + j]);
+      }
+    }
+    return retval;
+  }
+  static Vectorized<c10::quint8> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    constexpr int elem_per_int_vec = size() / int_num_vecs();
+    constexpr auto min_val = std::numeric_limits<value_type>::min();
+    constexpr auto max_val = std::numeric_limits<value_type>::max();
+    Vectorized<c10::quint8> retval;
+    for (size_t i = 0; i < int_num_vecs(); ++i) {
+      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+        int32_t rounded =
+            nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
+            zero_point;
+        retval.vals[i * elem_per_int_vec + j] =
+            std::min<int32_t>(std::max<int32_t>(rounded, min_val), max_val);
+      }
+    }
+    return retval;
+  }
+};
+
+template <>
+Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return a.maximum(b);
+}
+
+#endif // defined(CPU_CAPABILITY_AVX512) && !defined(MSVC)
 
 }}}
