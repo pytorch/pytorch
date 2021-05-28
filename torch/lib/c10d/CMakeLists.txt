@@ -45,8 +45,10 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
+  ParamCommsUtils.cpp
   PrefixStore.cpp
   ProcessGroup.cpp
+  sequence_num.cpp
   Store.cpp
   TCPStore.cpp
   Utils.cpp
@@ -65,11 +67,14 @@ endif()
 
 if(USE_C10D_MPI)
   list(APPEND C10D_SRCS ProcessGroupMPI.cpp)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(ProcessGroupMPI.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  endif()
   list(APPEND C10D_LIBS ${MPI_LIBRARIES})
 endif()
 
 if(USE_C10D_GLOO)
-  list(APPEND C10D_SRCS ProcessGroupGloo.cpp GlooDeviceFactory.cpp)
+  list(APPEND C10D_SRCS ProcessGroupGloo.cpp GlooDeviceFactory.cpp ProcessGroupWrapper.cpp)
   list(APPEND C10D_LIBS gloo)
   if(USE_CUDA)
     list(APPEND C10D_LIBS gloo_cuda)
@@ -121,15 +126,18 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
+copy_header(ParamCommsUtils.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
 copy_header(TCPStore.hpp)
 copy_header(Types.hpp)
 copy_header(Utils.hpp)
+copy_header(sequence_num.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
   copy_header(GlooDeviceFactory.hpp)
+  copy_header(ProcessGroupWrapper.hpp)
 endif()
 if(NOT WIN32)
   copy_header(HashStore.hpp)

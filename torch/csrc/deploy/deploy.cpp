@@ -1,4 +1,6 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/deploy/deploy.h>
+#include <torch/cuda.h>
 
 #include <dlfcn.h>
 #include <libgen.h>
@@ -9,31 +11,52 @@
 // it into a symbol that is then linked into libtorch_deploy.so. This enables us
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
-extern "C" char _binary_libtorch_deployinterpreter_so_start[];
-extern "C" char _binary_libtorch_deployinterpreter_so_end[];
+extern "C" __attribute__((
+    __weak__)) char _binary_libtorch_deployinterpreter_so_start[];
+extern "C"
+    __attribute__((__weak__)) char _binary_libtorch_deployinterpreter_so_end[];
+#ifdef FBCODE_CAFFE2
+// in fbcode, we build the interpreter version with cuda bindings explicitly and
+// side-by-side with the one without.  In OSS builds, we just build one
+// libinterpreter and it either has or doesn't have cuda depending on top-level
+// CMAKE flags
+extern "C" __attribute__((
+    __weak__)) char _binary_libtorch_deployinterpreter_cuda_so_start[];
+extern "C" __attribute__((
+    __weak__)) char _binary_libtorch_deployinterpreter_cuda_so_end[];
+#endif
 
 namespace torch {
 namespace deploy {
 
 Package InterpreterManager::load_package(const std::string& uri) {
+  TORCH_DEPLOY_TRY
   return Package(uri, this);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
-Package InterpreterManager::load_package(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader) {
+Package InterpreterManager::load_package(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader) {
+  TORCH_DEPLOY_TRY
   return Package(reader, this);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 Obj InterpreterSession::from_movable(const ReplicatedObj& obj) {
+  TORCH_DEPLOY_TRY
   return impl_->unpickle_or_get(obj.pImpl_->object_id_, obj.pImpl_->data_);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 InterpreterSession ReplicatedObj::acquire_session(
     const Interpreter* on_this_interpreter) const {
+  TORCH_DEPLOY_TRY
   InterpreterSession I = on_this_interpreter
       ? on_this_interpreter->acquire_session()
       : pImpl_->manager_->acquire_one();
   I.self = I.from_movable(*this);
   return I;
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 InterpreterSession::~InterpreterSession() {
@@ -43,7 +66,9 @@ InterpreterSession::~InterpreterSession() {
 }
 
 void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
+  TORCH_DEPLOY_TRY
   if (!on_this_interpreter) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     for (auto& interp : manager_->all_instances()) {
       unload(&interp);
     }
@@ -52,6 +77,7 @@ void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
 
   InterpreterSession I = on_this_interpreter->acquire_session();
   I.impl_->unload(object_id_);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 ReplicatedObjImpl::~ReplicatedObjImpl() {
@@ -59,31 +85,61 @@ ReplicatedObjImpl::~ReplicatedObjImpl() {
 }
 
 void ReplicatedObj::unload(const Interpreter* on_this_interpreter) {
+  TORCH_DEPLOY_TRY
   pImpl_->unload(on_this_interpreter);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 ReplicatedObj InterpreterSession::create_movable(Obj obj) {
+  TORCH_DEPLOY_TRY
   TORCH_CHECK(
       manager_,
       "Can only create a movable object when the session was created from an interpreter that is part of a InterpreterManager");
   auto pickled = impl_->pickle(self, obj);
   return ReplicatedObj(std::make_shared<ReplicatedObjImpl>(
       manager_->next_object_id_++, std::move(pickled), manager_));
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
+void write_tmp_lib(FILE* dst, char* lib_start, char* lib_end) {
+  TORCH_INTERNAL_ASSERT(dst);
+  size_t size = lib_end - lib_start;
+  TORCH_INTERNAL_ASSERT(size == fwrite(lib_start, 1, size, dst));
 }
 
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char library_name[] = "/tmp/torch_deployXXXXXX";
   int fd = mkstemp(library_name);
   TORCH_INTERNAL_ASSERT(fd != -1, "failed to create temporary file");
   library_name_ = library_name;
   FILE* dst = fdopen(fd, "wb");
-  TORCH_INTERNAL_ASSERT(dst);
-  size_t size = _binary_libtorch_deployinterpreter_so_end -
-      _binary_libtorch_deployinterpreter_so_start;
-  TORCH_INTERNAL_ASSERT(
-      size ==
-      fwrite(_binary_libtorch_deployinterpreter_so_start, 1, size, dst));
+
+  // See comment above for fbcode vs oss behavior
+  char* lib_start = nullptr;
+  char* lib_end = nullptr;
+#ifdef FBCODE_CAFFE2
+  if (torch::cuda::is_available() &&
+      &_binary_libtorch_deployinterpreter_cuda_so_start &&
+      &_binary_libtorch_deployinterpreter_cuda_so_end) {
+    lib_start = _binary_libtorch_deployinterpreter_cuda_so_start;
+    lib_end = _binary_libtorch_deployinterpreter_cuda_so_end;
+  } else if (
+      &_binary_libtorch_deployinterpreter_so_start &&
+      &_binary_libtorch_deployinterpreter_so_end) {
+    lib_start = _binary_libtorch_deployinterpreter_so_start;
+    lib_end = _binary_libtorch_deployinterpreter_so_end;
+  }
+#else // FBCODE_CAFFE2
+  lib_start = _binary_libtorch_deployinterpreter_so_start;
+  lib_end = _binary_libtorch_deployinterpreter_so_end;
+#endif // FBCODE_CAFFE2
+  TORCH_CHECK(
+      lib_start != nullptr && lib_end != nullptr,
+      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.");
+
+  write_tmp_lib(dst, lib_start, lib_end);
   fclose(dst);
   handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY);
   if (!handle_) {
@@ -98,6 +154,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
   void* new_interpreter_impl = dlsym(handle_, "new_interpreter_impl");
   assert(new_interpreter_impl);
   pImpl_ = std::unique_ptr<InterpreterImpl>(
+      // NOLINTNEXTLINE(modernize-redundant-void-arg)
       ((InterpreterImpl * (*)(void)) new_interpreter_impl)());
 }
 
@@ -110,10 +167,12 @@ Interpreter::~Interpreter() {
 }
 
 int LoadBalancer::acquire() {
+  TORCH_DEPLOY_TRY
   thread_local int last = 0;
   size_t minusers = SIZE_MAX;
   int min_idx = 0;
   for (size_t i = 0; i < n_; ++i, ++last) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (last >= n_) {
       last = 0;
     }
@@ -142,10 +201,14 @@ int LoadBalancer::acquire() {
   // then, so this is only a heuristic).
   __atomic_fetch_add(&uses_[8 * min_idx], 1ULL, __ATOMIC_SEQ_CST);
   return min_idx;
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 void LoadBalancer::free(int where) {
+  TORCH_DEPLOY_TRY
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   __atomic_fetch_sub(&uses_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
 } // namespace deploy

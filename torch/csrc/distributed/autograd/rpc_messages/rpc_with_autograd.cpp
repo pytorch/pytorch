@@ -19,7 +19,7 @@ RpcWithAutograd::RpcWithAutograd(
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
     rpc::Message&& wrappedMessage,
-    std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap)
+    std::unordered_map<c10::Device, c10::Device> deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       autogradMetadata_(autogradMetadata),
@@ -39,7 +39,7 @@ RpcWithAutograd::RpcWithAutograd(
     std::unique_ptr<RpcCommandBase> wrappedRpc,
     MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
-    std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap)
+    std::unordered_map<c10::Device, c10::Device> deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       autogradMetadata_(autogradMetadata),
@@ -61,9 +61,9 @@ Message RpcWithAutograd::toMessageImpl() && {
   TORCH_INTERNAL_ASSERT(!payload.empty());
 
   // Convert deviceMap to c10::Dict for serialization.
-  c10::Dict<int64_t, int64_t> deviceMap;
+  c10::Dict<std::string, std::string> deviceMap;
   for (const auto& mapEntry : deviceMap_) {
-    deviceMap.insert(mapEntry.first, mapEntry.second);
+    deviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
   }
 
   std::vector<at::IValue> ivalues{wrappedMessageType,
@@ -109,10 +109,10 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   AutogradMetadata autogradMetadata(
       tupleElements[1].toInt(), tupleElements[2].toInt());
   worker_id_t workerId = tupleElements[3].toInt();
-  auto c10DeviceMap = tupleElements[4].to<c10::Dict<int64_t, int64_t>>();
+  auto c10DeviceMap = tupleElements[4].to<c10::Dict<std::string, std::string>>();
 
   // Convert to regular map.
-  std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap;
+  std::unordered_map<c10::Device, c10::Device> deviceMap;
   for (const auto& mapEntry : c10DeviceMap) {
     deviceMap.insert({mapEntry.key(), mapEntry.value()});
   }
@@ -169,7 +169,7 @@ rpc::worker_id_t RpcWithAutograd::fromWorkerId() const {
   return fromWorkerId_;
 }
 
-const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& RpcWithAutograd::
+const std::unordered_map<c10::Device, c10::Device>& RpcWithAutograd::
     deviceMap() {
   return deviceMap_;
 }

@@ -8,7 +8,7 @@ from torch.jit.annotations import Dict
 from collections import OrderedDict
 
 try:
-    from scipy.optimize import linear_sum_assignment  # type: ignore
+    from scipy.optimize import linear_sum_assignment
     scipy_available = True
 except Exception:
     scipy_available = False

@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <cmath>
 #include <numeric>
@@ -484,17 +485,8 @@ TEST(LLVM, DirectVectorization) {
       Store::make(
           c,
           {Ramp::make(m * 64, 1, 64)},
-          Load::make(
-              {kFloat, 64},
-              a,
-              {Ramp::make(m * 64, 1, 64)},
-              Broadcast::make(1, 64)) *
-              Load::make(
-                  {kFloat, 64},
-                  b,
-                  {Ramp::make(m * 64, 1, 64)},
-                  Broadcast::make(1, 64)),
-          Broadcast::make(1, 64)));
+          Load::make({kFloat, 64}, a, {Ramp::make(m * 64, 1, 64)}) *
+              Load::make({kFloat, 64}, b, {Ramp::make(m * 64, 1, 64)})));
   LLVMCodeGen cg(s, {a, b, c});
 }
 
@@ -505,11 +497,7 @@ TEST(LLVM, VecLoadStoreTest) {
   std::vector<int32_t> a_buffer = {1, 1, 1, 1};
   std::vector<int32_t> b_buffer = {2, 2, 2, 2};
 
-  auto store = b.storeWithMask(
-      {Ramp::make(0, 1, 4)},
-      a.loadWithMask(
-          {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
-      Broadcast::make(IntImm::make(1), 4));
+  auto store = b.store({Ramp::make(0, 1, 4)}, a.load({Ramp::make(0, 1, 4)}));
   LLVMCodeGen cg(store, {a, b});
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -523,26 +511,22 @@ TEST(LLVM, VecLoadStoreTest) {
   ASSERT_EQ(b_buffer[3], 1);
 }
 
-#define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
-  TEST(LLVM, VecFloat_##Name##Lane##Lanes##Test) {               \
-    KernelScope kernel_scope;                                    \
-    Placeholder a(BufHandle("A", {1}, kFloat));                  \
-    Placeholder b(BufHandle("B", {1}, kFloat));                  \
-    float val = 0.5f;                                            \
-    std::vector<float> a_buffer(Lanes, val);                     \
-    std::vector<float> b_buffer(Lanes, val);                     \
-    auto store = b.storeWithMask(                                \
-        {Ramp::make(0, 1, Lanes)},                               \
-        Name(a.loadWithMask(                                     \
-            {Ramp::make(0, 1, Lanes)},                           \
-            Broadcast::make(IntImm::make(1), Lanes))),           \
-        Broadcast::make(IntImm::make(1), Lanes));                \
-    LLVMCodeGen cg(store, {a, b});                               \
-    std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
-    ASSERT_EQ(cg.value<int>(args), 0);                           \
-    for (int i = 0; i < Lanes; i++) {                            \
-      ASSERT_FLOAT_EQ(a_buffer[i], val);                         \
-    }                                                            \
+#define FLOAT_INTRINSICS_TEST(Name, Lanes)                                   \
+  TEST(LLVM, VecFloat_##Name##Lane##Lanes##Test) {                           \
+    KernelScope kernel_scope;                                                \
+    Placeholder a(BufHandle("A", {1}, kFloat));                              \
+    Placeholder b(BufHandle("B", {1}, kFloat));                              \
+    float val = 0.5f;                                                        \
+    std::vector<float> a_buffer(Lanes, val);                                 \
+    std::vector<float> b_buffer(Lanes, val);                                 \
+    auto store = b.store(                                                    \
+        {Ramp::make(0, 1, Lanes)}, Name(a.load({Ramp::make(0, 1, Lanes)}))); \
+    LLVMCodeGen cg(store, {a, b});                                           \
+    std::vector<void*> args({a_buffer.data(), b_buffer.data()});             \
+    ASSERT_EQ(cg.value<int>(args), 0);                                       \
+    for (int i = 0; i < Lanes; i++) {                                        \
+      ASSERT_FLOAT_EQ(a_buffer[i], val);                                     \
+    }                                                                        \
   } // namespace jit
 FLOAT_INTRINSICS_TEST(erf, 4)
 FLOAT_INTRINSICS_TEST(erfc, 4)
@@ -566,26 +550,22 @@ FLOAT_INTRINSICS_TEST(expm1, 8)
 FLOAT_INTRINSICS_TEST(lgamma, 8)
 #undef FLOAT_INTRINSICS_TEST
 
-#define DOUBLE_INTRINSICS_TEST(Name, Lanes)                      \
-  TEST(LLVM, VecDouble_##Name##Lane##Lanes##Test) {              \
-    KernelScope kernel_scope;                                    \
-    Placeholder a(BufHandle("A", {1}, kDouble));                 \
-    Placeholder b(BufHandle("B", {1}, kDouble));                 \
-    float val = 0.5f;                                            \
-    std::vector<double> a_buffer(Lanes, val);                    \
-    std::vector<double> b_buffer(Lanes, val);                    \
-    auto store = b.storeWithMask(                                \
-        {Ramp::make(0, 1, Lanes)},                               \
-        Name(a.loadWithMask(                                     \
-            {Ramp::make(0, 1, Lanes)},                           \
-            Broadcast::make(IntImm::make(1), Lanes))),           \
-        Broadcast::make(IntImm::make(1), Lanes));                \
-    LLVMCodeGen cg(store, {a, b});                               \
-    std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
-    ASSERT_EQ(cg.value<int>(args), 0);                           \
-    for (int i = 0; i < Lanes; i++) {                            \
-      ASSERT_FLOAT_EQ(a_buffer[i], val);                         \
-    }                                                            \
+#define DOUBLE_INTRINSICS_TEST(Name, Lanes)                                  \
+  TEST(LLVM, VecDouble_##Name##Lane##Lanes##Test) {                          \
+    KernelScope kernel_scope;                                                \
+    Placeholder a(BufHandle("A", {1}, kDouble));                             \
+    Placeholder b(BufHandle("B", {1}, kDouble));                             \
+    float val = 0.5f;                                                        \
+    std::vector<double> a_buffer(Lanes, val);                                \
+    std::vector<double> b_buffer(Lanes, val);                                \
+    auto store = b.store(                                                    \
+        {Ramp::make(0, 1, Lanes)}, Name(a.load({Ramp::make(0, 1, Lanes)}))); \
+    LLVMCodeGen cg(store, {a, b});                                           \
+    std::vector<void*> args({a_buffer.data(), b_buffer.data()});             \
+    ASSERT_EQ(cg.value<int>(args), 0);                                       \
+    for (int i = 0; i < Lanes; i++) {                                        \
+      ASSERT_FLOAT_EQ(a_buffer[i], val);                                     \
+    }                                                                        \
   } // namespace jit
 DOUBLE_INTRINSICS_TEST(erf, 2)
 DOUBLE_INTRINSICS_TEST(erfc, 2)
@@ -758,16 +738,13 @@ TEST(LLVM, ElemwiseLog10Float) {
   std::vector<float> a_buffer(N, 10.0f);
   std::vector<float> b_buffer(N, 2.0f);
 
-  auto mask = Broadcast::make(IntImm::make(1), 4);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N / 4,
-      b.storeWithMask(
-          {Ramp::make(i * 4, 1, 4)},
-          log10(a.loadWithMask({Ramp::make(i * 4, 1, 4)}, mask)),
-          mask));
+      b.store(
+          {Ramp::make(i * 4, 1, 4)}, log10(a.load({Ramp::make(i * 4, 1, 4)}))));
 
   LLVMCodeGen cg(expr, {a, b});
 
@@ -788,16 +765,13 @@ TEST(LLVM, ElemwiseLog1pFloat) {
   std::vector<float> a_buffer(N, expf(3.0f) - 1);
   std::vector<float> b_buffer(N, 42.0f);
 
-  auto mask = Broadcast::make(IntImm::make(1), 4);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N / 4,
-      b.storeWithMask(
-          {Ramp::make(i * 4, 1, 4)},
-          log1p(a.loadWithMask({Ramp::make(i * 4, 1, 4)}, mask)),
-          mask));
+      b.store(
+          {Ramp::make(i * 4, 1, 4)}, log1p(a.load({Ramp::make(i * 4, 1, 4)}))));
 
   LLVMCodeGen cg(expr, {a, b});
 
@@ -1528,8 +1502,8 @@ TEST(LLVM, RFactorReduction) {
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
   loop_n = loops.at(1);
-  auto b_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(b_body, loop_n->var(), loop_n->body());
+  auto b_body = const_cast<Stmt*>(loop.getAllWritesToBuf(b->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(b_body, loop_n));
 
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
@@ -1567,25 +1541,19 @@ TEST(LLVM, RFactorVectorizedReduction) {
   Tensor* b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
   LoopNest loopnest({b});
   std::vector<For*> loops = loopnest.getLoopStmtsFor(b);
-  For* loop_k = loops.at(0);
-  For* loop_m = loops.at(1);
-  For* loop_n = loops.at(2);
-  auto b_body = NodeFinder<ReduceOp>::find(loopnest.root_stmt())[0];
-  loopnest.rfactor(b_body, loop_n->var());
+  // Reorder n and m loops
+  loopnest.reorderAxis(loops.at(1), loops.at(2));
+  auto b_body = const_cast<Stmt*>(loopnest.getAllWritesToBuf(b->buf()).at(1));
+  auto all_loops = loopnest.getAllLoopNestsWritingToBuf(b->buf());
+  ASSERT_TRUE(all_loops.size() == 2 && all_loops[1].size() == 3);
+  ASSERT_TRUE(loopnest.rfactor(b_body, all_loops[1][1]));
+  auto distributed_loops = loopnest.distributeLoop(all_loops[1][1]);
 
-  loops = NodeFinder<For>::find(loopnest.root_stmt());
-  loop_k = loops.at(0);
-  // loop 1 is the initializer of tmp_buf
-  loop_m = loops.at(2);
-  loop_n = loops.at(3);
-  loopnest.reorderAxis(loop_n, loop_m);
-
-  // Case-III reductions
-  loops = NodeFinder<For>::find(loopnest.root_stmt());
-  // Vectorize initializer of tmp_buf
-  loopnest.vectorize(loops[1]);
-  // Vectorize producer of tmp_buf
-  loopnest.vectorize(loops[2]);
+  // Vectorize initializer of rfac_buf
+  loopnest.vectorize(distributed_loops[0]);
+  // Vectorize producer of rfac_buf
+  loopnest.vectorize(distributed_loops[1]);
+  loopnest.simplify();
 
   loopnest.prepareForCodegen();
 
@@ -1674,13 +1642,13 @@ TEST(LLVM, CompositeParallel) {
         "t3",
         {{M, "M"}, {N, "N"}},
         [=](const VarHandle& m, const VarHandle& n) {
-          return t1->call(m) * t2->call(n);
+          return t1->load(m) * t2->load(n);
         });
     Tensor* t4 = Compute(
         "t4",
         {{M, "M"}, {N, "N"}},
         [=](const VarHandle& m, const VarHandle& n) {
-          return t3->call(m, n) + m + n;
+          return t3->load(m, n) + m + n;
         });
     LoopNest loop_nest({t4}, {t1, t2, t3, t4});
     std::vector<For*> loop_list;
@@ -1754,16 +1722,12 @@ TEST(LLVM, VectorizedGEMM) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* m = loops[0];
-    For* mo;
-    For* mi;
-    loop.splitWithMask(m, 16, &mo, &mi);
+    loop.splitWithMask(m, 16);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* n = loops[2];
-    For* no;
-    For* ni;
-    loop.splitWithMask(n, 16, &no, &ni);
+    loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
@@ -1818,6 +1782,72 @@ TEST(LLVM, VectorizedGEMM) {
   cg.call({a_v, b_v, c_v});
 
   ExpectAllNear(c_v, c_ref, 1e-5);
+}
+
+TEST(LLVM, CallRaw) {
+  KernelScope kernel_scope;
+  const int M = 32;
+  VarHandle N("N", kInt);
+  Placeholder a(BufHandle("a", {M, N}, kFloat));
+  Placeholder b(BufHandle("b", {N}, kFloat));
+  Tensor* c = Compute(
+      "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return a.load(i, j) + b.load(j);
+      });
+
+  LoopNest l({c});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+
+  int32_t N_value = 1024;
+  std::vector<float> av(M * N_value);
+  std::iota(av.begin(), av.end(), 0);
+  std::vector<float> bv(N_value);
+  std::iota(bv.begin(), bv.end(), 0);
+  std::vector<float> cv(M * N_value, 0);
+  std::vector<void*> args({av.data(), bv.data(), cv.data(), &N_value});
+
+  LLVMCodeGen cg(s, {a, b, BufHandle(c->buf()), N});
+  cg.call_raw(args);
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N_value; j++) {
+      ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
+    }
+  }
+
+  SimpleIREvaluator eval(s, {a, b, BufHandle(c->buf()), N});
+  eval.call_raw(args);
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N_value; j++) {
+      ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
+    }
+  }
+}
+
+TEST(LLVM, CustomTarget) {
+  KernelScope kernel_scope;
+  constexpr int M = 16;
+  Placeholder a("a", kFloat, {M});
+  Placeholder b("b", kFloat, {M});
+  Placeholder c("c", kFloat, {M});
+  Tensor* d = Compute("d", {{M, "m"}}, [&](const VarHandle& m) {
+    return a.load(m) * b.load(m) + c.load(m);
+  });
+  LoopNest nest({d});
+  nest.prepareForCodegen();
+  auto cg = LLVMCodeGenBuilder(nest.root_stmt(), {a, b, c, d})
+                .triple("i686-elf")
+                .cpu("i386")
+                .build();
+  std::ostringstream ss;
+  ss << cg->getCodeText("asm");
+  torch::jit::testing::FileCheck()
+      .check("fadds")
+      ->check("fmuls")
+      ->check_not("vfmadd")
+      ->run(ss.str());
 }
 
 } // namespace jit

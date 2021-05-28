@@ -6,50 +6,60 @@
 
 #include <unordered_set>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(onnxifi_debug_mode, false, "Enable onnxifi debug mode.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     onnxifi_adjust_batch,
     true,
     "Attach AdjustBatch ops at input/outputs of the Onnxifi ops");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     enforce_fp32_inputs_into_fp16,
     false,
     "Whether to enforce fp32 to fp16 conversion for external inputs.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     merge_fp32_inputs_into_fp16,
     false,
     "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     onnxifi_min_ops,
     1,
     "Minimum number of ops for a subgraph to be lowered to backend");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     onnxifi_timeout_ms,
     0,
     "Timeout limit for onnxifi inference in milliseconds. 0 means no timeout");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     onnxifi_shape_hints,
     "",
     "Shape hints in the form of Name:d0,d1:d2;");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     onnxifi_blacklist,
     "",
     "A list of net positions whose corresponding op will be ignored "
     "to onnxifi. Example 0-50,61,62-70");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     onnxifi_blacklist_ops,
     "",
     "A list of operator types that will be ignored "
     "to onnxifi. Example Tanh,Mul");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     onnxifi_input_output_observe_list,
     "",
@@ -116,7 +126,8 @@ void onnxifi(
     bool predictor_net_ssa_rewritten,
     const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs,
     const c10::optional<std::string> &blacklist_ops,
-    const c10::optional<size_t> &min_ops) {
+    const c10::optional<size_t> &min_ops,
+    const std::unordered_set<std::string> &blocklist_blobs) {
   // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
   splitSparseLengthsSumSparse(net, *ws);
 
@@ -170,6 +181,13 @@ void onnxifi(
         ArgumentHelper helper(op);
         more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
       }
+    }
+  }
+  // exclude blocklisted blobs, which is supposed to be loaded to NVM selectively.
+  for (const auto& op : net->op()) {
+    if (blocklist_blobs.count(op.input(0))) {
+      ArgumentHelper helper(op);
+      more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
     }
   }
 

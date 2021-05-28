@@ -15,7 +15,7 @@ class _Loss(Module):
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
         super(_Loss, self).__init__()
         if size_average is not None or reduce is not None:
-            self.reduction = _Reduction.legacy_get_string(size_average, reduce)
+            self.reduction: str = _Reduction.legacy_get_string(size_average, reduce)
         else:
             self.reduction = reduction
 
@@ -24,6 +24,7 @@ class _WeightedLoss(_Loss):
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean') -> None:
         super(_WeightedLoss, self).__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
+        self.weight: Optional[Tensor]
 
 
 class L1Loss(_Loss):
@@ -212,7 +213,6 @@ class NLLLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.nll_loss(input, target, weight=self.weight, ignore_index=self.ignore_index, reduction=self.reduction)
 
 
@@ -304,20 +304,18 @@ class GaussianNLLLoss(_Loss):
 
     The targets are treated as samples from Gaussian distributions with
     expectations and variances predicted by the neural network. For a
-    D-dimensional ``target`` tensor modelled as having heteroscedastic Gaussian
-    distributions with a D-dimensional tensor of expectations ``input`` and a
-    D-dimensional tensor of positive variances ``var`` the loss is:
+    ``target`` tensor modelled as having Gaussian distribution with a tensor
+    of expectations ``input`` and a tensor of positive variances ``var`` the loss is:
 
     .. math::
-        \text{loss} = \frac{1}{2}\sum_{i=1}^D \left(\log\left(\text{max}\left(\text{var}[i],
-        \ \text{eps}\right)\right) + \frac{\left(\text{input}[i] - \text{target}[i]\right)^2}
-        {\text{max}\left(\text{var}[i], \ \text{eps}\right)}\right) + \text{const.}
+        \text{loss} = \frac{1}{2}\left(\log\left(\text{max}\left(\text{var},
+        \ \text{eps}\right)\right) + \frac{\left(\text{input} - \text{target}\right)^2}
+        {\text{max}\left(\text{var}, \ \text{eps}\right)}\right) + \text{const.}
 
     where :attr:`eps` is used for stability. By default, the constant term of
-    the loss function is omitted unless :attr:`full` is ``True``. If ``var`` is
-    a scalar (implying ``target`` tensor has homoscedastic Gaussian
-    distributions) it is broadcasted to be the same size as the input.
-
+    the loss function is omitted unless :attr:`full` is ``True``. If ``var`` is not the same
+    size as ``input`` (due to a homoscedastic assumption), it must either have a final dimension
+    of 1 or have one fewer dimension (with all other sizes being the same) for correct broadcasting.
 
     Args:
         full (bool, optional): include the constant term in the loss
@@ -333,20 +331,22 @@ class GaussianNLLLoss(_Loss):
     Shape:
         - Input: :math:`(N, *)` where :math:`*` means any number of additional
           dimensions
-        - Target: :math:`(N, *)`, same shape as the input
-        - Var: :math:`(N, 1)` or :math:`(N, *)`, same shape as the input
+        - Target: :math:`(N, *)`, same shape as the input, or same shape as the input
+          but with one dimension equal to 1 (to allow for broadcasting)
+        - Var: :math:`(N, *)`, same shape as the input, or same shape as the input but
+          with one dimension equal to 1, or same shape as the input but with one fewer
+          dimension (to allow for broadcasting)
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
-          ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N)`
+          ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`, same
+          shape as the input
 
     Examples::
-
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
         >>> var = torch.ones(5, 2, requires_grad=True) #heteroscedastic
         >>> output = loss(input, target, var)
         >>> output.backward()
-
 
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
@@ -609,7 +609,6 @@ class BCELoss(_WeightedLoss):
         super(BCELoss, self).__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.binary_cross_entropy(input, target, weight=self.weight, reduction=self.reduction)
 
 
@@ -707,10 +706,10 @@ class BCEWithLogitsLoss(_Loss):
         super(BCEWithLogitsLoss, self).__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
         self.register_buffer('pos_weight', pos_weight)
+        self.weight: Optional[Tensor]
+        self.pos_weight: Optional[Tensor]
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
-        assert self.pos_weight is None or isinstance(self.pos_weight, Tensor)
         return F.binary_cross_entropy_with_logits(input, target,
                                                   self.weight,
                                                   pos_weight=self.pos_weight,
@@ -1118,7 +1117,6 @@ class CrossEntropyLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.cross_entropy(input, target, weight=self.weight,
                                ignore_index=self.ignore_index, reduction=self.reduction)
 
@@ -1167,7 +1165,6 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.multilabel_soft_margin_loss(input, target, weight=self.weight, reduction=self.reduction)
 
 
@@ -1206,6 +1203,12 @@ class CosineEmbeddingLoss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+
+    Shape:
+        - Input1: :math:`(N, D)`, where `N` is the batch size and `D` is the embedding dimension.
+        - Input2: :math:`(N, D)`, same shape as Input1.
+        - Target: :math:`(N)`.
+        - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
     """
     __constants__ = ['margin', 'reduction']
     margin: float
@@ -1335,7 +1338,6 @@ class MultiMarginLoss(_WeightedLoss):
         self.margin = margin
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.multi_margin_loss(input, target, p=self.p, margin=self.margin,
                                    weight=self.weight, reduction=self.reduction)
 

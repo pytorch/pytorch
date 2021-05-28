@@ -197,6 +197,9 @@ struct PythonArgs {
   inline std::string string(int i);
   inline std::string stringWithDefault(int i, const std::string& default_str);
   inline c10::optional<std::string> stringOptional(int i);
+  inline c10::string_view stringView(int i);
+  inline c10::string_view stringViewWithDefault(int i, const c10::string_view default_str);
+  inline c10::optional<c10::string_view> stringViewOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -274,9 +277,10 @@ inline std::string PythonArgs::get_func_name(){
   return signature.name;
 }
 
+// TODO: this can return MaybeOwned
 inline at::Tensor PythonArgs::tensor(int i) {
   if (args[i] && THPVariable_CheckExact(args[i])) {
-    return reinterpret_cast<THPVariable*>(args[i])->cdata;
+    return THPVariable_Unpack(args[i]);
   }
   return tensor_slow(i);
 }
@@ -330,7 +334,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     // This is checked by the argument parser so it's safe to cast without checking
     // if this is a tensor first
-    res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
+    res[idx] = THPVariable_Unpack(obj);
   }
   return res;
 }
@@ -347,7 +351,7 @@ inline torch::List<c10::optional<at::Tensor>> PythonArgs::list_of_optional_tenso
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     // This is checked by the argument parser so it's safe to cast without checking
     // if this is a tensor first
-    res.push_back(reinterpret_cast<THPVariable*>(obj)->cdata);
+    res.push_back(THPVariable_Unpack(obj));
   }
   return res;
 }
@@ -367,7 +371,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     // This is checked by the argument parser so it's safe to cast without checking
     // if this is a tensor first
-    res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
+    res[idx] = THPVariable_Unpack(obj);
   }
   return res;
 }
@@ -589,6 +593,20 @@ inline std::string PythonArgs::stringWithDefault(int i, const std::string& defau
 inline c10::optional<std::string> PythonArgs::stringOptional(int i) {
   if (!args[i]) return c10::nullopt;
   return THPUtils_unpackString(args[i]);
+}
+
+inline c10::string_view PythonArgs::stringView(int i) {
+  return stringViewWithDefault(i, signature.params[i].default_string);
+}
+
+inline c10::string_view PythonArgs::stringViewWithDefault(int i, const c10::string_view default_str) {
+  if (!args[i]) return default_str;
+  return THPUtils_unpackStringView(args[i]);
+}
+
+inline c10::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return THPUtils_unpackStringView(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {

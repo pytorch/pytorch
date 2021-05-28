@@ -25,7 +25,6 @@ struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list legacy_apply(const variable_list& inputs);
 
   // Throw a python_error with the PyErr state persisted, so that we
   // don't lose the error state if the GIL is released when we don't
@@ -45,12 +44,16 @@ struct PyNode : public Node {
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
+  // NOLINTNEXTLINE(modernize-use-override)
   ~PyNode() {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
     // TestAutograd.test_inplace_view_python called me out about it.
-    pybind11::gil_scoped_acquire g;
-    Py_DECREF(obj);
+    // If python is already dead, leak the wrapped python objects
+    if (Py_IsInitialized()) {
+      pybind11::gil_scoped_acquire gil;
+      Py_DECREF(obj);
+    }
   }
 };
 
@@ -116,7 +119,9 @@ struct THPFunction {
 };
 
 bool THPFunction_initModule(PyObject *module);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPFunctionType;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPFunctionClass;
 
 inline bool THPFunction_Check(PyObject* obj) {

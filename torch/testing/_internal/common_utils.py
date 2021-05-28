@@ -200,7 +200,7 @@ def wait_for_process(p):
         else:
             p.kill()
             raise
-    except:  # noqa E722, copied from python core library
+    except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
     finally:
@@ -856,8 +856,11 @@ slow_tests_dict: Optional[Dict[str, float]] = None
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
-        url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
-        slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
+        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
+            url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
+            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
+        else:
+            slow_tests_dict = {}
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
 
@@ -1049,6 +1052,32 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
+    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+        sparse_dim = 2
+        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+        assert len(size) == sparse_dim
+
+        def random_sparse_csr(n_rows, n_cols, nnz):
+            nnz_per_row = nnz // n_rows
+            if nnz_per_row > 0:
+                crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
+                crow_indices[1:] = nnz_per_row
+                crow_indices.cumsum_(dim=0)
+                col_indices = torch.randint(0, n_cols, size=[nnz_per_row * n_rows], dtype=index_dtype, device=device)
+            else:
+                crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
+                crow_indices[1:nnz + 1] = 1
+                crow_indices.cumsum_(dim=0)
+                col_indices = torch.randint(0, n_cols, size=[nnz], dtype=index_dtype, device=device)
+            nnz = col_indices.shape[0]
+            values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
+            return values, crow_indices, col_indices
+
+        values, crow_indices, col_indices = random_sparse_csr(size[0], size[1], nnz)
+        return torch.sparse_csr_tensor(crow_indices,
+                                       col_indices,
+                                       values, size=size, dtype=dtype, device=device)
+
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.
@@ -1224,6 +1253,9 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    def _is_dict(self, obj):
+        return isinstance(obj, (dict, torch._C.ScriptDict))  # type: ignore[attr-defined]
+
     # Compares x and y
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
@@ -1332,7 +1364,7 @@ class TestCase(expecttest.TestCase):
             debug_msg = ("Attempted to compare [set] types: "
                          f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        elif isinstance(x, dict) and isinstance(y, dict):
+        elif self._is_dict(x) and self._is_dict(y):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
@@ -1469,10 +1501,10 @@ class TestCase(expecttest.TestCase):
                 torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
-            for w in ws:
-                self.assertTrue(type(w.message) is category)
-                self.assertTrue(re.match(pattern, str(w.message)),
-                                f'{pattern}, {w.message}')
+            self.assertTrue(any([type(w.message) is category for w in ws]))
+            self.assertTrue(
+                any([re.match(pattern, str(w.message)) for w in ws]),
+                f'{pattern}, {[w.message for w in ws if type(w.message) is category]}')
 
     def assertExpected(self, s, subname=None):
         r"""
@@ -1557,6 +1589,36 @@ class TestCase(expecttest.TestCase):
     def assertExpectedStripMangled(self, s, subname=None):
         s = re.sub(r'__torch__[^ ]+', '', s)
         self.assertExpected(s, subname)
+
+    def assertGreaterAlmostEqual(self, first, second, places=None, msg=None, delta=None):
+        """Assert that ``first`` is greater than or almost equal to ``second``.
+
+        The equality of ``first`` and ``second`` is determined in a similar way to
+        the ``assertAlmostEqual`` function of the standard library.
+        """
+        if delta is not None and places is not None:
+            raise TypeError("specify delta or places not both")
+
+        if first >= second:
+            return
+
+        diff = second - first
+        if delta is not None:
+            if diff <= delta:
+                return
+
+            standardMsg = f"{first} not greater than or equal to {second} within {delta} delta"
+        else:
+            if places is None:
+                places = 7
+
+            if round(diff, places) == 0:
+                return
+
+            standardMsg = f"{first} not greater than or equal to {second} within {places} places"
+
+        msg = self._formatMessage(msg, standardMsg)
+        raise self.failureException(msg)
 
     # run code in subprocess and capture exceptions.
     @staticmethod
@@ -1664,7 +1726,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, noncontiguous: bool = False) -> torch.Tensor:
+                requires_grad: bool = False, noncontiguous: bool = False,
+                exclude_zero: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
@@ -1676,6 +1739,10 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
         it is not possible to create a noncontiguous Tensor with a single element.
+
+        If exclude_zero is passed with True (default is False), all the matching values (with zero) in
+        created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
+        complex type and 1 if integer/boolean type.
     """
 
     assert low is None or low < 9, "low value too high!"
@@ -1714,6 +1781,19 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 
+    if exclude_zero:
+        if dtype in integral_types() or dtype is torch.bool:
+            replace_with = torch.tensor(1, device=device, dtype=dtype)
+        elif dtype in floating_types_and(torch.half, torch.bfloat16):
+            replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
+        else:
+            assert dtype in complex_types()
+            float_dtype = torch.float if dtype is torch.cfloat else torch.double
+            real = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
+            imag = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
+            replace_with = torch.complex(real, imag)
+        result[result == 0] = replace_with
+
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
        dtype in complex_types():
         result.requires_grad = requires_grad
@@ -1723,13 +1803,13 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
     A = torch.randn(l, l, dtype=dtype, device=device)
-    u, s, v = A.svd()
+    u, s, vh = torch.linalg.svd(A, full_matrices=False)
     for i in range(l):
         if i >= rank:
             s[i] = 0
         elif s[i] == 0:
             s[i] = 1
-    return u.mm(torch.diag(s).to(dtype)).mm(v.transpose(0, 1))
+    return (u * s.to(dtype).unsqueeze(-2)) @ vh
 
 def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001):
     """
@@ -1748,10 +1828,10 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
     x = torch.rand(shape, dtype=dtype, device=device)
     m = x.size(-2)
     n = x.size(-1)
-    u, _, v = x.svd()
+    u, _, vh = torch.linalg.svd(x, full_matrices=False)
     s = (torch.randn(*(shape[:-2] + (min(m, n),)), dtype=primitive_dtype[dtype], device=device) * sigma + mean) \
         .sort(-1, descending=True).values.to(dtype)
-    return (u * s.unsqueeze(-2)) @ v.transpose(-2, -1).conj()
+    return (u * s.unsqueeze(-2)) @ vh
 
 # TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
@@ -1837,10 +1917,10 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
         return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
 
     A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
-    u, _, v = A.svd()
+    u, _, vh = torch.linalg.svd(A, full_matrices=False)
     real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
-    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
-    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).to(A.dtype).matmul(v.transpose(-2, -1)))
+    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1))
+    return (u * s.to(A.dtype)) @ vh
 
 
 # Creates a full rank matrix with distinct signular values or
@@ -1849,12 +1929,11 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
-    u, _, v = t.svd()
+    u, _, vh = torch.linalg.svd(t, full_matrices=False)
     # TODO: improve the handling of complex tensors here
     real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
-    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1)).diag()
-    u.matmul(s.expand(*shape).to(t.dtype).matmul(v.transpose(-2, -1)))
-    return t
+    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1))
+    return (u * s.to(dtype)) @ vh
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
@@ -1873,19 +1952,17 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
         return torch.ones(rows, columns, dtype=dtype, device=device)
 
     A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
-    u, _, v = A.svd(some=False)
-    s = torch.zeros(rows, columns, dtype=dtype, device=device)
+    u, _, vh = torch.linalg.svd(A, full_matrices=False)
     k = min(rows, columns)
-    for i in range(k):
-        s[i, i] = float(i + 1) / (k + 1)
+    s = torch.linspace(1 / (k + 1), 1, k, dtype=dtype, device=device)
     if singular:
         # make matrix singular
-        s[k - 1, k - 1] = 0
+        s[k - 1] = 0
         if k > 2:
             # increase the order of singularity so that the pivoting
             # in LU factorization will be non-trivial
-            s[0, 0] = 0
-    return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
+            s[0] = 0
+    return (u * s.unsqueeze(-2)) @ vh
 
 
 def random_lowrank_matrix(rank, rows, columns, *batch_dims, **kwargs):
@@ -2117,6 +2194,12 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
+# Tentative value for nondet_tol for gradcheck when backward implementation
+# relies on nondeterministic operations, i.e., those listed here:
+# https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html
+#
+# For more information see https://github.com/pytorch/pytorch/issues/56202
+GRADCHECK_NONDET_TOL = 1e-12
 
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
@@ -2125,25 +2208,38 @@ def gradcheck(fn, inputs, **kwargs):
     # to be disabled to default for the public-facing api to avoid breaking user code.
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
-    keys_enabled_by_default = (
-        "check_batched_grad",)
+    default_values = {
+        "check_batched_grad": True,
+        "fast_mode": True,
+    }
 
-    for key in keys_enabled_by_default:
-        kwargs[key] = kwargs.get(key, True)
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+        default_values["fast_mode"] = False
+
+    for key, value in default_values.items():
+        # default value override values explicitly set to None
+        k = kwargs.get(key, None)
+        kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
-
 
 def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # Wrapper around gradgradcheck that enables certain keys by default
     # See gradcheck above for an explanation of why we need something like this.
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
-    keys_enabled_by_default = (
-        "check_batched_grad",)
+    default_values = {
+        "check_batched_grad": True,
+        "fast_mode": True,
+    }
 
-    for key in keys_enabled_by_default:
-        kwargs[key] = kwargs.get(key, True)
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+        default_values["fast_mode"] = False
+
+    for key, value in default_values.items():
+        # default value override values explicitly set to None
+        k = kwargs.get(key, None)
+        kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
 
