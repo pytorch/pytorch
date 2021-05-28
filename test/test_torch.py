@@ -4983,6 +4983,25 @@ else:
             bin_edges = make_tensor((), device, dtype=inconsistent_dtype)
             torch.histogram(values, 1, out=(hist, bin_edges))
 
+        with self.assertRaisesRegex(RuntimeError, 'bins tensor should have dimension 1'):
+            t = make_tensor((2, 2), device, dtype=dtype)
+            torch.histogram(t, t)
+
+        with self.assertRaisesRegex(RuntimeError, 'bins tensor should have at least 1 element'):
+            t = make_tensor((0), device, dtype=dtype)
+            torch.histogram(t, t)
+
+        with self.assertRaisesRegex(RuntimeError, 'input tensor and weight tensor should have same shape'):
+            values = make_tensor((2, 2), device, dtype=dtype)
+            weight = make_tensor((1), device, dtype=dtype)
+            torch.histogram(values, 1, weight=weight)
+
+        with self.assertRaisesRegex(RuntimeError, 'hist tensor must be contiguous'):
+            values = make_tensor((), device, dtype=dtype)
+            hist = make_tensor((2), device, dtype=dtype, noncontiguous=True)
+            bin_edges = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, 2, out=(hist, bin_edges))
+
     @onlyCPU
     @dtypes(torch.float32, torch.float64)
     def test_histogram_noncontig(self, device, dtype):
