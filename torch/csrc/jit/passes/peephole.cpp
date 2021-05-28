@@ -160,6 +160,25 @@ struct PeepholeOptimizeImpl {
           }
         }
       } else if (
+          node->matches("aten::len.t(t[] a) -> int") &&
+          node->input()->node()->matches("aten::size(Tensor self) -> int[]") &&
+          shape_peepholes_) {
+        auto ptt = node->input()->node()->input()->type()->expect<TensorType>();
+        // only handle one use case for now to avoid modifying mutated lists
+        // TODO: canonicalize as aten::dim ?
+        if (ptt->sizes().size() && node->input()->uses().size() == 1) {
+          WithInsertPoint guard(node);
+          auto output = node->owningGraph()->insertConstant(
+              static_cast<int64_t>(*ptt->sizes().size()));
+          GRAPH_UPDATE(
+              "Replacing ",
+              getHeader(node),
+              " with a \"dim\" constant ",
+              output->debugName());
+          node->output()->replaceAllUsesWith(output);
+          changed = true;
+        }
+      } else if (
           node->matches("aten::size(Tensor self, int dim) -> int") &&
           shape_peepholes_) {
         if (auto ptt = node->inputs().at(0)->type()->cast<TensorType>()) {
