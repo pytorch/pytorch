@@ -88,10 +88,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
   }
 
   cudnnBatchNormMode_t mode;
+  at::MemoryFormat memory_format = input->suggest_memory_format();
   if (input->dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
-  } else if (training && input->suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
+  } else if (training && memory_format == at::MemoryFormat::ChannelsLast) {
 #if CUDNN_VERSION >= 7400
+    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#else
+    mode = CUDNN_BATCHNORM_SPATIAL;
+#endif // CUDNN_VERSION >= 7400
+  } else if (training && memory_format == at::MemoryFormat::ChannelsLast3d) {
+#if CUDNN_VERSION >= 8100
     mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
 #else
     mode = CUDNN_BATCHNORM_SPATIAL;
@@ -272,10 +279,17 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   }
 
   cudnnBatchNormMode_t mode;
+  at::MemoryFormat memory_format = input->suggest_memory_format();
   if (input->dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
-  } else if (input->suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
+  } else if (memory_format == at::MemoryFormat::ChannelsLast) {
 #if CUDNN_VERSION >= 7400
+    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#else
+    mode = CUDNN_BATCHNORM_SPATIAL;
+#endif // CUDNN_VERSION >= 7400
+  } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+#if CUDNN_VERSION >= 8100
     mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
 #else
     mode = CUDNN_BATCHNORM_SPATIAL;
