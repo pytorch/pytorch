@@ -232,12 +232,10 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   // restores the behavior of V5 and before. For V6, the default arg values are
   // resolved at runtime init stage for better operator compatibility.
   BytecodeEmitDefaultInputsGuard argNumGuard(true);
-  std::stringstream output;
-  torch_script._save_for_mobile(output, extra_files, hasBytecodeDebug);
-  std::stringstream output_copy(output.str());
-  output_model_stream.swap(output);
-
-  return true;
+  std::stringstream ouput_model_stream;
+  torch_script._save_for_mobile(
+      ouput_model_stream, extra_files, hasBytecodeDebug);
+  return ouput_model_stream;
 }
 } // namespace
 

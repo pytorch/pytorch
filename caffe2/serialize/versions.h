@@ -71,6 +71,9 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  to the unify format, the root key of tensor storage is updated from {index} to
 //  {the_pointer_value_the_tensor.storage}, for example: `140245072983168.storage`
 //  Forward-compatibility change.
+//  0x6L: Implicit opereator versioning using number of specified argument.
+//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845
+//  for details.
 constexpr uint64_t kProducedBytecodeVersion = 0x6L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
