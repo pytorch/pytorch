@@ -3836,6 +3836,39 @@ Example::
     tensor([ 0.,  2.,  1.,  0.])
 """.format(**common_args))
 
+add_docstr(torch.histogram,
+           r"""
+histogram(input, bins, *, min=None, max=None, weight=None, density=False) -> (Tensor, Tensor)
+
+Computes the histogram of a tensor. The histogram is computed over the flattened values.
+
+Args:
+    {input}
+    bins: int or 1D Tensor. If int, defines the number of equal-width bins. If tensor,
+          defines the sequence of bin edges including the rightmost edge.
+
+Keyword args:
+    min (scalar): Defines the lower range of the bins. If not provided, defaults to input.min().
+    max (scalar): Defines the upper range of the bins. If not provided, defaults to input.max().
+    weight (Tensor): If provided, weight should have the same shape as input. Each value in
+                     input contributes its associated weight towards its bin's result.
+    density (bool): If False, the result will contain the count (or total weight) in each bin.
+                    If True, the result is the value of the probability density function over the bins,
+                    normalized such that the integral over the range of the bins is 1.
+    {out}
+
+Returns:
+    hist (Tensor): 1D Tensor containing the values of the histogram.
+    bin_edges(Tensor): 1D Tensor containing the edges of the histogram bins.
+
+Example::
+
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, min=0, max=3, weight=torch.tensor([1., 2., 4.]))
+    (tensor([ 0.,  5.,  2.,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, min=0, max=3, weight=torch.tensor([1., 2., 4.]), density=True)
+    (tensor([ 0.,  0.9524,  0.3810,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
+""".format(**common_args))
+
 add_docstr(torch.hypot,
            r"""
 hypot(input, other, *, out=None) -> Tensor
