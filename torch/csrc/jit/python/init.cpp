@@ -180,6 +180,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
       .def(
+          "_jit_set_symbolic_shapes_test_mode",
+          &setSymbolicShapeAnalysisTestMode)
+      .def(
+          "_jit_symbolic_shapes_test_mode_enabled",
+          &symbolicShapeAnalysisTestModeEnabled)
+      .def(
           "_jit_pass_onnx_fold_if",
           [](std::shared_ptr<Graph>& graph) {
             return FoldIfNodeONNX(graph->block());
