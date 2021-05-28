@@ -69,32 +69,26 @@ class MisalignedVectorizationModifier {
     }
   }
 
-  // TODO: Divide this function into smaller, compact pieces
-  kir::ForLoop* handleMisalignedVectorize(
-      std::vector<kir::ForLoop*> for_loop_structure,
-      const kir::ForLoop* parent_for_loop) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  struct ReferenceTensors {
+    // Input TensorView to Vectorize Set operation
+    kir::TensorView* in_tv = nullptr;
+    // Output TensorView to Vectorize Set operation
+    kir::TensorView* out_tv = nullptr;
+    // TensorView in global memory
+    kir::TensorView* global_tv = nullptr;
+    // TensorView with vectorize IterDomain and not in global memory
+    kir::TensorView* vec_tv = nullptr;
+  };
 
-    // The parent_for_loop contains allocate, read, compute, write operations
-    // Create a new parent for loop
-    const auto new_parent_for_loop =
-        ir_builder.create<kir::ForLoop>(parent_for_loop);
+  ReferenceTensors getReferenceTensors(kir::Expr* vectorized_expr) {
+    TORCH_INTERNAL_ASSERT(vectorized_expr != nullptr);
+    TORCH_INTERNAL_ASSERT(
+        vectorized_expr->outputs().front()->isA<kir::TensorView>());
+    TORCH_INTERNAL_ASSERT(
+        vectorized_expr->inputs().front()->isA<kir::TensorView>());
 
-    // Transfer any expressions except for loops to new parent for loop
-    // All expressions are placed at the beginning of the parent for loop
-    moveExprsExceptForLoops(parent_for_loop, new_parent_for_loop);
-
-    // Find all child for loops
-    auto child_loops = findChildForLoops(parent_for_loop);
-
-    // Find the first vectorize set - either read or write
-    auto vec_expr = findFirstVectorizedSetOp(for_loop_structure, child_loops);
-    TORCH_INTERNAL_ASSERT(vec_expr != nullptr);
-    TORCH_INTERNAL_ASSERT(vec_expr->outputs().front()->isA<kir::TensorView>());
-    TORCH_INTERNAL_ASSERT(vec_expr->inputs().front()->isA<kir::TensorView>());
-
-    auto out_tv = vec_expr->outputs().front()->as<kir::TensorView>();
-    auto in_tv = vec_expr->inputs().front()->as<kir::TensorView>();
+    auto in_tv = vectorized_expr->inputs().front()->as<kir::TensorView>();
+    auto out_tv = vectorized_expr->outputs().front()->as<kir::TensorView>();
 
     const bool global_vectorize_write_op =
         (out_tv->memoryType() == MemoryType::Global &&
@@ -117,101 +111,124 @@ class MisalignedVectorizationModifier {
     // expression is a vectorized load, so the output TV is vec_tv.
     auto vec_tv = (out_tv->memoryType() != MemoryType::Global) ? out_tv : in_tv;
 
-    // Get the predicate for all but last root domains
-    auto pred_except_last_root_domain = ir_builder.create<kir::Predicate>(
-        PredicateType::Misaligned, vec_expr, ir_builder.trueVal());
-    TORCH_INTERNAL_ASSERT(pred_except_last_root_domain != nullptr);
-    kir::IfThenElse* pred_ite =
-        ir_builder.create<kir::IfThenElse>(pred_except_last_root_domain);
-    new_parent_for_loop->body().push_back(pred_ite);
+    return {in_tv, out_tv, global_tv, vec_tv};
+  }
 
-    //-------------------------------------------------------------------------
-    // Create constants for handling misaligned addresses
+  struct VectorizeData {
+    kir::Val* vector_size = nullptr;
+    kir::Val* shift = nullptr;
+    kir::Val* extent = nullptr;
+    kir::Val* remainder = nullptr;
+    kir::Val* extent_minus_remainder = nullptr;
+    kir::Val* last_root_domain_index = nullptr;
+    kir::Val* last_root_domain_index_shift = nullptr;
+  };
+
+  // Create constants for handling misaligned addresses
+  VectorizeData createVectorizeConstants(
+      const std::vector<kir::ForLoop*>& for_loop_structure,
+      const ReferenceTensors& tensors,
+      kir::IfThenElse* parent_scope_ite) {
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
     // Generate vectorize index
-    // TODO: Remove tensor index
-    auto indices = (out_tv->memoryType() == MemoryType::Global)
+    auto indices = (tensors.out_tv->memoryType() == MemoryType::Global)
         ? Index::getConsumerStridedIndices(
-              out_tv->fuserTv(), for_loop_structure)
+              tensors.out_tv->fuserTv(), for_loop_structure)
         : Index::getProducerStridedIndices(
-              in_tv->fuserTv(), out_tv->fuserTv(), for_loop_structure);
-    auto index =
-        ir_builder.create<kir::TensorIndex>(global_tv->fuserTv(), indices);
-    auto address = createNamedScalarFromValue(
-        pred_ite->thenBody(), index, "address", true);
+              tensors.in_tv->fuserTv(),
+              tensors.out_tv->fuserTv(),
+              for_loop_structure);
 
+    // >>>>>>>>>>>>>
     // Number of elements in vectorize access
     auto vector_size =
-        vec_tv->domain()->domain().back()->extent()->as<kir::Int>();
+        tensors.vec_tv->domain()->domain().back()->extent()->as<kir::Int>();
 
     // Size of memory type for the elements
     kir::Int* data_size_in_bytes =
-        ir_builder.create<kir::Int>(dataTypeSize(vec_tv->dtype()));
+        ir_builder.create<kir::Int>(dataTypeSize(tensors.vec_tv->dtype()));
 
     // The number of bytes in the vectorize access
     auto vector_size_in_bytes =
         ir_builder.mulExpr(vector_size, data_size_in_bytes);
+
+    auto index = ir_builder.create<kir::TensorIndex>(
+        tensors.global_tv->fuserTv(), indices);
+    auto address = createNamedScalarFromValue(
+        parent_scope_ite->thenBody(), index, "address", true);
 
     // offset_size = (address % vector_size_bytes) / data_type_size_bytes
     // shift_init = vector_size - offset_size
     auto a = ir_builder.modExpr(address, vector_size_in_bytes);
     auto b = ir_builder.divExpr(a, data_size_in_bytes);
     auto c = ir_builder.subExpr(vector_size, b);
-    auto shift_init =
-        createNamedScalarFromValue(pred_ite->thenBody(), c, "shift_val");
+    auto shift_init = createNamedScalarFromValue(
+        parent_scope_ite->thenBody(), c, "shift_val");
 
     // shift = (shift_init == vector_size) ? 0 : shift_init
     // The number of elements until the first aligned address
     auto shift_pred = ir_builder.eqExpr(shift_init, vector_size);
     auto shift_val =
         ir_builder.whereExpr(shift_pred, ir_builder.zeroVal(), shift_init);
-    auto shift =
-        createNamedScalarFromValue(pred_ite->thenBody(), shift_val, "shift");
 
+    // >>>>>>>>>>>>>
+    auto shift = createNamedScalarFromValue(
+        parent_scope_ite->thenBody(), shift_val, "shift");
+
+    // >>>>>>>>>>>>>
     // Get full extent for the inner-most, merged root domain
-    auto extent = getVectorizeExtent(in_tv, out_tv);
+    auto extent = getVectorizeExtent(tensors.in_tv, tensors.out_tv);
 
     // remainder = (extent - shift) % vector_size
     // The number of elements remaining not accessed by vectorized operations
     auto remaining_extent = ir_builder.subExpr(extent, shift);
     auto remainder_val = ir_builder.modExpr(remaining_extent, vector_size);
     auto remainder = createNamedScalarFromValue(
-        pred_ite->thenBody(), remainder_val, "remainder");
+        parent_scope_ite->thenBody(), remainder_val, "remainder");
 
     // (extent - remainder) is the upper-bound for the vectorize section
     auto extent_remainder_val = ir_builder.subExpr(extent, remainder);
+
+    // >>>>>>>>>>>>>
     auto extent_minus_remainder = createNamedScalarFromValue(
-        pred_ite->thenBody(), extent_remainder_val, "extent_minus_remainder");
+        parent_scope_ite->thenBody(),
+        extent_remainder_val,
+        "extent_minus_remainder");
 
+    // >>>>>>>>>>>>>
     auto last_root_domain_index = createNamedScalarFromValue(
-        pred_ite->thenBody(), indices.back(), "last_root_domain_index");
+        parent_scope_ite->thenBody(), indices.back(), "last_root_domain_index");
 
+    // >>>>>>>>>>>>>
     auto last_root_domain_index_shift =
         ir_builder.addExpr(last_root_domain_index, shift);
 
-    //------------------------------------------------------------------------
-    // Clone the child for loops
-    // Each child for loop is duplicated 3 times and is modified to handle parts
-    // of the address space.
-    //
-    // 1) Initial : [0 - shift)
-    // From the initial address until the first aligned address
-    //
-    // 2) Vectorized : [shift - (extent-remainder))
-    // From the first to the last aligned address
-    //
-    // 3) Remainder : [(extent-remainder) - extent)
-    // From the last aligned address until the end of the extent
+    return {
+        vector_size,
+        shift,
+        extent,
+        remainder,
+        extent_minus_remainder,
+        last_root_domain_index,
+        last_root_domain_index_shift};
+  }
 
-    // Part A - Vectorized
-    // Vectorized set operations with vectorize shift
+  // Vectorized : [shift - (extent-remainder))
+  // From the first to the last aligned address
+  kir::IfThenElse* createVectorizeSection(
+      const std::vector<kir::ForLoop*>& child_loops,
+      const VectorizeData& params) {
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
     auto vectorized_child_loops =
-        cloneForLoops(child_loops, vector_size, true, shift);
+        cloneForLoops(child_loops, params.vector_size, true, params.shift);
 
     // Vectorize Range: [shift - (extent-remainder))
     // (last_root_domain_index + shift) < (extent - remainder)
-    kir::Val* vectorize_cond =
-        ir_builder.ltExpr(last_root_domain_index_shift, extent_minus_remainder);
+    kir::Val* vectorize_cond = ir_builder.ltExpr(
+        params.last_root_domain_index_shift, params.extent_minus_remainder);
+
     kir::Predicate* vectorize_pred =
         ir_builder.create<kir::Predicate>(vectorize_cond->as<kir::Bool>());
     kir::IfThenElse* vectorize_ite =
@@ -220,16 +237,25 @@ class MisalignedVectorizationModifier {
     for (auto cloned_loop : vectorized_child_loops) {
       vectorize_ite->thenBody().push_back(cloned_loop);
     }
-    pred_ite->thenBody().push_back(vectorize_ite);
 
-    // Part B - Initial
-    // Standard set operations without vectorize shift
-    auto pre_child_loops = cloneForLoops(child_loops, shift, false, nullptr);
+    return vectorize_ite;
+  }
+
+  // Initial : [0 - shift)
+  // From the initial address until the first aligned address
+  kir::IfThenElse* createInitialSection(
+      const std::vector<kir::ForLoop*>& child_loops,
+      const VectorizeData& params) {
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
+    auto pre_child_loops =
+        cloneForLoops(child_loops, params.shift, false, nullptr);
 
     // Initial Range: [0 - shift)
     // last_root_domain_index == 0
     kir::Val* initial_cond =
-        ir_builder.eqExpr(last_root_domain_index, ir_builder.zeroVal());
+        ir_builder.eqExpr(params.last_root_domain_index, ir_builder.zeroVal());
+
     kir::Predicate* initial_pred =
         ir_builder.create<kir::Predicate>(initial_cond->as<kir::Bool>());
     kir::IfThenElse* initial_ite =
@@ -238,19 +264,28 @@ class MisalignedVectorizationModifier {
     for (auto cloned_loop : pre_child_loops) {
       initial_ite->thenBody().push_back(cloned_loop);
     }
-    pred_ite->thenBody().push_back(initial_ite);
 
-    // Part C - Remainder
-    // Standard set operations with vectorize shift
-    auto post_child_loops = cloneForLoops(child_loops, remainder, false, shift);
+    return initial_ite;
+  }
+
+  // Remainder : [(extent-remainder) - extent)
+  // From the last aligned address until the end of the extent
+  kir::IfThenElse* createRemainderSection(
+      const std::vector<kir::ForLoop*>& child_loops,
+      const VectorizeData& params) {
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
+    auto post_child_loops =
+        cloneForLoops(child_loops, params.remainder, false, params.shift);
 
     // Remainder Range: [(extent-remainder) - extent)
     // (extent - remainder) <= last_root_domain_index + shift < extent
-    kir::Val* lower_bound =
-        ir_builder.geExpr(last_root_domain_index_shift, extent_minus_remainder);
+    kir::Val* lower_bound = ir_builder.geExpr(
+        params.last_root_domain_index_shift, params.extent_minus_remainder);
     kir::Val* upper_bound =
-        ir_builder.ltExpr(last_root_domain_index_shift, extent);
+        ir_builder.ltExpr(params.last_root_domain_index_shift, params.extent);
     kir::Val* remainder_cond = ir_builder.andExpr(lower_bound, upper_bound);
+
     kir::Predicate* remainder_pred =
         ir_builder.create<kir::Predicate>(remainder_cond->as<kir::Bool>());
     kir::IfThenElse* remainder_ite =
@@ -259,6 +294,55 @@ class MisalignedVectorizationModifier {
     for (auto cloned_loop : post_child_loops) {
       remainder_ite->thenBody().push_back(cloned_loop);
     }
+
+    return remainder_ite;
+  }
+
+  kir::ForLoop* handleMisalignedVectorize(
+      std::vector<kir::ForLoop*> for_loop_structure,
+      const kir::ForLoop* parent_for_loop) {
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
+    auto child_loops = findChildForLoops(parent_for_loop);
+
+    // Assumption: All vectorize operations have the same shift
+    auto vectorized_expr =
+        findFirstVectorizedSetOp(for_loop_structure, child_loops);
+    TORCH_INTERNAL_ASSERT(vectorized_expr != nullptr);
+
+    auto reference_tensors = getReferenceTensors(vectorized_expr);
+
+    // The parent_for_loop contains allocate, read, compute, write operations
+    const auto new_parent_for_loop =
+        ir_builder.create<kir::ForLoop>(parent_for_loop);
+
+    // Transfer all expressions except for-loops to new parent for-loop
+    // All expressions are placed at the beginning of the new for-loop
+    moveExprsExceptForLoops(parent_for_loop, new_parent_for_loop);
+
+    // Get the predicate for all but the last root domain
+    auto pred_except_last_root_domain = ir_builder.create<kir::Predicate>(
+        PredicateType::Misaligned, vectorized_expr, ir_builder.trueVal());
+    kir::IfThenElse* pred_ite =
+        ir_builder.create<kir::IfThenElse>(pred_except_last_root_domain);
+    new_parent_for_loop->body().push_back(pred_ite);
+
+    auto constants = createVectorizeConstants(
+        for_loop_structure, reference_tensors, pred_ite);
+
+    // The last root domain is divided into three sections.
+    // | Initial - N/A Shift | Vectorize - Shift | Remainder - Shift |
+
+    // Vectorized set operation with vectorize shift
+    auto vectorize_ite = createVectorizeSection(child_loops, constants);
+    pred_ite->thenBody().push_back(vectorize_ite);
+
+    // Standard set operation without vectorize shift
+    auto initial_ite = createInitialSection(child_loops, constants);
+    pred_ite->thenBody().push_back(initial_ite);
+
+    // Standard set operation with vectorize shift
+    auto remainder_ite = createRemainderSection(child_loops, constants);
     pred_ite->thenBody().push_back(remainder_ite);
 
     return new_parent_for_loop;
