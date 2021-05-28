@@ -5,6 +5,7 @@ import runpy
 import threading
 from enum import Enum
 from functools import wraps
+import contextlib
 from typing import List, Any, ClassVar, Optional, Sequence, Tuple
 import unittest
 import os
@@ -289,7 +290,11 @@ class DeviceTypeTestBase(TestCase):
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
-                    with op.decorate_errors():
+                    if op:
+                        decorate_errors = op.decorate_errors()
+                    else:
+                        decorate_errors = contextlib.nullcontext()
+                    with decorate_errors:
                         result = test_fn(self, *args)
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
