@@ -22,6 +22,7 @@ These are the basic building blocks for graphs:
 
     ~parameter.Parameter
     ~parameter.UninitializedParameter
+    ~parameter.UninitializedBuffer
 
 Containers
 ----------------------------------
@@ -145,6 +146,7 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.GELU
     nn.Sigmoid
     nn.SiLU
+    nn.Mish
     nn.Softplus
     nn.Softshrink
     nn.Softsign

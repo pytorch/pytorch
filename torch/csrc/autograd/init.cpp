@@ -108,7 +108,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("Metal", c10::DeviceType::Metal);
 
 #ifdef USE_KINETO
-  py::class_<KinetoEvent>(m, "KinetoEvent")
+  py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", &KinetoEvent::name)
       // PyTorch thread id of the start callback
@@ -186,7 +186,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
 
-  py::class_<ProfilerResult>(m, "ProfilerResult")
+  py::class_<ProfilerResult>(m, "_ProfilerResult")
     .def("events", &ProfilerResult::events)
     .def("legacy_events", &ProfilerResult::legacy_events)
     .def("save", &ProfilerResult::save);
@@ -213,7 +213,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif
   });
 
-  m.def("supported_kineto_activities", []() {
+  m.def("_supported_kineto_activities", []() {
     std::set<ActivityType> activities;
 #ifdef USE_KINETO
     activities.insert(ActivityType::CPU);
