@@ -15,6 +15,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
+lscpu
+
 export LANG=C.UTF-8
 
 if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
