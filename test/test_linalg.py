@@ -11,6 +11,7 @@ import random
 from random import randrange
 from itertools import product
 from functools import reduce
+import pytest
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -7319,14 +7320,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
-                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    @pytest.mark.lu_solve
+    @dtypes(torch.float64)
+    @precisionOverride({torch.float64: 1e-8})
     def test_lu_solve(self, device, dtype):
         def sub_test(pivot):
             for k, n in zip([2, 3, 5], [3, 5, 7]):
                 b, A, LU_data, LU_pivots = self.lu_solve_test_helper((n,), (n, k), pivot, device, dtype)
+                print("pre lu_solve b:")
+                print(b)
                 x = torch.lu_solve(b, LU_data, LU_pivots)
+                print("b:")
+                print(b)
+                print("x:")
+                print(x)
+                print("matmul:")
+                print(np.matmul(A.cpu(), x.cpu()))
                 self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
         sub_test(True)

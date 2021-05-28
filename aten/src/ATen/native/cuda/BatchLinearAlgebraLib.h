@@ -52,6 +52,8 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
 
 void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots);
 
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots);
+
 #endif  // USE_CUSOLVER
 
 }}  // namespace at::native

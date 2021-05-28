@@ -75,17 +75,12 @@ template <typename scalar_t>
 static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
   cublasOperation_t trans = CUBLAS_OP_N;
 
-  auto lu_data = lu.data_ptr<scalar_t>();
-  auto b_data = b.data_ptr<scalar_t>();
   auto pivots_data = pivots.data_ptr<int>();
-  auto lu_stride = matrixStride(lu);
-  auto b_stride = matrixStride(b);
   auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
   auto m = cuda_int_cast(lu.size(-2), "m");
   auto nrhs = cuda_int_cast(b.size(-1), "nrhs");
   auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
-  auto ldb = cuda_int_cast(std::max<int>(1, nrhs), "ldb");
-  Tensor infos_getrs = at::zeros({std::max<int>(1, batch_size)}, lu.options().dtype(kInt));
+  Tensor infos_getrs = at::zeros({std::max<int>(1, batch_size)}, lu.options().dtype(kInt).device(kCPU));
   auto infos_getrs_data = infos_getrs.data_ptr<int>();
 
   Tensor lu_ptr_array = get_device_pointers<scalar_t>(lu);
@@ -95,7 +90,7 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
-    lda, pivots_data, b_ptr_array_data, ldb, infos_getrs_data, batch_size);
+    lda, pivots_data, b_ptr_array_data, lda, infos_getrs_data, batch_size);
 }
 
 void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
@@ -1271,8 +1266,7 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
     auto pivots_stride = pivots.size(-1);
     auto lu_stride = matrixStride(lu);
     auto b_stride = matrixStride(b);
-    int lda = cuda_int_cast(std::max<int>(1, lu_stride), "lda");
-    int ldb = cuda_int_cast(std::max<int>(1, b_stride), "ldb");
+    int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       auto handle = at::cuda::getCurrentCUDASolverDnHandle();
@@ -1281,10 +1275,10 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
         n,
         nrhs,
         lu_data + batch * lu_stride,
-        lda,
+        leading_dimension,
         pivots_data + batch * pivots_stride,
         b_data + batch * b_stride,
-        ldb,
+        leading_dimension,
         infos_data + batch);
     }
   });
