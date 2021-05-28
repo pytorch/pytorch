@@ -39,6 +39,7 @@ void _dim_apply(
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(values.sizes(), /*squash_dim=*/dim)
     .add_output(values)
     .add_output(indices)
@@ -48,8 +49,8 @@ void _dim_apply(
   auto indices_dim_stride = indices.stride(dim);
   auto dim_size = values.size(dim);
 
-  AT_DISPATCH_ALL_TYPES_AND2(
-    ScalarType::Bool, ScalarType::Half, iter.dtype(),
+  AT_DISPATCH_ALL_TYPES_AND3(
+    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
     "sorting_kernel_method_name", [&] {
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* values_data_bytes = data[0];
@@ -141,8 +142,8 @@ static void sort_kernel(
 }
 
 static void topk_kernel(
-    Tensor& values,
-    Tensor& indices,
+    const Tensor& values,
+    const Tensor& indices,
     const Tensor& self,
     int64_t k,
     int64_t dim,
@@ -216,7 +217,9 @@ static void topk_kernel(
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
 }} //at::native

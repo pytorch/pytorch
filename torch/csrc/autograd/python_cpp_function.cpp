@@ -43,7 +43,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
     if (!THPVariable_Check(arg)) {
       return PyErr_Format(PyExc_TypeError, "argument %d is not a Variable", i);
     }
-    vars[i] = ((THPVariable*)arg)->cdata;
+    vars[i] = THPVariable_Unpack(arg);
   }
 
   variable_list output;
@@ -143,7 +143,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
   std::unique_ptr<FunctionPreHook> hook(
-      new PyFunctionPreHook(var->backward_hooks, var->cdata.output_nr()));
+      new PyFunctionPreHook(var->backward_hooks, THPVariable_Unpack(var).output_nr()));
   fn.add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
@@ -159,11 +159,13 @@ PyObject* THPCppFunction_name(PyObject* self, PyObject *noargs) {
   return THPUtils_packString(fn.name());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
   THP_FUNCTION_DEFAULT_METHODS,
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef default_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {nullptr}
@@ -188,6 +190,7 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
   return &type;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 struct DefaultFunctionType {
@@ -218,6 +221,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
   } else {
     auto& fn = *cdata;
     auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyTypeObject* type;
     if (it == cpp_function_types.end()) {
       type = &default_type.type;

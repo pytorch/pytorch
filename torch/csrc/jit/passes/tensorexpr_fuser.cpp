@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
@@ -27,6 +28,7 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_reductions_enabled = false;
 
 bool isSupportedForBlock(Node* node) {
@@ -94,6 +96,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
       "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
       "aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
       "aten::to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None"
       ", bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
       "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
@@ -120,6 +123,8 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::sinh(Tensor self) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
       "aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor",
+      "aten::hardswish(Tensor self) -> Tensor",
+      "aten::hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor",
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::rsqrt(Tensor self) -> Tensor",
       "aten::abs(Tensor self) -> Tensor",
@@ -134,6 +139,9 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::sigmoid(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
+      "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor",
+      "aten::relu6(Tensor self) -> Tensor",
+      "aten::gelu(Tensor self) -> Tensor",
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
@@ -163,6 +171,7 @@ static const OperatorSet& supported_eltwise_set() {
       // TODO: enable slice, shape inference is not implemented for this op yet
 
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
   };
   // clang-format on
 
@@ -231,7 +240,18 @@ bool isSupported(Node* node) {
 
 } // namespace tensorexpr
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_fuser_enabled_ = true;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static bool texpr_parallel_cpu_enabled = false;
+
+bool texprParallelCPUEnabled() {
+  return texpr_parallel_cpu_enabled;
+}
+
+void setTexprParallelCPUEnabled(bool val) {
+  texpr_parallel_cpu_enabled = val;
+}
 
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
@@ -635,7 +655,9 @@ class TensorExprFuser {
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
     GRAPH_DEBUG(msg, *n);
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (n->kind() == prim::TensorExprGroup) {
       GRAPH_DEBUG(*n->g(attr::Subgraph));
     }
@@ -674,6 +696,7 @@ class TensorExprFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
@@ -829,11 +852,17 @@ class TensorExprFuser {
     }
     return true;
   }
+
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
       if (!shapeIsKnown(input)) {
         return false;
+      }
+      if (input->node()->kind() == prim::ListConstruct) {
+        if (!allShapesAreKnown(input->node())) {
+          return false;
+        }
       }
     }
     for (Value* output : node->outputs()) {
@@ -854,7 +883,14 @@ class TensorExprFuser {
       return false;
     }
     if (device->is_cpu()) {
-      return canFuseOnCPU();
+      // CPU fusion is only supported for single-thread.
+      if (!canFuseOnCPU()) {
+        return false;
+      }
+      if (at::get_num_threads() == 1 || texprParallelCPUEnabled()) {
+        return true;
+      }
+      return false;
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
@@ -893,11 +929,12 @@ class TensorExprFuser {
       "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
     };
-    static const OperatorSet cuda_only_operator_set{
-      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
-    };
     static const OperatorSet cpu_only_operator_set{
-      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
+    };
+    static const OperatorSet pow{
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
     };
     // clang-format on
 
@@ -905,15 +942,22 @@ class TensorExprFuser {
     for (const Value* v : node->inputs()) {
       if (auto const& tt = v->type()->cast<TensorType>()) {
         auto const& st = tt->scalarType();
+        auto const& device = tt->device();
 
         // All tensors must be typed.
-        if (!st) {
+        if (!st || !device) {
           return false;
         }
 
         // Byte tensors introduce too many corner cases in type promotion.
         // Better not to try to handle them.
         if (*st == c10::ScalarType::Byte) {
+          return false;
+        }
+
+        // Float16 has a few kinks on LLVM.  Disable it until we either move to
+        // a more stable version or find workarounds.
+        if (*st == c10::ScalarType::Half && *device == c10::kCPU) {
           return false;
         }
 
@@ -939,13 +983,16 @@ class TensorExprFuser {
       }
     }
 
-    // Operator is only supported on CUDA.
-    if (node->isMemberOf(cuda_only_operator_set)) {
-      auto device = tensorexpr::pickDeviceType(node->inputs());
-      if (!device) {
-        device = tensorexpr::pickDeviceType(node->outputs());
+    // aten::pow has special rules to avoid complicated integer cases.  We
+    // expect the first arg to be a floating point tensor, and if that's the
+    // case the type of the scalar exponent doesn't matter.
+    if (node->isMemberOf(pow)) {
+      auto const& tt = node->input(0)->type()->cast<TensorType>();
+      if (!tt) {
+        return false;
       }
-      if (!device || device->is_cpu()) {
+      auto const& st = tt->scalarType();
+      if (!st || !isFloatingType(*st)) {
         return false;
       }
     }
@@ -989,9 +1036,23 @@ class TensorExprFuser {
         }
       }
     }
+
+    if (node->kind() == aten::unsqueeze) {
+      // `dim` argument must be a constant.
+      if (node->input(1)->node()->kind() != prim::Constant) {
+        return false;
+      }
+    }
+
     if (node->kind() == aten::conv2d) {
-      if (!tensorexpr::conv2dIsSupported(node)) {
+      if (!tensorexpr::conv2dIsSupportedJit(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
+        return false;
+      }
+    }
+    if (node->kind() == aten::matmul) {
+      if (!tensorexpr::matmulIsSupported(node)) {
+        GRAPH_DEBUG("Shapes of matmul inputs are not supported");
         return false;
       }
     }
@@ -1043,9 +1104,7 @@ class TensorExprFuser {
     REQ(typesAreSupported(node));
 
     // A hook to optimizations limitter to allow bisecting the pass
-    if (!JIT_OPT_ALLOWED) {
-      return false;
-    }
+    REQ(JIT_OPT_ALLOWED);
 
     return true;
   }
@@ -1131,27 +1190,6 @@ class TensorExprFuser {
   }
 #undef REQ
 
-  // TODO: support constant tensors instead of setting them as input
-  void liftTensorConstantsFromFusionGroups(Node* fusion_group) {
-    auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
-    WithInsertPoint guard(fusion_group);
-    for (auto it = subgraph->block()->nodes().begin();
-         it != subgraph->block()->nodes().end();
-         ++it) {
-      auto n = *it;
-      if (n->kind() == prim::Constant &&
-          n->output()->type()->cast<TensorType>()) {
-        auto constant =
-            fusion_group->owningGraph()->insertConstant(*toIValue(n->output()));
-        fusion_group->addInput(constant);
-        auto inputToGraph = subgraph->addInput();
-        inputToGraph->setType(n->output()->type());
-        n->output()->replaceAllUsesWith(inputToGraph);
-        it.destroyCurrent();
-      }
-    }
-  }
-
   void prepareFusionGroupAndGuardOutputs(Block* block) {
     std::vector<Node*> fusion_groups;
     for (Node* n : block->nodes()) {
@@ -1164,7 +1202,6 @@ class TensorExprFuser {
     }
     for (Node* fusion_group : fusion_groups) {
       removeOutputsUsedOnlyInSize(fusion_group);
-      liftTensorConstantsFromFusionGroups(fusion_group);
       insertTypeGuard(
           fusion_group,
           [](const TensorTypePtr& t) { return t; },
@@ -1237,6 +1274,7 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,

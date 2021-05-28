@@ -5,9 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import binascii
-import codecs
 import logging
 import os
+from base64 import b64decode, b64encode
 from datetime import timedelta
 from typing import Any, Optional, Tuple, cast
 
@@ -15,7 +15,7 @@ from torch.distributed import Store, TCPStore
 
 from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
 from .dynamic_rendezvous import RendezvousBackend, Token
-from .utils import _matches_machine_hostname, _parse_rendezvous_endpoint
+from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
 log = logging.getLogger(__name__)
 
@@ -56,18 +56,7 @@ class C10dRendezvousBackend(RendezvousBackend):
     @property
     def name(self) -> str:
         """See base class."""
-        return "c10d-experimental"
-
-    @property
-    def store(self) -> Store:
-        """Gets the :py:class:`torch.distributed.Store` instance used to
-        communicate with the C10d store."""
-        return self._store
-
-    @property
-    def key(self) -> str:
-        """Gets the key under which the rendezvous state is stored."""
-        return self._key
+        return "c10d"
 
     def get_state(self) -> Optional[Tuple[bytes, Token]]:
         """See base class."""
@@ -77,14 +66,20 @@ class C10dRendezvousBackend(RendezvousBackend):
 
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token]]:
+    ) -> Optional[Tuple[bytes, Token, bool]]:
         """See base class."""
-        base64_state_str: str = codecs.encode(state, "base64").decode()
+        base64_state_str: str = b64encode(state).decode()
 
         if token:
             # Shortcut if we know for sure that the token is not valid.
             if not isinstance(token, bytes):
-                return self.get_state()
+                result = self.get_state()
+                if result is not None:
+                    tmp = *result, False
+                    # Python 3.6 does not support tuple unpacking in return
+                    # statements.
+                    return tmp
+                return None
 
             token = token.decode()
         else:
@@ -92,7 +87,16 @@ class C10dRendezvousBackend(RendezvousBackend):
 
         base64_state: bytes = self._call_store("compare_set", self._key, token, base64_state_str)
 
-        return self._decode_state(base64_state)
+        state_token_pair = self._decode_state(base64_state)
+        if state_token_pair is None:
+            return None
+
+        new_state, new_token = state_token_pair
+
+        # C10d Store's compare_set method does not offer an easy way to find out
+        # whether our write attempt was successful. As a brute-force solution we
+        # perform a bitwise comparison of our local state and the remote state.
+        return new_state, new_token, new_state == state
 
     def _call_store(self, store_op: str, *args, **kwargs) -> Any:
         try:
@@ -105,8 +109,9 @@ class C10dRendezvousBackend(RendezvousBackend):
     def _decode_state(self, base64_state: bytes) -> Optional[Tuple[bytes, Token]]:
         if base64_state == self._NULL_SENTINEL.encode():
             return None
+
         try:
-            state = codecs.decode(base64_state, "base64")
+            state = b64decode(base64_state)
         except binascii.Error as exc:
             raise RendezvousStateError(
                 "The state object is corrupt. See inner exception for details."
@@ -116,7 +121,7 @@ class C10dRendezvousBackend(RendezvousBackend):
 
 
 def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
-    host, port = _parse_rendezvous_endpoint(params.endpoint, default_port=29500)
+    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29400)
 
     cfg_is_host = params.get_as_bool("is_host")
     # If the user has explicitly specified whether our process should host the
@@ -162,7 +167,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     return store
 
 
-def create_backend(params: RendezvousParameters) -> C10dRendezvousBackend:
+def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend, Store]:
     """Creates a new :py:class:`C10dRendezvousBackend` from the specified
     parameters.
 
@@ -198,4 +203,4 @@ def create_backend(params: RendezvousParameters) -> C10dRendezvousBackend:
 
     store = _create_tcp_store(params)
 
-    return C10dRendezvousBackend(store, params.run_id)
+    return C10dRendezvousBackend(store, params.run_id), store

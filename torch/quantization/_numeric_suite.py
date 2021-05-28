@@ -434,9 +434,9 @@ def prepare_model_outputs(
         allow_list = get_default_compare_output_module_list()
 
     qconfig_debug = torch.quantization.QConfig(activation=logger_cls, weight=None)
-    float_module.qconfig = qconfig_debug  # type: ignore
+    float_module.qconfig = qconfig_debug  # type: ignore[assignment]
     prepare(float_module, inplace=True, allow_list=allow_list)
-    q_module.qconfig = qconfig_debug  # type: ignore
+    q_module.qconfig = qconfig_debug  # type: ignore[assignment]
     prepare(
         q_module,
         inplace=True,

@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 
@@ -207,6 +208,11 @@ void vulkanFoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
+void vulkanRemoveMutation(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  RemoveTensorMutation(graph);
+}
+
 script::Module vulkanOptimizeForMobile(
     const script::Module& m,
     const std::vector<std::string>& preserved_methods) {
@@ -218,6 +224,9 @@ script::Module vulkanOptimizeForMobile(
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
+  vulkanRemoveMutation(cloned_module);
+  cloned_module.register_attribute(
+      "optimized_for_vulkan", BoolType::get(), true);
   return cloned_module;
 }
 

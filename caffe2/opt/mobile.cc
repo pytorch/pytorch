@@ -125,7 +125,9 @@ void fuseNNPACKConvRelu(repr::NNModule* nn) {
   fuseActivation<repr::Conv, repr::Relu>(nn, should_fuse, postprocess);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPT_PASS_FROM_FUNC(FuseNNPACKConvRelu, fuseNNPACKConvRelu);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPT_PASS_FROM_FUNC(AddNNPACK, addNNPACK);
 
 } // namespace opt

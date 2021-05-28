@@ -17,43 +17,43 @@ class OptionalTest : public ::testing::Test {
 template <typename T>
 T getSampleValue();
 
-template<>
+template <>
 bool getSampleValue() {
   return true;
 }
 
-template<>
+template <>
 uint64_t getSampleValue() {
   return 42;
 }
 
-template<>
+template <>
 std::string getSampleValue() {
   return "hello";
 }
 
-
 using OptionalTypes = ::testing::Types<
-  // 32-bit scalar optimization.
-  bool,
-  // Trivially destructible but not 32-bit scalar.
-  uint64_t,
-  // Non-trivial destructor.
-  std::string
-  >;
-
+    // 32-bit scalar optimization.
+    bool,
+    // Trivially destructible but not 32-bit scalar.
+    uint64_t,
+    // Non-trivial destructor.
+    std::string>;
 
 TYPED_TEST_CASE(OptionalTest, OptionalTypes);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(OptionalTest, Empty) {
   typename TestFixture::optional empty;
 
   EXPECT_FALSE((bool)empty);
   EXPECT_FALSE(empty.has_value());
 
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(empty.value(), c10::bad_optional_access);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(OptionalTest, Initialized) {
   using optional = typename TestFixture::optional;
 
@@ -66,7 +66,8 @@ TYPED_TEST(OptionalTest, Initialized) {
   optional moveAssign;
   moveAssign = std::move(moveFrom2);
 
-  std::array<typename TestFixture::optional *, 5> opts = {&opt, &copy, &copyAssign, &move, &moveAssign};
+  std::array<typename TestFixture::optional*, 5> opts = {
+      &opt, &copy, &copyAssign, &move, &moveAssign};
   for (auto* popt : opts) {
     auto& opt = *popt;
     EXPECT_TRUE((bool)opt);

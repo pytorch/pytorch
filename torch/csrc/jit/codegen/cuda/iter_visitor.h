@@ -32,6 +32,7 @@ namespace cuda {
  */
 class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~IterVisitor() = default;
 
   IterVisitor() = default;
@@ -94,10 +95,12 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
   // guarenteed to be all siblings throughout traversal). stmt_stack.front()
   // contains the outputs we started with (not guarenteed to be all outputs
   // throughout traversal).
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<Statement*>> stmt_stack;
 
   // Statements to stop traversal on if they're hit (pretends they're leaf
   // nodes in next)
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_set<Statement*> termination_stmts;
 
   void traverse_(
@@ -149,6 +152,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  */
 class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~BackwardVisitor() = default;
 
   BackwardVisitor() = default;
@@ -171,16 +175,19 @@ class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void handle(Statement* stmt) override {
     OptOutDispatch::handle(stmt);
   }
   // This handle functions is called on every Expr* in topological order,
   // starting from outputs to inputs.
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void handle(Expr* expr) override {
     OptOutDispatch::handle(expr);
   }
   // This handle functions is called on every Val* in topological order,
   // starting from outputs to inputs.
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void handle(Val* val) override {
     OptOutDispatch::handle(val);
   }

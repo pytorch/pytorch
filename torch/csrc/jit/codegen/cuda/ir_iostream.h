@@ -41,6 +41,7 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   // eventhough fusion should remain unchanged.
   // Need to look into this.
   virtual void handle(const Fusion* f) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     handle(const_cast<Fusion*>(f));
   }
 

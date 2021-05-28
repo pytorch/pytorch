@@ -6,14 +6,14 @@
 
 #include <gtest/gtest.h>
 
-#include "test/cpp/tensorexpr/test_base.h"
+#include <test/cpp/tensorexpr/test_base.h>
 
+#include <test/cpp/tensorexpr/padded_buffer.h>
+#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
-#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -172,11 +172,10 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
       },
       [&](const VarHandle& n) { return a_buf.load(n) + b_buf.load(n); });
   LoopNest l({c});
-  For* n_outer;
   For* n_inner;
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.splitWithMask(loops[0], block_size, &n_outer, &n_inner);
-  l.setGPUBlockIndex(n_outer, 0);
+  l.splitWithMask(loops[0], block_size, &n_inner);
+  l.setGPUBlockIndex(loops[0], 0);
   l.setGPUThreadIndex(n_inner, 0);
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
@@ -391,11 +390,10 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
   Tensor* b = Compute(
       "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
-  For* outer;
   For* inner;
   std::vector<For*> loops = l.getLoopStmtsFor(b);
-  l.splitWithMask(loops[0], 1024, &outer, &inner);
-  l.setGPUBlockIndex(outer, 0);
+  l.splitWithMask(loops[0], 1024, &inner);
+  l.setGPUBlockIndex(loops[0], 0);
   l.setGPUThreadIndex(inner, 0);
   Stmt* s = l.root_stmt();
   CudaCodeGen cg(s, {a, b, n});
@@ -934,11 +932,11 @@ TEST(Cuda, HalfSupport_CUDA) {
   });
 
   Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->call(i));
+    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->load(i));
   });
 
   Tensor* d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(half, c->call(i));
+    return Cast::make(half, c->load(i));
   });
 
   LoopNest l({b, c, d});
@@ -1554,7 +1552,7 @@ TEST(Cuda, MaskMultiDim_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -1684,7 +1682,7 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -2098,7 +2096,7 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -2229,7 +2227,7 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
       "D",
       {{OUTER_B_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});

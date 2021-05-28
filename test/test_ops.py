@@ -6,13 +6,13 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
+    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
+     gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
-from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -63,18 +63,16 @@ class TestOpInfo(TestCase):
     #   does NOT throw a runtime error.
     # TODO: support multi-tensor outputs
     @onlyOnCPUAndCUDA
-    @ops(op_db, allowed_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16))
+    @ops(op_db, dtypes=OpDTypes.supported_backward,
+         allowed_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16))
     def test_supported_backward(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
-        if not op.supports_complex_autograd and dtype.is_complex:
-            self.skipTest("Skipped! Complex autograd not supported.")
 
         for sample in op.sample_inputs(device, dtype, requires_grad=True):
             result = op(sample.input, *sample.args, **sample.kwargs)
             if not isinstance(result, torch.Tensor):
                 continue
-
             result.sum().backward()
 
     # Verifies that ops do not have an entry in
@@ -101,7 +99,7 @@ class TestGradients(TestCase):
 
         return _fn
 
-    def _check_helper(self, device, dtype, op, variant, check):
+    def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False):
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
         if not op.supports_dtype(dtype, torch.device(device).type):
@@ -112,9 +110,11 @@ class TestGradients(TestCase):
                 return variant.__wrapped__ is op.get_inplace()
             return variant is op.get_inplace()
 
-        samples = op.sample_inputs(device, dtype, requires_grad=True,
-                                   for_inplace_variant=is_inplace(variant))
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
+            if sample.broadcasts_input and is_inplace(variant):
+                continue
+
             # Note on TensorList inputs
             #
             # gradcheck does not support TensorList inputs so here we pass TensorList
@@ -137,47 +137,55 @@ class TestGradients(TestCase):
             if check == 'gradcheck':
                 self.assertTrue(gradcheck(fn, gradcheck_args,
                                           check_batched_grad=op.check_batched_grad,
-                                          check_grad_dtypes=True))
+                                          check_grad_dtypes=True,
+                                          nondet_tol=op.gradcheck_nondet_tol,
+                                          fast_mode=op.gradcheck_fast_mode,
+                                          check_forward_ad=check_forward_ad))
             elif check == 'gradgradcheck':
+                self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True))
+                                              check_grad_dtypes=True,
+                                              nondet_tol=op.gradcheck_nondet_tol,
+                                              fast_mode=op.gradcheck_fast_mode))
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=True,
                                               check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True))
+                                              check_grad_dtypes=True,
+                                              nondet_tol=op.gradcheck_nondet_tol,
+                                              fast_mode=op.gradcheck_fast_mode))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
-    def _grad_test_helper(self, device, dtype, op, variant):
-        return self._check_helper(device, dtype, op, variant, 'gradcheck')
+    def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False):
+        return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad)
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
-    def _skip_helper(self, op, dtype):
+    def _skip_helper(self, op, device, dtype):
         if not op.supports_autograd:
             self.skipTest("Skipped! autograd not supported.")
-        if not op.supports_complex_autograd and dtype.is_complex:
+        if not op.supports_complex_autograd(torch.device(device).type) and dtype.is_complex:
             self.skipTest("Skipped! Complex autograd not supported.")
 
     # Tests that gradients are computed correctly
     @_gradcheck_ops(op_db)
     def test_fn_grad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
     # @_gradcheck_ops(op_db)
     # def test_method_grad(self, device, dtype, op):
-    #     self._skip_helper(op, dtype)
+    #     self._skip_helper(op, device, dtype)
     #     self._grad_test_helper(device, dtype, op, op.get_method())
 
     @_gradcheck_ops(op_db)
     def test_inplace_grad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
@@ -185,22 +193,48 @@ class TestGradients(TestCase):
     # Test that gradients of gradients are computed correctly
     @_gradcheck_ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
+        if not op.supports_gradgrad:
+            self.skipTest("Skipped! Operation does not support gradgrad")
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
+
+    # Test that gradients of gradients are properly raising
+    @_gradcheck_ops(op_db)
+    def test_fn_fail_gradgrad(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+        if op.supports_gradgrad:
+            self.skipTest("Skipped! Operation does support gradgrad")
+
+        err_msg = r"derivative for .* is not implemented"
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
     # Method gradgrad (and grad, see above) tests are disabled since they're
     #   costly and redundant with function gradgrad (and grad) tests
     # @_gradcheck_ops(op_db)
     # def test_method_gradgrad(self, device, dtype, op):
-    #     self._skip_helper(op, dtype)
+    #     self._skip_helper(op, device, dtype)
     #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
     @_gradcheck_ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+
+    @_gradcheck_ops(op_db)
+    def test_forward_mode_AD(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        if op.supports_forward_ad:
+            self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+        else:
+            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            hint_msg = ("Running forward AD for an OP that has does not support it did not "
+                        "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
+            with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
+                self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
 
 
 # Tests operators for consistency between JIT and eager, also checks
@@ -242,13 +276,11 @@ class TestCommon(JitCommonTestCase):
 
         inplace_variants = tuple(filter(None, inplace_ops))
         variants = tuple(filter(None, variants))
-        outplace_variants = tuple(set(variants) - set(inplace_variants))
 
         _requires_grad = (op.supports_autograd and
-                          (dtype.is_floating_point or op.supports_complex_autograd))
+                          (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type)))
 
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad,
-                                   for_inplace_variant=False)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
         def _test_consistency_helper(samples, variants):
             for sample in samples:
@@ -273,7 +305,7 @@ class TestCommon(JitCommonTestCase):
                 # TODO: update to handle checking grads of all tensor inputs as
                 #   derived from each tensor output
                 if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
-                        and (dtype.is_floating_point or op.supports_complex_autograd)):
+                        and (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type))):
                     expected_forward.sum().backward()
                     expected_grad = tensor.grad
 
@@ -287,6 +319,17 @@ class TestCommon(JitCommonTestCase):
                     # Note: copies the to-be-modified input when testing the inplace variant
                     tensor.grad = None
                     cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
+
+                    if variant in inplace_ops and sample.broadcasts_input:
+                        with self.assertRaises(RuntimeError,
+                                               msg=('inplace variant either incorrectly allowed '
+                                                    'resizing or you have marked the sample {}'
+                                                    ' incorrectly with `broadcasts_self=True'.format(sample.summary()))):
+                            variant_forward = variant(cloned,
+                                                      *sample.args,
+                                                      **sample.kwargs)
+                        continue
+
                     variant_forward = variant(cloned,
                                               *sample.args,
                                               **sample.kwargs)
@@ -298,7 +341,7 @@ class TestCommon(JitCommonTestCase):
                         variant_forward.sum().backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
-        _test_consistency_helper(samples, outplace_variants)
+        _test_consistency_helper(samples, variants)
 
         def _test_inplace_preserve_storage(samples, variants):
             for sample in samples:
@@ -319,16 +362,14 @@ class TestCommon(JitCommonTestCase):
                     variant_forward = variant(cloned,
                                               *sample.args,
                                               **sample.kwargs)
-# TODO Support non-tensor outputs if they exist for inplace ops
+                    # TODO Support non-tensor outputs if they exist for inplace ops
                     if (isinstance(variant_forward, torch.Tensor)):
                         self.assertEqual(data_ptr, variant_forward.data_ptr(), atol=0, rtol=0)
                     else:
                         self.assertTrue(False, "Non-tensor outputs for inplace ops are not supported")
 
         if len(inplace_ops) > 0:
-            inplace_samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad,
-                                               for_inplace_variant=True)
-            _test_consistency_helper(inplace_samples, inplace_variants)
+            inplace_samples = list(filter(lambda sample: not sample.broadcasts_input, samples))
             _test_inplace_preserve_storage(inplace_samples, inplace_variants)
 
     # Tests that the forward and backward passes of operations produce the
@@ -337,7 +378,9 @@ class TestCommon(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
-        _requires_grad = op.supports_autograd and (dtype.is_floating_point or op.supports_complex_autograd)
+        _requires_grad = op.supports_autograd and (dtype.is_floating_point or
+                                                   op.supports_complex_autograd(torch.device(device).type))
+
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
         for sample in samples:
@@ -376,7 +419,7 @@ class TestCommon(JitCommonTestCase):
                                             out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
@@ -386,7 +429,7 @@ class TestCommon(JitCommonTestCase):
                                             out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
@@ -430,12 +473,19 @@ class TestCommon(JitCommonTestCase):
         # - args_kw is the string of args/kwargs used to call the op, same as args_annot_kw but
         # without type annotations
         args = ["t0"]
+
+        def quote_strs(v):
+            if isinstance(v, str):
+                return f"'{v}'"
+
+            return str(v)
+
         args_annot_kw = args + \
             [f"s{i}: {type(v).__name__}" for i, v in enumerate(sample.args)] + \
-            [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
+            [f"{k}: {type(v).__name__} = {quote_strs(v)}" for k, v in sample.kwargs.items()]
         args_kw = args + \
             [f"s{i}" for i in range(len(sample.args))] + \
-            [f"{k}={v}" for k, v in sample.kwargs.items()]
+            [f"{k}={quote_strs(v)}" for k, v in sample.kwargs.items()]
 
         # Prepare data for test tracing
         sample_args_kwargs = ()
