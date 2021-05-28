@@ -1837,8 +1837,8 @@ works_list = [
     'add',
     'addcmul',
     'asin',
-    'atan2',
     'atan',
+    'atan2',
     'ceil',
     'clamp',
     'clamp.scalar',
@@ -1860,10 +1860,10 @@ works_list = [
     'le',
     'lerp',
     'lgamma',
+    'log',
     'log10',
     'log1p',
     'log2',
-    'log',
     'lt',
     'masked_fill',
     'max.binary',
@@ -1895,6 +1895,7 @@ works_list = [
     'transpose',
     'trunc',
     'unsqueeze',
+    'view',
 ]
 
 known_failures = [
