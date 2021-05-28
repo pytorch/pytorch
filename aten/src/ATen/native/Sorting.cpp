@@ -321,8 +321,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
         TensorAccessor<scalar_t, 1> tmp_values(
             reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
             &sizes[dim], &tmp_values_stride);
-        TensorAccessor<scalar_t, 1> tmp_indices(
-            reinterpret_cast<scalar_t*>(data[1] + i * strides[1]),
+        TensorAccessor<int64_t, 1> tmp_indices(
+            reinterpret_cast<int64_t*>(data[1] + i * strides[1]),
             &sizes[dim], &tmp_indices_stride);
         auto mode_value = reinterpret_cast<scalar_t*>(data[2] + i * strides[2]);
         auto mode_index = reinterpret_cast<int64_t*>(data[3] + i * strides[3]);
