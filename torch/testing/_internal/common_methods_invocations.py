@@ -3620,6 +3620,21 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 
+def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    cases = (((M, M), ()),
+             ((M, M), (2,),),
+             ((S, M, M), ()),
+             ((S, M, M), (2,)),
+             ((3, 3, S, S), ()),)
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
+
 def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -6413,6 +6428,12 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
+    OpInfo('tril',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_tril_triu),
+    OpInfo('triu',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -6776,16 +6797,6 @@ def method_tests():
         ('norm', (), (3, 0), '3_dim_scalar', (), [1]),
         ('norm', (), (2, 0, True), 'keepdim_2_dim_scalar', (), [1]),
         ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', (), [1]),
-        ('tril', (M, M), NO_ARGS),
-        ('tril', (M, M), (2,), 'idx'),
-        ('tril', (S, M, M), NO_ARGS, 'batched'),
-        ('tril', (S, M, M), (2,), 'batched_idx'),
-        ('tril', (3, 3, S, S), NO_ARGS, 'more_batched'),
-        ('triu', (M, M), NO_ARGS),
-        ('triu', (M, M), (2,), 'idx'),
-        ('triu', (S, M, M), NO_ARGS, 'batched'),
-        ('triu', (S, M, M), (2,), 'batched_idx'),
-        ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
         ('fill_', (S, S, S), (1,), 'number'),
