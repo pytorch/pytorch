@@ -3274,10 +3274,10 @@ add_docstr(torch.fmod,
            r"""
 fmod(input, other, *, out=None) -> Tensor
 
-Computes the element-wise remainder of division.
-
-The dividend and divisor may contain both for integer and floating point
-numbers. The remainder has the same sign as the dividend :attr:`input`.
+Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
+for floating point tensors, and the modulus operation for integer tensors. The result
+has the same sign as the dividend :attr:`input` and its absolute value
+is less than that of :attr:`other`.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3287,6 +3287,11 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     When the divisor is zero, returns ``NaN`` for floating point dtypes
     on both CPU and GPU; raises ``RuntimeError`` for integer division by
     zero on CPU; Integer division by zero on GPU may return any value.
+
+.. note::
+
+   Complex inputs are not supported. In some cases, it is not mathematically
+   possible to satisfy the definition of a modulo operation with complex numbers.
 
 Args:
     input (Tensor): the dividend
@@ -3299,9 +3304,14 @@ Example::
 
     >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([-1., -0., -1.,  1.,  0.,  1.])
-    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5)
+    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
+.. seealso::
+
+    :func:`torch.remainder` which is similar to :func:`torch.fmod` except that if the sign
+    of the modulus is different than the sign of the divisor :attr:`other` then the divisor
+    is added to the modulus.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -7639,10 +7649,10 @@ add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
 
-Computes the element-wise remainder of division.
-
-The dividend and divisor may contain both for integer and floating point
-numbers. The remainder has the same sign as the divisor :attr:`other`.
+Like :func:`torch.fmod` this applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
+for floating point tensors and the modulus operation for integer tensors.
+Unlike :func:`torch.fmod`, however, if the sign of the modulus is different
+than the sign of the divisor :attr:`other` then the divisor is added to the modulus.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -7663,13 +7673,14 @@ Example::
 
     >>> torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
-    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
-    tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
+    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), -1.5)
+    tensor([ -0.5000, -1.0000,  0.0000, -0.5000, -1.0000 ])
 
 .. seealso::
 
-        :func:`torch.fmod`, which computes the element-wise remainder of
-        division equivalently to the C library function ``fmod()``.
+    :func:`torch.fmod` which just computes the modulus for integer inputs and
+    applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
+    for floating point inputs.
 """.format(**common_args))
 
 add_docstr(torch.renorm,

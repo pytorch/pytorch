@@ -1726,7 +1726,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, noncontiguous: bool = False) -> torch.Tensor:
+                requires_grad: bool = False, noncontiguous: bool = False,
+                exclude_zero: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
@@ -1738,6 +1739,10 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
         it is not possible to create a noncontiguous Tensor with a single element.
+
+        If exclude_zero is passed with True (default is False), all the matching values (with zero) in
+        created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
+        complex type and 1 if integer/boolean type.
     """
 
     assert low is None or low < 9, "low value too high!"
@@ -1775,6 +1780,19 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
+
+    if exclude_zero:
+        if dtype in integral_types() or dtype is torch.bool:
+            replace_with = torch.tensor(1, device=device, dtype=dtype)
+        elif dtype in floating_types_and(torch.half, torch.bfloat16):
+            replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
+        else:
+            assert dtype in complex_types()
+            float_dtype = torch.float if dtype is torch.cfloat else torch.double
+            real = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
+            imag = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
+            replace_with = torch.complex(real, imag)
+        result[result == 0] = replace_with
 
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
        dtype in complex_types():

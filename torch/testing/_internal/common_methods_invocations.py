@@ -2807,6 +2807,46 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs)
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autodiffed=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    if autodiffed:
+        samples = (  # type: ignore[assignment]
+            ((S, S, S), 1.5, False),
+            ((), 1.5, False),
+        )
+    else:
+        cases = (  # type: ignore[assignment]
+            ((S, S, S), (), False),
+            ((S, S, S), (S, S, S), False),
+            ((S, S, S), (S,), False),
+        )
+
+        # Sample inputs with scalars as torch tensors
+        cases_with_tensor_scalar = (  # type: ignore[assignment]
+            ((), torch.tensor(1, dtype=dtype, device=device, requires_grad=False), False),
+        )
+
+        # Sample inputs with broadcasting
+        cases_with_broadcasting = (  # type: ignore[assignment]
+            ((S,), (S, S, S), True),
+            ((S, 1, S), (S, S, S), True),
+            ((), (S, S, S), True),
+        )
+
+        samples = cases + cases_with_tensor_scalar + cases_with_broadcasting  # type: ignore[assignment]
+
+    def generator():
+        for shape, arg_other, broadcasts_input in samples:
+            if isinstance(arg_other, tuple):
+                arg = make_arg(arg_other, requires_grad=False, exclude_zero=True)
+            else:
+                # shape_other is scalar or torch.tensor
+                arg = arg_other
+            yield(SampleInput(make_arg(shape), args=(arg,), broadcasts_input=broadcasts_input))
+
+    return list(generator())
+
 # TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     x = make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
@@ -4607,6 +4647,24 @@ op_db: List[OpInfo] = [
            op=torch.fmin,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('fmod',
+           dtypes=all_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_fmod_remainder),
+    OpInfo('fmod',
+           variant_test_name='autodiffed',
+           dtypes=all_types_and(torch.float16, torch.bool),
+           assert_autodiffed=True,
+           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True)),
+    OpInfo('remainder',
+           dtypesIfCPU=all_types_and(torch.float16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_fmod_remainder),
+    OpInfo('remainder',
+           variant_test_name='autodiffed',
+           dtypesIfCPU=all_types_and(torch.float16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
+           assert_autodiffed=True,
+           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True)),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -6656,22 +6714,6 @@ def method_tests():
         ('div', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant', (True,)),
         ('div', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant', (True,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
-        ('fmod', (S, S, S), (1.5,), '', (True,)),
-        ('fmod', (), (1.5,), 'scalar', (True,)),
-        ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
-        ('fmod', (S,), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor_broadcast_lhs'),
-        ('fmod', (S, S, S), (non_differentiable(torch.rand(S) + 1.5),), 'tensor_broadcast_rhs'),
-        ('fmod', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
-        ('fmod', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
-        ('fmod', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('fmod', (S, S, S), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor_broadcast_rhs'),
-        ('remainder', (S, S, S), (1.5,), '', (True,)),
-        ('remainder', (), (1.5,), 'scalar', (True,)),
-        ('remainder', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
-        ('remainder', (S,), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor_broadcast_lhs'),
-        ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
-        ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
-        ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
