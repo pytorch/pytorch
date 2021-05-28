@@ -219,7 +219,7 @@ def _is_scalar_list(x):
     """
     Check if x is a scalar list, for example: List[float], List[int].
 
-    Besides checking the type is ListType, we also check if the data type is 
+    Besides checking the type is ListType, we also check if the data type is
     a valid ONNX data type.
     """
     return isinstance(x.type(), torch._C.ListType) and \
