@@ -2,7 +2,6 @@ import torch
 from .. import _functional as F
 from ..optimizer import Optimizer
 
-
 class Adagrad(Optimizer):
     """Implements Adagrad algorithm with multi-tensor APIs.
 
@@ -90,20 +89,20 @@ class Adagrad(Optimizer):
             if weight_decay != 0:
                 if has_sparse_grad:
                     raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                grads = torch._foreach_add(grads, params_with_grad, alpha=weight_decay)
+                torch._foreach_add_(grads, params_with_grad, alpha=weight_decay)
 
             minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in state_steps]
 
             if has_sparse_grad:
                 # sparse is not supported by multi_tensor. Fall back to optim.adagrad
                 # implementation.
-                F.adagrad(params_with_grad, 
-                          grads, 
-                          state_sums, 
-                          state_steps, 
+                F.adagrad(params_with_grad,
+                          grads,
+                          state_sums,
+                          state_steps,
                           lr=lr,
-                          weight_decay=weight_decay, 
-                          lr_decay=lr_decay, 
+                          weight_decay=weight_decay,
+                          lr_decay=lr_decay,
                           eps=group['eps'])
             else:
                 torch._foreach_addcmul_(state_sums, grads, grads, value=1)
