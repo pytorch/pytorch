@@ -64,7 +64,7 @@ bool isWeight(Module& module, Value* v) {
             call_method_result == result.value(),
             "Expected all CallMethods to use either weight "
             "or non-weight value.",
-            v->debugName());
+            v->displayName());
       } else {
         result = call_method_result;
       }
@@ -84,10 +84,10 @@ Node* insertChooseQParams(Graph* graph, Value* original_val) {
       at::Symbol::aten(choose_qparams_func),
       {original_val, reduce_range},
       /* num_outputs = */ 2);
-  choose_qparams->output(0)->setDebugName(original_val->debugName() + ".scale");
+  choose_qparams->output(0)->setDebugName(original_val->displayName() + ".scale");
   choose_qparams->output(0)->setType(FloatType::get());
   choose_qparams->output(1)->setDebugName(
-      original_val->debugName() + ".zero_point");
+      original_val->displayName() + ".zero_point");
   choose_qparams->output(1)->setType(IntType::get());
   graph->insertNode(choose_qparams);
   return choose_qparams;
@@ -112,7 +112,7 @@ Node* insertDeQuant(
   Node* dequant = graph->create(Symbol::aten("dequantize"), {quantized_val});
   dequant->output()
       ->setDebugName(
-          original_val->debugName() + ".dequant." + c10::guts::to_string(id))
+          original_val->displayName() + ".dequant." + c10::guts::to_string(id))
       ->setType(original_val->type());
   graph->insertNode(dequant);
   return dequant;
@@ -147,7 +147,7 @@ Node* insertQParam(
     const std::string& param_name) {
   Node* qparam = graph->create(node_kind, {quantized_input});
   qparam->output()
-      ->setDebugName(quantized_input->debugName() + "." + param_name)
+      ->setDebugName(quantized_input->displayName() + "." + param_name)
       ->setType(output_type);
   graph->insertNode(qparam);
   return qparam;
@@ -162,7 +162,7 @@ Node* insertScalarToTensor(Graph* graph, Value* scalar_value) {
       Symbol::aten("scalar_tensor"),
       {scalar_value, float_scalar_type, none, none, none});
   Value* tensor_output = tensor_node->output();
-  tensor_output->setDebugName(scalar_value->debugName() + ".tensor");
+  tensor_output->setDebugName(scalar_value->displayName() + ".tensor");
   graph->insertNode(tensor_node);
   // replace original_output with tensor
   scalar_value->replaceAllUsesAfterNodeWith(tensor_node, tensor_output);
@@ -173,7 +173,7 @@ Node* insertItem(Graph* graph, Value* tensor, const TypePtr& output_type) {
   WithInsertPoint ins(tensor->node()->next());
   Node* n = graph->create(Symbol::aten("item"), {tensor});
   Value* scalar = n->output();
-  scalar->setDebugName(tensor->debugName() + ".scalar")->setType(output_type);
+  scalar->setDebugName(tensor->displayName() + ".scalar")->setType(output_type);
   graph->insertNode(n);
   return n;
 }
@@ -190,7 +190,7 @@ DynamicQuantOps insertChooseQParamQuantDequant(
   }
   quant_inputs.push_back(dtype);
   Node* quant = insertQuant(
-      graph, quant_inputs, quant_kind, original_val->debugName() + ".quant");
+      graph, quant_inputs, quant_kind, original_val->displayName() + ".quant");
   Node* dequant = insertDeQuant(graph, quant->output(), original_val);
   return std::make_tuple(choose_qparams, quant, dequant);
 }
@@ -295,7 +295,7 @@ Node* insertQuantDequantNodes(
       g,
       inputs,
       at::Symbol::aten(quantize_func),
-      original_val->debugName() + ".quant");
+      original_val->displayName() + ".quant");
   Node* dequant = insertDeQuant(g, quant->output(), original_val);
   return dequant;
 }
@@ -951,9 +951,9 @@ void InsertQuantDeQuantHelper::findSubgraph(
           v == self,
           "Unexpected value found when handling weight value "
           " in findSubgraph, traced back to:",
-          v->debugName(),
+          v->displayName(),
           " which is not self:",
-          self->debugName());
+          self->displayName());
     }
   }
 }
@@ -1003,10 +1003,10 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       const auto& qparam = pr.second;
       size_t uid = 0;
       auto qparam_name =
-          original_value->debugName() + name + "_" + c10::to_string(uid++);
+          original_value->displayName() + name + "_" + c10::to_string(uid++);
       while (module.hasattr(qparam_name)) {
         qparam_name =
-            original_value->debugName() + name + "_" + c10::to_string(uid++);
+            original_value->displayName() + name + "_" + c10::to_string(uid++);
       }
       qparam_name_map_for_node_[n][name] = qparam_name;
       module.register_attribute(qparam_name, qparam.type(), qparam);
@@ -1028,7 +1028,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   TORCH_INTERNAL_ASSERT(
       observer_name,
       "getQSchemeAndParamMap expects the corresponding observer for ",
-      v->debugName(),
+      v->displayName(),
       " exists.");
   QParamVector qparams;
   c10::QScheme qscheme = c10::kPerTensorAffine;
@@ -1146,7 +1146,7 @@ void InsertQuantDeQuantHelper::propagateQParams(
     }
     for (const auto& qparam : qparams) {
       Value* qparam_val = graph->insertConstant(qparam.second);
-      qparam_val->setDebugName(quantized_input->debugName() + qparam.first);
+      qparam_val->setDebugName(quantized_input->displayName() + qparam.first);
       quant_inputs.push_back(qparam_val);
     }
   } else {
@@ -1173,7 +1173,7 @@ void InsertQuantDeQuantHelper::propagateQParams(
         dtype->output()};
   }
   Node* quant = insertQuant(
-      graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
+      graph, quant_inputs, quant_kind, original_output->displayName() + ".quant");
   Value* quantized_output = quant->output();
   // replace uses of original output of the general op with quantized
   // output
@@ -1221,7 +1221,7 @@ c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
     for (auto* input : inputs) {
       GRAPH_DEBUG(
           "checking if input:",
-          input->debugName(),
+          input->displayName(),
           " in node:",
           *input->node(),
           "is quantized");

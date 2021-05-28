@@ -336,12 +336,12 @@ std::string AliasDb::getElementName(const Element* e) const {
   } else {
     std::ostringstream ss;
     if (e->values.size() == 1) {
-      ss << "%" << (*e->values.begin())->debugName();
+      ss << "%" << (*e->values.begin())->displayName();
       return ss.str();
     }
     ss << "(";
     for (const Value* v : e->values) {
-      ss << "%" << v->debugName() << ", ";
+      ss << "%" << v->displayName() << ", ";
     }
     ss << ")";
     return ss.str();
@@ -418,12 +418,12 @@ std::string AliasDb::toGraphviz() const {
     } else {
       std::ostringstream ss;
       if (e->values.size() == 1) {
-        ss << "\"\\%" << (*e->values.begin())->debugName() << "\"";
+        ss << "\"\\%" << (*e->values.begin())->displayName() << "\"";
         return ss.str();
       }
       ss << "\"(";
       for (const Value* v : e->values) {
-        ss << "\\%" << v->debugName() << ", ";
+        ss << "\\%" << v->displayName() << ", ";
       }
       ss << ")\"";
       return ss.str();
@@ -1716,7 +1716,7 @@ void Lint(const AliasDb* db) {
     auto it = db->elementMap_.find(v);
     if (it == db->elementMap_.end()) {
       failed = true;
-      ss << "Value %" << v->debugName() << " of type " << v->type()->repr_str()
+      ss << "Value %" << v->displayName() << " of type " << v->type()->repr_str()
          << " wasn't found in the element map.\n"
          << "It was defined in " << *v->node();
     }

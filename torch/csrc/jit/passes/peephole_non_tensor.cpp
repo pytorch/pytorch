@@ -58,9 +58,9 @@ struct PeepholeOptimizeNonTensorImpl {
           if (true_val && !false_val) {
             GRAPH_UPDATE(
                 "Replacing ",
-                n.outputs().at(i)->debugName(),
+                n.outputs().at(i)->displayName(),
                 " (True or False) with ",
-                n.cond()->debugName());
+                n.cond()->displayName());
             n.outputs().at(i)->replaceAllUsesWith(n.cond());
             changed = true;
           }
@@ -81,7 +81,7 @@ struct PeepholeOptimizeNonTensorImpl {
             auto output = node->owningGraph()->insertConstant(
                 node->kind() == aten::__isnot__);
             GRAPH_UPDATE(
-                "Folding ", getHeader(node), " to ", output->debugName());
+                "Folding ", getHeader(node), " to ", output->displayName());
             node->output()->replaceAllUsesWith(output);
             changed = true;
           }

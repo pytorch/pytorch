@@ -158,7 +158,7 @@ void unpackQuantizedWeightsHelper(
     auto match_vmap = match.values_map;
     auto qlinear_node = match_vmap.at(vmap.at("r"))->node();
     std::string quantized_weight =
-        match_vmap.at(vmap.at("r"))->node()->inputs()[1]->debugName();
+        match_vmap.at(vmap.at("r"))->node()->inputs()[1]->displayName();
 
     auto itr = paramsDict.find(quantized_weight);
     if (itr == paramsDict.end()) {

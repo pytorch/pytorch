@@ -964,7 +964,7 @@ void InsertObserversHelper::insertObserverFor(
   if (observed_values_.count(v)) {
     return;
   }
-  GRAPH_DEBUG("Inserting observer for:", v->debugName());
+  GRAPH_DEBUG("Inserting observer for:", v->displayName());
   Module observer = observer_module.deepcopy();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
@@ -1020,9 +1020,9 @@ void InsertObserversHelper::delayObservingValuesInPattern(
     auto second_output = match.values_map.at(vmap.at("second_output"));
     GRAPH_DEBUG(
         "Delay observation for value in function pattern:",
-        first_output->debugName(),
+        first_output->displayName(),
         " to ",
-        second_output->debugName());
+        second_output->displayName());
     delay_observation_map_[first_output] = second_output;
   }
 }
@@ -1103,9 +1103,9 @@ void InsertObserversHelper::fillBoundaryValueMap(
           auto* return_val = g->outputs()[i];
           GRAPH_DEBUG(
               "Boundary Map[return]:",
-              n->output(i)->debugName(),
+              n->output(i)->displayName(),
               " -> ",
-              return_val->debugName());
+              return_val->displayName());
           boundary_value_map_[n->output(i)].insert(return_val);
         }
         for (auto i = 0U; i < g->inputs().size(); ++i) {
@@ -1114,9 +1114,9 @@ void InsertObserversHelper::fillBoundaryValueMap(
           auto* input_val = g->inputs()[i];
           GRAPH_DEBUG(
               "Boundary Map[input]:",
-              caller_input->debugName(),
+              caller_input->displayName(),
               " -> ",
-              input_val->debugName());
+              input_val->displayName());
           boundary_value_map_[caller_input].insert(input_val);
         }
       } else if (n->kind() == prim::If) {
@@ -1126,9 +1126,9 @@ void InsertObserversHelper::fillBoundaryValueMap(
             Value* subblock_output = subblock->outputs()[v->offset()];
             GRAPH_DEBUG(
                 "Boundary Map[if_output]:",
-                v->debugName(),
+                v->displayName(),
                 " -> ",
-                subblock_output->debugName());
+                subblock_output->displayName());
             boundary_value_map_[v].insert(subblock_output);
           }
         }
@@ -1236,7 +1236,7 @@ void InsertObserversHelper::fillValueObserverMap(
   auto qconfig = *qconfig_opt;
   for (auto* v : graph->inputs()) {
     if (valueNeedsToBeQuantized(v, qconfig)) {
-      GRAPH_DEBUG("Recording observer for ", v->debugName());
+      GRAPH_DEBUG("Recording observer for ", v->displayName());
       GRAPH_DUMP("In graph:", v->owningGraph());
       observer_for_value_[v] = getObserverModuleFor(v, qconfig);
     }
@@ -1249,7 +1249,7 @@ void InsertObserversHelper::fillValueObserverMap(
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
         if (valueNeedsToBeQuantized(v, qconfig)) {
-          GRAPH_DEBUG("Recording observer for ", v->debugName());
+          GRAPH_DEBUG("Recording observer for ", v->displayName());
           GRAPH_DUMP("In graph:", v->owningGraph());
           observer_for_value_[v] = getObserverModuleFor(v, qconfig);
         }
@@ -1265,7 +1265,7 @@ void InsertObserversHelper::fillValueObserverMap(
 c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
   if (observer_for_value_.count(v)) {
     auto observer = observer_for_value_.at(v);
-    GRAPH_DEBUG("Got observer module config for:", v->debugName());
+    GRAPH_DEBUG("Got observer module config for:", v->displayName());
     return observer;
   }
   c10::optional<Module> result;
@@ -1273,9 +1273,9 @@ c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
     for (Value* next : boundary_value_map_.at(v)) {
       GRAPH_DEBUG(
           "Going through boundary map:",
-          v->debugName(),
+          v->displayName(),
           " --> ",
-          next->debugName());
+          next->displayName());
       GRAPH_DUMP("From graph:", v->owningGraph());
       GRAPH_DUMP("To graph:", next->owningGraph());
       auto observer_opt = getObserverFor(next);
@@ -1293,7 +1293,7 @@ c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
     }
   }
   GRAPH_DEBUG(
-      "Observer module config for ", v->debugName(), ":", result.has_value());
+      "Observer module config for ", v->displayName(), ":", result.has_value());
   return result;
 }
 

@@ -281,7 +281,7 @@ bool texprReductionsEnabled() {
 void removeProfileNodesAndSpecializeTypes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::profile) {
-      GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
+      GRAPH_DEBUG("Removing prim::profile: %", it->output()->displayName());
       it->output()->replaceAllUsesWith(it->input());
       auto profiled_type = it->ty(attr::profiled_type)->expect<TensorType>();
 
@@ -483,7 +483,7 @@ class TensorExprFuser {
         aliasDb_->createValue(soutput);
         GRAPH_DEBUG(
             "Adding a mapping for %",
-            sinputs[i]->debugName(),
+            sinputs[i]->displayName(),
             " ",
             getHeader(soutput->node()));
         shape_of[sinputs[i]] = soutput;
@@ -538,7 +538,7 @@ class TensorExprFuser {
       GRAPH_DEBUG("Building sizes for ", getHeader(n));
       bool all_inputs_have_sizes = true;
       auto shapes = fmap(tensor_inputs, [&](Value* v) {
-        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
+        GRAPH_DEBUG("Getting aten::size for %", v->displayName());
         all_inputs_have_sizes &= shape_of.count(v);
         return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
       });

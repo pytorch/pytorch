@@ -325,7 +325,7 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
     if (auto t_type = in->type()->cast<TensorType>()) {
       if (!t_type->scalarType().has_value()) {
         GRAPH_UPDATE(
-            "Input ", in->debugName(), " is tensor type, but miss datatype.");
+            "Input ", in->displayName(), " is tensor type, but miss datatype.");
         return false;
       }
     } else if (auto s_type = in->type()->cast<ListType>()) {
@@ -336,7 +336,7 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
         }
       }
       GRAPH_UPDATE(
-          "Input ", in->debugName(), " is sequence type, but miss datatype.");
+          "Input ", in->displayName(), " is sequence type, but miss datatype.");
       return false;
     }
   }
@@ -395,11 +395,11 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
   std::vector<at::Tensor> inputTensorValues;
   for (auto i = 0; i < n->inputs().size(); i++) {
     if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
-      if (!ConstantValueMap::HasValue(n->input(i)->debugName())) {
+      if (!ConstantValueMap::HasValue(n->input(i)->displayName())) {
         return c10::nullopt;
       }
       auto tensor_value =
-          ConstantValueMap::GetValue(n->input(i)->debugName()).value();
+          ConstantValueMap::GetValue(n->input(i)->displayName()).value();
       inputTensorValues.emplace_back(tensor_value);
     }
   }
@@ -556,7 +556,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
 }
 
 void UpdateRank(Value* value, size_t rank) {
-  ConstantValueMap::SetRank(value->debugName(), rank);
+  ConstantValueMap::SetRank(value->displayName(), rank);
   if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
     c10::optional<size_t> rank_opt = rank;
     auto shape = ::c10::SymbolicShape(rank_opt);
@@ -568,26 +568,26 @@ void UpdateShapeFromVector(
     Value* value,
     const std::vector<int64_t>& shape_size) {
   ::c10::SymbolicShape shape(shape_size);
-  ConstantValueMap::SetShape(value->debugName(), shape);
+  ConstantValueMap::SetShape(value->displayName(), shape);
   if (shape_size.empty()) {
     UpdateRank(value, 0);
     return;
   }
-  ConstantValueMap::SetRank(value->debugName(), shape_size.size());
+  ConstantValueMap::SetRank(value->displayName(), shape_size.size());
   if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
     value->setType(value_type->withSymbolicShapes(shape));
   }
 }
 
 void UpdateShape(Value* value, const ::c10::SymbolicShape& shape) {
-  ConstantValueMap::SetShape(value->debugName(), shape);
+  ConstantValueMap::SetShape(value->displayName(), shape);
   if (shape.rank().has_value()) {
     auto rank = shape.rank().value();
     if (rank == 0) {
       UpdateRank(value, 0);
       return;
     }
-    ConstantValueMap::SetRank(value->debugName(), rank);
+    ConstantValueMap::SetRank(value->displayName(), rank);
     if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
       value->setType(value_type->withSymbolicShapes(shape));
     }
@@ -601,9 +601,9 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
   for (size_t i = 0; i < rank; i++) {
     if (TensorTypePtr shape_type =
             lc_node->input(i)->type()->cast<TensorType>()) {
-      if (ConstantValueMap::HasValue(lc_node->input(i)->debugName())) {
+      if (ConstantValueMap::HasValue(lc_node->input(i)->displayName())) {
         auto lc_value =
-            ConstantValueMap::GetValue(lc_node->input(i)->debugName()).value();
+            ConstantValueMap::GetValue(lc_node->input(i)->displayName()).value();
         if (lc_value.dim() == 0) {
           auto lc_value_0 = lc_value.item<int64_t>();
           shape_size.emplace_back(static_cast<int64_t>(lc_value_0));
@@ -617,12 +617,12 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
 }
 
 void ProcessReshapeNode(Node* n) {
-  if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
+  if (ConstantValueMap::HasValue(n->input(1)->displayName())) {
     auto shape_temp =
-        ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
+        ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->displayName());
     auto shape_vector_0 =
         ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
-            n->input(0)->debugName());
+            n->input(0)->displayName());
     if (shape_vector_0.has_value()) {
       auto final_shape =
           ComputeShapeFromReshape(shape_vector_0.value(), shape_temp);
@@ -631,9 +631,9 @@ void ProcessReshapeNode(Node* n) {
     }
   }
 
-  if (ConstantValueMap::HasShape(n->input(1)->debugName())) {
+  if (ConstantValueMap::HasShape(n->input(1)->displayName())) {
     auto shape_vector_1 =
-        ConstantValueMap::GetShapeInto1DInt64Vector(n->input(1)->debugName());
+        ConstantValueMap::GetShapeInto1DInt64Vector(n->input(1)->displayName());
     if (shape_vector_1.has_value()) {
       TORCH_INTERNAL_ASSERT(shape_vector_1.value().size() == 1);
       UpdateRank(n->output(), shape_vector_1.value()[0]);
@@ -715,26 +715,26 @@ c10::SymbolicShape ComputeShapeForSlice(
 }
 
 void ProcessSliceNode(Node* n, int opset_version) {
-  if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+  if (ConstantValueMap::HasShape(n->input(0)->displayName())) {
     auto shape_size_0 =
-        ConstantValueMap::GetShape(n->input(0)->debugName()).value();
+        ConstantValueMap::GetShape(n->input(0)->displayName()).value();
     if (shape_size_0.rank().has_value()) {
       auto input0_shape_value = shape_size_0.sizes().value();
       auto valid = true;
       if (opset_version >= 10) {
-        valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
-            ConstantValueMap::HasValue(n->input(2)->debugName());
+        valid = ConstantValueMap::HasValue(n->input(1)->displayName()) &&
+            ConstantValueMap::HasValue(n->input(2)->displayName());
         for (auto input_idx = 3; input_idx < 5; ++input_idx) {
           if (n->inputs().size() > input_idx) {
             valid = valid &&
-                ConstantValueMap::HasValue(n->input(input_idx)->debugName());
+                ConstantValueMap::HasValue(n->input(input_idx)->displayName());
           }
         }
       }
       if (!valid) {
-        if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
+        if (ConstantValueMap::HasRank(n->input(0)->displayName())) {
           auto rank =
-              ConstantValueMap::GetRank(n->input(0)->debugName()).value();
+              ConstantValueMap::GetRank(n->input(0)->displayName()).value();
           UpdateRank(n->output(), rank);
         }
         return;
@@ -756,16 +756,16 @@ void ProcessSliceNode(Node* n, int opset_version) {
         }
       } else {
         start_vector = ConstantValueMap::GetValueInto1DInt64Vector(
-            n->input(1)->debugName());
+            n->input(1)->displayName());
         end_vector = ConstantValueMap::GetValueInto1DInt64Vector(
-            n->input(2)->debugName());
+            n->input(2)->displayName());
         if (n->inputs().size() > 3) {
           axes_vector = ConstantValueMap::GetValueInto1DInt64Vector(
-              n->input(3)->debugName());
+              n->input(3)->displayName());
         }
         if (n->inputs().size() > 4) {
           step_vector = ConstantValueMap::GetValueInto1DInt64Vector(
-              n->input(4)->debugName());
+              n->input(4)->displayName());
         }
       }
 
@@ -785,8 +785,8 @@ void ProcessSliceNode(Node* n, int opset_version) {
 }
 
 void ProcessTimeSeriesNode(Node* n) {
-  auto input0_shape = ConstantValueMap::GetShape(n->input(0)->debugName());
-  auto input1_shape = ConstantValueMap::GetShape(n->input(1)->debugName());
+  auto input0_shape = ConstantValueMap::GetShape(n->input(0)->displayName());
+  auto input1_shape = ConstantValueMap::GetShape(n->input(1)->displayName());
   if (!(input0_shape.has_value() && input1_shape.has_value())) {
     return;
   }
@@ -849,7 +849,7 @@ void ComputeConstant(Node* n, int opset_version) {
       at::Tensor const_val_copy =
           at::empty(const_val.sizes(), const_val.options());
       const_val_copy.copy_(const_val);
-      ConstantValueMap::SetValue(n->output()->debugName(), const_val_copy);
+      ConstantValueMap::SetValue(n->output()->displayName(), const_val_copy);
     }
     return;
   }
@@ -862,7 +862,7 @@ void ComputeConstant(Node* n, int opset_version) {
     at::Tensor const_fold_val_copy = at::empty(
         const_fold_val.value().sizes(), const_fold_val.value().options());
     const_fold_val_copy.copy_(const_fold_val.value());
-    ConstantValueMap::SetValue(n->output()->debugName(), const_fold_val_copy);
+    ConstantValueMap::SetValue(n->output()->displayName(), const_fold_val_copy);
     UpdateShapeFromVector(n->output(), const_fold_val_copy.sizes().vec());
     return;
   }
@@ -870,7 +870,7 @@ void ComputeConstant(Node* n, int opset_version) {
   switch (n->kind()) {
     case ::c10::onnx::Shape: {
       auto input_shape =
-          ConstantValueMap::GetShapeInto1DInt64Vector(n->input()->debugName());
+          ConstantValueMap::GetShapeInto1DInt64Vector(n->input()->displayName());
       if (input_shape.has_value()) {
         auto shape_value = input_shape.value();
         // TODO: getDevice() ?
@@ -882,7 +882,7 @@ void ComputeConstant(Node* n, int opset_version) {
         // Need copy here
         at::Tensor f_copy = at::empty({shape_value_size}, options);
         f_copy.copy_(f);
-        ConstantValueMap::SetValue(n->output()->debugName(), f_copy);
+        ConstantValueMap::SetValue(n->output()->displayName(), f_copy);
       }
       break;
     }
@@ -891,12 +891,12 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Gather: {
-      if (ConstantValueMap::HasRank(n->input(0)->debugName()) &&
-          ConstantValueMap::HasRank(n->input(1)->debugName())) {
+      if (ConstantValueMap::HasRank(n->input(0)->displayName()) &&
+          ConstantValueMap::HasRank(n->input(1)->displayName())) {
         auto rank_0 =
-            ConstantValueMap::GetRank(n->input(0)->debugName()).value();
+            ConstantValueMap::GetRank(n->input(0)->displayName()).value();
         auto rank_1 =
-            ConstantValueMap::GetRank(n->input(1)->debugName()).value();
+            ConstantValueMap::GetRank(n->input(1)->displayName()).value();
         only_rank_available = true;
         rank = rank_0 + rank_1 - 1;
       }
@@ -911,9 +911,9 @@ void ComputeConstant(Node* n, int opset_version) {
           is_default_perm = true;
         }
         auto shape_updated = false;
-        if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+        if (ConstantValueMap::HasShape(n->input(0)->displayName())) {
           auto shape_size_0 =
-              ConstantValueMap::GetShape(n->input(0)->debugName())
+              ConstantValueMap::GetShape(n->input(0)->displayName())
                   .value()
                   .sizes();
           if (shape_size_0.has_value()) {
@@ -938,8 +938,8 @@ void ComputeConstant(Node* n, int opset_version) {
         if (!shape_updated) {
           if (!is_default_perm) {
             only_rank_available = true;
-          } else if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
-            rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
+          } else if (ConstantValueMap::HasRank(n->input(0)->displayName())) {
+            rank = ConstantValueMap::GetRank(n->input(0)->displayName()).value();
             only_rank_available = true;
           }
         }
@@ -947,35 +947,35 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::ConstantOfShape: {
-      if (ConstantValueMap::HasValue(n->input()->debugName())) {
+      if (ConstantValueMap::HasValue(n->input()->displayName())) {
         auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
-            n->input()->debugName());
+            n->input()->displayName());
         UpdateShapeFromVector(n->output(), shape_temp);
         if (!shape_temp.empty()) {
           if (n->hasAttributeS("value")) {
             auto value = n->t(attr::value).repeat(shape_temp);
-            ConstantValueMap::SetValue(n->output()->debugName(), value);
+            ConstantValueMap::SetValue(n->output()->displayName(), value);
           } else {
             auto options =
                 c10::TensorOptions().dtype(at::kFloat).device(at::kCPU);
             auto value = at::full({1}, 0.0, options).repeat(shape_temp);
-            ConstantValueMap::SetValue(n->output()->debugName(), value);
+            ConstantValueMap::SetValue(n->output()->displayName(), value);
           }
         }
       }
       break;
     }
     case ::c10::onnx::Expand: {
-      if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+      if (ConstantValueMap::HasShape(n->input(0)->displayName())) {
         auto input0_shape_size =
-            ConstantValueMap::GetShape(n->input(0)->debugName())
+            ConstantValueMap::GetShape(n->input(0)->displayName())
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
           auto input0_shape_value = input0_shape_size.value();
-          if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
+          if (ConstantValueMap::HasValue(n->input(1)->displayName())) {
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
-                n->input(1)->debugName());
+                n->input(1)->displayName());
             auto final_shape =
                 ComputeShapeFromExpand(input0_shape_value, shape_temp);
             if (final_shape.has_value()) {
@@ -987,8 +987,8 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::NonZero: {
-      if (ConstantValueMap::HasRank(n->input()->debugName())) {
-        auto rank = ConstantValueMap::GetRank(n->input()->debugName()).value();
+      if (ConstantValueMap::HasRank(n->input()->displayName())) {
+        auto rank = ConstantValueMap::GetRank(n->input()->displayName()).value();
         std::vector<c10::ShapeSymbol> dims;
         dims.emplace_back(
             c10::ShapeSymbol::fromStaticSize(static_cast<int64_t>(rank)));
@@ -999,9 +999,9 @@ void ComputeConstant(Node* n, int opset_version) {
                 input_node->t(attr::value).toType(at::ScalarType::Float);
             auto value_a = value.accessor<float, 1>();
             if (value_a.size(0) == 1 && std::abs(value_a[0]) > 1e-6) {
-              if (ConstantValueMap::HasShape(n->input()->debugName())) {
+              if (ConstantValueMap::HasShape(n->input()->displayName())) {
                 auto shape_size_0 =
-                    ConstantValueMap::GetShape(n->input()->debugName()).value();
+                    ConstantValueMap::GetShape(n->input()->displayName()).value();
                 if (shape_size_0.isComplete()) {
                   auto shape_vector_0 = shape_size_0.sizes().value();
                   int64_t num_elements = 1;
@@ -1034,16 +1034,16 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Tile: {
-      if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+      if (ConstantValueMap::HasShape(n->input(0)->displayName())) {
         auto input0_shape_size =
-            ConstantValueMap::GetShape(n->input(0)->debugName())
+            ConstantValueMap::GetShape(n->input(0)->displayName())
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
           auto input0_shape_value = input0_shape_size.value();
-          if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
+          if (ConstantValueMap::HasValue(n->input(1)->displayName())) {
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
-                n->input(1)->debugName());
+                n->input(1)->displayName());
             auto final_shape =
                 ComputeShapeFromTile(input0_shape_value, shape_temp);
             if (final_shape.has_value()) {
@@ -1059,7 +1059,7 @@ void ComputeConstant(Node* n, int opset_version) {
     }
   }
   if (n->outputs().size() > 1 ||
-      ConstantValueMap::HasShape(n->output(0)->debugName())) {
+      ConstantValueMap::HasShape(n->output(0)->displayName())) {
     return;
   }
   if (only_rank_available) {
@@ -1097,7 +1097,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(output_type->dim().value());
-        ConstantValueMap::SetRank(n->output(i)->debugName(), rank);
+        ConstantValueMap::SetRank(n->output(i)->displayName(), rank);
         auto shape = output_type->symbolic_sizes();
         if (shape.isComplete()) {
           UpdateShape(n->output(i), shape);
@@ -1112,7 +1112,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
     if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
       if (input_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(input_type->dim().value());
-        ConstantValueMap::SetRank(n->input(i)->debugName(), rank);
+        ConstantValueMap::SetRank(n->input(i)->displayName(), rank);
         // Only update shape if the input is onnx node.
         // If it is aten operators, for example,
         //   Float(20, 20, strides=[1, 0], requires_grad=0, device=cpu),
@@ -1121,7 +1121,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
         // The tracer shape may not be correct when dynamic_axes is enabled.
         if (n->input(i)->node()->kind().is_onnx() || static_input_shape) {
           auto shape = input_type->symbolic_sizes();
-          if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
+          if (!ConstantValueMap::HasShape(n->input(i)->displayName())) {
             UpdateShape(n->input(i), shape);
           }
         }
@@ -1139,7 +1139,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
         // Need copy here
         at::Tensor f_copy = at::empty({lc_vector_size}, options);
         f_copy.copy_(f);
-        ConstantValueMap::SetValue(n->input(i)->debugName(), f_copy);
+        ConstantValueMap::SetValue(n->input(i)->displayName(), f_copy);
         UpdateShapeFromVector(n->input(i), {lc_vector_size});
       } else {
         UpdateShapeFromVector(n->input(i), {static_cast<int64_t>(rank)});
@@ -1323,7 +1323,7 @@ void UpdateOutputTypeByONNXProto(
   auto updateNodeOutputsByONNXValueInfo =
       [&](const onnx::ValueInfoProto& v_info) {
         for (size_t i = 0; i < n->outputs().size(); ++i) {
-          if (clone_node->output(i)->debugName() == v_info.name()) {
+          if (clone_node->output(i)->displayName() == v_info.name()) {
             UpdateTorchValueByOnnxValueInfo(n->output(i), v_info, symbol_map);
           }
         }

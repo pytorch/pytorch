@@ -174,16 +174,16 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
             "In run ",
             frame_id,
             " annotating %",
-            pno->debugName(),
+            pno->displayName(),
             " with ",
             *pttp);
         if (profiled_types.count(pno) == 0) {
           profiled_types.insert({pno, pttp});
         } else {
           auto type = profiled_types.at(pno);
-          GRAPH_DEBUG("Existing type for %", pno->debugName(), " ", *type);
+          GRAPH_DEBUG("Existing type for %", pno->displayName(), " ", *type);
           pttp = type->merge(*pttp);
-          GRAPH_DEBUG("Result for %", pno->debugName(), " ", *pttp);
+          GRAPH_DEBUG("Result for %", pno->displayName(), " ", *pttp);
           profiled_types[pno] = pttp;
         }
       } else {

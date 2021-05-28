@@ -615,7 +615,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
     auto newSourceNodeOutput = b->addInput();
     valsToParamsMap.insert(
         {newSourceNodeOutput,
-         std::make_pair(newSourceNodeOutput->debugName(), updatedVal)});
+         std::make_pair(newSourceNodeOutput->displayName(), updatedVal)});
     newSourceNodeOutput->inferTypeFrom(updatedVal);
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
     // Next we remove the current node that has been replaced by

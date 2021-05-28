@@ -338,7 +338,7 @@ void EncoderBase::EncodeValueInfo(
     const std::unordered_map<
         std::string,
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
-  std::string name = n->debugName();
+  std::string name = n->displayName();
   v->set_name(name);
 
   auto tensorTypeToONNXType = [&dynamic_axes, &name, n, this](
@@ -458,7 +458,7 @@ void EncoderBase::EncodeBlock(
     }
   } else {
     for (auto input : block->inputs()) {
-      auto it = initializers.find(input->debugName());
+      auto it = initializers.find(input->displayName());
       if (it == initializers.end()) {
         onnx::ValueInfoProto* v = graph_proto->add_input();
         EncodeValueInfo(graph_proto, v, input, dynamic_axes);
@@ -486,11 +486,11 @@ void EncoderBase::EncodeBlock(
       if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
-        p_n->add_input(input->debugName());
+        p_n->add_input(input->displayName());
       }
     }
     for (auto output : node->outputs()) {
-      p_n->add_output(output->debugName());
+      p_n->add_output(output->displayName());
       EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (!node->kind().is_onnx()) {
@@ -594,7 +594,7 @@ void EncoderBase::AddInitializersIntoGraphProto(
   AT_ASSERT(block->inputs().size() >= initializers.size());
 
   for (auto input : block->inputs()) {
-    auto name_tensor_pair = initializers.find(input->debugName());
+    auto name_tensor_pair = initializers.find(input->displayName());
     if (name_tensor_pair == initializers.end()) {
       continue;
     }

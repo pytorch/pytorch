@@ -41,9 +41,9 @@ struct BailOutGraphBuilderForNode {
     auto new_value = copy_graph_->block()->addInput();
     GRAPH_DEBUG(
         "Adding a new value %",
-        new_value->debugName(),
+        new_value->displayName(),
         " for %",
-        old_value->debugName());
+        old_value->displayName());
     return mapValueAndCopyMetadata(old_value, new_value);
   }
 

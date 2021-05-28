@@ -57,9 +57,9 @@ struct GuardElimination {
         if (moved) {
           GRAPH_UPDATE(
               "Moved ",
-              n->output()->debugName(),
+              n->output()->displayName(),
               " to ",
-              n->inputs().at(0)->debugName());
+              n->inputs().at(0)->displayName());
         }
       } else {
         it++;
@@ -101,9 +101,9 @@ struct GuardElimination {
           n->output()->replaceAllUsesWith(prev->output());
           GRAPH_UPDATE(
               "Replacing ",
-              n->output()->debugName(),
+              n->output()->displayName(),
               " with ",
-              prev->output()->debugName());
+              prev->output()->displayName());
           it.destroyCurrent();
         } else {
           inputs_to_guards.insert({n->input(), n});
@@ -210,7 +210,7 @@ struct GuardElimination {
         n->output()->replaceAllUsesWith(n->inputs().at(0));
         n->inputs().at(0)->setType(pttp);
         GRAPH_UPDATE(
-            "Eliminating the redundant guard ", n->output()->debugName());
+            "Eliminating the redundant guard ", n->output()->displayName());
         it.destroyCurrent();
       } else {
         it++;
@@ -242,7 +242,7 @@ struct GuardElimination {
       } else {
         GRAPH_DEBUG(
             "input ",
-            input->debugName(),
+            input->displayName(),
             " isn't guarded, type ",
             *input->type());
         all_inputs_guarded = false;

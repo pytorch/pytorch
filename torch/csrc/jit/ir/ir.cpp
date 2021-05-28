@@ -37,7 +37,7 @@ static constexpr topo_position_t kMidPoint = 0;
 static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
 static void printValueRef(std::ostream& out, const Value* n) {
-  out << "%" << n->debugName();
+  out << "%" << n->displayName();
 }
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
@@ -699,7 +699,7 @@ std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
-        "Graph::copy() encountered a use of a value " + v->debugName() +
+        "Graph::copy() encountered a use of a value " + v->displayName() +
         " not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
@@ -751,7 +751,7 @@ bool Value::mustNotBeNone() const {
 }
 
 std::string Value::debugNameBase() const {
-  std::string name = debugName();
+  std::string name = displayName();
   std::string name_base = name;
   auto last_dot_pos = name.find_last_of('.');
   if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
@@ -834,10 +834,18 @@ Value* Value::setDebugName(const std::string& name) {
   return this;
 }
 
+std::string Value::displayName() const {
+  std::string ret = c10::to_string(unique());
+  if (!unique_name_.empty()) {
+    ret += "_" + unique_name_;
+  }
+  return ret;
+}
+
 Value* Value::copyMetadata(Value* from) {
   setType(from->type());
   if (from->hasDebugName()) {
-    setDebugName(from->debugName());
+    setDebugName(from->displayName());
   }
   return this;
 }
@@ -2097,7 +2105,7 @@ std::vector<Value*> inlineCallTo(
   AT_ASSERT(new_outputs.size() == old_outputs.size());
   for (size_t i = 0; i < old_outputs.size(); ++i) {
     if (old_outputs[i]->hasDebugName()) {
-      new_outputs[i]->setDebugName(old_outputs[i]->debugName());
+      new_outputs[i]->setDebugName(old_outputs[i]->displayName());
     }
     old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
   }

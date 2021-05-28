@@ -268,11 +268,11 @@ void NodeToONNX(
         // If onnx shape inference is turned on, the new outputs will have
         // types inferred, and they will be merged with the old types.
         if (outputs[i]->node()->kind() != c10::onnx::Constant &&
-            ConstantValueMap::HasValue(outputs[i]->debugName())) {
+            ConstantValueMap::HasValue(outputs[i]->displayName())) {
           // Create a const node if the node output value is in
           // ConstantValueMap.
           auto value =
-              ConstantValueMap::GetValue(outputs[i]->debugName()).value();
+              ConstantValueMap::GetValue(outputs[i]->displayName()).value();
           Node* const_node =
               new_block->owningGraph()->create(c10::onnx::Constant);
           const_node->t_(attr::value, value);

@@ -385,10 +385,10 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   };
   const auto set_grad = [&](Value* x, Value* dx) {
     if (Value* prev_grad = grad_map[x]) {
-      GRAPH_DEBUG("grad_map[", x->debugName(), "] = ", *grad_map[x]->node());
+      GRAPH_DEBUG("grad_map[", x->displayName(), "] = ", *grad_map[x]->node());
       grad_map[x] = createAutogradAdd(prev_grad, dx);
     } else {
-      GRAPH_DEBUG("grad_map[", x->debugName(), "] = ", dx->debugName());
+      GRAPH_DEBUG("grad_map[", x->displayName(), "] = ", dx->displayName());
       grad_map[x] = dx;
     }
   };
@@ -401,9 +401,9 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     Value* output_grad = reverse_block->addInput()->setType(output->type());
     GRAPH_DEBUG(
         "Adding output_grad ",
-        output_grad->debugName(),
+        output_grad->displayName(),
         " for ",
-        output->debugName());
+        output->displayName());
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
   }
@@ -519,9 +519,9 @@ static void liftConstants(Node* node, Block* move_to_this_block) {
     move_to_this_block->prependNode(lifted_constant);
     GRAPH_DEBUG(
         "Lifting constant ",
-        input->debugName(),
+        input->displayName(),
         " from GradOf's block and adding ",
-        lifted_constant->output()->debugName(),
+        lifted_constant->output()->displayName(),
         " to the backprop block");
     node->replaceInputWith(input, lifted_constant->output());
   }
@@ -612,9 +612,9 @@ static void deduplicateSizeCaptures(
           node->input()->owningGraph()->insert(aten::size, {node->input()});
       GRAPH_DEBUG(
           "deduplicateSizeCaptures: Replacing ",
-          capture->debugName(),
+          capture->displayName(),
           " with ",
-          size->debugName());
+          size->displayName());
       capture->replaceAllUsesWith(size);
       node->destroy();
     }
@@ -640,7 +640,7 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
         }
         for (Value* v : to_erase) {
           GRAPH_DEBUG(
-              "Erasing unused value ", v->debugName(), " from grad_map");
+              "Erasing unused value ", v->displayName(), " from grad_map");
           rev_info.grad_map.erase(v);
         }
       };
@@ -736,9 +736,9 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
       auto out_index = graph.registerOutput(capture_val);
       GRAPH_DEBUG(
           "Capturing a temporary ",
-          capture_val->debugName(),
+          capture_val->displayName(),
           " as ",
-          graph.outputs()[out_index]->debugName(),
+          graph.outputs()[out_index]->displayName(),
           " for forward graph");
       grad_desc.df_input_captured_outputs.emplace_back(
           graph.outputs().size() - 1);
@@ -778,7 +778,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
-    GRAPH_DEBUG("grad_map[", tmp->debugName(), "] = ", *new_vjp->node());
+    GRAPH_DEBUG("grad_map[", tmp->displayName(), "] = ", *new_vjp->node());
     grad_desc.df_input_vjps.emplace_back(i);
   }
 
@@ -792,9 +792,9 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     auto new_input = reverse_block->addInput()->copyMetadata(captured);
     GRAPH_DEBUG(
         "Capturing ",
-        captured->debugName(),
+        captured->displayName(),
         " as ",
-        new_input->debugName(),
+        new_input->displayName(),
         " for an embedded backward block");
   };
   for (auto& offset : grad_desc.df_input_captured_inputs)

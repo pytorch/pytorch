@@ -306,9 +306,9 @@ void FoldConvBatchNormHelper::analyze(
           rewrite_map_[matched_bn->output()] = matched_conv->output();
           GRAPH_UPDATE(
               "Rewriting %",
-              matched_bn->output()->debugName(),
+              matched_bn->output()->displayName(),
               " with %",
-              matched_conv->output()->debugName());
+              matched_conv->output()->displayName());
 
           nodes_to_delete_.insert(matched_bn);
           nodes_to_delete_.insert(matched_bn_submodule);

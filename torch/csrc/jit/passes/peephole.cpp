@@ -65,7 +65,7 @@ struct PeepholeOptimizeImpl {
           GRAPH_UPDATE(
               getHeader(node),
               " (x._grad_sum_to_size(x, None) == x) is replaced with ",
-              node->input(0)->debugName());
+              node->input(0)->displayName());
           node->output()->replaceAllUsesWith(node->input(0));
           changed = true;
         } else {
@@ -77,7 +77,7 @@ struct PeepholeOptimizeImpl {
               GRAPH_UPDATE(
                   getHeader(node),
                   " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
-                  node->inputs().at(0)->debugName());
+                  node->inputs().at(0)->displayName());
               u.user->replaceInput(0, node->inputs().at(0));
               changed = true;
             }
@@ -98,7 +98,7 @@ struct PeepholeOptimizeImpl {
             GRAPH_UPDATE(
                 getHeader(node),
                 " (x.expand(x.size()) == x) is replaced with ",
-                node->namedInput(attr::self)->debugName());
+                node->namedInput(attr::self)->displayName());
             node->output()->replaceAllUsesWith(node->namedInput(attr::self));
             changed = true;
           }
@@ -110,7 +110,7 @@ struct PeepholeOptimizeImpl {
           GRAPH_UPDATE(
               getHeader(node),
               " (x.t().t() == x) is replaced with ",
-              input_node->input()->debugName());
+              input_node->input()->displayName());
           node->output()->replaceAllUsesWith(input_node->input());
           changed = true;
         }
@@ -125,7 +125,7 @@ struct PeepholeOptimizeImpl {
           GRAPH_UPDATE(
               getHeader(node),
               " (x.type_as(y) == x) is replaced with ",
-              node->input(0)->debugName());
+              node->input(0)->displayName());
           node->output()->replaceAllUsesWith(node->input(0));
           changed = true;
         }
@@ -139,7 +139,7 @@ struct PeepholeOptimizeImpl {
           GRAPH_UPDATE(
               getHeader(node),
               " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
-              node->input()->debugName());
+              node->input()->displayName());
           node->output()->replaceAllUsesWith(input_node->input());
           changed = true;
         }
@@ -151,7 +151,7 @@ struct PeepholeOptimizeImpl {
             GRAPH_UPDATE(
                 getHeader(node),
                 " (x.size()) is replaced with ",
-                node->input()->debugName());
+                node->input()->displayName());
             WithInsertPoint guard(node);
             IValue ival(sizes);
             auto const_sizes_val = node->owningGraph()->insertConstant(ival);
@@ -215,7 +215,7 @@ struct PeepholeOptimizeImpl {
               "Replacing ",
               getHeader(node),
               " with a type constant ",
-              output->debugName());
+              output->displayName());
           node->output()->replaceAllUsesWith(output);
           changed = true;
         }
@@ -230,7 +230,7 @@ struct PeepholeOptimizeImpl {
               "Replacing ",
               getHeader(node),
               " with a device constant ",
-              output->debugName());
+              output->displayName());
           node->output()->replaceAllUsesWith(output);
           changed = true;
         }
@@ -245,7 +245,7 @@ struct PeepholeOptimizeImpl {
               "Replacing ",
               getHeader(node),
               " with a \"dim\" constant ",
-              output->debugName());
+              output->displayName());
           node->output()->replaceAllUsesWith(output);
           changed = true;
         }
@@ -261,7 +261,7 @@ struct PeepholeOptimizeImpl {
               "Replacing ",
               getHeader(node),
               " with a is_cuda constant ",
-              output->debugName());
+              output->displayName());
           node->output()->replaceAllUsesWith(output);
           changed = true;
         }
@@ -303,7 +303,7 @@ struct PeepholeOptimizeImpl {
         GRAPH_UPDATE(
             getHeader(node),
             " (x + 0 == x - 0 == x) is replaced with ",
-            node->input(0)->debugName());
+            node->input(0)->displayName());
         node->output()->replaceAllUsesWith(node->input(0));
         changed = true;
       }
@@ -319,7 +319,7 @@ struct PeepholeOptimizeImpl {
         GRAPH_UPDATE(
             getHeader(node),
             " (x * 1 == x / 1 == x) is replaced with ",
-            node->input(0)->debugName());
+            node->input(0)->displayName());
         node->output()->replaceAllUsesWith(node->input(0));
         changed = true;
       }
@@ -426,13 +426,13 @@ bool FuseAddMM(Block* block) {
             addmm_value->copyMetadata(node->output());
             GRAPH_UPDATE(
                 "Fusing ",
-                mm_node->input(0)->debugName(),
+                mm_node->input(0)->displayName(),
                 ", ",
-                mm_node->input(1)->debugName(),
+                mm_node->input(1)->displayName(),
                 " and ",
-                node->input(1 - mm_side)->debugName(),
+                node->input(1 - mm_side)->displayName(),
                 " into ",
-                addmm_value->debugName());
+                addmm_value->displayName());
             node->output()->replaceAllUsesWith(addmm_value);
             changed = true;
             continue;

@@ -92,13 +92,13 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
     if (values_map_.at(v1) != v2) {
       GRAPH_DEBUG(
           "Values %",
-          v1->debugName(),
+          v1->displayName(),
           " and %",
-          v2->debugName(),
+          v2->displayName(),
           " did not match because %",
-          v1->debugName(),
+          v1->displayName(),
           " has already been matched with %",
-          values_map_.at(v1)->debugName(),
+          values_map_.at(v1)->displayName(),
           ".\n");
       return false;
     }
@@ -111,9 +111,9 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   if (v1->uses().size() != v2->uses().size() && !isOutput(v1) && !isInput(v1)) {
     GRAPH_DEBUG(
         "Values %",
-        v1->debugName(),
+        v1->displayName(),
         " and %",
-        v2->debugName(),
+        v2->displayName(),
         " did not match because number of their uses is different.\n");
     return false;
   }
@@ -121,7 +121,7 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // Add the values to the map before calling matchNodes to avoid infinite
   // recursion.
   GRAPH_DEBUG(
-      "Values %", v1->debugName(), " and %", v2->debugName(), " matched.\n");
+      "Values %", v1->displayName(), " and %", v2->displayName(), " matched.\n");
   values_map_[v1] = v2;
   return matchNodes(v1->node(), v2->node());
 }

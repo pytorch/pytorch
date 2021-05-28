@@ -14,7 +14,7 @@ ValueToParamPairMap buildValueToParamsMap(
     const ParamMap& paramsDict) {
   ValueToParamPairMap valsToParamsMap;
   for (auto& input : b->inputs()) {
-    auto it = paramsDict.find(input->debugName());
+    auto it = paramsDict.find(input->displayName());
     if (it != paramsDict.end()) {
       valsToParamsMap.emplace(input, *it);
     }

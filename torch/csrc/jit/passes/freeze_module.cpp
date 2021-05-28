@@ -260,7 +260,7 @@ class AttributePropagator {
           if (n->kind() == prim::SetAttr || aliasDb->hasOutputWriters(n)) {
             GRAPH_DEBUG(
                 n->kind() == prim::GetAttr ? "attribute: " + name + " in %" +
-                        n->output()->debugName() + " has inplace writer"
+                        n->output()->displayName() + " has inplace writer"
                                            : "attribute: " + name + " is set");
             auto mptr = attrModule._ivalue();
             insertMutableAttr(name, attr, mptr);
@@ -482,9 +482,9 @@ class AttributePropagator {
           }
           GRAPH_UPDATE(
               "Folding GetAttr %",
-              n->outputs()[0]->debugName(),
+              n->outputs()[0]->displayName(),
               " with ",
-              paramConst->debugName());
+              paramConst->displayName());
           n->outputs().at(0)->replaceAllUsesWith(paramConst);
           n->removeAllInputs();
         } else if (n->kind() == prim::fork) {

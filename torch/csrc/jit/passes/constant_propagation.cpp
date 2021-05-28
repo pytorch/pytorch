@@ -168,7 +168,7 @@ struct ConstantPropagator {
         made_change_ = true;
         GRAPH_UPDATE(
             "Folding %",
-            n->outputs()[i]->debugName(),
+            n->outputs()[i]->displayName(),
             " with ",
             getHeader((*new_output)->node()));
         if (outputs[i].isNone()) {

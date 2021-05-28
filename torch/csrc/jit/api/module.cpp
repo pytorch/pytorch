@@ -22,7 +22,7 @@ namespace jit {
 namespace {
 
 std::string getInputDebugName(const Node& n, const int idx) {
-  return n.inputs().at(idx)->debugName();
+  return n.inputs().at(idx)->displayName();
 }
 
 std::vector<Node*> findAllNodes(

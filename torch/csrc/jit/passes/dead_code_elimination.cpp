@@ -66,9 +66,9 @@ class DeadCodeEliminator {
               "Dead ",
               i,
               "-th input ",
-              node->inputs().at(i)->debugName(),
+              node->inputs().at(i)->displayName(),
               "(",
-              g.inputs().at(i)->debugName(),
+              g.inputs().at(i)->displayName(),
               " in a subgraph) will be removed");
           g.eraseInput(i);
           node->removeInput(i);
@@ -283,7 +283,7 @@ class DeadCodeEliminator {
             "Node ",
             it->kind().toQualString(),
             " which outputs ",
-            (node->outputs().size() > 0 ? node->outputs().at(0)->debugName()
+            (node->outputs().size() > 0 ? node->outputs().at(0)->displayName()
                                         : "n/a"),
             " will be removed");
         it.destroyCurrent();
@@ -337,7 +337,7 @@ class DeadCodeEliminator {
             "Dead ",
             i,
             "-th output ",
-            node->outputs().at(i)->debugName(),
+            node->outputs().at(i)->displayName(),
             " of node ",
             node->kind().toQualString(),
             " will be removed");
@@ -345,7 +345,7 @@ class DeadCodeEliminator {
         for (Block* b : node->blocks()) {
           GRAPH_UPDATE(
               "\tCorresponding block output ",
-              b->outputs().at(i)->debugName(),
+              b->outputs().at(i)->displayName(),
               " will be removed");
           b->eraseOutput(i);
         }
@@ -384,23 +384,23 @@ class DeadCodeEliminator {
         "Dead ",
         loop_input_offset + i,
         "-th input ",
-        node->inputs().at(i)->debugName(),
+        node->inputs().at(i)->displayName(),
         " will be removed");
     GRAPH_UPDATE(
         "Dead ",
         i,
         "-th output ",
-        node->outputs().at(i)->debugName(),
+        node->outputs().at(i)->displayName(),
         " will be removed");
     GRAPH_UPDATE(
         "\tDead block input ",
-        loop_body->inputs().at(loop_body_offset + i)->debugName(),
+        loop_body->inputs().at(loop_body_offset + i)->displayName(),
         "at offset ",
         loop_body_offset + i,
         " will be removed");
     GRAPH_UPDATE(
         "\tDead block output ",
-        loop_body->outputs().at(loop_body_offset + i)->debugName(),
+        loop_body->outputs().at(loop_body_offset + i)->displayName(),
         "at offset ",
         loop_body_offset + i,
         " will be removed");

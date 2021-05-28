@@ -213,13 +213,8 @@ struct Value {
   }
   static bool isValidName(const std::string& name);
   TORCH_API Value* setDebugName(const std::string& name);
-  std::string debugName() const {
-    if (hasDebugName()) {
-      return unique_name_;
-    }
-    return c10::to_string(unique());
-  }
   TORCH_API std::string debugNameBase() const;
+  std::string displayName() const;
   Node* node() {
     return node_;
   }

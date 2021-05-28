@@ -53,7 +53,7 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
   // check output types
   // Static Runtime doesn't support complex outputs such as List of Lists
   for (Value* output : graph->outputs()) {
-    VLOG(1) << "output: %" << output->debugName()
+    VLOG(1) << "output: %" << output->displayName()
             << " has type: " << output->type()->repr_str();
     auto kind = output->node()->kind();
     if (kind == prim::TupleConstruct || kind == prim::ListConstruct ||
@@ -1010,7 +1010,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
-          val->debugName() + " of node " + c10::to_string(n) +
+          val->displayName() + " of node " + c10::to_string(n) +
           " was not cleaned up";
       if (output_ivalues.count(ival) == 0) {
         // check for intermediates

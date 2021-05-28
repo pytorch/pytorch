@@ -58,7 +58,7 @@ class ModuleUseDeduper {
         // we'll have to rewrite the use
         if (!unique_modules_.insert(m._ivalue()).second) {
           uses_to_rewrite_.push_back(instance);
-          GRAPH_DEBUG("Found use to rewrite: ", instance->debugName());
+          GRAPH_DEBUG("Found use to rewrite: ", instance->displayName());
         }
       }
     }

@@ -117,13 +117,13 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
 
       auto conv_W = b->owningGraph()->addInput();
       valsToParamsMap.insert(
-          {conv_W, std::make_pair(conv_W->debugName(), w_conv)});
+          {conv_W, std::make_pair(conv_W->displayName(), w_conv)});
       conv_W->inferTypeFrom(w_conv);
       convNode->addInput(conv_W);
 
       auto conv_B = b->addInput();
       valsToParamsMap.insert(
-          {conv_B, std::make_pair(conv_B->debugName(), b_conv)});
+          {conv_B, std::make_pair(conv_B->displayName(), b_conv)});
       conv_B->inferTypeFrom(b_conv);
       convNode->addInput(conv_B);
 

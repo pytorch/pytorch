@@ -619,9 +619,9 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
       iter == self,
       "Can't handle the access pattern of GetAttr "
       " in getModuleAccessPath, traced back to:",
-      iter->debugName(),
+      iter->displayName(),
       " which is not self:",
-      self->debugName());
+      self->displayName());
   std::reverse(path.begin(), path.end());
   return path;
 }

@@ -101,8 +101,8 @@ void FoldFrozenConvBatchnorm(Block* b) {
       auto conv_w_value = conv->namedInput("weight");
       auto conv_b_value = conv->namedInput("bias");
 
-      fused_conv_w->setDebugName(conv_w_value->debugName() + "_fused_bn");
-      fused_conv_b->setDebugName(conv_b_value->debugName() + "_fused_bn");
+      fused_conv_w->setDebugName(conv_w_value->displayName() + "_fused_bn");
+      fused_conv_b->setDebugName(conv_b_value->displayName() + "_fused_bn");
 
       conv->replaceInputWith(conv_w_value, fused_conv_w);
       conv->replaceInputWith(conv_b_value, fused_conv_b);
@@ -260,7 +260,7 @@ void FoldFrozenConvAddOrSub(Block* b) {
       auto conv_b_value = conv->namedInput("bias");
 
       fused_conv_b->setDebugName(
-          conv_b_value->debugName() + "_fused_" +
+          conv_b_value->displayName() + "_fused_" +
           add_or_div->kind().toUnqualString());
       conv->replaceInputWith(conv_b_value, fused_conv_b);
       add_or_div->output()->replaceAllUsesWith(conv->output());
@@ -326,7 +326,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
       auto conv_weight_value = conv->namedInput("weight");
 
       fused_conv_weight->setDebugName(
-          conv_weight_value->debugName() + "_fused_" +
+          conv_weight_value->displayName() + "_fused_" +
           mul_or_div->kind().toUnqualString());
       conv->replaceInputWith(conv_weight_value, fused_conv_weight);
       mul_or_div->output()->replaceAllUsesWith(conv->output());
@@ -350,7 +350,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
         auto conv_b_value = conv->namedInput("bias");
 
         fused_conv_weight->setDebugName(
-            conv_b_value->debugName() + "_fused_" +
+            conv_b_value->displayName() + "_fused_" +
             mul_or_div->kind().toUnqualString());
         conv->replaceInputWith(conv_b_value, fused_conv_bias);
       }

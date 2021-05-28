@@ -314,7 +314,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
         int index = std::distance(node->inputs().begin(), it);
         std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
                   << node->kind().toQualString() << " on block input: '"
-                  << (*it)->debugName() << "'. This changes graph semantics."
+                  << (*it)->displayName() << "'. This changes graph semantics."
                   << std::endl;
 
         Node* newNode =
@@ -377,7 +377,7 @@ Value* findArgumentAsInputParam(
     std::string& name,
     IValue& attr) {
   for (auto input : graph->inputs()) {
-    if (input->debugName() == name)
+    if (input->displayName() == name)
       return input;
   }
   throw std::runtime_error(
@@ -400,10 +400,10 @@ std::string InplaceConverter::ValueTracker::toString() const {
   ss << "value_to_sorted_aliases_: " << std::endl;
   size_t idx = 0;
   for (const auto& it : value_to_sorted_aliases_) {
-    ss << "Value[" << idx << "]: " << it.first->debugName() << std::endl;
+    ss << "Value[" << idx << "]: " << it.first->displayName() << std::endl;
     ss << "  Mapping to ";
     for (auto v : it.second) {
-      ss << v->debugName() << " ";
+      ss << v->displayName() << " ";
     }
     ss << std::endl;
     idx++;
@@ -411,8 +411,8 @@ std::string InplaceConverter::ValueTracker::toString() const {
 
   ss << "alias_to_value_: " << std::endl;
   for (auto it : alias_to_value_) {
-    ss << "  Alias " << it.first->debugName();
-    ss << " map to " << it.second->debugName() << std::endl;
+    ss << "  Alias " << it.first->displayName();
+    ss << " map to " << it.second->displayName() << std::endl;
   }
 
   return ss.str();
@@ -423,9 +423,9 @@ void InplaceConverter::ValueTracker::recordSetValue(
     Value* new_v) {
   GRAPH_UPDATE(
       "Calling recordSetValue with old_v: ",
-      old_v->debugName(),
+      old_v->displayName(),
       " new_v: ",
-      new_v->debugName());
+      new_v->displayName());
   GRAPH_UPDATE(this->toString());
   auto* n = new_v->node();
   auto* owning_block = n->owningBlock();
@@ -498,9 +498,9 @@ void InplaceConverter::ValueTracker::recordSetValue(
 
   GRAPH_UPDATE(
       "After recordSetValue for in: ",
-      old_v->debugName(),
+      old_v->displayName(),
       ", out: ",
-      new_v->debugName(),
+      new_v->displayName(),
       ". tracker status:");
   GRAPH_UPDATE(this->toString());
 }
@@ -538,9 +538,9 @@ void InplaceConverter::correctAliasReferences(Node* n) {
       n->replaceInput(i, alias);
       GRAPH_UPDATE(
           "Replacing ",
-          in->debugName(),
+          in->displayName(),
           " with ",
-          alias->debugName(),
+          alias->displayName(),
           " for ",
           *n);
     }
@@ -551,7 +551,7 @@ void InplaceConverter::correctAliasReferences(Node* n) {
 Value* InplaceConverter::ValueTracker::findAliasForValueAtNode(
     Value* v,
     const Node* n) const {
-  GRAPH_UPDATE("Finding alias for value:", v->debugName(), " at node ", *n);
+  GRAPH_UPDATE("Finding alias for value:", v->displayName(), " at node ", *n);
   if (alias_to_value_.find(v) == alias_to_value_.end()) {
     // This value was not affected by any inplace operator.
     return v;
@@ -580,7 +580,7 @@ Value* InplaceConverter::ValueTracker::findAliasForValueAtNode(
       "More details: \n",
       n->sourceRange().str(),
       "Input ",
-      v->debugName(),
+      v->displayName(),
       " of node ",
       *n,
       " was modified by in-place operation, but we cannot find its updated value. ",
