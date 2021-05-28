@@ -65,6 +65,7 @@ from .quantization_patterns import (
 from .utils import (
     _parent_name,
     all_node_args_have_no_tensors,
+    is_get_tensor_info_node,
     quantize_node,
     get_custom_module_class_keys,
     get_new_attr_name_with_prefix,
@@ -1141,7 +1142,7 @@ class Quantizer:
             custom_module_classes=custom_module_classes)
 
         quantized_graph = Graph()
-        env: Dict[str, Tuple[Node, torch.dtype]] = {}
+        env: Dict[str, Tuple[Node, Optional[torch.dtype]]] = {}
 
         graph_inputs: List[str] = []
         for node in model.graph.nodes:
@@ -1155,7 +1156,7 @@ class Quantizer:
                 ' in env: ' + \
                 str(env)
             quantized_node, dtype = env[n.name]
-            if dtype != torch.float:
+            if dtype and dtype != torch.float:
                 env[n.name] = Proxy(quantized_node).dequantize().node, torch.float
             return env[n.name][0]
 
@@ -1164,6 +1165,8 @@ class Quantizer:
                 'trying to load quantized node but did not find node:' + \
                 n.name + ' in environment:' + str(env)
             quantized_node, dtype = env[n.name]
+            assert dtype in [torch.quint8, torch.int8, torch.float16], \
+                f'Expecting node {quantized_node} to be quantized but got dtype: {dtype}'
             return quantized_node
 
         def load_x(n: Node) -> Node:
@@ -1392,14 +1395,22 @@ class Quantizer:
                 placeholder_node_seen_cnt += 1
                 if cur_placeholder_node_idx in input_quantized_idxs:
                     env[node.name] = \
-                        quantized_graph.node_copy(node, load_non_quantized), activation_dtype(qconfig) if qconfig else None
+                        quantized_graph.node_copy(
+                            node, load_non_quantized), activation_dtype(qconfig) if qconfig else torch.float
                 else:
                     env[node.name] = \
                         quantized_graph.node_copy(node, load_non_quantized), torch.float
             else:
                 # copy quantized or non-quantized node
-                env[node.name] = \
-                    quantized_graph.node_copy(node, load_non_quantized), torch.float
+                # get_tensor_info_node like shape works for both
+                # quantized and non-quantized input and output a non-Tensor
+                # (we use None for dtype currently for non-Tensors)
+                if is_get_tensor_info_node(node):
+                    env[node.name] = \
+                        quantized_graph.node_copy(node, load_x), None
+                else:
+                    env[node.name] = \
+                        quantized_graph.node_copy(node, load_non_quantized), torch.float
 
         # remove activation post process
         act_post_process_removed_graph = Graph()
