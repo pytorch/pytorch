@@ -6686,6 +6686,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-py3.8-gcc9"
           image_name: "pytorch-linux-bionic-py3.8-gcc9"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-py3-clang5-asan"
+          image_name: "pytorch-linux-xenial-py3-clang5-asan"
       - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_8_gcc9_coverage_build
           requires:
@@ -6698,6 +6701,19 @@ workflows:
             - pytorch_linux_bionic_py3_8_gcc9_coverage_build
           build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage-test1"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
+          resource_class: xlarge
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_asan_build
+          requires:
+            - "docker-pytorch-linux-xenial-py3-clang5-asan"
+          build_environment: "pytorch-linux-xenial-py3-clang5-asan-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan"
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_py3_clang5_asan_test2
+          requires:
+            - pytorch_linux_xenial_py3_clang5_asan_build
+          build_environment: "pytorch-linux-xenial-py3-clang5-asan-test2"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan"
           resource_class: xlarge
     when: << pipeline.parameters.run_build >>
   master_build:
