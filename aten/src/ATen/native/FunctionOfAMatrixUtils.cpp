@@ -86,9 +86,9 @@ Tensor& _compute_linear_combination_out(const Tensor& input, const Tensor& coeff
     .set_check_mem_overlap(false)  // Output is intentionally 0 strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_borrowed_output(output_restrided)
-    .add_borrowed_input(input_restrided)
-    .add_borrowed_input(coefficients_restrided)
+    .add_output(output_restrided)
+    .add_input(input_restrided)
+    .add_input(coefficients_restrided)
     .build();
 
   // The dimension of size n is traversed inside the kernels,
