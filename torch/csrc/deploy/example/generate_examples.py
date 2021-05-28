@@ -49,3 +49,5 @@ if __name__ == "__main__":
 
     multi_return = MultiReturn()
     save("multi_return", multi_return, torch.jit.script(multi_return), (torch.rand(10, 20),), multi_return_metadata)
+    with PackageExporter(p / "uses_distributed") as e:
+        e.save_source_string("uses_distributed", "import torch.distributed; assert torch.distributed.is_available()")
