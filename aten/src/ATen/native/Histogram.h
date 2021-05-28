@@ -7,7 +7,7 @@
 
 namespace at { namespace native {
 
-using histogram_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, Tensor&);
+using histogram_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, const Tensor&);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DECLARE_DISPATCH(histogram_fn, histogram_stub);

@@ -4955,6 +4955,34 @@ else:
             self.assertEqual(actual_hist, expected_hist)
             self.assertEqual(actual_bin_edges, expected_bin_edges)
 
+        with self.assertRaisesRegex(RuntimeError, 'not supported on CPU for dtype'):
+            values = make_tensor((), device, dtype=torch.int32)
+            torch.histogram(values, 1)
+
+        inconsistent_dtype = torch.float32 if dtype != torch.float32 else torch.float64
+
+        with self.assertRaisesRegex(RuntimeError, 'input tensor and bins tensor should have same dtype'):
+            values = make_tensor((), device, dtype=dtype)
+            bins = make_tensor((), device, dtype=inconsistent_dtype)
+            torch.histogram(values, bins)
+
+        with self.assertRaisesRegex(RuntimeError, 'input tensor and weight tensor should have same dtype'):
+            values = make_tensor((), device, dtype=dtype)
+            weight = make_tensor((), device, dtype=inconsistent_dtype)
+            torch.histogram(values, 1, weight=weight)
+
+        with self.assertRaisesRegex(RuntimeError, 'input tensor and hist tensor should have same dtype'):
+            values = make_tensor((), device, dtype=dtype)
+            hist = make_tensor((), device, dtype=inconsistent_dtype)
+            bin_edges = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, 1, out=(hist, bin_edges))
+
+        with self.assertRaisesRegex(RuntimeError, 'input tensor and bin_edges tensor should have same dtype'):
+            values = make_tensor((), device, dtype=dtype)
+            hist = make_tensor((), device, dtype=dtype)
+            bin_edges = make_tensor((), device, dtype=inconsistent_dtype)
+            torch.histogram(values, 1, out=(hist, bin_edges))
+
     @onlyCPU
     @dtypes(torch.float32, torch.float64)
     def test_histogram_noncontig(self, device, dtype):

@@ -96,8 +96,8 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
  * Initializes hist to 0, calls into the main algorithm, and normalizes output if necessary.
  */
 template<bool LinearBinEdges>
-std::tuple<Tensor&, Tensor&>
-histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weight, bool density, Tensor& hist, Tensor& bin_edges) {
+void histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
+        Tensor& hist, const Tensor& bin_edges) {
     hist.fill_(0);
 
     const int64_t numel_in = self.numel();
@@ -109,15 +109,17 @@ histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weig
 
     switch (self.scalar_type()) {
         case ScalarType::Double: {
-            histogram_cpu_contiguous<double, LinearBinEdges>(hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
+            histogram_cpu_contiguous<double, LinearBinEdges>(
+                  hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
             break;
         }
         case ScalarType::Float: {
-            histogram_cpu_contiguous<float, LinearBinEdges>(hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
+            histogram_cpu_contiguous<float, LinearBinEdges>(
+                  hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
             break;
         }
         default:
-            TORCH_INTERNAL_ASSERT(false, "histogram_out not supported on CPUType for ", self.scalar_type());
+            TORCH_CHECK(false, "torch.histogram: not supported on CPU for dtype ", self.dtype());
     }
 
     if (density) {
@@ -126,19 +128,15 @@ histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weig
         hist.div_(bin_widths);
         hist.div_(hist_sum);
     }
-
-    return std::forward_as_tuple(hist, bin_edges);
 }
 
-//static std::tuple<Tensor&, Tensor&>
-static void
-histogram_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight, bool density, Tensor& hist, Tensor& bin_edges) {
+static void histogram_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
+        Tensor& hist, const Tensor& bin_edges) {
     histogram_out_cpu_template<false>(self, weight, density, hist, bin_edges);
 }
 
-//static std::tuple<Tensor&, Tensor&>
-static void
-histogram_linear_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight, bool density, Tensor& hist, Tensor& bin_edges) {
+static void histogram_linear_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight,
+        bool density, Tensor& hist, const Tensor& bin_edges) {
     histogram_out_cpu_template<true>(self, weight, density, hist, bin_edges);
 }
 } // namespace

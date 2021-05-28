@@ -48,39 +48,42 @@ namespace {
 inline void histogram_pre_check(const Tensor& input, const Tensor& bin_edges_in,
         const c10::optional<Tensor>& weight, bool density,
         const Tensor& hist, const Tensor& bin_edges_out) {
-    TORCH_CHECK(input.dtype() == bin_edges_in.dtype(), "torch.histogram(): input tensor and bins tensor should",
-            " have same dtype, but got input ", input.dtype(), " and bins ", bin_edges_in.dtype());
-
-    TORCH_CHECK(input.dtype() == hist.dtype(), "torch.histogram(): input tensor and hist tensor should",
+    TORCH_CHECK(input.dtype() == hist.dtype(), "torch.histogram: input tensor and hist tensor should",
             " have same dtype, but got input ", input.dtype(), " and hist ", hist.dtype());
 
-    TORCH_CHECK(input.dtype() == bin_edges_out.dtype(), "torch.histogram(): input tensor and bin_edges tensor should",
+    TORCH_CHECK(input.dtype() == bin_edges_in.dtype(), "torch.histogram: input tensor and bins tensor should",
+            " have same dtype, but got input ", input.dtype(), " and bins ", bin_edges_in.dtype());
+
+    TORCH_CHECK(input.dtype() == bin_edges_out.dtype(), "torch.histogram: input tensor and bin_edges tensor should",
             " have same dtype, but got input ", input.dtype(), " and bin_edges ", bin_edges_out.dtype());
 
-    TORCH_CHECK(hist.dim() == 1, "torch.histogram(): hist tensor should have dimension 1,",
+    TORCH_CHECK(hist.dim() == 1, "torch.histogram: hist tensor should have dimension 1,",
             " but got ", hist.dim(), " dimension");
 
-    TORCH_CHECK(bin_edges_in.dim() == 1, "torch.histogram(): bins tensor should have dimension 1,",
+    TORCH_CHECK(bin_edges_in.dim() == 1, "torch.histogram: bins tensor should have dimension 1,",
             " but got ", bin_edges_in.dim(), " dimension");
 
-    TORCH_CHECK(bin_edges_out.dim() == 1, "torch.histogram(): bin_edges tensor should have dimension 1,",
+    TORCH_CHECK(bin_edges_out.dim() == 1, "torch.histogram: bin_edges tensor should have dimension 1,",
             " but got ", bin_edges_out.dim(), " dimension");
 
     if (weight.has_value()) {
-        auto weight_sizes = weight.value().sizes();
-        TORCH_CHECK(input.sizes() == weight.value().sizes(), "torch.histogram(): if weight tensor is provided,"
-                " input tensor and weight tensor should have the same shape, but got input(", input.sizes(), ")",
-                ", and weight(", weight_sizes, ")");
+        TORCH_CHECK(input.dtype() == weight.value().dtype(), "torch.histogram: if weight tensor is provided,"
+                " input tensor and weight tensor should have same dtype, but got input(", input.dtype(), ")",
+                ", and weight(", weight.value().dtype(), ")");
+
+        TORCH_CHECK(input.sizes() == weight.value().sizes(), "torch.histogram: if weight tensor is provided,"
+                " input tensor and weight tensor should have same shape, but got input(", input.sizes(), ")",
+                ", and weight(", weight.value().sizes(), ")");
     }
 
-    TORCH_CHECK(bin_edges_in.numel() > 0, "torch.histogram(): bin_edges tensor should have at least 1 element,",
+    TORCH_CHECK(bin_edges_in.numel() > 0, "torch.histogram: bin_edges tensor should have at least 1 element,",
             " but got ", bin_edges_in.numel(), " elements");
 
     at::native::resize_output(hist, {bin_edges_in.numel() - 1});
 
     at::native::resize_output(bin_edges_out, {bin_edges_in.numel()});
 
-    TORCH_CHECK(hist.is_contiguous(), "torch.histogram(): hist tensor must be contiguous");
+    TORCH_CHECK(hist.is_contiguous(), "torch.histogram: hist tensor must be contiguous");
 }
 
 /* Determines the outermost bin edges.
@@ -101,7 +104,7 @@ std::pair<double, double> select_outer_bin_edges(const Tensor& input,
     double leftmost_edge  = min.has_value() ? min.value().to<double>() : std::get<0>(extrema).item<double>();
     double rightmost_edge = max.has_value() ? max.value().to<double>() : std::get<1>(extrema).item<double>();
 
-    TORCH_CHECK(leftmost_edge <= rightmost_edge, "torch.histogram(): min should not exceed max, but got",
+    TORCH_CHECK(leftmost_edge <= rightmost_edge, "torch.histogram: min should not exceed max, but got",
             "min ", leftmost_edge, " max ", rightmost_edge);
 
     // Expand empty range to match numpy behavior and avoid division by 0 in normalization
@@ -116,36 +119,46 @@ std::pair<double, double> select_outer_bin_edges(const Tensor& input,
 } // namespace
 
 std::tuple<Tensor&, Tensor&>
-histogram_out_cpu(const Tensor& self, const Tensor& bin_edges,
+histogram_out_cpu(const Tensor& self, const Tensor& bins,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
         const c10::optional<Tensor>& weight, bool density,
-        Tensor& hist, Tensor& bin_edges_out) {
-    histogram_pre_check(self, bin_edges, weight, density, hist, bin_edges_out);
-    bin_edges_out.copy_(bin_edges);
-    histogram_stub(self.device().type(), self, weight, density, hist, bin_edges_out);
-    return std::forward_as_tuple(hist, bin_edges_out);
+        Tensor& hist, Tensor& bin_edges) {
+    histogram_pre_check(self, bins, weight, density, hist, bin_edges);
+    bin_edges.copy_(bins);
+    histogram_stub(self.device().type(), self, weight, density, hist, bin_edges);
+    return std::forward_as_tuple(hist, bin_edges);
 }
 
 std::tuple<Tensor, Tensor>
-histogram_cpu(const Tensor& self, const Tensor& bin_edges,
+histogram_cpu(const Tensor& self, const Tensor& bins,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
-    Tensor bin_edges_out = at::empty({0}, bin_edges.options());
-    return histogram_out_cpu(self, bin_edges, min, max, weight, density, hist, bin_edges_out);
+
+    // Performs dtype-check on bins before general checks to ensure an unambiguous error message.
+    TORCH_CHECK(self.dtype() == bins.dtype(), "torch.histogram: input tensor and bins tensor should",
+            " have same dtype, but got input ", self.dtype(), " and bins ", bins.dtype());
+    histogram_pre_check(self, bins, weight, density, hist, bins);
+
+    histogram_stub(self.device().type(), self, weight, density, hist, bins);
+    return std::make_tuple(hist, bins);
 }
 
 std::tuple<Tensor&, Tensor&>
 histogram_out_cpu(const Tensor& self, int64_t bin_ct,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
         const c10::optional<Tensor>& weight, bool density,
-        Tensor& hist, Tensor& bin_edges_out) {
+        Tensor& hist, Tensor& bin_edges) {
     auto outer_bin_edges = select_outer_bin_edges(self, min, max);
-    linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges_out);
+    linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
 
-    histogram_pre_check(self, bin_edges_out, weight, density, hist, bin_edges_out);
-    histogram_linear_stub(self.device().type(), self, weight, density, hist, bin_edges_out);
-    return std::forward_as_tuple(hist, bin_edges_out);
+    // Performs dtype-check on out bin_edges before general checks to ensure an unambiguous error message.
+    TORCH_CHECK(self.dtype() == bin_edges.dtype(), "torch.histogram: input tensor and bin_edges tensor should",
+            " have same dtype, but got input ", self.dtype(), " and bins ", bin_edges.dtype());
+    histogram_pre_check(self, bin_edges, weight, density, hist, bin_edges);
+
+    histogram_linear_stub(self.device().type(), self, weight, density, hist, bin_edges);
+    return std::forward_as_tuple(hist, bin_edges);
 }
 
 std::tuple<Tensor, Tensor>
