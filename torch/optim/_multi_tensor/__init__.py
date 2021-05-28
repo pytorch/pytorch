@@ -13,6 +13,7 @@ from .rprop import Rprop
 from .asgd import ASGD
 from .adamax import Adamax
 from .adadelta import Adadelta
+from .adagrad import Adagrad
 
 del adam
 del adamw
@@ -22,3 +23,4 @@ del rprop
 del asgd
 del adamax
 del adadelta
+del adagrad
