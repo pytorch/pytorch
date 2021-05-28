@@ -56,10 +56,10 @@ Tensor& glu_backward_out(const Tensor& grad_output, const Tensor& input, int64_t
   at::sigmoid_out(gradInputfirstHalf, secondHalf);
   // for second gradinput half, can get a better performance by fusion
   auto iter = at::TensorIteratorConfig()
-    .add_borrowed_output(gradInputsecondHalf)
-    .add_borrowed_input(gradInputfirstHalf)
-    .add_borrowed_input(firstHalf)
-    .add_borrowed_input(grad_output)
+    .add_output(gradInputsecondHalf)
+    .add_input(gradInputfirstHalf)
+    .add_input(firstHalf)
+    .add_input(grad_output)
     .build();
   glu_backward_stub(iter.device_type(), iter);
   gradInputfirstHalf.mul_(grad_output);
