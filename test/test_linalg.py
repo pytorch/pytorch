@@ -1567,6 +1567,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.bfloat16, torch.float16)
     def test_norm_fused_type_promotion(self, device, dtype):
         x = torch.randn(10, device=device, dtype=dtype)
+
         def profile_and_check(fn, x, kwargs, fn_name):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 fn(x, **kwargs, dtype=torch.float)
@@ -1575,8 +1576,8 @@ class TestLinalg(TestCase):
             # test that there was no explicit copy
             self.assertFalse("aten::to" in map(lambda e: e.name, p.events()))
 
-        for f, kwargs, fn_name in zip((torch.norm, torch.linalg.vector_norm), ({"p":2}, {}),
-                                       ("aten::norm", "aten::linalg_vector_norm")):
+        for f, kwargs, fn_name in zip((torch.norm, torch.linalg.vector_norm), ({"p" : 2}, {}),
+                                      ("aten::norm", "aten::linalg_vector_norm")):
             profile_and_check(f, x, kwargs, fn_name)
 
     @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
