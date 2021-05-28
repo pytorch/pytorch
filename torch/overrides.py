@@ -718,6 +718,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.rrelu: lambda input, lower=0.125, upper=0.3333333333333333, training=False, inplace=False: -1,
         torch.nn.functional.selu: lambda input, inplace=False: -1,
         torch.nn.functional.silu: lambda input, inplace=False: -1,
+        torch.nn.functional.mish: lambda input, inplace=False: -1,
         torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean', beta=1.: -1,
         torch.nn.functional.huber_loss: lambda input, target, reduction='mean', delta=1.: -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
