@@ -167,8 +167,8 @@ def mv_lower(name, out_shape, inp_shapes, args):
     B = args[1]
     N, M = inp_shapes[0][0]
 
-    def f(n, m):
-        return A.load([n, m]) * B.load([m])
+    # def f(n, m):
+    #     return A.load([n, m]) * B.load([m])
     # mm = te.Compute('mm', get_dim_args([N,M]), f)
     # out = te.Reduce(name, get_dim_args([N]), te.Sum(), mm, get_dim_args([M]))
     # return out.buf(), [mm.stmt(), out.stmt()]
@@ -191,6 +191,13 @@ def ger_lower(name, out_shape, inp_shapes, args):
     out = te.lower('aten::mul', [A_squeeze.buf(), B_squeeze.buf()], get_te_shapes(out_shape), get_nnc_type(inp_shapes[0][1]))
     return out.buf(), [A_squeeze.stmt(), B_squeeze.stmt(), out.stmt()]
 
+def triangular_solve_lower(name, out_shape, inp_shapes, args):
+    A = args[0]
+    B = args[1]
+    C = torch._C._te.BufHandle('C', get_te_shapes(out_shape[0]), get_nnc_type(inp_shapes[0][1]))
+    s = torch._C._te.ExternalCall(C, "nnc_aten_triangular_solve", [A, B], [to_expr(args[2]), to_expr(args[3]), to_expr(args[4])])
+    return (C, None), [s]
+
 lowering_functions[torch.ops.aten.full_like] = full_like_lower
 lowering_functions[torch.ops.aten.zeros_like] = zeros_like_lower
 lowering_functions[torch.ops.aten.ones_like] = ones_like_lower
@@ -201,6 +208,7 @@ lowering_functions[torch.ops.aten.mv] = mv_lower
 lowering_functions[torch.ops.aten.ger] = ger_lower
 lowering_functions[torch.ops.aten.reshape] = reshape_lower
 lowering_functions[torch.ops.aten.view] = reshape_lower
+lowering_functions[torch.ops.aten.triangular_solve] = triangular_solve_lower
 
 
 func_to_aten = {
@@ -283,6 +291,10 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             env[node.name] = placeholder
             inputs.append(placeholder)
         elif node.op == 'call_function':
+            if node.target == operator.getitem:
+                iterable = lookup_env(node.args)[0]
+                env[node.name] = iterable[node.args[1]]
+                continue
             # This does the bulk of the work - we call `lower_function`, which
             # returns a `te.ExprHandle` (the output of a NNC computation), and
             # put it in our environment.
