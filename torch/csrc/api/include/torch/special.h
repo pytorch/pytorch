@@ -194,8 +194,8 @@ inline Tensor i0(const Tensor& self) {
   return torch::special_i0(self);
 }
 
-inline Tensor i0_out(Tensor& result, const Tensor& self) {
-  return torch::special_i0(result, self);
+inline Tensor i0_out(const Tensor& self) {
+  return torch::special_i0(self);
 }
 
 /// Computes the exponentially scaled zeroth order modified Bessel function of the first kind
@@ -210,8 +210,8 @@ inline Tensor i0e(const Tensor& self) {
   return torch::special_i0e(self);
 }
 
-inline Tensor i0e_out(Tensor& result, const Tensor& self) {
-  return torch::special_i0e(result, self);
+inline Tensor i0e_out(const Tensor& self) {
+  return torch::special_i0e(self);
 }
 
 }} // torch::special
