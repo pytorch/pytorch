@@ -486,8 +486,9 @@ class TestOptim(TestCase):
                 lambda weight, bias: optimizer([weight, bias], lr=1e-1)
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1,
-                                                   initial_accumulator_value=0.1)
+                lambda weight, bias: optimizer(
+                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1
+                )
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer(
