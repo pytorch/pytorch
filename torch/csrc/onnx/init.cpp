@@ -28,7 +28,6 @@ void initONNXBindings(PyObject* module) {
     .value("ONNX", OperatorExportTypes::ONNX)
     .value("ONNX_ATEN", OperatorExportTypes::ONNX_ATEN)
     .value("ONNX_ATEN_FALLBACK", OperatorExportTypes::ONNX_ATEN_FALLBACK)
-    .value("RAW", OperatorExportTypes::RAW)
     .value("ONNX_FALLTHROUGH", OperatorExportTypes::ONNX_FALLTHROUGH);
 
   py::enum_<TrainingMode>(onnx, "TrainingMode")

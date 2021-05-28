@@ -71,15 +71,14 @@ def select_model_mode_for_export(model, mode):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
-           input_names=None, output_names=None, aten=False, export_raw_ir=False,
+           input_names=None, output_names=None, aten=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=True, use_external_data_format=False):
-    if aten or export_raw_ir:
+    if aten:
         assert operator_export_type is None
-        assert aten ^ export_raw_ir
-        operator_export_type = OperatorExportTypes.ONNX_ATEN if aten else OperatorExportTypes.RAW
+        operator_export_type = OperatorExportTypes.ONNX_ATEN
     elif operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -153,60 +152,59 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
     from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
 
-    if operator_export_type != OperatorExportTypes.RAW:
-        torch._C._jit_pass_peephole(graph, True)
-        torch._C._jit_pass_lower_all_tuples(graph)
-        # in _jit_pass_onnx, symbolic functions are called for each node for conversion.
-        # However, there are nodes that cannot be converted without additional context.
-        # For example, the number of outputs from split (and whether it is static or dynamic) is unknown
-        # until the point where it is unpacked by listUnpack node.
-        # This pass does a preprocess, and prepares the nodes such that enough context can be received
-        # by the symbolic function.
-        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
-        torch._C._jit_pass_onnx_preprocess(graph)
+    torch._C._jit_pass_peephole(graph, True)
+    torch._C._jit_pass_lower_all_tuples(graph)
+    # in _jit_pass_onnx, symbolic functions are called for each node for conversion.
+    # However, there are nodes that cannot be converted without additional context.
+    # For example, the number of outputs from split (and whether it is static or dynamic) is unknown
+    # until the point where it is unpacked by listUnpack node.
+    # This pass does a preprocess, and prepares the nodes such that enough context can be received
+    # by the symbolic function.
+    torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
+    torch._C._jit_pass_onnx_preprocess(graph)
 
-        # onnx does not support tuples, so try to remove them
-        torch._C._jit_pass_lint(graph)
+    # onnx does not support tuples, so try to remove them
+    torch._C._jit_pass_lint(graph)
 
-        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
-        torch._C._jit_pass_prepare_division_for_onnx(graph)
+    # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
+    torch._C._jit_pass_prepare_division_for_onnx(graph)
 
-        torch._C._jit_pass_onnx_remove_print(graph)
-        torch._C._jit_pass_onnx_preprocess_caffe2(graph)
+    torch._C._jit_pass_onnx_remove_print(graph)
+    torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            torch.onnx.symbolic_helper._quantized_ops.clear()
-            # Unpack quantized weights for conv and linear ops and insert into graph.
-            torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
-            # Insert permutes before and after each conv op to ensure correct order.
-            torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
+    if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        torch.onnx.symbolic_helper._quantized_ops.clear()
+        # Unpack quantized weights for conv and linear ops and insert into graph.
+        torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
+        # Insert permutes before and after each conv op to ensure correct order.
+        torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
 
-            # Find consecutive permutes that are no-ops and remove them.
-            torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
-            graph(%Pi):
-                %Pq = quantized::nhwc2nchw(%Pi)
-                %Pr = quantized::nchw2nhwc(%Pq)
-                return (%Pr)""", """
-            graph(%Ri):
-                return (%Ri)""", graph)
+        # Find consecutive permutes that are no-ops and remove them.
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        graph(%Pi):
+            %Pq = quantized::nhwc2nchw(%Pi)
+            %Pr = quantized::nchw2nhwc(%Pq)
+            return (%Pr)""", """
+        graph(%Ri):
+            return (%Ri)""", graph)
 
-        # onnx only supports tensors, so we turn all out number types into tensors
-        torch._C._jit_pass_erase_number_types(graph)
+    # onnx only supports tensors, so we turn all out number types into tensors
+    torch._C._jit_pass_erase_number_types(graph)
 
-        if _onnx_shape_inference:
-            input_names = [] if input_names is None else input_names
-            dynamic_axes = {} if dynamic_axes is None else dynamic_axes
-            torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
-        graph = torch._C._jit_pass_onnx(graph, operator_export_type)
-        torch._C._jit_pass_lint(graph)
+    if _onnx_shape_inference:
+        input_names = [] if input_names is None else input_names
+        dynamic_axes = {} if dynamic_axes is None else dynamic_axes
+        torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
+    graph = torch._C._jit_pass_onnx(graph, operator_export_type)
+    torch._C._jit_pass_lint(graph)
 
-        torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
-        torch._C._jit_pass_lint(graph)
+    torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
+    torch._C._jit_pass_lint(graph)
 
-        torch._C._jit_pass_onnx_fold_if(graph)
+    torch._C._jit_pass_onnx_fold_if(graph)
 
-        torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
-        torch._C._jit_pass_lint(graph)
+    torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
+    torch._C._jit_pass_lint(graph)
 
     # graph is not a valid jit graph anymore because types have been replaced
     # (e.g. int with Tensor), so it now contains operators that don't actually
@@ -520,16 +518,16 @@ def _model_to_graph(model, args, verbose=False,
 
 
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
-                            input_names=None, output_names=None, aten=False, export_raw_ir=False,
+                            input_names=None, output_names=None, aten=False,
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, google_printer=False,
                             opset_version=None, _retain_param_name=True,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True):
-    if aten or export_raw_ir:
+    if aten:
         assert operator_export_type is None
-        assert aten ^ export_raw_ir
-        operator_export_type = OperatorExportTypes.ONNX_ATEN if aten else OperatorExportTypes.RAW
+        assert aten
+        operator_export_type = OperatorExportTypes.ONNX_ATEN
     elif operator_export_type is None:
         operator_export_type = OperatorExportTypes.ONNX
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,

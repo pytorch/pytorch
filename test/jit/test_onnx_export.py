@@ -212,23 +212,6 @@ class TestONNXExport(JitTestCase):
             mte, (torch.zeros(1, 2, 3, dtype=torch.float),), None, verbose=False,
             example_outputs=outputs)
 
-    def test_onnx_raw_export_script_truediv(self):
-        class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToExport, self).__init__()
-
-            @torch.jit.script_method
-            def forward(self, x):
-                z = x.size(0) / 2
-                return x + z
-
-        mte = ModuleToExport()
-        outputs = mte(torch.zeros(1, 2, 3))
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            add_node_names=False, do_constant_folding=False,
-            example_outputs=outputs, export_raw_ir=True)
-
     def test_onnx_export_script_non_alpha_add_sub(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
