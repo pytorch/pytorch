@@ -132,11 +132,8 @@ histogram_cpu(const Tensor& self, const Tensor& bins,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
-    histogram_check_inputs(self, bins, weight);
-    histogram_prepare_out(self, bins.numel() - 1, hist, bins);
-
-    histogram_stub(self.device().type(), self, weight, density, hist, bins);
-    return std::make_tuple(hist, bins);
+    Tensor bin_edges = at::empty({0}, bins.options(), MemoryFormat::Contiguous);
+    return histogram_out_cpu(self, bins, min, max, weight, density, hist, bin_edges);
 }
 
 std::tuple<Tensor&, Tensor&>

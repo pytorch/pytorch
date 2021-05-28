@@ -1364,6 +1364,22 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
 
     return tuple(sample_inputs)
 
+def sample_inputs_histogram(op_info, device, dtype, requires_grad):
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S))
+
+    sample_inputs = []
+    for size, bin_ct, density in product(sizes, range(1, 5), [False, True]):
+        input_tensor = make_tensor(size, device, dtype, requires_grad=requires_grad)
+
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,), \
+            kwargs=dict(density=density)))
+
+        bins_tensor = make_tensor((bin_ct + 1,), device, dtype, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,), \
+            kwargs=dict(density=density)))
+
+    return sample_inputs
+
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
     sample_inputs = []
     test_cases_float = (
@@ -3970,6 +3986,7 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
 
 
 # Operator database (sorted alphabetically)
+
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
                    aliases=('absolute', ),
@@ -6292,6 +6309,11 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_hypot,
            ),
+    OpInfo('histogram',
+            dtypesIfCPU=floating_types(),
+            sample_inputs_func=sample_inputs_histogram,
+            supports_autograd=False,
+            ),
     OpInfo('vstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,

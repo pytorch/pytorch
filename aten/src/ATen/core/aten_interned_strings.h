@@ -372,6 +372,7 @@ _(aten, hardtanh_forward) \
 _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
+_(aten, histogram) \
 _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
