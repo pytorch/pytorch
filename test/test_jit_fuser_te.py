@@ -1851,6 +1851,7 @@ works_list = [
     'erfc',
     'exp',
     'expand',
+    'expand_as',
     'expm1',
     'floor',
     'fmod',

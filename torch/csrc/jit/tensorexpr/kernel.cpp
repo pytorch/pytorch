@@ -2515,7 +2515,8 @@ Tensor* tensorexpr::computeOperandValue(
             return A.load(new_axes);
           });
     }
-    case aten::expand: {
+    case aten::expand:
+    case aten::expand_as: {
       auto A = c10::get<BufHandle>(inputs[0]);
       return Compute(
           "aten_expand",
@@ -2691,6 +2692,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::t:
     case aten::transpose:
     case aten::expand:
+    case aten::expand_as:
     case aten::permute:
     case aten::mm:
     case aten::matmul:
