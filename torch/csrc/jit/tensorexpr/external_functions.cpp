@@ -158,7 +158,8 @@ void nnc_aten_addmm(
   }
 }
 
-// Only provides first output
+// Only provides first output, the second output is just a copy of one of the
+// inputs
 void nnc_aten_triangular_solve(
     int64_t bufs_num,
     void** buf_data,

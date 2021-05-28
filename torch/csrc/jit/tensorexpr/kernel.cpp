@@ -2509,7 +2509,7 @@ Tensor* tensorexpr::computeOperandValue(
             std::vector<VarHandle> new_axes;
             new_axes.resize(axes.size());
             assert(permute_dims.size() == axes.size());
-            for (int i = 0; i < axes.size(); i++) {
+            for (unsigned i = 0; i < axes.size(); i++) {
               auto new_dim = at::maybe_wrap_dim(permute_dims[i], A.ndim());
               new_axes[new_dim] = axes[i];
             }
