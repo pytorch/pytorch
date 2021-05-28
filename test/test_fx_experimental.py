@@ -1317,6 +1317,7 @@ class TestNormalizeOperators(JitTestCase):
                    'einsum',
                    'expand',
                    'expand_as',
+                   'fill_',
                    'gradient',
                    'index_put',
                    'polygamma',
