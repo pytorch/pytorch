@@ -14,7 +14,7 @@ is simply to make sure that there is *some* configuration of ruamel that can rou
 the YAML, not to be prescriptive about it.
 '''
 
-import ruamel.yaml
+import ruamel.yaml  # type: ignore[import]
 import difflib
 import sys
 from pathlib import Path
