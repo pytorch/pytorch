@@ -24,6 +24,7 @@ from torch._C._distributed_c10d import (
     ScatterOptions,
     Store,
 )
+from torch._C._distributed_c10d import _get_debug_mode, _DistributedDebugLevel
 from torch._six import string_classes
 
 # This module is wildcard imported from torch.distributed.
@@ -31,7 +32,6 @@ from torch._six import string_classes
 
 from .constants import default_pg_timeout
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
-from torch._C._distributed_c10d import _get_debug_mode, _DistributedDebugLevel
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -662,19 +662,17 @@ def _new_process_group_helper(
         if backend == Backend.GLOO:
             if pg_options is not None:
                 raise RuntimeError("GLOO options not supported")
-            pg = ProcessGroupGloo(
-                prefix_store,
-                rank,
-                world_size,
-                timeout=timeout)
+            pg = ProcessGroupGloo(prefix_store, rank, world_size, timeout=timeout)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
             if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
                 if not _GLOO_AVAILABLE:
-                    logger.info("""TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
                                 GLOO is not available. Build with Gloo to
                                 create a wrapper process group in debug mode
-                                to aid collective desynchronization debugging.""")
+                                to aid collective desynchronization debugging."""
+                    )
                 else:
                     pg = _create_process_group_wrapper(
                         wrapped_pg=pg,
@@ -682,7 +680,7 @@ def _new_process_group_helper(
                         store=store,
                         rank=rank,
                         world_size=world_size,
-                        timeout=timeout
+                        timeout=timeout,
                     )
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
@@ -699,19 +697,17 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
                 pg_options._timeout = timeout
 
-            pg = ProcessGroupNCCL(
-                prefix_store,
-                rank,
-                world_size,
-                pg_options)
+            pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
             if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
                 if not _GLOO_AVAILABLE:
-                    logger.info("""TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
                                 GLOO is not available. Build with Gloo to
                                 create a wrapper process group in debug mode
-                                to aid collective desynchronization debugging.""")
+                                to aid collective desynchronization debugging."""
+                    )
                 else:
                     pg = _create_process_group_wrapper(
                         wrapped_pg=pg,
@@ -719,7 +715,7 @@ def _new_process_group_helper(
                         store=store,
                         rank=rank,
                         world_size=world_size,
-                        timeout=timeout
+                        timeout=timeout,
                     )
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
@@ -2646,26 +2642,23 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
 
+
 def _create_process_group_wrapper(
     wrapped_pg: ProcessGroup,
     store_prefix: str,
     store: Store,
     rank: int,
     world_size: int,
-    timeout: timedelta = default_pg_timeout
+    timeout: timedelta = default_pg_timeout,
 ):
     # Create a separate prefix store for the helper process group.
     prefix = f"{PG_WRAPPER_STORE_PREFIX}:{store_prefix}"
     store = PrefixStore(prefix, store)
-    helper_pg = ProcessGroupGloo(
-        store,
-        rank,
-        world_size,
-        timeout=timeout
-    )
+    helper_pg = ProcessGroupGloo(store, rank, world_size, timeout=timeout)
     # Wrap the underlying pg with ProcessGroupWrapper.
     wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
+
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
     """
@@ -2884,17 +2877,15 @@ def new_subgroups(
             rank = get_rank()
             if rank in ranks:
                 cur_subgroup = subgroup
-                logger.info(
-                    "Rank {} is assigned to subgroup {}".format(
-                        rank, ranks
-                    )
-                )
+                logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
         return cur_subgroup, subgroups
 
     # By default, create one subgroup per machine.
     # Assume that each machine has the same number of devices.
-    num_devices_per_machine : int = (
-        torch.cuda.device_count() if torch.cuda.is_available() else os.cpu_count()
+    num_devices_per_machine = (
+        torch.cuda.device_count()
+        if torch.cuda.is_available()
+        else (os.cpu_count() or 1)
     )
     # If the given main group does not use all the devices,
     # then the number of devices used by the subgroup should exceed the world size.
