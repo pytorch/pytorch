@@ -36,8 +36,20 @@ pointwise ops)
 - Supporting returning partially evaluated shape compute graph
 */
 
+static bool symbolic_shape_analysis_test_mode = false;
+
 namespace torch {
 namespace jit {
+
+bool setSymbolicShapeAnalysisTestMode(bool value) {
+  bool old_value = symbolic_shape_analysis_test_mode;
+  symbolic_shape_analysis_test_mode = value;
+  return old_value;
+}
+
+bool symbolicShapeAnalysisTestModeEnabled() {
+  return symbolic_shape_analysis_test_mode;
+}
 
 // TODO: better registration mechanism
 std::mutex lock;
@@ -79,7 +91,14 @@ struct SymbolicShapeAnalyzer {
       auto type = node_->input(i)->type();
       if (auto tt = type->castRaw<TensorType>()) {
         c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
-        if (symbolic_shapes.isComplete()) {
+
+        // for testing, we don't insert complete tensor shapes and rely on our
+        // partial evaluation pipeline to propagate information.
+        // this is a good proxy for our ability to propagate non-complete shape
+        // information.
+
+        if (symbolic_shapes.isComplete() &&
+            !symbolic_shape_analysis_test_mode) {
           replaceWithIValue(
               graph_->inputs().at(i), *tt->sizes().concrete_sizes());
           continue;

@@ -13,6 +13,13 @@ if __name__ == '__main__':
 
 # XXX: still in prototype
 class TestSymbolicShapeAnalysis(JitTestCase):
+    def setUp(self):
+        self.prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
+        torch._C._jit_set_symbolic_shapes_test_mode(True)
+
+    def tearDown(self):
+        torch._C._jit_set_symbolic_shapes_test_mode(self.prev_symbolic_shapes_test_enabled)
+
     def test_shape_analysis(self):
         @torch.jit.script
         def foo(x, y):
