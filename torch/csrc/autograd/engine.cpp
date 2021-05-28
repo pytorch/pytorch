@@ -548,22 +548,23 @@ void GraphTask::exec_post_processing() {
   // See Note [Streaming backwards].
   // Syncs caller_current_stream with leaf streams, so final_callbacks may use
   // any grad on its device's current stream.
-  /// if (leaf_streams.size() > 0) {
-  ///   for (const auto& leaf_stream : leaf_streams) {
-  ///     // stash_current_streams() stashed streams for all device IDs that already had a
-  ///     // CUDA context before the GraphTask executed. For inactive devices, it stashed
-  ///     // a c10::nullopt. I don't expect GraphTask's backward pass ran leaf nodes on
-  ///     // any new devices, so the stashed streams should be enough.
-  ///     // If leaf_stream.device_index() happens to be for a new device,
-  ///     // operator* on the c10::nullopt will throw an error.
-  ///     const auto caller_current_stream = *caller_current_streams_[leaf_stream.device_index()];
+  if (leaf_streams.size() > 0) {
+    for (const auto& leaf_stream : leaf_streams) {
+      // stash_current_streams() stashed streams for all device IDs that already had a
+      // CUDA context before the GraphTask executed. For inactive devices, it stashed
+      // a c10::nullopt. I don't expect GraphTask's backward pass ran leaf nodes on
+      // any new devices, so the stashed streams should be enough.
+      // If leaf_stream.device_index() happens to be for a new device,
+      // operator* on the c10::nullopt will throw an error.
+      const auto caller_current_stream = *caller_current_streams_[leaf_stream.device_index()];
 
-  ///     if (caller_current_stream != leaf_stream) {
-  ///       auto event = c10::Event{c10::DeviceType::CUDA};
-  ///       event.record(leaf_stream);
-  ///       caller_current_stream.wait(event);
-  ///     }
-  ///   }
+      if (caller_current_stream != leaf_stream) {
+        auto event = c10::Event{c10::DeviceType::CUDA};
+        event.record(leaf_stream);
+        caller_current_stream.wait(event);
+      }
+    }
+  }
 
   ///   caller_current_streams_filtered.reserve(caller_current_streams_.size());
   ///   for (const auto& opt_stream : caller_current_streams_) {
