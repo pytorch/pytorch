@@ -132,10 +132,7 @@ Algorithms
     Adamax
     ASGD
     LBFGS
-<<<<<<< HEAD
     NAdam
-=======
->>>>>>> fa9595dbb7 (To add Rectified Adam Algorithm to Optim package)
     RAdam
     RMSprop
     Rprop
