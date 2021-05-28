@@ -250,7 +250,13 @@ void getrsBatched(CUDABLAS_GETRS_ARGTYPES(Dtype)) {
   TORCH_CHECK(false, "at::cuda::blas::getrsBatched: not implemented for ", typeid(Dtype).name());
 }
 template<>
+void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float));
+template<>
 void getrsBatched<double>(CUDABLAS_GETRS_ARGTYPES(double));
+template<>
+void getrsBatched<c10::complex<float>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<float>));
+template<>
+void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<double>));
 
 
 #define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
