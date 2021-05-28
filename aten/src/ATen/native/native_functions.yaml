@@ -9394,6 +9394,14 @@
   dispatch:
     CompositeExplicitAutograd: special_xlog1py_out
 
+- func: special_i0(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 - func: special_i0e(Tensor self) -> Tensor
   python_module: special
   variants: function

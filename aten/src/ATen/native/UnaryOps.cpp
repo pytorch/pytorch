@@ -408,6 +408,10 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
+// special_i0, alias for i0
+Tensor& special_i0_out(const Tensor& self, Tensor& result) { return at::i0_out(result, self); }
+Tensor special_i0(const Tensor& self) { return self.i0(); }
+
 // FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {

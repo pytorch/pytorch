@@ -26,6 +26,7 @@ Functions
 .. autofunction:: expm1
 .. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: i0
 .. autofunction:: i0e
 .. autofunction:: logit
 .. autofunction:: xlog1py

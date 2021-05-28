@@ -182,6 +182,22 @@ inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& oth
   return torch::special_xlog1py_out(result, self, other);
 }
 
+/// Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
+/// See https://pytorch.org/docs/master/special.html#torch.special.i0
+///
+/// Example:
+/// ```
+/// auto = torch::arange(5, dtype=kDouble);
+/// torch::special::i0(t);
+/// ```
+inline Tensor i0(const Tensor& self) {
+  return torch::special_i0(self);
+}
+
+inline Tensor i0_out(Tensor& result, const Tensor& self) {
+  return torch::special_i0(result, self);
+}
+
 /// Computes the exponentially scaled zeroth order modified Bessel function of the first kind
 /// See https://pytorch.org/docs/master/special.html#torch.special.i0e.
 ///
@@ -194,8 +210,8 @@ inline Tensor i0e(const Tensor& self) {
   return torch::special_i0e(self);
 }
 
-inline Tensor i0e_out(const Tensor& self) {
-  return torch::special_i0e(self);
+inline Tensor i0e_out(Tensor& result, const Tensor& self) {
+  return torch::special_i0e(result, self);
 }
 
 }} // torch::special
