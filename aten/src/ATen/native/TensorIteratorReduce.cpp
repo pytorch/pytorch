@@ -55,9 +55,6 @@ static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
     const auto thread_num = at::get_thread_num();
     auto shape = first_reduce.shape();
     auto strides = first_reduce.get_strides();
-    if (iter.ndim() <= 2) {
-      strides.resize(2 * iter.ntensors());
-    }
 
     // Bump output ptr so each thread has its own ouput slice
     auto base_ptrs = first_reduce.get_base_ptrs();
