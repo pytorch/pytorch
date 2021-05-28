@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/utils/memory.h>
 #include <memory>
 #include <unordered_map>
@@ -24,9 +25,6 @@
 /*
 XXX: this is still in prototype phase and has much work left to do, including
 but not limited to:
-- Bind shape functions for operators in C+
-- Make classes of operators share the same shape function (e.g. pointwise,
-broadcast two inputs)
 - Refactor APIs
 - Only iteratively optimize shape function while a change has been made
 - Add decent coverage of common ops
@@ -269,24 +267,12 @@ void PropagateShapesWithShapeFunction(
       n->output()->type()->expect<TensorType>()->withSymbolicShapes(out));
 }
 
-void RegisterOperatorShapeFunction(Node* n, std::shared_ptr<Graph>& graph) {
-  std::lock_guard<std::mutex> guard(lock);
-  if (!n->maybeSchema()) {
-    return;
-  }
-  if (operator_functions.count(toString(n->schema()))) {
-    return;
-  }
-  operator_functions[toString(n->schema())] = graph;
-}
-
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   std::lock_guard<std::mutex> guard(lock);
   for (Node* n : graph->nodes()) {
     if (n->maybeSchema()) {
-      if (operator_functions.count(toString(n->schema()))) {
-        PropagateShapesWithShapeFunction(
-            n, operator_functions[toString(n->schema())]);
+      if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
+        PropagateShapesWithShapeFunction(n, *maybe_graph);
       }
     }
   }
