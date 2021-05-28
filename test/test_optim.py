@@ -320,6 +320,8 @@ class TestOptim(TestCase):
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
+            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=0.)),
+            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=1.)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
@@ -534,27 +536,28 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
     def test_radam(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.RAdam([weight, bias], lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.RAdam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.RAdam([weight, bias], lr=1e-3, weight_decay=0.1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.RAdam([weight, bias], lr=1e-3),
-            [lambda opt: ExponentialLR(opt, gamma=0.9),
-                lambda opt: ReduceLROnPlateau(opt)]
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-            optim.RAdam(None, lr=1e-2, betas=(1.0, 0.0))
+        for optimizer in [optim.RAdam, optim_mt.RAdam]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                    lambda opt: ReduceLROnPlateau(opt)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
 
-        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
-            optim.RAdam(None, lr=1e-2, weight_decay=-1)
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
 
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
