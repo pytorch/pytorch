@@ -681,11 +681,12 @@ def build_info() -> ReportMetaMeta:
     }
 
 
-def build_message(test_case: TestCase) -> Dict[str, Dict[str, Any]]:
+def build_message(test_file: TestFile, test_suite: TestSuite, test_case: TestCase) -> Dict[str, Dict[str, Any]]:
     return {
         "normal": {
             **build_info(),
-            "test_suite_name": test_case.class_name,
+            "test_filename": test_file.name,
+            "test_suite_name": test_suite.name,
             "test_case_name": test_case.name,
         },
         "int": {
@@ -715,7 +716,7 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
                 [
                     {
                         "category": "perfpipe_pytorch_test_times",
-                        "message": json.dumps(build_message(test_case)),
+                        "message": json.dumps(build_message(test_file, test_suite, test_case)),
                         "line_escape": False,
                     }
                     for test_file in reports.values()
