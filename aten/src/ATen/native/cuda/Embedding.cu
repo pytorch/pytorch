@@ -7,7 +7,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/execution_policy.h>
@@ -15,7 +14,7 @@
 #include <thrust/unique.h>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
-
+#include <ATen/native/cuda/SortingCommon.cuh>
 
 namespace at { namespace native {
 
@@ -291,7 +290,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
         // Sort; a stable sort is not required
         auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
         thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data,
-                            ThrustLTOp<index_t>());
+                            LTOp<index_t>());
     }
 
     if (scale_grad_by_freq) {

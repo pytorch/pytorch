@@ -51,7 +51,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCSortUtils.cu
   ${extra_src}
   PARENT_SCOPE)
 
@@ -73,7 +72,6 @@ install(FILES
           THCAsmUtils.cuh
           THCAtomics.cuh
           THCScanUtils.cuh
-          THCSortUtils.cuh
           THCAllocator.h
           THCCachingHostAllocator.h
           THCDeviceUtils.cuh
