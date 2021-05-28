@@ -5,14 +5,14 @@ import runpy
 import threading
 from enum import Enum
 from functools import wraps
-import contextlib
 from typing import List, Any, ClassVar, Optional, Sequence, Tuple
 import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, \
+    nullcontext
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -290,11 +290,8 @@ class DeviceTypeTestBase(TestCase):
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
-                    if op:
-                        decorate_errors = op.decorate_errors()
-                    else:
-                        decorate_errors = contextlib.nullcontext()
-                    with decorate_errors:
+                    ctx = op.decorate_errors() if op else nullcontext()
+                    with ctx:
                         result = test_fn(self, *args)
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
