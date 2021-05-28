@@ -1032,7 +1032,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scala
 
 // omit in_dtype in the following call, to avoid make_reduction explicitly casting input to out_dtype
   auto iter = isComplexType(self.scalar_type()) ?
-      make_reduction("vector_norm", result, self, dim, keepdim, in_dtype, out_dtype) :
+      make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype) :
       make_reduction("norm", result, self, dim, keepdim, out_dtype);
 
   if (iter.numel() == 0) {
