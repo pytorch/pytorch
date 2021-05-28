@@ -54,7 +54,6 @@ class TestOpInfo(TestCase):
             sample_input = sample.input[0] if is_iterable_of_tensors(sample.input) else sample.input
             self.assertTrue(sample_input.dtype == dtype)
             self.assertTrue(sample_input.device.type == self.device_type)
-            #raise Exception('fake error to test the traceback')
 
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.

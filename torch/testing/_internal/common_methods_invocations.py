@@ -393,6 +393,7 @@ class OpInfo(object):
         except Exception as exc:
             if self._current_sample:
                 exc.args = (f'[SampleInput: {self._current_sample.name}] {exc}',)
+            self._current_sample = None
             raise
 
     # Returns True if the test should be skipped and False otherwise
