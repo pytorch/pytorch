@@ -6375,7 +6375,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_squeeze),
     OpInfo('fill_',
-           op=lambda x, scalar, **kwargs: torch.fill_(x.clone(), scalar, **kwargs),
+           op=lambda x, scalar: torch.fill_(x.clone(), scalar),
            method_variant=None,
            inplace_variant=torch.Tensor.fill_,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
