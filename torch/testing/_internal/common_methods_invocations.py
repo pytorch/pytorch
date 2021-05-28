@@ -277,9 +277,6 @@ class OpInfo(object):
         self.skips = skips
         self.decorators = decorators
         self.sample_inputs_func = sample_inputs_func
-        # the sample which is currently being iterted on by sample_inputs. See
-        # also decorate_errors()
-        self._current_sample = None
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -307,6 +304,17 @@ class OpInfo(object):
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+        self.reset()
+
+    def reset(self):
+        """Reset the value of attributes which can change during a test.
+
+        This method must be called at the beginning of each test: the goal is
+        to ensure that we don't carry changed states between tests.
+        """
+        # the sample which is currently being iterted on by sample_inputs. See
+        # also decorate_errors()
+        self._current_sample = None
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -393,7 +401,6 @@ class OpInfo(object):
         except Exception as exc:
             if self._current_sample:
                 exc.args = (f'[SampleInput: {self._current_sample.name}] {exc}',)
-            self._current_sample = None
             raise
 
     # Returns True if the test should be skipped and False otherwise
