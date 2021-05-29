@@ -89,6 +89,8 @@ allow_list = [
     ("aten::_amp_update_scale", datetime.date(2021, 6, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
     ("aten::linalg_vector_norm", datetime.date(2021, 5, 15)),
+    ("aten::repeat_interleave", datetime.date(2021, 6, 26)),
+    ("aten::one_hot", datetime.date(2021, 6, 15)),
 ]
 
 def allow_listed(schema, allow_list):
