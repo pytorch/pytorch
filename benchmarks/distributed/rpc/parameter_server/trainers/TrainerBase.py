@@ -16,7 +16,7 @@ class TrainerBase(ABC):
 
     def __init__(self, rank):
         r"""
-        Inits TrainerBase class
+        Inits TrainerBase class.
         Args:
             rank (int): worker rank
         """
@@ -25,13 +25,13 @@ class TrainerBase(ABC):
     @abstractmethod
     def train(self):
         r"""
-        Method to be implemented by child class that will train a neural network
+        A method to be implemented by child class that will train a neural network.
         """
         return
 
     def record_start(self, type, key, name, cuda=True):
         r"""
-        Records the start event for a metric
+        A method that records the start event for a metric.
         Args:
             type (str): group id for metric
             key (str): unique id for metric within a group
@@ -47,7 +47,7 @@ class TrainerBase(ABC):
 
     def record_end(self, type, key):
         r"""
-        Records the end event for a metric
+        A method that records the end event for a metric.
         Args:
             type (str): group id for metric
             key (str): unique id for metric within a group
@@ -166,12 +166,12 @@ class TrainerBase(ABC):
 
     def get_metrics(self):
         r"""
-        returns metrics captured by the __metrics_logger
+        A method that returns metrics captured by the __metrics_logger.
         """
         return self.__metrics_logger.get_processed_metrics()
 
     def clear_metrics(self):
         r"""
-        clears __metrics_logger state
+        A method that clears __metrics_logger recorded metrics.
         """
         return self.__metrics_logger.clear_metrics()
