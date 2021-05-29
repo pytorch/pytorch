@@ -5389,6 +5389,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(SiLUModel(), (x))
 
+    def test_mish(self):
+        class MishModel(torch.nn.Module):
+            def __init__(self):
+                super(MishModel, self).__init__()
+                self.mish = torch.nn.Mish()
+
+            def forward(self, x):
+                return self.mish(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(MishModel(), (x))
+
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):
             def forward(self, input, other):
