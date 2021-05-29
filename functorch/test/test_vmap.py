@@ -2866,6 +2866,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             'moveaxis',
             'positive',
             'tensor_split',
+            'gradient'
         }
         # Unsupported input types
         if op.name in op_skip:
@@ -2873,13 +2874,14 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
-        vmap_fail = {'__getitem__', 'argmax', 'gradient', 'squeeze', 'unfold'}
+        vmap_fail = {'__getitem__', 'squeeze', 'unfold'}
         if op.name in vmap_fail:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
+            # print(arg_values, kwarg_values)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
