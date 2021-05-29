@@ -373,7 +373,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
 
   const int32_t count = safe_downcast<int32_t, int64_t>(input.numel());
   if (count == 0) {
-    return gradInput;
+    return;
   }
 
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);

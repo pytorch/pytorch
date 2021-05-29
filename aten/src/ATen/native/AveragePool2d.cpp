@@ -361,7 +361,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override, 
+  c10::optional<int64_t> divisor_override,
   const Tensor& gradInput
 ) {
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
