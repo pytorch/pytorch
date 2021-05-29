@@ -9,7 +9,7 @@ class DdpTrainerBase(TrainerBase):
 
     def __init__(self, rank):
         r"""
-        Inits DdpTrainerBase class
+        Inits DdpTrainerBase class.
         Args:
             rank (int): worker rank
         """
@@ -19,11 +19,11 @@ class DdpTrainerBase(TrainerBase):
     @abstractmethod
     def hook(state, bucket):
         r"""
-        Method to be implemented by child class that will implement a DDP
-        training algorithm
+        A method to be implemented by child class that will implement a DDP
+        training algorithm.
         Args:
             state (object): maintains state during the training process
-            bucket (object): gradient bucket
+            bucket (GradBucket): gradient bucket
         """
         return
 
@@ -31,7 +31,7 @@ class DdpTrainerBase(TrainerBase):
         r"""
         A helper method that records a hook future metric
         for the given key. A user should call this before
-        sending async request in the DDP communication hook
+        sending async request in the DDP communication hook.
         Args:
             key (str): unique id for metric within a group
             cuda (bool): indicator to determine if this is a CUDA metric

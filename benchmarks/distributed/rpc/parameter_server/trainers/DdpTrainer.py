@@ -11,11 +11,11 @@ class DdpTrainer(DdpTrainerBase):
 
         def __init__(self, cref, process_group):
             r"""
-            holds state information that is needed by the communication hook
+            A class that holds state information that is needed by the communication hook
             during the training algorithm.
             Args:
-                cref (object): reference to the self keyword of the trainer instance
-                process_group (object): distributed process group
+                cref (DdpTrainer): reference to the self keyword of the trainer instance
+                process_group (ProcessGroup): distributed process group
             """
             self.cref = cref
             self.process_group = process_group
@@ -23,7 +23,7 @@ class DdpTrainer(DdpTrainerBase):
 
         def get_key(self, bucket_index):
             r"""
-            returns an encoded key that represents the current batch and
+            A method that returns an encoded key that represents the current batch and
             bucket index.
             Args:
                 bucket_index (int): index of the bucket being processed in backward
@@ -32,21 +32,21 @@ class DdpTrainer(DdpTrainerBase):
 
         def next_batch(self):
             r"""
-            increments batch_number by 1
+            A method that increments batch_number by 1.
             """
             self.batch_number += 1
 
     def __init__(self, rank, trainer_count, process_group, use_cuda_rpc, server_rref, backend, epochs):
         r"""
-        a trainer that implements a DDP training algorithm using a simple hook that performs allreduce
-        using the process group.
+        A trainer that implements a DDP training algorithm using a simple hook that performs allreduce
+        using the process_group implementation.
         Args:
             rank (int): worker rank
             trainer_count (int): count of trainer in the world
-            process_group (object): distributed process group
+            process_group (ProcessGroup): distributed process group
             use_cuda_rpc (bool): indicator for CUDA RPC
-            server_rref (object): remote reference to the server
-            backend (string): distributed communication backend
+            server_rref (RRef): remote reference to the server
+            backend (str): distributed communication backend
             epochs (int): epoch count for training
         """
         super().__init__(rank)
@@ -61,11 +61,10 @@ class DdpTrainer(DdpTrainerBase):
     @staticmethod
     def hook(state, bucket):
         r"""
-        ddp communication hook that uses the current backend allreduce
-        implementation.
+        A ddp communication hook that uses the process_group allreduce implementation.
         Args:
             state (object): maintains state during the training process
-            bucket (object): gradient bucket
+            bucket (GradBucket): gradient bucket
         """
         cref = state.cref
         tensors = [bucket.get_tensor() / state.process_group.size()]
@@ -87,10 +86,10 @@ class DdpTrainer(DdpTrainerBase):
 
     def create_ddp_model(self, model):
         r"""
-        creates a ddp_model and hook_state objects, registers ddp_model communication hook,
-        and returns the ddp_model and hook_state.
+        A method that creates a ddp_model and hook_state objects.
+        It returns the ddp_model and hook_state objects.
         Args:
-            model (object): neural network model
+            model (nn.Module): neural network model
         """
         ddp_model = DDP(
             model, device_ids=[self.rank], process_group=self.process_group
@@ -99,9 +98,26 @@ class DdpTrainer(DdpTrainerBase):
         ddp_model.register_comm_hook(hook_state, self.get_hook())
         return ddp_model, hook_state
 
+    def create_criterion(self):
+        r"""
+        A method that creates a criterion for the training
+        algorithm.
+        """
+        return nn.CrossEntropyLoss().cuda(self.rank)
+
+    def create_optimizer(self, parameters, lr):
+        r"""
+        A method that creates a optimizer for the training
+        algorithm.
+        Args:
+            parameters (iterable): iterable of parameters to optimize
+            lr (float): learning rate
+        """
+        return torch.optim.SGD(parameters, lr)
+
     def epoch_key(self, epoch, index):
         r"""
-        returns an encoded key that represents the current epoch and
+        A method that returns an encoded key that represents the current epoch and
         iteration index.
         Args:
             epoch (int): epoch index
@@ -111,7 +127,7 @@ class DdpTrainer(DdpTrainerBase):
 
     def preprocess_data(self, data):
         r"""
-        moves the data from CPU to GPU.
+        A method that moves the data from CPU to GPU.
         Args:
             data (list): training examples
         """
@@ -122,11 +138,11 @@ class DdpTrainer(DdpTrainerBase):
 
     def iteration_step(self, ddp_model, criterion, optimizer, hook_state, epoch, index, batch):
         r"""
-        performs an iteration of training.
+        A method that performs an iteration of training.
         Args:
-            ddp_model (object): distributed data parallel model
-            criterion (object): loss function to measure model
-            optimizer (object): updates model parameters
+            ddp_model (nn.Module): distributed data parallel model
+            criterion (nn.Module): loss function to measure model
+            optimizer (optim.Optimizer): updates model parameters
             hook_state (object): ddp communication hook state object
             epoch (int): index of pass through the data
             index (int): iteration number - 1 in current batch
@@ -148,16 +164,16 @@ class DdpTrainer(DdpTrainerBase):
 
     def train(self, model, data):
         r"""
-        implements the training algorithm for the current trainer.
+        A method that implements the training algorithm.
         Args:
-            model (object): neural network model
+            model (nn.Module): neural network model
             data (list): training examples
         """
         model = model.cuda(self.rank)
         data = self.preprocess_data(data)
         ddp_model, hook_state = self.create_ddp_model(model)
-        criterion = nn.CrossEntropyLoss().cuda(self.rank)
-        optimizer = torch.optim.SGD(ddp_model.parameters(), 1e-4)
+        criterion = self.create_criterion()
+        optimizer = self.create_optimizer(ddp_model.parameters(), 1e-4)
 
         for epoch in range(self.epochs):
             for index, batch in enumerate(data):
