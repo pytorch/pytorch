@@ -369,6 +369,8 @@ class _NnapiSerializer(object):
         zero_point = 0
         if dtype == "float32":
             op_type = NNAPI_OperandCode.TENSOR_FLOAT32
+        elif dtype == "int32":
+            op_type = NNAPI_OperandCode.TENSOR_INT32
         elif dtype == "quint8":
             op_type = NNAPI_OperandCode.TENSOR_QUANT8_ASYMM
             scale = tensor.q_scale()
