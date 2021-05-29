@@ -319,8 +319,8 @@ class TestCommon(JitCommonTestCase):
                     if variant in inplace_ops and sample.broadcasts_input:
                         with self.assertRaises(RuntimeError,
                                                msg=('inplace variant either incorrectly allowed '
-                                                    'resizing or you have marked the sample {}'
-                                                    ' incorrectly with `broadcasts_self=True'.format(sample.summary()))):
+                                                    'resizing or you have marked the sample '
+                                                    'incorrectly with `broadcasts_self=True')):
                             variant_forward = variant(cloned,
                                                       *sample.args,
                                                       **sample.kwargs)
