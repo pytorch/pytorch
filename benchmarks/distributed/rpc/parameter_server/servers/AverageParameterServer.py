@@ -9,6 +9,8 @@ from .ParameterServerBase import ParameterServerBase
 
 class AverageParameterServer(ParameterServerBase):
 
+    lock = threading.Lock()
+
     def __init__(
         self,
         rank,
@@ -16,20 +18,18 @@ class AverageParameterServer(ParameterServerBase):
         use_cuda_rpc
     ):
         r"""
-        a parameter server that averages the gradients
+        A parameter server that averages the gradients
         from trainers for each training iteration step.
-        gradients are added as they are received from trainers.
-        when all gradients have been received, the sum is
+        Gradients are added as they are received from trainers.
+        When all gradients have been received, the sum is
         divided by the number of trainers.
         Args:
             rank (int): worker rank
             trainer_count (int): count of trainers sending
-            gradients to the server
+                gradients to the server
             use_cuda_rpc (bool): indicator for CUDA RPC
         """
         super().__init__(rank)
-
-        self.lock = threading.Lock()
 
         self.rank = rank
         self.trainer_count = trainer_count
@@ -42,9 +42,9 @@ class AverageParameterServer(ParameterServerBase):
     @staticmethod
     def reset_state(server_rref):
         r"""
-        clears the server state
+        A method that clears the state of the server.
         Args:
-            server_rref (object): remote reference to the server
+            server_rref (RRef): remote reference to the server
         """
         self = server_rref.local_value()
         self.batch_number = 0
@@ -54,29 +54,29 @@ class AverageParameterServer(ParameterServerBase):
 
     def param_key(self, param_loc):
         r"""
-        returns an encoded key that represents the current batch and
-        param location.
+        A method that returns an encoded key that represents
+        the current batch and param location.
         Args:
             param_loc (int): bucket location sent by the trainer
-            containing the gradient
+                containing the gradient
         """
         return f"{self.batch_number},{param_loc}"
 
     def clear_batch_state(self):
         r"""
-        clears current server batch state
+        Clears the current server batch state.
         """
         self.futures.clear()
         self.gradient_dict.clear()
 
     def process_gradient(self, gradient, param_loc):
         r"""
-        stores the gradient if param_loc is not in dict.
-        adds the gradient to param_loc if it is in dict.
+        Stores the gradient if param_loc is not in gradient_dict.
+        Adds the gradient to param_loc if it is in gradient_dict.
         Args:
-            gradient (object): tensor sent from trainer
+            gradient (torch.Tensor): tensor sent from trainer
             param_loc (int): bucket location sent by the trainer
-            containing the gradient
+                containing the gradient
         """
         if param_loc not in self.gradient_dict:
             self.record_straggler_start(self.param_key(param_loc))
@@ -88,11 +88,11 @@ class AverageParameterServer(ParameterServerBase):
     @ParameterServerBase.record_method(name="average computation")
     def average(self, param_loc):
         r"""
-        obtains the tensor at the param_loc in the gradient dict
+        Obtains the tensor at the param_loc in the gradient_dict
         and then divides by number of trainers.
         Args:
             param_loc (int): bucket location sent by the trainer
-            containing the gradient
+                containing the gradient
         """
         param_loc_avg = self.gradient_dict[param_loc]
         param_loc_avg / (1.0 * self.trainer_count)
@@ -107,14 +107,15 @@ class AverageParameterServer(ParameterServerBase):
         gradient
     ):
         r"""
-        averages gradients sent to the server by trainers.
+        An asynchronous function that will average gradients
+        sent from trainers.
         Args:
-            server_rref (object): remote reference to the server
+            server_rref (RRef): remote reference to the server
             received_batch_number (int): batch number sent by
-            the trainer
+                the trainer
             param_loc (int): bucket location sent by the trainer
-            containing the gradient
-            gradient (int): tensor sent by the trainer
+                containing the gradient
+            gradient (torch.Tensor or list): tensor sent by the trainer
         """
         self = server_rref.local_value()
         if type(gradient) is list:
