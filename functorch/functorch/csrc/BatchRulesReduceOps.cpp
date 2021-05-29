@@ -112,15 +112,24 @@ std::tuple<Tensor,optional<int64_t>> argmax_batch_rule(
   if (!self_bdim.has_value()) {
     return { at::argmax(self, dim, keepdim), nullopt };
   }
-  if (self.dim() == 1 && dim && is_allowed_dim_on_scalar_tensor(*dim)) {
-    return { self.clone(), 0 };
-  }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   if (!dim) {
+    // If no dimension is given, then argmax gives you the flattened index of
+    // the maximum element. We need to do this flatten/keepdim setting in order
+    // to preserve that behavior.
     dim = 0;
-    self_ = at::flatten(self, 1);
+    if (self_.dim() > 1) {
+      self_ = at::flatten(self, 1);
+    }
+    keepdim = false;
   }
   auto new_dim = getPhysicalDim(self_, self_bdim.has_value(), *dim);
+  if (self_.dim() <= new_dim) {
+    // This happens when the original tensor is a scalar
+    // vmap(argmax([], 0)) => argmax([5, 1], 1)
+    TORCH_INTERNAL_ASSERT(self_.dim() == 1);
+    self_ = self_.unsqueeze(-1);
+  }
   auto result = at::argmax(self_, new_dim, keepdim);
   return {result, 0};
 }
