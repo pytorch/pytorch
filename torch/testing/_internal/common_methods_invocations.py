@@ -4574,11 +4574,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode='trunc', rhs_exclude_zero=True),
            skips=(
-               # This error is raised only for lhs=scalar_tensor and rhs=python float
-               # Works for lhs=1 or more dim tensor and rhs=python float
-               # Error Message:
-               # Got dtypes torch.float32 and torch.float64.
-               # Results of original model and exported/imported version of model differed
+               # Reference: https://github.com/pytorch/pytorch/issues/59174
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
            ),
            assert_autodiffed=True),
@@ -4587,11 +4583,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode='floor', rhs_exclude_zero=True),
            skips=(
-               # This error is raised only for lhs=scalar_tensor and rhs=python float
-               # Works for lhs=1 or more dim tensor and rhs=python float
-               # Error Message:
-               # Got dtypes torch.float32 and torch.float64.
-               # Results of original model and exported/imported version of model differed
+               # Reference: https://github.com/pytorch/pytorch/issues/59174
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
            ),
            assert_autodiffed=True),
