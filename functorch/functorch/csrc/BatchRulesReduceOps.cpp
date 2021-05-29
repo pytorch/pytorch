@@ -112,6 +112,9 @@ std::tuple<Tensor,optional<int64_t>> argmax_batch_rule(
   if (!self_bdim.has_value()) {
     return { at::argmax(self, dim, keepdim), nullopt };
   }
+  if (self.dim() == 1 && dim && is_allowed_dim_on_scalar_tensor(*dim)) {
+    return { self.clone(), 0 };
+  }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   if (!dim) {
     dim = 0;
