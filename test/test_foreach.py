@@ -830,7 +830,7 @@ class TestForeach(TestCase):
         if self.device_type != 'cuda':
             self.skipTest('CUDA is necessary for tests with tensors on different devices')
         # tensors: ['cuda', 'cpu]
-        tensors = op.sample_inputs(device, dtype, 2)
+        tensors = [sample.input for sample in op.sample_inputs(device, dtype, 2)]
         tensors[1] = tensors[1].to('cpu')
         try:
             actual = op.get_method()(tensors)
