@@ -2856,24 +2856,24 @@ class TestVmapOperatorsOpInfo(TestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
+        # These are ops that we can't generate fallbacks for
         op_skip = {
-            '__getitem__',
             'broadcast_to',
             'dsplit',
             'hsplit',
             'vsplit',
+            'ravel',
             'moveaxis',
             'positive',
             'tensor_split',
-            'unfold',
-            'squeeze',
         }
         # Unsupported input types
         if op.name in op_skip:
             return
 
         # entries in here need don't work and need to be fixed.
-        vmap_fail = {'repeat', 'ravel', 'argmax', 'gradient'}
+        # Each one of these is a bug
+        vmap_fail = {'__getitem__', 'repeat', 'argmax', 'gradient', 'squeeze', 'unfold'}
         if op.name in vmap_fail:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
