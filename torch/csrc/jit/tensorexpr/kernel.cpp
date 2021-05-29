@@ -2526,11 +2526,12 @@ Tensor* tensorexpr::computeOperandValue(
             return broadcast(A, indices);
           });
     }
+    case aten::reshape:
     case aten::view: {
       auto A = c10::get<BufHandle>(inputs[0]);
       auto view_dims = c10::get<IntList>(inputs[1]);
       return Compute(
-          "aten_view",
+          "aten_reshape",
           c10::fmap<DimArg>(outputShape),
           [&](const std::vector<VarHandle>& axes) {
             std::vector<VarHandle> new_axes;
@@ -2698,6 +2699,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::matmul:
     case aten::cat:
     case aten::view:
+    case aten::reshape:
     case aten::sum:
     case aten::softmax:
     case aten::log_softmax:

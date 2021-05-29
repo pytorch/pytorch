@@ -1883,6 +1883,7 @@ works_list = [
     'reciprocal',
     'remainder',
     'remainder.autodiffed',
+    'reshape',
     'round',
     'rsqrt',
     'sigmoid',
