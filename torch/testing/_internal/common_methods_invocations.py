@@ -723,6 +723,8 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 # Then one sample input would also be generated corresponding to the value of alpha provided.
 # In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
 # specify scalars of floating, integral & complex types as values for "alpha".
+# Keyword argument `rhs_exclude_zero` is used to exclude zero values from rhs tensor argument
+# This is necessary for operations like `true_divide`, where divide by zero throws an exception.
 def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
