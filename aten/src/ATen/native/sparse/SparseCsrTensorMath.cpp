@@ -288,12 +288,12 @@ Tensor& add_out_dense_sparse_csr_cpu(
               auto out_strides0 = resultBuffer.strides()[0];
               auto out_strides1 = resultBuffer.strides()[1];
 
-              for (int32_t irow = 0; irow < src_crow_indices.size(0) - 1;
+              for (index_t irow = 0; irow < src_crow_indices.size(0) - 1;
                    ++irow) {
-                int32_t start_index = crow_indices_accessor[irow];
-                int32_t end_index = crow_indices_accessor[irow + 1];
+                index_t start_index = crow_indices_accessor[irow];
+                index_t end_index = crow_indices_accessor[irow + 1];
 
-                for (int i = start_index; i < end_index; ++i) {
+                for (index_t i = start_index; i < end_index; ++i) {
                   auto icol = col_indices_accessor[i];
                   auto index = resultBuffer.storage_offset() + irow * out_strides0 +
                       icol * out_strides1;
