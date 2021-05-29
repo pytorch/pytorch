@@ -2325,7 +2325,11 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
   TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
     "linalg.vector_norm expected out tensor dtype ", out_dtype,
     " but got: ", result.scalar_type());
-  auto iter = make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype);
+  // omit in_dtype in the following call, to avoid make_reduction explicitly casting input to out_dtype
+  auto iter = isComplexType(self.scalar_type()) ?
+      make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype) :
+      make_reduction("vector_norm", result, self_, dim, keepdim, out_dtype);
+
   linalg_vector_norm_stub(iter.device_type(), iter, ord);
   return result;
 }
