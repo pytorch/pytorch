@@ -114,13 +114,12 @@ class SampleInput(object):
         # callable to customize the representation.
         # Look at `summary` method for example.
         arguments = [
+            f'name={repr(self.name)}',
             f'input={formatter(self.input)}',
             f'args={formatter(self.args)}',
             f'kwargs={formatter(self.kwargs)}',
             f'output_process_fn_grad={self.output_process_fn_grad}',
-            f'broadcasts_input={self.broadcasts_input}',
-            f'name={repr(self.name)}']
-
+            f'broadcasts_input={self.broadcasts_input}']
         return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
 
     def __repr__(self):
@@ -400,7 +399,7 @@ class OpInfo(object):
             yield
         except Exception as exc:
             if self._current_sample:
-                exc.args = (f'[SampleInput: {self._current_sample.name}] {exc}',)
+                exc.args = (f'[{self._current_sample.summary()}] {exc}',)
             raise
 
     # Returns True if the test should be skipped and False otherwise
