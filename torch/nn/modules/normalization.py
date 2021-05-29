@@ -90,9 +90,10 @@ class LayerNorm(Module):
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated separately over the last
-    certain number dimensions which have to be of the shape specified by
-    :attr:`normalized_shape`.
+    The mean and standard-deviation are calculated over a number of last dimensions
+    specifies by the shape of :attr:`normalized_shape`. For example, if the shape of
+    :attr:`normalized_shape` is 2, then the last two dimensions are used to compute
+    the mean, i.e. ``input.mean(dim=(-2, -1))``.
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
@@ -133,12 +134,16 @@ class LayerNorm(Module):
         >>> m = nn.LayerNorm(input.size()[1:])
         >>> # Without Learnable Parameters
         >>> m = nn.LayerNorm(input.size()[1:], elementwise_affine=False)
-        >>> # Normalize over last two dimensions
-        >>> m = nn.LayerNorm([10, 10])
         >>> # Normalize over last dimension of size 10
         >>> m = nn.LayerNorm(10)
+        >>> # Normalize over last three dimensions
+        >>> m = nn.LayerNorm([5, 10, 10])
         >>> # Activating the module
         >>> output = m(input)
+        >>> output[0].mean().item()
+        0.0
+        >>> output[0].var(unbiased=False).item()
+        0.9999
     """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
     normalized_shape: Tuple[int, ...]
