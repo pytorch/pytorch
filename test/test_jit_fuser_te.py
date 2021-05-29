@@ -1879,6 +1879,7 @@ works_list = [
     'nn.functional.leaky_relu',
     'nn.functional.relu6',
     'pow',
+    'permute',
     'reciprocal',
     'remainder',
     'remainder.autodiffed',
@@ -1895,11 +1896,11 @@ works_list = [
     'transpose',
     'trunc',
     'unsqueeze',
+    'where',
 ]
 
 known_failures = [
     'matmul',
-    'permute',
     'frac',
     '__rmatmul__'
 ]
