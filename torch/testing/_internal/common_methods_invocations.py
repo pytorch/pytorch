@@ -234,6 +234,8 @@ class OpInfo(object):
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
+                 inplace_variant=_NOTHING,  # explicitly pass the inplace variant of the operator if required
+                 method_variant=_NOTHING,  # explicitly pass the method variant of the operator if required
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -261,11 +263,12 @@ class OpInfo(object):
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         self.op = op if op else _getattr_qual(torch, self.name)
-        method_variant = getattr(torch.Tensor, name, None)
+        method_variant = getattr(torch.Tensor, name, None) if method_variant is _NOTHING else method_variant
         # attributes like real, imag are not callable
         self.method_variant = method_variant if callable(method_variant) else None
         inplace_name = name + "_"
-        self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
+        self.inplace_variant = getattr(torch.Tensor, inplace_name, None) \
+            if inplace_variant is _NOTHING else inplace_variant
         self.operator_variant = getattr(operator, name, None)
 
         self.supports_out = supports_out
@@ -1157,6 +1160,24 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
                     args=(make_tensor(t2_size, device, dtype, requires_grad=requires_grad, noncontiguous=False), p, cm)))
 
     return samples
+
+
+def sample_inputs_fill_(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       low=None, high=None, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (1,)),
+             ((), (1,)),
+             # For requires_grad=False below,
+             # check https://github.com/pytorch/pytorch/issues/59137
+             ((S, S, S), (make_arg((), requires_grad=False),)))
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
 
 def sample_inputs_comparison_ops(self, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -6390,6 +6411,17 @@ op_db: List[OpInfo] = [
            supports_out=False,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_squeeze),
+    OpInfo('fill_',
+           op=lambda x, scalar: torch.fill_(x.clone(), scalar),
+           method_variant=None,
+           inplace_variant=torch.Tensor.fill_,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           skips=(
+               # JIT has issue when op is passed as lambda
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_fill_),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -6837,9 +6869,6 @@ def method_tests():
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('fill_', (S, S, S), (1,), 'number'),
-        ('fill_', (), (1,), 'number_scalar'),
-        ('fill_', (S, S, S), ((),), 'variable'),
         ('tensor_split', (S, S, S), (3,), 'sections', (False,)),
         ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
         ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
