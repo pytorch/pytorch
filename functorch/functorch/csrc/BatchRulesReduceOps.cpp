@@ -10,7 +10,7 @@ namespace at { namespace functorch {
 
 // [start, start + 1, ..., stop - 1]
 static VmapDimVector range(int64_t start, int64_t stop) {
-  TORCH_INTERNAL_ASSERT(stop > start);
+  TORCH_INTERNAL_ASSERT(stop >= start);
   VmapDimVector dims;
   dims.reserve(stop - start);
   for (int64_t i = start; i < stop; i++) {
@@ -19,24 +19,37 @@ static VmapDimVector range(int64_t start, int64_t stop) {
   return dims;
 }
 
-std::tuple<Tensor,optional<int64_t>> sum_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<ScalarType> dtype) {
-  if (!self_bdim.has_value()) {
-    return { self.sum(dtype), nullopt };
-  }
-  auto self_dim = self.dim();
-  if (self_dim == 1) {
-    return { self.clone(), 0 };
-  }
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto dims = range(1, self_dim);
-  auto result = at::sum(self_, dims, /*keepdim*/false, dtype);
-  return { result, 0 };
-}
 
 bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
+
+
+// Not used right now, since ATEN_OPS isn't landed. Kinda annoying.
+// template <typename F, F Func, typename... ExtraArgs>
+// std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
+//     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
+//   if (!self_bdim.has_value()) {
+//     return { Func(self, dims, std::forward<ExtraArgs>(extra_args)...), nullopt };
+//   }
+//   auto self_dim = self.dim();
+
+//   if (dims.size() == 0) {
+//     dims = range(0, self_dim);
+//   }
+
+//   if (self_dim == 1 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
+//     return { self.clone(), 0 };
+//   }
+//   auto self_ = moveBatchDimToFront(self, self_bdim);
+//   VmapDimVector new_dims;
+//   new_dims.reserve(dims.size());
+//   for (auto dim: dims) {
+//     new_dims.push_back(getPhysicalDim(self_, self_bdim.has_value(), dim));
+//   }
+//   auto result = Func(self_, new_dims, std::forward<ExtraArgs>(extra_args)...);
+//   return { result, 0 };
+// }
 
 std::tuple<Tensor,optional<int64_t>> sum_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
@@ -44,6 +57,11 @@ std::tuple<Tensor,optional<int64_t>> sum_dim_batch_rule(
     return { at::sum(self, dims, keepdim, dtype), nullopt };
   }
   auto self_dim = self.dim();
+
+  if (dims.size() == 0) {
+    dims = range(0, self_dim);
+  }
+
   if (self_dim == 1 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
     return { self.clone(), 0 };
   }
@@ -57,13 +75,42 @@ std::tuple<Tensor,optional<int64_t>> sum_dim_batch_rule(
   return { result, 0 };
 }
 
+std::tuple<Tensor,optional<int64_t>> sum_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, optional<ScalarType> dtype) {
+  return sum_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), false, dtype);
+}
+
+std::tuple<Tensor,optional<int64_t>> var_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool unbiased, bool keepdim) {
+  if (!self_bdim.has_value()) {
+    return { at::var(self, dims, unbiased, keepdim), nullopt };
+  }
+  auto self_dim = self.dim();
+  if (dims.size() == 0) {
+    dims = range(0, self_dim);
+  }
+  if (self_dim == 1 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
+    return { self.clone(), 0 };
+  }
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  VmapDimVector new_dims;
+  new_dims.reserve(dims.size());
+  for (auto dim: dims) {
+    new_dims.push_back(getPhysicalDim(self_, self_bdim.has_value(), dim));
+  }
+  auto result = at::var(self_, new_dims, unbiased, keepdim);
+  return { result, 0 };
+}
+
+std::tuple<Tensor,optional<int64_t>> var_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, bool unbiased) {
+  return var_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), unbiased, false);
+}
+
 std::tuple<Tensor,optional<int64_t>> argmax_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, optional<int64_t> dim, bool keepdim) {
   if (!self_bdim.has_value()) {
     return { at::argmax(self, dim, keepdim), nullopt };
-  }
-  if (self.dim() == 1 && dim && is_allowed_dim_on_scalar_tensor(*dim)) {
-    return { self.clone(), 0 };
   }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   if (!dim) {
@@ -75,19 +122,32 @@ std::tuple<Tensor,optional<int64_t>> argmax_batch_rule(
   return {result, 0};
 }
 
-std::tuple<Tensor,optional<int64_t>> mean_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<ScalarType> dtype) {
+std::tuple<Tensor,optional<int64_t>> mean_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
   if (!self_bdim.has_value()) {
-    return { self.sum(dtype), nullopt };
+    return { at::mean(self, dims, keepdim), nullopt };
   }
   auto self_dim = self.dim();
-  if (self_dim == 1) {
+  if (dims.size() == 0) {
+    dims = range(0, self_dim);
+  }
+  if (self_dim == 1 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
     return { self.clone(), 0 };
   }
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto dims = range(1, self_dim);
-  auto result = at::mean(self_, dims, /*keepdim*/false, dtype);
+  VmapDimVector new_dims;
+  new_dims.reserve(dims.size());
+  for (auto dim: dims) {
+    new_dims.push_back(getPhysicalDim(self_, self_bdim.has_value(), dim));
+  }
+  auto result = at::mean(self_, new_dims, keepdim);
   return { result, 0 };
+}
+
+
+std::tuple<Tensor,optional<int64_t>> mean_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, optional<ScalarType> dtype) {
+  return mean_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), false, dtype);
 }
 
 std::tuple<Tensor,optional<int64_t>>
@@ -134,8 +194,11 @@ _log_softmax_backward_data(
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("sum", sum_batch_rule);
   VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
+  VMAP_SUPPORT("var", var_batch_rule);
+  VMAP_SUPPORT("var.dim", var_dim_batch_rule);
   VMAP_SUPPORT("argmax", argmax_batch_rule);
   VMAP_SUPPORT("mean", mean_batch_rule);
+  VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
 }
 
