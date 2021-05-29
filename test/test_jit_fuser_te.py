@@ -1243,6 +1243,7 @@ class TestTEFuser(JitTestCase):
             torch.reciprocal,
             torch.neg,
             torch.relu,
+            F.relu6,
             torch.log,
             torch.log10,
             torch.log1p,
@@ -1852,6 +1853,8 @@ works_list = [
     'expand',
     'expm1',
     'floor',
+    'fmod',
+    'fmod.autodiffed',
     'ge',
     'gt',
     'le',
@@ -1874,8 +1877,12 @@ works_list = [
     'nn.functional.hardswish',
     'nn.functional.hardtanh',
     'nn.functional.leaky_relu',
+    'nn.functional.relu6',
     'pow',
+    'permute',
     'reciprocal',
+    'remainder',
+    'remainder.autodiffed',
     'round',
     'rsqrt',
     'sigmoid',
@@ -1889,11 +1896,11 @@ works_list = [
     'transpose',
     'trunc',
     'unsqueeze',
+    'where',
 ]
 
 known_failures = [
     'matmul',
-    'permute',
     'frac',
     '__rmatmul__'
 ]
