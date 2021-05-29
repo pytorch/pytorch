@@ -31,8 +31,6 @@ class DdpSparseRpcTrainer(DdpTrainer):
             state (object): maintains state during the training process
             bucket (GradBucket): gradient bucket
         """
-        print(type(bucket))
-        print(type(bucket).__name__)
         tensor = bucket.get_tensor()
         if tensor.is_sparse:
             return process_bucket_with_remote_server(state, bucket)
