@@ -28,6 +28,15 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define UNARY_POINTWISE(op) \
   VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op>));
 
+#define UNARY_POINTWISE_SCALAR(op) \
+  VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op, const Scalar&>));
+
+#define UNARY_POINTWISE_SCALAR_SCALAR(op) \
+  VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op, const Scalar&, const Scalar&>));
+
+#define UNARY_POINTWISE_SCALAR_SCALAR_SCALAR(op) \
+  VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op, const Scalar&, const Scalar&, const Scalar&>));
+
 #define UNARY_POINTWISE_ALL(op) \
   UNARY_POINTWISE_(op ## _); \
   VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op>));
@@ -52,18 +61,38 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(log2);
   UNARY_POINTWISE_ALL(neg);
   UNARY_POINTWISE_ALL(reciprocal);
-  UNARY_POINTWISE_ALL(relu);
   UNARY_POINTWISE_ALL(round);
   UNARY_POINTWISE_ALL(rsqrt);
-  UNARY_POINTWISE_ALL(sigmoid);
   UNARY_POINTWISE_ALL(sign);
   UNARY_POINTWISE_ALL(sin);
   UNARY_POINTWISE_ALL(sinh);
   UNARY_POINTWISE_ALL(sqrt);
   UNARY_POINTWISE_ALL(tan);
-  UNARY_POINTWISE_ALL(tanh);
   UNARY_POINTWISE_ALL(trunc);
 
+  // Activation functions (from https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity)
+  UNARY_POINTWISE_SCALAR_SCALAR_SCALAR(elu);
+  UNARY_POINTWISE_SCALAR(hardshrink);
+  UNARY_POINTWISE(hardsigmoid);
+  UNARY_POINTWISE_SCALAR_SCALAR(hardtanh);
+  UNARY_POINTWISE(hardswish);
+  UNARY_POINTWISE_SCALAR(leaky_relu);
+  UNARY_POINTWISE(log_sigmoid);
+  UNARY_POINTWISE_ALL(relu);
+  UNARY_POINTWISE(relu6);
+  UNARY_POINTWISE(selu);
+  UNARY_POINTWISE_SCALAR(celu);
+  UNARY_POINTWISE(gelu);
+  UNARY_POINTWISE_ALL(sigmoid);
+  UNARY_POINTWISE(silu);
+  UNARY_POINTWISE_SCALAR_SCALAR(softplus);
+  UNARY_POINTWISE_SCALAR(softshrink);
+  UNARY_POINTWISE_ALL(tanh);
+
+
+#undef UNARY_POINTWISE_SCALAR_SCALAR_SCALAR
+#undef UNARY_POINTWISE_SCALAR_SCALAR
+#undef UNARY_POINTWISE_SCALAR
 #undef UNARY_POINTWISE
 #undef UNARY_POINTWISE_
 #undef UNARY_POINTWISE_ALL
