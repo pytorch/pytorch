@@ -145,6 +145,7 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.GELU
     nn.Sigmoid
     nn.SiLU
+    nn.Mish
     nn.Softplus
     nn.Softshrink
     nn.Softsign

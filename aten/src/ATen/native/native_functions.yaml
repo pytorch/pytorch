@@ -3526,6 +3526,31 @@
     CPU, CUDA: silu_backward
     CompositeImplicitAutograd: math_silu_backward
 
+- func: mish(Tensor self) -> Tensor
+  structured_delegate: mish.out
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: mish
+
+- func: mish_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: mish.out
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: mish_
+
+- func: mish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: nn
+  dispatch:
+    CPU, CUDA: mish_out
+
+- func: mish_backward(Tensor grad_output, Tensor self) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU, CUDA: mish_backward
+    CompositeImplicitAutograd: math_mish_backward
+
 - func: sigmoid(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: sigmoid.out
@@ -4795,6 +4820,8 @@
 
 - func: sparse_csr_tensor.crow_col_value(Tensor crow_indices, Tensor col_indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
+- func: _sparse_csr_tensor_unsafe(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
 - func: sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4804,6 +4831,8 @@
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size) -> ()
+
+- func: _validate_sparse_csr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
@@ -4876,7 +4905,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _nnz_sparse
-    SparseCsrCPU: _nnz_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: _nnz_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -4935,21 +4964,21 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
-    SparseCsrCPU: values_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: values_sparse_csr
   device_check: NoCheck
   device_guard: False
 
 - func: crow_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU: crow_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: crow_indices_sparse_csr
   device_check: NoCheck
   device_guard: False
 
 - func: col_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU: col_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: col_indices_sparse_csr
   device_check: NoCheck
   device_guard: False
 
