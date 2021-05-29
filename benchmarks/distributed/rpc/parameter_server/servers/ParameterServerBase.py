@@ -14,7 +14,7 @@ class ParameterServerBase(ABC):
 
     def __init__(self, rank):
         r"""
-        Inits ParameterServerBase class
+        Inits ParameterServerBase class.
         Args:
             rank (int): worker rank
         """
@@ -23,8 +23,8 @@ class ParameterServerBase(ABC):
     @abstractmethod
     def process_gradient(self):
         r"""
-        Method to be implemented by child class that will process a
-        gradient received by a server
+        A method to be implemented by child class that will process a
+        gradient received by a server.
         """
         return
 
@@ -32,8 +32,8 @@ class ParameterServerBase(ABC):
     @abstractmethod
     def average_gradient():
         r"""
-        Method to be implemented by child class that will average
-        gradients received for the sever
+        A method to be implemented by child class that will average
+        gradients.
         """
         return
 
@@ -41,14 +41,14 @@ class ParameterServerBase(ABC):
     @abstractmethod
     def reset_state():
         r"""
-        Method to be implemented by child class that will reset
-        the server state
+        A method to be implemented by child class that will reset
+        the server state.
         """
         return
 
     def record_start(self, type, key, name, cuda=True):
         r"""
-        Records the start event for a metric
+        A method that records the start event for a metric.
         Args:
             type (str): group id for metric
             key (str): unique id for metric within a group
@@ -64,7 +64,7 @@ class ParameterServerBase(ABC):
 
     def record_end(self, type, key):
         r"""
-        Records the end event for a metric
+        A method that records the end event for a metric
         Args:
             type (str): group id for metric
             key (str): unique id for metric within a group
@@ -156,15 +156,15 @@ class ParameterServerBase(ABC):
     @staticmethod
     def get_metrics(server_rref):
         r"""
-        returns metrics captured by the __metrics_logger
+        A staticmethod that returns metrics captured by the __metrics_logger.
         Args:
-            server_rref (object): remote reference to the server
+            server_rref (RRef): remote reference to the server
         """
         self = server_rref.local_value()
         return self.__metrics_logger.get_processed_metrics()
 
     def clear_metrics(self):
         r"""
-        clears __metrics_logger state
+        A method that clears __metrics_logger recorded metrics.
         """
         return self.__metrics_logger.clear_metrics()
