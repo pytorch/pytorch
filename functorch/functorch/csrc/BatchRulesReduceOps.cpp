@@ -107,10 +107,11 @@ std::tuple<Tensor,optional<int64_t>> var_batch_rule(
   return var_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), unbiased, false);
 }
 
-std::tuple<Tensor,optional<int64_t>> argmax_batch_rule(
+template<typename F, F Func>
+std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, optional<int64_t> dim, bool keepdim) {
   if (!self_bdim.has_value()) {
-    return { at::argmax(self, dim, keepdim), nullopt };
+    return { Func(self, dim, keepdim), nullopt };
   }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   if (!dim) {
@@ -130,7 +131,7 @@ std::tuple<Tensor,optional<int64_t>> argmax_batch_rule(
     TORCH_INTERNAL_ASSERT(self_.dim() == 1);
     self_ = self_.unsqueeze(-1);
   }
-  auto result = at::argmax(self_, new_dim, keepdim);
+  auto result = Func(self_, new_dim, keepdim);
   return {result, 0};
 }
 
@@ -208,7 +209,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
   VMAP_SUPPORT("var", var_batch_rule);
   VMAP_SUPPORT("var.dim", var_dim_batch_rule);
-  VMAP_SUPPORT("argmax", argmax_batch_rule);
+  VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
+  VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
   VMAP_SUPPORT("mean", mean_batch_rule);
   VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
