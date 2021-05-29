@@ -234,6 +234,8 @@ class OpInfo(object):
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
+                 inplace_variant=_NOTHING,  # explicitly pass the inplace variant of the operator if required
+                 method_variant=_NOTHING,  # explicitly pass the method variant of the operator if required
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -261,11 +263,12 @@ class OpInfo(object):
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         self.op = op if op else _getattr_qual(torch, self.name)
-        method_variant = getattr(torch.Tensor, name, None)
+        method_variant = getattr(torch.Tensor, name, None) if method_variant is _NOTHING else method_variant
         # attributes like real, imag are not callable
         self.method_variant = method_variant if callable(method_variant) else None
         inplace_name = name + "_"
-        self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
+        self.inplace_variant = getattr(torch.Tensor, inplace_name, None) \
+            if inplace_variant is _NOTHING else inplace_variant
         self.operator_variant = getattr(operator, name, None)
 
         self.supports_out = supports_out
@@ -1157,6 +1160,24 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
                     args=(make_tensor(t2_size, device, dtype, requires_grad=requires_grad, noncontiguous=False), p, cm)))
 
     return samples
+
+
+def sample_inputs_fill_(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       low=None, high=None, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (1,)),
+             ((), (1,)),
+             # For requires_grad=False below,
+             # check https://github.com/pytorch/pytorch/issues/59137
+             ((S, S, S), (make_arg((), requires_grad=False),)))
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
 
 def sample_inputs_comparison_ops(self, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -3739,10 +3760,47 @@ def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
              )
 
     def generator():
-        for case in cases:
-            shape, shape_other = case
+        for shape, shape_other in cases:
             yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
                               args=(make_arg(shape_other, requires_grad=False), )))
+
+    return list(generator())
+
+
+def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    def make_bool_mask(shape):
+        # Make sure atleast one element is nonzero,
+        # except for empty tensor
+        mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
+
+        if mask_t.numel() == 0:
+            return mask_t
+        elif mask_t.numel() == 1:
+            mask_t.fill_(True)
+            return mask_t
+
+        if mask_t.sum() == 0:
+            def random_index(shape):
+                return tuple(map(lambda max_idx: random.randint(0, max_idx), shape))
+
+            mask_t[random_index(mask_t.shape)] = True
+            return mask_t
+
+        return mask_t
+
+    cases = (((M, M), (M, M), (M, M), False),
+             ((M, 1, M), (M, M), (M, M, 1), True),
+             ((), (), (), False),
+             ((M, 1, M), (), (M, M, 1), True),
+             ((), (M, M), (), True),)
+
+    def generator():
+        for shape, mask_shape, other_shape, broadcasts_input in cases:
+            yield SampleInput(make_arg(shape),
+                              args=(make_bool_mask(mask_shape), make_arg(other_shape)),
+                              broadcasts_input=broadcasts_input)
 
     return list(generator())
 
@@ -6353,6 +6411,17 @@ op_db: List[OpInfo] = [
            supports_out=False,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_squeeze),
+    OpInfo('fill_',
+           op=lambda x, scalar: torch.fill_(x.clone(), scalar),
+           method_variant=None,
+           inplace_variant=torch.Tensor.fill_,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           skips=(
+               # JIT has issue when op is passed as lambda
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_fill_),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -6573,6 +6642,18 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit,
                    safe_casts_outputs=True),
+    OpInfo('where',
+           # Currently only the `input` is tested in gradcheck.
+           # If we pass `condition` first, none of the input which supports
+           # autograd will be tested. Hence the following lambda.
+           op=lambda self, condition, other: torch.where(condition, self, other),
+           sample_inputs_func=sample_inputs_where,
+           supports_out=False,
+           skips=(
+               # test does not work with passing lambda for op
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
 ]
 
 # Common operator groupings
@@ -6788,9 +6869,6 @@ def method_tests():
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('fill_', (S, S, S), (1,), 'number'),
-        ('fill_', (), (1,), 'number_scalar'),
-        ('fill_', (S, S, S), ((),), 'variable'),
         ('tensor_split', (S, S, S), (3,), 'sections', (False,)),
         ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
         ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
@@ -6801,11 +6879,6 @@ def method_tests():
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
-        ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M)), '', (True,)),
-        ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all', (True,)),
-        ('where', (), (bernoulli_scalar(), ()), 'scalar', (True,)),
-        ('where', (M, 1, M), (bernoulli_scalar(), (M, M, 1)), 'scalar_broadcast_mask', (True,)),
-        ('where', (), (mask_not_all_zeros((M, M)), ()), 'scalar_broadcast_non_mask', (True,)),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
         ('to_sparse', (S, S), (1,), 'dim', (), (), [], lambda x: x.to_dense())
     ]
