@@ -2873,7 +2873,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
-        vmap_fail = {'__getitem__', 'repeat', 'argmax', 'gradient', 'squeeze', 'unfold'}
+        vmap_fail = {'__getitem__', 'argmax', 'gradient', 'squeeze', 'unfold'}
         if op.name in vmap_fail:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
