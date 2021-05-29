@@ -45,17 +45,25 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
 
     batch_size = 3
     out_dim = 0
-    batch_choices = [(add_batch_dim(a, 0, batch_size), (a, None)) if isinstance(a, torch.Tensor) else ((a, None),) for a in arg_values]
+    batch_choices = []
+    for a in arg_values:
+        if isinstance(a, torch.Tensor):
+            batched_val = add_batch_dim(a, 0, batch_size)
+            batch_choices.append((batched_val, (a, None)))
+        else:
+            batch_choices.append(((a, None),))
+
     for batched_values in itertools.product(*batch_choices):
         batched_args, in_dims = zip(*batched_values)
-        if in_dims != (None, None, 0):
-            continue
 
         if all([i is None for i in in_dims]):
             continue
         outs = []
         for idx in range(batch_size):
-            idx_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(batched_args, in_dims)]
+            idx_args = []
+            idx_kwargs = {}
+            for a, in_dim in zip(batched_args, in_dims):
+                idx_args.append(a.select(in_dim, idx) if in_dim is not None else a)
             out = op(*idx_args, **kwarg_values)
             outs.append(out)
         loop_out = []
@@ -2865,16 +2873,13 @@ class TestVmapOperatorsOpInfo(TestCase):
             return
 
         # entries in here need don't work and need to be fixed.
-        vmap_fail = {'repeat', 'ravel', 'squeeze'}
+        vmap_fail = {'repeat', 'ravel', 'argmax', 'gradient'}
         if op.name in vmap_fail:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
-            if len(kwarg_values) > 0:
-                continue
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
