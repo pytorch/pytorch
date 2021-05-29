@@ -3739,10 +3739,47 @@ def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
              )
 
     def generator():
-        for case in cases:
-            shape, shape_other = case
+        for shape, shape_other in cases:
             yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
                               args=(make_arg(shape_other, requires_grad=False), )))
+
+    return list(generator())
+
+
+def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    def make_bool_mask(shape):
+        # Make sure atleast one element is nonzero,
+        # except for empty tensor
+        mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
+
+        if mask_t.numel() == 0:
+            return mask_t
+        elif mask_t.numel() == 1:
+            mask_t.fill_(True)
+            return mask_t
+
+        if mask_t.sum() == 0:
+            def random_index(shape):
+                return tuple(map(lambda max_idx: random.randint(0, max_idx), shape))
+
+            mask_t[random_index(mask_t.shape)] = True
+            return mask_t
+
+        return mask_t
+
+    cases = (((M, M), (M, M), (M, M), False),
+             ((M, 1, M), (M, M), (M, M, 1), True),
+             ((), (), (), False),
+             ((M, 1, M), (), (M, M, 1), True),
+             ((), (M, M), (), True),)
+
+    def generator():
+        for shape, mask_shape, other_shape, broadcasts_input in cases:
+            yield SampleInput(make_arg(shape),
+                              args=(make_bool_mask(mask_shape), make_arg(other_shape)),
+                              broadcasts_input=broadcasts_input)
 
     return list(generator())
 
@@ -6573,6 +6610,18 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit,
                    safe_casts_outputs=True),
+    OpInfo('where',
+           # Currently only the `input` is tested in gradcheck.
+           # If we pass `condition` first, none of the input which supports
+           # autograd will be tested. Hence the following lambda.
+           op=lambda self, condition, other: torch.where(condition, self, other),
+           sample_inputs_func=sample_inputs_where,
+           supports_out=False,
+           skips=(
+               # test does not work with passing lambda for op
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
 ]
 
 # Common operator groupings
@@ -6801,11 +6850,6 @@ def method_tests():
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
-        ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M)), '', (True,)),
-        ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all', (True,)),
-        ('where', (), (bernoulli_scalar(), ()), 'scalar', (True,)),
-        ('where', (M, 1, M), (bernoulli_scalar(), (M, M, 1)), 'scalar_broadcast_mask', (True,)),
-        ('where', (), (mask_not_all_zeros((M, M)), ()), 'scalar_broadcast_non_mask', (True,)),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
         ('to_sparse', (S, S), (1,), 'dim', (), (), [], lambda x: x.to_dense())
     ]
