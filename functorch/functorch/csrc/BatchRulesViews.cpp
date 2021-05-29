@@ -111,9 +111,12 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
     return { self.repeat(sizes), nullopt };
   }
 
-  auto self_ = moveBatchDimToFront(self, self_bdim);
   VmapDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
   sizes_with_bdim.insert(sizes_with_bdim.begin(), 1);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  while (self_.dim() < sizes_with_bdim.size()) {
+    self_ = self_.unsqueeze(1);
+  }
   return { self_.repeat(sizes_with_bdim), 0 };
 }
 
