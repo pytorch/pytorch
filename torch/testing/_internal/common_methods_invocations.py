@@ -3986,7 +3986,6 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
 
 
 # Operator database (sorted alphabetically)
-
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
                    aliases=('absolute', ),
@@ -6311,6 +6310,8 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('histogram',
             dtypesIfCPU=floating_types(),
+            dtypesIfCUDA=None,
+            dtypesIfROCM=None,
             sample_inputs_func=sample_inputs_histogram,
             supports_autograd=False,
             ),
