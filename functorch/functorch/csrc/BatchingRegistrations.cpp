@@ -1374,7 +1374,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("max_pool2d", at::native::max_pool2d); // composite
   m.impl("max_pool2d_with_indices", max_pool2d_with_indices_batching_rule);
 
-  m.impl("mean.dim", mean_int_batching_rule);
+  // m.impl("mean.dim", mean_int_batching_rule);
   // m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("log_softmax.int", log_softmax_batching_rule);
   m.impl("_log_softmax", _log_softmax_batching_rule);
