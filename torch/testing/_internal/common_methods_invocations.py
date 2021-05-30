@@ -3685,9 +3685,12 @@ def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
 
     def generator():
         for shape, args_or_shape in cases:
+            # Update `args` based on operator
             if op_info.name == 'resize_':
+                # resize_ takes shape/tuple of ints,
                 args = (args_or_shape, )
             elif op_info.name == 'resize_as_':
+                # resize_as_ takes another tensor
                 args = (make_arg(shape, requires_grad=False), )  # type:ignore[assignment]
             else:
                 raise ValueError("sample_inputs_resize_ops is being used with incorrect operator")
