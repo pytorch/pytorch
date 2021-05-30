@@ -6553,11 +6553,15 @@ op_db: List[OpInfo] = [
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
     OpInfo('zero_',
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           # zero_ supports autograd but tests don't correctly deal with this case (inplace op)
-           # See: https://github.com/pytorch/pytorch/issues/58900
-           supports_autograd=False,
+           op=lambda x: torch.zero_(x.clone()),
+           method_variant=None,
+           inplace_variant=torch.Tensor.zero_,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
+           skips=(
+               # JIT has issue when op is passed as lambda
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
            sample_inputs_func=sample_inputs_zero_),
     OpInfo('special.xlog1py',
            aten_name='special_xlog1py',
