@@ -339,6 +339,8 @@ namespace c10 {
   _(aten, i0)                        \
   _(aten, special_i0)                \
   _(aten, special_i0e)               \
+  _(aten, special_i1)                \
+  _(aten, special_i1e)               \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
