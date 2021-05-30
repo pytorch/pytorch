@@ -9329,6 +9329,14 @@
   python_module: special
   variants: function
 
+- func: special_digamma(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 - func: special_gammaln(Tensor self) -> Tensor
   python_module: special
   variants: function

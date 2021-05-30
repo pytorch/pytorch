@@ -37,12 +37,19 @@ Example::
 
 psi = _add_docstr(_special.special_psi,
                   r"""
+psi(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.special.digamma`.
+""")
+
+digamma = _add_docstr(_special.special_digamma,
+                      r"""
 digamma(input, *, out=None) -> Tensor
 
 Computes the logarithmic derivative of the gamma function on `input`.
 
 .. math::
-    \psi(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
+    \digamma(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
 """ + r"""
 Args:
     input (Tensor): the tensor to compute the digamma function on
@@ -58,7 +65,7 @@ Keyword args:
 Example::
 
     >>> a = torch.tensor([1, 0.5])
-    >>> torch.digamma(a)
+    >>> torch.special.digamma(a)
     tensor([-0.5772, -1.9635])
 
 """.format(**common_args))

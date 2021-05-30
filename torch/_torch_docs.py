@@ -2816,7 +2816,9 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.digamma, r"""
-Alias for :func:`torch.special.psi`.
+digamma(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.special.digamma`.
 """)
 
 add_docstr(torch.dist,

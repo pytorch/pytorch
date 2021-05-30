@@ -411,6 +411,9 @@ Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 // special_psi, alias for digamma
 Tensor& special_psi_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
 Tensor special_psi(const Tensor& self) { return self.digamma(); }
+// special_digamma, alias for digamma
+Tensor& special_digamma_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
+Tensor special_digamma(const Tensor& self) { return self.digamma(); }
 
 // FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {

@@ -6406,7 +6406,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True),
     UnaryUfuncInfo('digamma',
                    ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,
-                   aliases=('special.psi',),
+                   aliases=('special.psi', 'special.digamma',),
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
