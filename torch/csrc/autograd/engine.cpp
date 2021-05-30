@@ -16,6 +16,7 @@
 #include <c10/core/Event.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/Optional.h>
+#include <c10/util/ThreadLocal.h>
 #include <c10/core/StreamGuard.h>
 
 #include <atomic>
@@ -86,7 +87,8 @@ static thread_local int total_depth = 0;
 // The current GraphTask being executed by this thread. This helps
 // queue_callback() to find the target GraphTask to append final callbacks.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
+C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
+#define current_graph_task (tls_current_graph_task.get())
 
 // Every autograd worker thread is associated with a ready queue, which specifies
 // the stream of work of this thread to do. This shared_ptr is a thread_local
@@ -103,7 +105,8 @@ static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 // ReadyQueue with the parent thread for performance improvement.
 // see Note [Reentrant backwards] for more details.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
+C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
+#define local_ready_queue (tls_local_ready_queue.get())
 
 // Note [Reentrant backwards]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
