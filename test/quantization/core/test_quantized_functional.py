@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
 )
 
-class TestQuantizedFunctional(QuantizationTestCase):
+class TestQuantizedFunctionalOps(QuantizationTestCase):
     def test_relu_api(self):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
