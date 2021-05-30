@@ -224,6 +224,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     if (frames.back().pc == 0 && stack_start_ == 0) {
       checkAndStartRecordFunction(frames.back(), stack);
     }
+
+    static void* dispatch_table[] = {
+    #define DISPATCH_TABLE_ENTRY(op, _) &&do_##op,
+      FORALL_OPCODES(DISPATCH_TABLE_ENTRY)
+    #undef DISPATCH_TABLE_ENTRY
+    };
+
+    #define DISPATCH() goto *dispatch_table[frame.function->instructions_[frame.pc++].op]
+
     try {
       while (true) {
         Frame& frame = frames.back();
@@ -232,389 +241,388 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         Instruction inst = frame.function->instructions_[frame.pc];
         profiling::InstructionSpan instSpan{
             *frame.function->instructions_source()[frame.pc]};
-        switch (inst.op) {
-          case ENTER: {
-            const auto& obj = peek(stack, 0, 1);
-            TORCH_INTERNAL_ASSERT(obj.isObject());
-            entered_objects.push_back(obj);
-            ++frame.pc;
-          } break;
-          case EXIT: {
-            auto obj = entered_objects.back().toObject();
-            auto& f = obj->type()->getMethod("__exit__");
-            push(stack, std::move(obj));
-            entered_objects.pop_back();
-            push(stack, IValue());
-            push(stack, IValue());
-            push(stack, IValue());
-            runGraphFunction(stack, &f);
-          } break;
-          case OP:
-            frame.function->operator_table_[inst.X](&stack);
-            ++frame.pc;
-            break;
-          case OPN:
-            stack.push_back(inst.N);
-            frame.function->operator_table_[inst.X](&stack);
-            ++frame.pc;
-            break;
-          case LOAD:
-            stack.emplace_back(reg(inst.X));
-            ++frame.pc;
-            break;
-          case MOVE:
-            stack.emplace_back(std::move(reg(inst.X)));
-            ++frame.pc;
-            break;
-          case STORE:
-            reg(inst.X) = pop(stack);
-            ++frame.pc;
-            break;
-          case STOREN:
-            for (size_t i = inst.N; i > 0; --i) {
-              reg(inst.X + i - 1) = pop(stack);
-            }
-            ++frame.pc;
-            break;
-          case DROP:
-            pop(stack);
-            ++frame.pc;
-            break;
-          case DROPR:
-            reg(inst.X) = IValue();
-            ++frame.pc;
-            break;
-          case LOADC:
-            stack.emplace_back(frame.function->constant_table_[inst.X]);
-            ++frame.pc;
-            break;
-          case GET_ATTR: {
-            auto userObj = pop(stack).toObject();
-            auto value = userObj->getSlot(inst.X);
-            push(stack, std::move(value));
-            ++frame.pc;
-          } break;
-          case SET_ATTR: {
-            auto v = pop(stack);
-            auto userObj = pop(stack).toObject();
-            userObj->setSlot(inst.X, std::move(v));
-            ++frame.pc;
-          } break;
-          case JF:
-            frame.pc += (pop(stack).toBool()) ? 1 : inst.X;
-            break;
-          case JMP:
-            frame.pc += inst.X;
-            break;
-          case LOOP: {
-            // stack: iteration_count, max_iter, cond, loop_carried_deps...
-            auto fr = stack.end() - (inst.N + 1);
-            int64_t trip_count = fr[0].toInt();
-            int64_t max_trip_count = fr[1].toInt();
-            bool cond = fr[2].toBool();
-            if (trip_count < max_trip_count && cond) {
-              fr[2] = trip_count;
-              fr[0] = trip_count + 1;
-              ++frame.pc;
-            } else {
-              size_t n_loop_carried = inst.N - 2;
-              for (size_t i = 0; i < n_loop_carried; ++i) {
-                fr[i] = std::move(fr[i + 3]);
-              }
-              drop(stack, 3); // iteration_count, max_iter, cond
-              frame.pc += inst.X;
-            }
-          } break;
-          case CALL: {
-            Function* fn = frame.function->function_table_[inst.X];
-            if (!fn->isGraphFunction()) {
-              runBuiltinFunction(stack, fn);
-            } else {
-              runGraphFunction(stack, fn);
-            }
-          } break;
-          case INTERFACE_CALL: {
-            // note the hash table lookup to find the function
-            // this can be more optimized if necessary, caching parts
-            // of the hashing computation or storing the offset when
-            // the object is turned into an interface
+        do_ENTER: {
+          const auto& obj = peek(stack, 0, 1);
+          TORCH_INTERNAL_ASSERT(obj.isObject());
+          entered_objects.push_back(obj);
+          DISPATCH();
+        }
 
-            // consider passing
-            // `frames.back().function->remaining_bailout_depth_` into
-            // `get_executor().getPlanFor()` to propagate caller's depth
-            // restrictions onto children while this strategy has a potential to
-            // reduce the number of compilations for too dynamic callers we
-            // might miss opportunities where a caller is dynamic but a callee
-            // gets stable arguments
-            Function& function =
-                peek(stack, 0, inst.N)
-                    .toObject()
-                    ->type()
-                    ->getMethod(
-                        frame.function->constant_table_[inst.X].toStringRef());
-            if (!function.isGraphFunction()) {
-              runBuiltinFunction(stack, &function);
-            } else {
-              runGraphFunction(stack, &function);
+        do_EXIT: {
+          auto obj = entered_objects.back().toObject();
+          auto& f = obj->type()->getMethod("__exit__");
+          push(stack, std::move(obj));
+          entered_objects.pop_back();
+          push(stack, IValue());
+          push(stack, IValue());
+          push(stack, IValue());
+          runGraphFunction(stack, &f);
+        } break;
+
+        do_OP:
+          frame.function->operator_table_[inst.X](&stack);
+          DISPATCH();
+
+        do_OPN:
+          stack.push_back(inst.N);
+          frame.function->operator_table_[inst.X](&stack);
+          DISPATCH();
+
+        do_LOAD:
+          stack.emplace_back(reg(inst.X));
+          DISPATCH();
+
+        do_MOVE:
+          stack.emplace_back(std::move(reg(inst.X)));
+          DISPATCH();
+
+        do_STORE:
+          reg(inst.X) = pop(stack);
+          DISPATCH();
+
+        do_STOREN:
+          for (size_t i = inst.N; i > 0; --i) {
+            reg(inst.X + i - 1) = pop(stack);
+          }
+          DISPATCH();
+        do_DROP:
+          pop(stack);
+          
+          DISPATCH();
+        do_DROPR:
+          reg(inst.X) = IValue();
+          
+          DISPATCH();
+        do_LOADC:
+          stack.emplace_back(frame.function->constant_table_[inst.X]);
+          
+          DISPATCH();
+        do_GET_ATTR: {
+          auto userObj = pop(stack).toObject();
+          auto value = userObj->getSlot(inst.X);
+          push(stack, std::move(value));
+          
+        } DISPATCH();
+        do_SET_ATTR: {
+          auto v = pop(stack);
+          auto userObj = pop(stack).toObject();
+          userObj->setSlot(inst.X, std::move(v));
+          
+        } DISPATCH();
+        do_JF:
+          frame.pc += (pop(stack).toBool()) ? 1 : inst.X;
+          DISPATCH();
+        do_JMP:
+          frame.pc += inst.X;
+          DISPATCH();
+        do_LOOP: {
+          // stack: iteration_count, max_iter, cond, loop_carried_deps...
+          auto fr = stack.end() - (inst.N + 1);
+          int64_t trip_count = fr[0].toInt();
+          int64_t max_trip_count = fr[1].toInt();
+          bool cond = fr[2].toBool();
+          if (trip_count < max_trip_count && cond) {
+            fr[2] = trip_count;
+            fr[0] = trip_count + 1;
+            
+          } else {
+            size_t n_loop_carried = inst.N - 2;
+            for (size_t i = 0; i < n_loop_carried; ++i) {
+              fr[i] = std::move(fr[i + 3]);
             }
-          } break;
-          case RET:
-            if (frames.size() > 1) {
-              leaveFrame();
+            drop(stack, 3); // iteration_count, max_iter, cond
+            frame.pc += inst.X;
+          }
+        } DISPATCH();
+        do_CALL: {
+          Function* fn = frame.function->function_table_[inst.X];
+          if (!fn->isGraphFunction()) {
+            runBuiltinFunction(stack, fn);
+          } else {
+            runGraphFunction(stack, fn);
+          }
+        } DISPATCH();
+        do_INTERFACE_CALL: {
+          // note the hash table lookup to find the function
+          // this can be more optimized if necessary, caching parts
+          // of the hashing computation or storing the offset when
+          // the object is turned into an interface
+
+          // consider passing
+          // `frames.back().function->remaining_bailout_depth_` into
+          // `get_executor().getPlanFor()` to propagate caller's depth
+          // restrictions onto children while this strategy has a potential to
+          // reduce the number of compilations for too dynamic callers we
+          // might miss opportunities where a caller is dynamic but a callee
+          // gets stable arguments
+          Function& function =
+              peek(stack, 0, inst.N)
+                  .toObject()
+                  ->type()
+                  ->getMethod(
+                      frame.function->constant_table_[inst.X].toStringRef());
+          if (!function.isGraphFunction()) {
+            runBuiltinFunction(stack, &function);
+          } else {
+            runGraphFunction(stack, &function);
+          }
+        } DISPATCH();
+        do_RET:
+          if (frames.size() > 1) {
+            leaveFrame();
+            break;
+          }
+          if (future_) {
+            auto num_outputs = frames.back().function->n_outputs;
+            if (num_outputs == 1) {
+              future_->markCompleted(stack.back());
+            } else {
+              future_->markCompleted(c10::ivalue::Tuple::create(
+                  jit::last(stack, num_outputs).vec()));
+            }
+          }
+          // destroy the last frame and call RecordFunction's end callbacks
+          leaveFrame();
+          return false;
+        do_WAIT: {
+          auto future = stack.back().toFuture();
+          if (!future->completed()) {
+            getOrCreateFuture();
+
+            // callback needs to be a struct rather than a lambda so that
+            // we can move the stack to the other thread
+            struct Callback {
+              Callback(
+                  c10::intrusive_ptr<InterpreterStateImpl> state,
+                  Stack stack)
+                  : stateImpl_(std::move(state)),
+                    state_(stateImpl_),
+                    stack_(std::move(stack)) {
+                dist_autograd_context_id_ = getDistAutogradContextId();
+                state_ = InterpreterState(stateImpl_);
+              }
+              void operator()(c10::ivalue::Future& /* unused */) {
+                stateImpl_->taskLauncher_(InterpreterContinuation(
+                    state_,
+                    std::move(stack_),
+                    dist_autograd_context_id_,
+                    std::move(tls_state_)));
+              }
+
+             private:
+              c10::intrusive_ptr<InterpreterStateImpl> stateImpl_;
+              InterpreterState state_;
+              Stack stack_;
+              int64_t dist_autograd_context_id_;
+              // preserve the original ThreadLocalState
+              at::ThreadLocalState tls_state_;
+            };
+
+            // we are suspending, so we need to reset the stack to where we
+            // started if it started empty, except for the inputs we can avoid
+            // a true copy by swapping, which leaves the original stack empty.
+            Stack copied;
+            if (stack_start_ == 0) {
+              copied.swap(stack);
+            } else {
+              copied.insert(
+                  copied.begin(),
+                  std::make_move_iterator(stack.begin() + stack_start_),
+                  std::make_move_iterator(stack.end()));
+              stack.resize(stack_start_);
+            }
+            // save pc into the frame so we continue here when restored
+            future->addCallback(
+                Callback(intrusive_from_this(), std::move(copied)));
+
+            return true;
+          }
+          stack.pop_back();
+          stack.emplace_back(future->value());
+          
+        } DISPATCH();
+        do_PROFILE_OP: {
+          auto& frame_id_ref = frame.id;
+          if (!frame_id_ref.has_value()) {
+            frame_id_ref = Frame::genId();
+          }
+          const auto& callback =
+              frame.function->profile_function_table_[inst.X];
+          push(stack, c10::IValue{static_cast<int64_t>(*frame_id_ref)});
+          callback(stack);
+          
+          DISPATCH();
+        }
+        do_FAIL_GUARD: {
+          // patch FAIL_GUARD back to GUARD
+          GRAPH_DEBUG(
+              "Bailout ", inst.X, " triggered via bailout_requests_!");
+          frame.function->instructions_[frame.pc].op = GUARD;
+          push(stack, false);
+          
+          DISPATCH();
+        }
+        do_TYPECHECK: {
+          int num_inputs = inst.N, i = 0;
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+          TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
+          // Check every input's shape against profiled (expected) shape.
+          for (i = 0; i < num_inputs; i++) {
+            auto& input = peek(stack, i, num_inputs);
+            auto& t = input.toTensor();
+            const TypePtr& expected = frame.function->type_table_[inst.X + i];
+            auto* expected_type = expected->castRaw<TensorType>();
+            if (t.defined() && !expected_type->matchTensor(t)) {
+              push(stack, false);
               break;
             }
-            if (future_) {
-              auto num_outputs = frames.back().function->n_outputs;
-              if (num_outputs == 1) {
-                future_->markCompleted(stack.back());
-              } else {
-                future_->markCompleted(c10::ivalue::Tuple::create(
-                    jit::last(stack, num_outputs).vec()));
-              }
+          }
+          if (i == num_inputs) {
+            push(stack, true);
+          }
+          
+          DISPATCH();
+        }
+        do_GUARD: {
+          if (!stack.back().isTensor()) {
+            // stack.back() is an Uninitialized IValue and this is a guard
+            // on a block output. Uninitialized IValues are never used
+            // so it's safe to pass this guard check
+            push(stack, true);
+          } else {
+            auto& t = stack.back().toTensor();
+            const TypePtr& expected = frame.function->type_table_[inst.X];
+            auto* expected_type = expected->castRaw<TensorType>();
+            if (t.defined() &&
+                !frames.back().symbols2dims.bindSymbolicShapes(
+                    t.sizes(), expected_type->symbolic_sizes())) {
+              push(stack, false);
+            } else {
+              push(stack, expected_type->matchTensor(t));
             }
-            // destroy the last frame and call RecordFunction's end callbacks
-            leaveFrame();
-            return false;
-          case WAIT: {
-            auto future = stack.back().toFuture();
-            if (!future->completed()) {
-              getOrCreateFuture();
+          }
+          
+        } DISPATCH();
+        do_TAIL_CALL: {
+          GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
+          frame.function->function_table_[inst.X]->ensure_defined();
+          size_t remaining_bailout_depth =
+              frame.function->remaining_bailout_depth_ > 0
+              ? frame.function->remaining_bailout_depth_ - 1
+              : 0;
+          const Code& code = frame.function->function_table_[inst.X]
+                                 ->get_executor()
+                                 .getPlanFor(stack, remaining_bailout_depth)
+                                 .code;
+          size_t num_inputs = code.num_inputs();
+          size_t base_pointer = frame.base_pointer;
+          TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
+          size_t inputs_start = stack.size() - num_inputs;
+          for (size_t i = 0; i < num_inputs; ++i) {
+            stack.at(base_pointer + i) =
+                std::move(stack.at(inputs_start + i));
+          }
+          stack.resize(base_pointer + num_inputs);
+          leaveFrame();
+          enterFrame(code, base_pointer);
+          checkAndStartRecordFunction(frames.back(), stack);
+        } DISPATCH();
+        do_LIST_UNPACK: {
+          listUnpack(stack, inst.X);
+          
+        } DISPATCH();
+        do_TUPLE_CONSTRUCT: {
+          tupleConstruct(stack, inst.X);
+          
+        } DISPATCH();
+        do_TUPLE_SLICE: {
+          tupleSlice(stack, inst.X, inst.X + inst.N);
+          
+        } DISPATCH();
+        do_NAMED_TUPLE_CONSTRUCT: {
+          namedTupleConstruct(
+              stack,
+              frame.function->type_table_[inst.X]->expect<TupleType>(),
+              inst.N);
+          
+        } DISPATCH();
+        do_LIST_CONSTRUCT: {
+          const auto& type =
+              frame.function->type_table_[inst.X]->expectRef<ListType>();
+          listConstruct(stack, type, inst.N);
+          
+        } DISPATCH();
+        do_DICT_CONSTRUCT: {
+          const auto& type =
+              frame.function->type_table_[inst.X]->expectRef<DictType>();
+          dictConstruct(stack, type, inst.N);
+          
+        } DISPATCH();
+        do_CREATE_OBJECT: {
+          auto type =
+              frame.function->type_table_[inst.X]->expect<ClassType>();
+          createObject(stack, type);
+          
+        } DISPATCH();
+        do_ISINSTANCE: {
+          at::ArrayRef<TypePtr> types(
+              &(frame.function->type_table_[inst.X]),
+              &(frame.function->type_table_[inst.X + inst.N]));
+          isinstance(stack, types);
+          
+        } DISPATCH();
+        do_FORK: {
+          // Move inputs to a separate stack
+          Function* forked_fn = frame.function->function_table_[inst.X];
+          InterpreterState forked_interpreter(
+              forked_fn->get_executor()
+                  .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                  .code,
+              taskLauncher_);
+          InterpreterContinuation continuation(
+              forked_interpreter,
+              Stack(stack.end() - inst.N, stack.end()),
+              getDistAutogradContextId());
+          drop(stack, inst.N);
+          push(stack, forked_interpreter.getFuture());
+          taskLauncher_(std::move(continuation));
+          
+        } DISPATCH();
+        do_WARN: {
+          // Keeps track of which WARN instruction has been executed before,
+          // we only want to execute each WARN once to match default Python
+          // warning behavior.
+          bool need_warn = true;
+          if (inst.X != -1) {
+            need_warn = warned_nodes_.insert(inst.X);
+          }
 
-              // callback needs to be a struct rather than a lambda so that
-              // we can move the stack to the other thread
-              struct Callback {
-                Callback(
-                    c10::intrusive_ptr<InterpreterStateImpl> state,
-                    Stack stack)
-                    : stateImpl_(std::move(state)),
-                      state_(stateImpl_),
-                      stack_(std::move(stack)) {
-                  dist_autograd_context_id_ = getDistAutogradContextId();
-                  state_ = InterpreterState(stateImpl_);
-                }
-                void operator()(c10::ivalue::Future& /* unused */) {
-                  stateImpl_->taskLauncher_(InterpreterContinuation(
-                      state_,
-                      std::move(stack_),
-                      dist_autograd_context_id_,
-                      std::move(tls_state_)));
-                }
-
-               private:
-                c10::intrusive_ptr<InterpreterStateImpl> stateImpl_;
-                InterpreterState state_;
-                Stack stack_;
-                int64_t dist_autograd_context_id_;
-                // preserve the original ThreadLocalState
-                at::ThreadLocalState tls_state_;
-              };
-
-              // we are suspending, so we need to reset the stack to where we
-              // started if it started empty, except for the inputs we can avoid
-              // a true copy by swapping, which leaves the original stack empty.
-              Stack copied;
-              if (stack_start_ == 0) {
-                copied.swap(stack);
-              } else {
-                copied.insert(
-                    copied.begin(),
-                    std::make_move_iterator(stack.begin() + stack_start_),
-                    std::make_move_iterator(stack.end()));
-                stack.resize(stack_start_);
-              }
-              // save pc into the frame so we continue here when restored
-              future->addCallback(
-                  Callback(intrusive_from_this(), std::move(copied)));
-
-              return true;
+          Node* node =
+              frames.back().function->instructions_source_.at(frame.pc);
+          auto range = node->sourceRange().source();
+          if (range->filename()) {
+            drop(stack, 1);
+            const auto& msg = stack.back().toStringRef();
+            if (need_warn) {
+              auto line = range->starting_line_no() +
+                  range->lineno_for_offset(node->sourceRange().start());
+              c10::SourceLocation location{
+                  "", range->filename()->c_str(), uint32_t(line)};
+              // Sends the warning to the warning handler with the
+              // "verbatim" flag. This flag ensures the warning handler
+              // will print the exception as configured.
+              c10::Warning::warn(location, msg, /*verbatim=*/true);
             }
             stack.pop_back();
-            stack.emplace_back(future->value());
-            ++frame.pc;
-          } break;
-          case PROFILE_OP: {
-            auto& frame_id_ref = frame.id;
-            if (!frame_id_ref.has_value()) {
-              frame_id_ref = Frame::genId();
+          } else {
+            const auto& msg = stack.back().toStringRef();
+            if (need_warn) {
+              TORCH_WARN(msg);
             }
-            const auto& callback =
-                frame.function->profile_function_table_[inst.X];
-            push(stack, c10::IValue{static_cast<int64_t>(*frame_id_ref)});
-            callback(stack);
-            ++frame.pc;
-            break;
+            stack.pop_back();
           }
-          case FAIL_GUARD: {
-            // patch FAIL_GUARD back to GUARD
-            GRAPH_DEBUG(
-                "Bailout ", inst.X, " triggered via bailout_requests_!");
-            frame.function->instructions_[frame.pc].op = GUARD;
-            push(stack, false);
-            ++frame.pc;
-            break;
-          }
-          case TYPECHECK: {
-            int num_inputs = inst.N, i = 0;
-            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
-            // Check every input's shape against profiled (expected) shape.
-            for (i = 0; i < num_inputs; i++) {
-              auto& input = peek(stack, i, num_inputs);
-              auto& t = input.toTensor();
-              const TypePtr& expected = frame.function->type_table_[inst.X + i];
-              auto* expected_type = expected->castRaw<TensorType>();
-              if (t.defined() && !expected_type->matchTensor(t)) {
-                push(stack, false);
-                break;
-              }
-            }
-            if (i == num_inputs) {
-              push(stack, true);
-            }
-            ++frame.pc;
-            break;
-          }
-          case GUARD: {
-            if (!stack.back().isTensor()) {
-              // stack.back() is an Uninitialized IValue and this is a guard
-              // on a block output. Uninitialized IValues are never used
-              // so it's safe to pass this guard check
-              push(stack, true);
-            } else {
-              auto& t = stack.back().toTensor();
-              const TypePtr& expected = frame.function->type_table_[inst.X];
-              auto* expected_type = expected->castRaw<TensorType>();
-              if (t.defined() &&
-                  !frames.back().symbols2dims.bindSymbolicShapes(
-                      t.sizes(), expected_type->symbolic_sizes())) {
-                push(stack, false);
-              } else {
-                push(stack, expected_type->matchTensor(t));
-              }
-            }
-            ++frame.pc;
-          } break;
-          case TAIL_CALL: {
-            GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
-            frame.function->function_table_[inst.X]->ensure_defined();
-            size_t remaining_bailout_depth =
-                frame.function->remaining_bailout_depth_ > 0
-                ? frame.function->remaining_bailout_depth_ - 1
-                : 0;
-            const Code& code = frame.function->function_table_[inst.X]
-                                   ->get_executor()
-                                   .getPlanFor(stack, remaining_bailout_depth)
-                                   .code;
-            size_t num_inputs = code.num_inputs();
-            size_t base_pointer = frame.base_pointer;
-            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
-            size_t inputs_start = stack.size() - num_inputs;
-            for (size_t i = 0; i < num_inputs; ++i) {
-              stack.at(base_pointer + i) =
-                  std::move(stack.at(inputs_start + i));
-            }
-            stack.resize(base_pointer + num_inputs);
-            leaveFrame();
-            enterFrame(code, base_pointer);
-            checkAndStartRecordFunction(frames.back(), stack);
-          } break;
-          case LIST_UNPACK: {
-            listUnpack(stack, inst.X);
-            ++frame.pc;
-          } break;
-          case TUPLE_CONSTRUCT: {
-            tupleConstruct(stack, inst.X);
-            ++frame.pc;
-          } break;
-          case TUPLE_SLICE: {
-            tupleSlice(stack, inst.X, inst.X + inst.N);
-            ++frame.pc;
-          } break;
-          case NAMED_TUPLE_CONSTRUCT: {
-            namedTupleConstruct(
-                stack,
-                frame.function->type_table_[inst.X]->expect<TupleType>(),
-                inst.N);
-            ++frame.pc;
-          } break;
-          case LIST_CONSTRUCT: {
-            const auto& type =
-                frame.function->type_table_[inst.X]->expectRef<ListType>();
-            listConstruct(stack, type, inst.N);
-            ++frame.pc;
-          } break;
-          case DICT_CONSTRUCT: {
-            const auto& type =
-                frame.function->type_table_[inst.X]->expectRef<DictType>();
-            dictConstruct(stack, type, inst.N);
-            ++frame.pc;
-          } break;
-          case CREATE_OBJECT: {
-            auto type =
-                frame.function->type_table_[inst.X]->expect<ClassType>();
-            createObject(stack, type);
-            ++frame.pc;
-          } break;
-          case ISINSTANCE: {
-            at::ArrayRef<TypePtr> types(
-                &(frame.function->type_table_[inst.X]),
-                &(frame.function->type_table_[inst.X + inst.N]));
-            isinstance(stack, types);
-            ++frame.pc;
-          } break;
-          case FORK: {
-            // Move inputs to a separate stack
-            Function* forked_fn = frame.function->function_table_[inst.X];
-            InterpreterState forked_interpreter(
-                forked_fn->get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code,
-                taskLauncher_);
-            InterpreterContinuation continuation(
-                forked_interpreter,
-                Stack(stack.end() - inst.N, stack.end()),
-                getDistAutogradContextId());
-            drop(stack, inst.N);
-            push(stack, forked_interpreter.getFuture());
-            taskLauncher_(std::move(continuation));
-            ++frame.pc;
-          } break;
-          case WARN: {
-            // Keeps track of which WARN instruction has been executed before,
-            // we only want to execute each WARN once to match default Python
-            // warning behavior.
-            bool need_warn = true;
-            if (inst.X != -1) {
-              need_warn = warned_nodes_.insert(inst.X);
-            }
-
-            Node* node =
-                frames.back().function->instructions_source_.at(frame.pc);
-            auto range = node->sourceRange().source();
-            if (range->filename()) {
-              drop(stack, 1);
-              const auto& msg = stack.back().toStringRef();
-              if (need_warn) {
-                auto line = range->starting_line_no() +
-                    range->lineno_for_offset(node->sourceRange().start());
-                c10::SourceLocation location{
-                    "", range->filename()->c_str(), uint32_t(line)};
-                // Sends the warning to the warning handler with the
-                // "verbatim" flag. This flag ensures the warning handler
-                // will print the exception as configured.
-                c10::Warning::warn(location, msg, /*verbatim=*/true);
-              }
-              stack.pop_back();
-            } else {
-              const auto& msg = stack.back().toStringRef();
-              if (need_warn) {
-                TORCH_WARN(msg);
-              }
-              stack.pop_back();
-            }
-            ++frame.pc;
-          } break;
-        }
+          
+        } DISPATCH();
       }
     } catch (std::exception& e) {
       for (auto it = entered_objects.rbegin(), end = entered_objects.rend();
@@ -641,6 +649,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       handleError(ExceptionMessage(e), is_jit_exception, not_implemented_error);
       return false;
     }
+    return false;
   }
 
   void formatStackTrace(std::ostream& out) {
