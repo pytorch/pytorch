@@ -29,5 +29,7 @@ Functions
 .. autofunction:: digamma
 .. autofunction:: psi
 .. autofunction:: i0e
+.. autofunction:: i1
+.. autofunction:: i1e
 .. autofunction:: logit
 .. autofunction:: xlog1py
