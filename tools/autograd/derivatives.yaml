@@ -594,7 +594,16 @@
   other: grad * other / result
 
 - name: i0(Tensor self) -> Tensor
-  self: not_implemented("i0")
+  self: grad * at::special_i1(self)
+
+- name: special_i0e(Tensor self) -> Tensor
+  self: grad * (at::special_i1e(self) - self.sgn() * result)
+
+- name: special_i1(Tensor self) -> Tensor
+  self: i1_backward(grad, self, result)
+
+- name: special_i1e(Tensor self) -> Tensor
+  self: i1e_backward(grad, self, result)
 
 - name: igamma(Tensor self, Tensor other) -> Tensor
   self: 'not_implemented("igamma: input")'
