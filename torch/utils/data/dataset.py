@@ -17,32 +17,6 @@ from ... import Tensor, Generator
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
-class DataChunk(object):
-    def __init__(self, items, is_df = False):
-        self.items = items
-        # self.is_df = is_df
-
-    def __getitem__(self, key):
-        return self.items[key]
-
-    def __len__(self):
-        return len(self.items)
-
-    def as_str(self, indent = ''):
-        res = indent + "--- chunk ---\n"
-        # if self.is_df:
-        #     res += " (of DataFrames)\n"
-        for i in self.items:
-            if isinstance(i, DataChunk):
-                res += i.as_str(indent + '  ')
-            else:
-                res += str(i) + "\n"
-        res += indent + "--- end of chunk ---\n"
-        return res        
-
-    def __str__(self):
-        return self.as_str()
-
 class Dataset(Generic[T_co]):
     r"""An abstract class representing a :class:`Dataset`.
 
@@ -197,6 +171,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
 
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register, is_df = False):
+        # print('register function', function_name)
         if function_name in IterableDataset.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
@@ -207,7 +182,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             # print('runtime call of ', function_name)
             result_pipe = cls(source_dp, *args, **kwargs)
             if is_df or isinstance(source_dp, DFIterDataPipe) or getattr(result_pipe, '_dp_cast_to_df', False):
-                if function_name != 'trace_as_dataframe' and function_name != 'batch':
+                if function_name != 'trace_as_dataframe' and function_name != 'batch' and function_name != 'groupby':
                     result_pipe = result_pipe.trace_as_dataframe()
             # else:
                 # print(function_name, 'will not return DF')

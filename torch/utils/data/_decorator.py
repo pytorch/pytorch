@@ -13,6 +13,7 @@ class functional_datapipe(object):
     name: str
 
     def __init__(self, name: str, is_df = False) -> None:
+        # print('functional_datapipe', name, is_df)
         self.name = name
         self.is_df = is_df
 

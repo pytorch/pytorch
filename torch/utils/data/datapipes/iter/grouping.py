@@ -2,7 +2,7 @@ import functools
 import os
 import warnings
 
-from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk, DFIterDataPipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
@@ -94,11 +94,11 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
             # print(x)
             batch.append(x)
             if len(batch) == self.batch_size:
-                yield DataChunk(batch, is_df = isinstance(self.datapipe, DFIterDataPipe))
+                yield batch
                 batch = []
         if len(batch) > 0:
             if not self.drop_last:
-                yield DataChunk(batch, is_df = isinstance(self.datapipe, DFIterDataPipe))
+                yield batch
             batch = []
 
     def __len__(self) -> int:
@@ -255,8 +255,9 @@ class GroupByIterDataPipe(IterDataPipe):
                 buffer_size -= len(buffer[biggest_key])
                 del buffer[biggest_key]
                 
-           
+            # print(key[0])
             if key not in buffer:
+                
                 buffer[key] = [x]
             else:
                 buffer[key].append(x)

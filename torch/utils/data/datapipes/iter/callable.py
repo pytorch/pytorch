@@ -1,6 +1,6 @@
 import warnings
 import torch.nn as nn
-from torch.utils.data import IterDataPipe, _utils, functional_datapipe, DataChunk
+from torch.utils.data import IterDataPipe, _utils, functional_datapipe
 from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 try:
@@ -65,13 +65,13 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         if nesting_level == 0:
             return fn(data, *args, **kwargs)
         elif nesting_level > 0:
-            if not isinstance(data, DataChunk):
+            if not isinstance(data, list):
                 raise Exception('Nesting level goes to deep')
-            result = DataChunk([self._apply(i, nesting_level - 1, fn, args, kwargs) for i in data])
+            result = [self._apply(i, nesting_level - 1, fn, args, kwargs) for i in data]
             return result
         else:
             if isinstance(data, list):
-                result = DataChunk([self._apply(i, nesting_level, fn, args, kwargs) for i in data])
+                result = [self._apply(i, nesting_level, fn, args, kwargs) for i in data]
                 return result
             else:
                 return fn(data, *args, **kwargs)

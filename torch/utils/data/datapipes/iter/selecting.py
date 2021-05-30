@@ -1,4 +1,4 @@
-from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
+from torch.utils.data import IterDataPipe, functional_datapipe
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
@@ -40,7 +40,7 @@ class FilterIterDataPipe(MapIterDataPipe):
         is_df = False
 
         for i,b in zip(data, mask):
-            if isinstance(b, DataChunk):
+            if isinstance(b, list):
                 t = self._merge(i, b)
                 if len(t) > 0 or not self.drop_empty_batches:
                     result.append(t)
@@ -61,10 +61,10 @@ class FilterIterDataPipe(MapIterDataPipe):
 
         if is_df:
             if len(result) > 0:
-                return DataChunk([pandas.concat(result)])
+                return [pandas.concat(result)]
             else:
-                return DataChunk([])
-        return DataChunk(result)
+                return []
+        return result
 
     def __iter__(self) -> Iterator[T_co]:
         res: bool
