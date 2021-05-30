@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <exception>
 
+#include <iostream>
+
 #include <ATen/record_function.h>
 
 namespace torch {
@@ -46,14 +48,20 @@ namespace {
 void set_train_recurse(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     bool on) {
+
+  std::cout << "mobile: ivalue name: " << obj->name() << std::endl;
   if (auto slot = obj->type()->findAttributeSlot("training")) {
+
     obj->setSlot(*slot, on);
   } else {
     TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
   }
   for (const auto& slot : obj->slots()) {
-    if (slot.isObject()) {
-      set_train_recurse(slot.toObject(), on);
+    if (slot.isModule() && slot.isObject()) {
+      auto slot_obj = slot.toObject();
+      if(slot_obj->type()->hasAttribute("training")) {
+        set_train_recurse(slot.toObject(), on);
+      }
     }
   }
 }
@@ -138,6 +146,21 @@ std::string Module::get_forward_method_debug_info(size_t pc) const {
 void Module::train(bool on) {
   set_train_recurse(object_, on);
 }
+
+//void Module::train(bool on) {
+////  if (auto slot = object_->type()->findAttributeSlot("training")) {
+////    object_->setSlot(*slot, on);
+////  } else {
+////    TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
+////  }
+//
+//  if (auto slot = _ivalue()->type()->findAttributeSlot("training")) {
+//    std::cout << "mobile: ivalue name: " << _ivalue()->name() << std::endl;
+//    _ivalue()->setSlot(*slot, on);
+//  } else {
+//    TORCH_INTERNAL_ASSERT("'training' attribute not found");
+//  }
+//}
 
 bool Module::is_training() const {
   if (auto slot = object_->type()->findAttributeSlot("training")) {
