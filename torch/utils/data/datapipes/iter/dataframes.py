@@ -28,6 +28,20 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             for i in range(len(df.index)):
                 yield df[i:i+1]
 
+# @functional_datapipe('dataframes_groupby', is_df = True)
+# class ShuffleDataFramesPipe(DFIterDataPipe):
+#     def __init__(self, source_datapipe, unbatch_level = 0):
+#         if unbatch_level != 0:
+#             self.source_datapipe = source_datapipe.unbatch(unbatch_level = unbatch_level)
+#         else:
+#             self.source_datapipe = source_datapipe
+#         # self.unbatch_level = unbatch_level
+
+#     def __iter__(self):
+#         for df in self.source_datapipe:
+#             for i in range(len(df.index)):
+#                 yield df[i:i+1]
+
 
 @functional_datapipe('dataframes_concat', is_df = True)
 class ShuffleDataFramesPipe(DFIterDataPipe):
@@ -129,7 +143,7 @@ class ExampleAggregateAsDataFrames(DFIterDataPipe):
         if len(aggregate) > 0:
             yield pandas.DataFrame(aggregate, columns=self.columns)
 
-DATAPIPES_OPS = ['dataframes_filter','map','to_datapipe','shuffle', 'concat', 'batch', 'dataframes_per_row','dataframes_concat','dataframes_shuffle']
+DATAPIPES_OPS = ['groupby','dataframes_filter','map','to_datapipe','shuffle', 'concat', 'batch', 'dataframes_per_row','dataframes_concat','dataframes_shuffle']
 
 class Capture(object):
     # All operations are shared across entire InitialCapture, need to figure out what if we join two captures
@@ -211,6 +225,16 @@ class Capture(object):
         dp._dp_contains_dataframe = True
         return dp
 
+    def groupby(self, group_key_fn, *, buffer_size = 10000, group_size = None, unbatch_level = 0, guaranteed_group_size = None, drop_remaining = False):
+        if unbatch_level != 0:
+            dp = self.unbatch(unbatch_level).dataframes_per_row()
+        else:
+            dp = self.dataframes_per_row()
+        dp = dp.as_datapipe().groupby(group_key_fn, buffer_size = buffer_size, group_size = group_size, guaranteed_group_size = guaranteed_group_size, drop_remaining = drop_remaining)
+        dp._dp_contains_dataframe = True
+        dp._dp_nesting_depth = 1
+        return dp
+        
     def shuffle(self, *args, **kwargs):
         return self.dataframes_shuffle(*args, **kwargs)
 
