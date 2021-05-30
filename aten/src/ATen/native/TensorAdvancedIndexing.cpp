@@ -1486,7 +1486,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   const int64_t ndim = self_sizes.size();
   if (resize_output(result, {total_nonzero, ndim})) {
     // Default to fortran-contiguous output (see gh-46224)
-    // result.as_strided_({total_nonzero, ndim}, {1, total_nonzero});
+    result.as_strided_({total_nonzero, ndim}, {1, total_nonzero});
   }
 
   if (result.numel() == 0) {
@@ -1562,7 +1562,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 Tensor nonzero_cpu(const Tensor& self) {
   auto result = at::empty({0}, self.options().dtype(kLong));
   nonzero_out_cpu(self, result);
-  return result;
+  return result.contiguous();
 }
 
 std::vector<Tensor> nonzero_numpy(const Tensor& self) {
