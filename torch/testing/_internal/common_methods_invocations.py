@@ -473,19 +473,30 @@ class UnaryUfuncInfo(OpInfo):
         self._domain_eps = 1e-5
 
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
-    return (SampleInput(make_tensor((S, S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(torch.tensor([1, 2, 3]),),),
-            SampleInput(make_tensor((S, S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(torch.tensor(1),),),
-            SampleInput(make_tensor((S, S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(torch.tensor([1, 2, 3]),),
-                        kwargs=dict(dim=1)),)
+    make_input = partial(make_tensor, device=device, dtype=dtype,
+                         low=None, high=None, requires_grad=requires_grad)
+
+    args_cases = (
+        # Cases with tensor indices.
+        (torch.tensor([1, 2, 3]),),
+        (torch.tensor(1),),
+        (torch.tensor([1, 2, 3]), 1),
+        # Cases with list of indices.
+        ((2, 4),),
+        ((2, 4), 1),
+        ((2, 4), -1),
+        # Cases with integer section.
+        (3,),
+        (3, 1),
+        (3, -1),
+    )
+
+    def generator():
+        for args in args_cases:
+            yield SampleInput(make_input((S, S, S)), args=args)
+
+    return list(generator())
+
 
 def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
     kw = dict(device=device, dtype=dtype)
@@ -5891,7 +5902,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -6938,10 +6948,6 @@ def method_tests():
         ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', (), [1]),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('tensor_split', (S, S, S), (3,), 'sections', (False,)),
-        ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
-        ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
-        ('tensor_split', (S, S, S), ([2, 4], 1), 'indices_dim', (False,), [1]),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
