@@ -612,6 +612,7 @@ The following operators are supported:
 * full
 * full_like
 * gather
+* gatherelements
 * ge
 * gelu
 * glu
