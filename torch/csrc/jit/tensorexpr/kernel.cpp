@@ -544,6 +544,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::relu6:
     case aten::gelu:
     case aten::batch_norm:
     case aten::isnan:
@@ -1869,6 +1870,19 @@ Tensor* tensorexpr::computeOperandValue(
           });
     } break;
 
+    case aten::relu6: {
+      return computeOneOperand(
+          "aten_relu6",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            auto zero = Cast::make(a.dtype(), 0);
+            auto six = Cast::make(a.dtype(), 6.);
+            return clamp(zero, six, a);
+          });
+    } break;
+
     case aten::gelu: {
       return computeOneOperand(
           "aten_gelu",
@@ -2493,10 +2507,11 @@ Tensor* tensorexpr::computeOperandValue(
           c10::fmap<DimArg>(outputShape),
           [&](const std::vector<VarHandle>& axes) {
             std::vector<VarHandle> new_axes;
+            new_axes.resize(axes.size());
             assert(permute_dims.size() == axes.size());
-            for (auto i : permute_dims) {
-              auto new_dim = at::maybe_wrap_dim(i, A.ndim());
-              new_axes.push_back(axes[new_dim]);
+            for (unsigned i = 0; i < axes.size(); i++) {
+              auto new_dim = at::maybe_wrap_dim(permute_dims[i], A.ndim());
+              new_axes[new_dim] = axes[i];
             }
             return A.load(new_axes);
           });
@@ -2580,6 +2595,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg:
     case aten::isnan:
     case aten::relu:
+    case aten::relu6:
     case aten::leaky_relu:
     case aten::hardswish:
     case aten::gelu:

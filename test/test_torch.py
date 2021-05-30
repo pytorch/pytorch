@@ -8244,6 +8244,10 @@ class TestTensorDeviceOps(TestCase):
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
 
+    def test_tensor_ctor_scalar(self):
+        x = torch.Tensor(torch.tensor(1.0))
+        self.assertEqual(x, torch.tensor(1.0))
+
     def test_deepcopy_gradient(self):
         from copy import deepcopy
         a = torch.zeros(10)
