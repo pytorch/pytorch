@@ -3403,8 +3403,56 @@ std::tuple<Tensor, Tensor> polar_backward(
   return std::make_tuple(grad_abs, grad_angle);
 }
 
+Tensor i1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result) {
+  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "i1_backward", [&]() {
+    // For x = 0, the correct gradient is 0.5,
+    // however due to floating point computation we get NaN.
+    // So we manually update gradient for x=0
+    auto eps = std::numeric_limits<scalar_t>::epsilon();
+    auto self_is_not_tiny = self.abs() > eps;
+
+    // Following `where` is needed as `where` computes gradients,
+    // even for the part which didn't affect the output.
+    // Look at https://github.com/pytorch/pytorch/issues/52248
+    // Update if and when this is fixed.
+    auto safe_self =
+        at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
+    auto gradx = (safe_self.i0() - (result * safe_self.reciprocal()));
+    return grad *
+        at::where(self_is_not_tiny, gradx, at::full({}, 0.5, self.options()));
+  });
+}
+
+Tensor i1e_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result) {
+  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "i1e_backward", [&]() {
+    // For x = 0, the correct gradient is 0.5,
+    // however due to floating point computation we get NaN.
+    // So we manually update gradient for x=0
+    auto eps = std::numeric_limits<scalar_t>::epsilon();
+    auto self_is_not_tiny = self.abs() > eps;
+
+    // Following `where` is needed as `where` computes gradients,
+    // even for the part which didn't affect the output.
+    // Look at https://github.com/pytorch/pytorch/issues/52248
+    // Update if and when this is fixed.
+    auto safe_self =
+        at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
+    auto gradx =
+        (at::special_i0e(safe_self) -
+         result * (safe_self.sgn() + safe_self.reciprocal()));
+    return grad *
+        at::where(self_is_not_tiny, gradx, at::full({}, 0.5, self.options()));
+  });
+}
+
 Tensor lu_unpack_backward(
-  const std::vector<torch::autograd::Variable>& grads,
+  const variable_list& grads,
   const Tensor& LU_data,
   bool unpack_data
 ) {

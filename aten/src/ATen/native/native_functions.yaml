@@ -9408,6 +9408,30 @@
   dispatch:
     CPU, CUDA: special_i0e_out
 
+- func: special_i1(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_i1.out
+
+- func: special_i1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_i1_out
+
+- func: special_i1e(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_i1e.out
+
+- func: special_i1e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_i1e_out
+
 - func: special_logit(Tensor self, float? eps=None) -> Tensor
   python_module: special
   variants: function
