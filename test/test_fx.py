@@ -2646,6 +2646,7 @@ class TestOperatorSignatures(JitTestCase):
                            'nn.functional.hardshrink',
                            'vstack',
                            'where',
+                           'zero_',
                            '__getitem__',
                            '__radd__',
                            '__rsub__',
