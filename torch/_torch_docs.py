@@ -3854,6 +3854,8 @@ Example::
 
 add_docstr(torch.i0,
            r"""
+i0(input, *, out=None) -> Tensor
+
 Alias for :func:`torch.special.i0`.
 """)
 
