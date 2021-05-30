@@ -31,8 +31,8 @@ inline void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
 
 inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
   for (int64_t dim = 0; dim < ndim; ++dim) {
-    for (size_t arg = 0; arg < operands.size(); ++arg) {
-      *strides++ = operands[arg].stride_bytes[dim];
+    for (const auto & operand : operands) {
+      *strides++ = operand.stride_bytes[dim];
     }
   }
   // Always at least 2d strides to support 2d for_each loops
