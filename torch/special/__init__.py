@@ -335,13 +335,17 @@ ndtr = _add_docstr(_special.special_ndtr,
 ndtr(input, *, out=None) -> Tensor
 Computes the area under the standard Gaussian probability density function,
 integrated from minus infinity to :attr:`input`, elementwise.
+
 .. math::
     \text{ndtr}(x) = \frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt
+
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
     tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
