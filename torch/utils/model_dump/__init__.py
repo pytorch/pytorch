@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 model_dump: a one-stop shop for TorchScript model inspection.
 
@@ -156,6 +156,12 @@ def hierarchical_pickle(data):
             ls, = data.args
             assert isinstance(ls, list)
             return hierarchical_pickle(ls)
+        if typename == "torch.device":
+            assert data.state is None
+            name, = data.args
+            assert isinstance(name, str)
+            # Just forget that it was a device and return the name.
+            return name
         raise Exception(f"Can't prepare fake object of type for JS: {typename}")
     raise Exception(f"Can't prepare data of type for JS: {type(data)}")
 
@@ -204,7 +210,7 @@ def get_model_info(
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
         with zf.open(path_prefix + "/data.pkl") as handle:
-            raw_model_data = torch.utils.show_pickle.DumpUnpickler.dump(handle, out_stream=io.StringIO())
+            raw_model_data = torch.utils.show_pickle.DumpUnpickler(handle).load()
             model_data = hierarchical_pickle(raw_model_data)
 
         # Intern strings that are likely to be re-used.
@@ -240,8 +246,7 @@ def get_model_info(
 
             code_parts = []
             for di, di_next in zip(debug_info, debug_info[1:]):
-                # accounting for source range serialization format change
-                start, source_range, _ = di
+                start, source_range, *_ = di
                 end = di_next[0]
                 assert end > start
                 source, s_start, s_end = source_range
@@ -282,7 +287,7 @@ def get_model_info(
                 # TODO: handle errors here and just ignore the file?
                 # NOTE: For a lot of these files (like bytecode),
                 # we could get away with just unpickling, but this should be safer.
-                obj = torch.utils.show_pickle.DumpUnpickler.dump(handle, out_stream=io.StringIO())
+                obj = torch.utils.show_pickle.DumpUnpickler(handle).load()
             buf = io.StringIO()
             pprint.pprint(obj, buf)
             contents = buf.getvalue()

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 
 import os
@@ -103,6 +103,12 @@ ignores = [
     '*/hip/*',
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
+    "torch/csrc/jit/codegen/cuda/codegen.cpp",
+    "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
+    "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
+    "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",

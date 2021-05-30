@@ -141,9 +141,7 @@ TEST(FromQualStringTest, Basic) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(THNNConvTest, Basic) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> kernel_size = {3, 5};
   std::vector<int64_t> stride = {1, 2};
   std::vector<int64_t> padding = {2, 1};
@@ -242,12 +240,9 @@ TEST(ATenNativeBatchNormTest, Basic) {
   // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor
   // running_mean, Tensor running_var, bool training, float momentum, float eps)
   // -> (Tensor, Tensor, Tensor)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
   bool training = true;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float momentum = 0.9;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float eps = 1e-5;
 
   // make inputs
@@ -673,7 +668,6 @@ TEST(TopologicalIndexTest, Reindex) {
   auto anchor = graph.create(prim::AutogradZero);
   graph.appendNode(anchor);
   // Inserting to the same place a lot will trigger reindexing
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 100; ++i) {
     auto n = graph.create(prim::AutogradZero);
     n->insertAfter(anchor);
@@ -681,9 +675,7 @@ TEST(TopologicalIndexTest, Reindex) {
   }
 
   // Nodes should be in reverse order
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 100; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (auto j = i + 1; j < 100; ++j) {
       ASSERT_TRUE(nodes[i]->isAfter(nodes[j]));
     }
@@ -852,13 +844,6 @@ void checkScopeCallbacks() {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static bool should_run = false;
-
-static bool shouldRunCallback(const RecordFunctionCallback&) {
-  return should_run;
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TracedTestValues traced_inputs;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TracedTestValues traced_outputs;
@@ -983,12 +968,10 @@ TEST(RecordFunctionTest, SampledCallbacks) {
 
   addGlobalCallback(RecordFunctionCallback(nonSampledCallback));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto handle = setup_sampled_callback(0.5);
 
   auto run_test_function = []() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (auto k = 0; k < 1000; k++) {
       invokeTestRecordFunction(t);
     }
@@ -1150,7 +1133,6 @@ TEST(RecordFunctionTest, Callbacks) {
         [](const RecordFunction&
            /* unused */) -> std::unique_ptr<at::ObserverContext> {
           auto ctx = std::make_unique<TestContext>();
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           ctx->a = 123;
           ctx->b = "test_str";
           ids.push_back(1);
@@ -1177,7 +1159,6 @@ TEST(RecordFunctionTest, Callbacks) {
           [](const RecordFunction&
              /* unused */) -> std::unique_ptr<at::ObserverContext> {
             auto ctx = std::make_unique<TestContext>();
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             ctx->a = 234;
             ctx->b = "test_thread_str";
             ids.push_back(2);
@@ -1208,25 +1189,31 @@ TEST(RecordFunctionTest, ShouldRun) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
-  should_run = false;
   static bool ran = false;
-  addGlobalCallback(
-      RecordFunctionCallback(
-          [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-            ran = true;
-            return nullptr;
-          })
-          .setShouldRun(shouldRunCallback));
+  auto handle = addGlobalCallback(RecordFunctionCallback(
+      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        ran = true;
+        return nullptr;
+      }));
 
   { RECORD_USER_SCOPE("test"); }
 
-  TORCH_CHECK(!ran);
+  EXPECT_TRUE(ran) << "first run didn't happen";
+  ran = false;
 
-  should_run = true;
+  disableCallback(handle);
 
   { RECORD_USER_SCOPE("test"); }
 
-  TORCH_CHECK(ran);
+  EXPECT_FALSE(ran) << "second run happened but shouldn't have";
+  ran = false;
+
+  reenableCallback(handle);
+
+  { RECORD_USER_SCOPE("test"); }
+
+  EXPECT_TRUE(ran) << "run after re-enable didn't happen";
+  ran = false;
 
   clearCallbacks();
 }
@@ -1342,11 +1329,9 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   debug_info->setModelId(42);
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
   }
 
@@ -1356,7 +1341,6 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     at::launch([]() {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
       done = true;
     });
@@ -1370,7 +1354,6 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   done = false;
   auto handle = addGlobalCallback(RecordFunctionCallback(
       [](const RecordFunction&) -> std::unique_ptr<at::ObserverContext> {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
         done = true;
         return nullptr;
@@ -1391,23 +1374,17 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
       {
         auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         debug_info->setModelId(314);
         c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO_2, debug_info);
         {
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
           done = false;
           at::launch([]() {
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
             done = true;
           });
@@ -1580,7 +1557,6 @@ graph(%a):
   return (%a))IR",
       &*graph);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
   auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
     GraphExecutor executor(graph, "");
@@ -1745,7 +1721,6 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // peeling 5 iterations should update the termination
   // condition to false
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     LoopsPeeler peeler(true_pred, 5);
     auto copy = f.graph()->copy();
     peeler.run(copy);
@@ -1802,7 +1777,6 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
   }
 
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     LoopsPeeler peeler(true_pred, 5);
     auto copy = f.graph()->copy();
     peeler.run(copy);
@@ -1843,7 +1817,6 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     LoopsPeeler peeler(true_pred, 5);
     auto copy = f.graph()->copy();
     peeler.run(copy);
@@ -1988,9 +1961,7 @@ TEST(ProfilerTest, Basic) {
   auto mm =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::add; });
   ASSERT_NE(mm, end);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> mm_expected{4, 2048};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> eltwise{4, 512};
   checkShape(mm->inputs().at(0)->node()->ty(attr::profiled_type), mm_expected);
   auto mul_n =
@@ -2037,7 +2008,6 @@ def foo(x):
           ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("bar"));
           break;
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 7: {
           // Const 7 comes from function 'ham', which gets inlined to 'baz',
           // which is then inlined to 'foo'. The callstack for the corresponding
@@ -2049,7 +2019,6 @@ def foo(x):
           ASSERT_EQ(std::get<0>(callstack_vector[1]), &cu->get_function("ham"));
           break;
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 11: {
           // Const 11 comes from function 'foo', which is not inlined anywhere
           // and thus it should not have a callstack.
@@ -2238,8 +2207,7 @@ TEST(FuturesTest, Basic) {
   ASSERT_FALSE(f1->hasValue());
   int32_t sat1 = 0;
   int32_t sat2 = 0;
-  f1->addCallback([&]() { ++sat1; });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  f1->addCallback([&](Future& /* unused */) { ++sat1; });
   f1->markCompleted(43);
   ASSERT_TRUE(f1->completed());
   ASSERT_TRUE(f1->hasValue());
@@ -2247,7 +2215,7 @@ TEST(FuturesTest, Basic) {
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(f1->constValue().toInt(), 43);
   ASSERT_EQ(f1->value().toInt(), 43);
-  f1->addCallback([&]() { ++sat2; });
+  f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
 }
@@ -2258,7 +2226,7 @@ TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   int sat1 = 0;
   int sat2 = 0;
-  f1->addCallback([&]() { ++sat1; });
+  f1->addCallback([&](Future& /* unused */) { ++sat1; });
   f1->setError(
       std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
   ASSERT_EQ(sat1, 1);
@@ -2271,7 +2239,7 @@ TEST(FuturesTest, Error) {
   } catch (const std::exception& e) {
     ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
   }
-  f1->addCallback([&]() { ++sat2; });
+  f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
   f1->setErrorIfNeeded(
@@ -2286,18 +2254,17 @@ TEST(FuturesTest, Error) {
 TEST(FuturesTest, Then) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   auto f2 = f1->then(
-      [f1]() -> IValue { return f1->constValue().toInt() + 1; },
+      [](Future& f1) -> IValue { return f1.constValue().toInt() + 1; },
       IntType::get());
   auto f3 = f2->then(
-      [f2]() -> IValue { return f2->constValue().toInt() * 3; },
+      [](Future& f2) -> IValue { return f2.constValue().toInt() * 3; },
       IntType::get());
   bool done = false;
-  f3->addCallback([f3, &done]() {
-    ASSERT_EQ(f3->constValue().toInt(), (42 + 1) * 3);
+  f3->addCallback([&done](Future& f3) {
+    ASSERT_EQ(f3.constValue().toInt(), (42 + 1) * 3);
     done = true;
   });
   ASSERT_FALSE(done);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f1->markCompleted(42);
   ASSERT_TRUE(done);
 }
@@ -2323,7 +2290,6 @@ TEST(FuturesTest, CollectAll) {
   futures.push_back(s1);
   auto c2 = collectAll(futures);
   ASSERT_FALSE(c2->completed());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s1->markCompleted(5);
   ASSERT_TRUE(c2->completed());
   ASSERT_EQ(c2->value().toList().size(), 1);
@@ -2343,10 +2309,8 @@ TEST(FuturesTest, CollectAll) {
   futures.push_back(s3);
   auto c4 = collectAll(futures);
   ASSERT_FALSE(c4->completed());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s3->markCompleted(7);
   ASSERT_FALSE(c4->completed());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s2->markCompleted(6);
   ASSERT_TRUE(c4->completed());
   ASSERT_EQ(c4->value().toList().size(), 3);
@@ -2388,7 +2352,6 @@ TEST(FuturesTest, CollectAny) {
   futures.push_back(s1);
   auto c2 = collectAny(futures);
   ASSERT_FALSE(c2->completed());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s1->markCompleted(5);
   ASSERT_TRUE(c2->completed());
   ASSERT_TRUE(c2->value().isInt());
@@ -2408,7 +2371,6 @@ TEST(FuturesTest, CollectAny) {
   futures.push_back(s3);
   auto c4 = collectAny(futures);
   ASSERT_FALSE(c4->completed());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s3->markCompleted(7);
   ASSERT_TRUE(c4->completed());
   ASSERT_EQ(c4->value().toInt(), 7);
@@ -2419,7 +2381,7 @@ TEST(FuturesTest, CollectAny) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TLSFutureCallbacksTest, Basic) {
   // cb that verifies the profiler is enabled
-  auto profilerEnabledCb = []() {
+  auto profilerEnabledCb = [](Future& /* unused */) {
     ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
   };
   // test running callbacks with propagation of TLS state.
@@ -2429,7 +2391,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
-    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    s1->addCallback(wrapPropagateTLSState(profilerEnabledCb));
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     // Since we join here, we can ensure that all callbacks corresponding to
     // markCompleted() have finished.
@@ -2444,8 +2406,8 @@ TEST(TLSFutureCallbacksTest, Basic) {
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
     auto s2 = s1->then(
-        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
-          profilerEnabledCb();
+        wrapPropagateTLSState([&profilerEnabledCb](Future& s1) {
+          profilerEnabledCb(s1);
           return at::IValue(1);
         }),
         IntType::get());
@@ -2466,37 +2428,39 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
-  auto verifyProfilerCb = wrapPropagateTLSState<void>([&profilerEnabledCb] {
-    // Ensure the profiler is still enabled in this thread.
-    profilerEnabledCb();
-    auto t1 = torch::ones({2, 2});
-    auto t2 = torch::ones({2, 2});
-    torch::add(t1, t2);
-    // Don't cleanup TLSState, and just consolidate.
-    auto opts = torch::autograd::profiler::ProfilerDisableOptions(false, true);
-    auto thread_event_lists =
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
-    // Ensure that the events from this thread are still profiled and we obtain
-    // the expected in events in our consolidated list when calling
-    // disableProfilerLegacy().
-    bool found_ones = false;
-    bool found_add = false;
-    for (const auto& li : thread_event_lists) {
-      for (const auto& evt : li) {
-        if (strcmp(evt.name(), "aten::add") == 0) {
-          found_add = true;
-        } else if (strcmp(evt.name(), "aten::ones") == 0) {
-          found_ones = true;
+  auto verifyProfilerCb =
+      wrapPropagateTLSState([&profilerEnabledCb](Future& /* unused */) {
+        // Ensure the profiler is still enabled in this thread.
+        profilerEnabledCb();
+        auto t1 = torch::ones({2, 2});
+        auto t2 = torch::ones({2, 2});
+        torch::add(t1, t2);
+        // Don't cleanup TLSState, and just consolidate.
+        auto opts =
+            torch::autograd::profiler::ProfilerDisableOptions(false, true);
+        auto thread_event_lists =
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
+        // Ensure that the events from this thread are still profiled and we
+        // obtain the expected in events in our consolidated list when calling
+        // disableProfilerLegacy().
+        bool found_ones = false;
+        bool found_add = false;
+        for (const auto& li : thread_event_lists) {
+          for (const auto& evt : li) {
+            if (strcmp(evt.name(), "aten::add") == 0) {
+              found_add = true;
+            } else if (strcmp(evt.name(), "aten::ones") == 0) {
+              found_ones = true;
+            }
+          }
+          if (found_add && found_ones) {
+            break;
+          }
         }
-      }
-      if (found_add && found_ones) {
-        break;
-      }
-    }
-    ASSERT_TRUE(found_ones);
-    ASSERT_TRUE(found_add);
-  });
+        ASSERT_TRUE(found_ones);
+        ASSERT_TRUE(found_add);
+      });
 
   s1->addCallback(verifyProfilerCb);
   // Disable the profiler, but do not consolidate results in the main thread.
@@ -2542,9 +2506,7 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test aten::conv2d
   extra_args.clear();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> input_size = {4, 5, 6, 7};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> weight_size = {3, 5, 2, 1};
   std::vector<int64_t> padding = {1, 0};
   std::vector<int64_t> stride = {1, 1};
@@ -2559,9 +2521,7 @@ TEST(ComputeFlopsTest, Basic) {
   ASSERT_EQ(flops, 13440);
 
   // Test aten::conv2d fail
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   input_size = {4, 5, 6, 7};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   weight_size = {4, 5, 6};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
@@ -2569,7 +2529,6 @@ TEST(ComputeFlopsTest, Basic) {
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 2
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   weight_size = {3, 5, 2, 1};
   stride = {0, 0};
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(input_size));
@@ -2579,7 +2538,6 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test aten::conv2d fail 3
   extra_args.clear();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   input_size = {4, 5, 6, 7};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
   flops = computeFlops(std::string("aten::conv2d"), extra_args);
@@ -2587,9 +2545,7 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test aten::mm
   extra_args.clear();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> mat1_sizes = {3, 4, 5, 6};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> mat2_sizes = {6, 5, 4, 3};
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
@@ -2603,7 +2559,6 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test aten::add.Tensor
   extra_args.clear();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
   flops = computeFlops(std::string("aten::add"), extra_args);
@@ -2611,7 +2566,6 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test aten::mul.Tensor
   extra_args.clear();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
   flops = computeFlops(std::string("aten::mul"), extra_args);

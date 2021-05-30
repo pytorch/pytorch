@@ -56,9 +56,7 @@ Tensor* conv2d_depthwise_static(
         auto const& oh = v[2];
         auto const& ow = v[3];
         auto const& c = v[4];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto const& r = v[5];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto const& s = v[6];
         auto cond = CompareSelect::make(oh * stride - pad + r, 0, 1, 0, kLT);
         cond = CompareSelect::make(ow * stride - pad + s, 0, 1, cond, kLT);

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import copy
@@ -81,6 +81,7 @@ TESTS = [
     'test_xnnpack_integration',
     'test_vulkan',
     'test_sparse',
+    'test_sparse_csr',
     'test_quantization',
     'test_pruning_op',
     'test_spectral_ops',
@@ -160,6 +161,7 @@ TESTS = [
     'distributed/elastic/utils/util_test',
     'distributed/elastic/utils/distributed_test',
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/_sharding_spec/test_sharding_spec',
 ]
 
 # Tests need to be run with pytest.
@@ -617,7 +619,8 @@ def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
 
 
 def test_distributed(test_module, test_directory, options):
-    mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
+    # MPI tests are broken with Python-3.9
+    mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0 and sys.version_info < (3, 9)
     if options.verbose and not mpi_available:
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')

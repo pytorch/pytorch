@@ -256,8 +256,8 @@ OwnerRRef::OwnerRRef(
     c10::optional<IValue> value,
     std::vector<c10::Device> devices)
     : RRef(ownerId, rrefId, type) {
-  future_ =
-      std::make_shared<JitFuture>(at::AnyClassType::get(), std::move(devices));
+  future_ = c10::make_intrusive<JitFuture>(
+      at::AnyClassType::get(), std::move(devices));
 
   if (value.has_value()) {
     future_->markCompleted(value.value());
@@ -283,7 +283,7 @@ bool OwnerRRef::hasValue() const {
   return future_->completed();
 }
 
-std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+c10::intrusive_ptr<JitFuture> OwnerRRef::getFuture() {
   return future_;
 }
 
@@ -306,7 +306,7 @@ void OwnerRRef::recordAllStreams(
   }
 }
 
-void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
+void OwnerRRef::blockAllStreams(const std::shared_ptr<LazyStreamContext>& ctx) {
   if (ctx) {
     for (c10::Event& event : events_) {
       event.block(ctx->getStream(event.device()));

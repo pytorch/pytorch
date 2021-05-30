@@ -174,7 +174,7 @@ class TensorPipeAgent : public RpcAgent {
   TensorPipeAgent(const TensorPipeAgent&) = delete;
   TensorPipeAgent& operator=(const TensorPipeAgent&) = delete;
 
-  std::shared_ptr<JitFuture> send(
+  c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
@@ -256,7 +256,7 @@ class TensorPipeAgent : public RpcAgent {
 
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
-      std::shared_ptr<JitFuture>& futureResponseMessage,
+      JitFuture& futureResponseMessage,
       uint64_t messageId,
       std::shared_ptr<LazyStreamContext> ctx);
 
@@ -283,12 +283,12 @@ class TensorPipeAgent : public RpcAgent {
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
     explicit AtomicJitFuture(const std::vector<c10::Device>& devices) {
-      jitFuture = std::make_shared<at::ivalue::Future>(
+      jitFuture = c10::make_intrusive<at::ivalue::Future>(
           at::AnyClassType::get(), devices);
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
-    std::shared_ptr<JitFuture> jitFuture;
+    c10::intrusive_ptr<JitFuture> jitFuture;
   };
 
   // Maintains state per client pipe to track pending response messages and

@@ -39,6 +39,16 @@ TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
 
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+    c10::string_view str_) {
+  return c10::make_intrusive<ConstantString>(std::string(str_));
+}
+
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+    const char* str_) {
+  return c10::make_intrusive<ConstantString>(std::string(str_));
+}
+
 bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
   return lhs.elements_.size() == rhs.elements_.size() &&
       // see [container equality]
@@ -508,7 +518,6 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
@@ -617,7 +626,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
 
   if (v.isString()) {
       return [](const IValue& a, const IValue& b) {
-       return a.toString()->string() < b.toString()->string();
+       return a.toStringRef() < b.toStringRef();
       };
   }
 
@@ -985,11 +994,10 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     auto typePtr = ctx->srcFutures.get(0)->elementType();
     for (const auto i : c10::irange(ctx->srcFutures.size())) {
 
-      auto fut = ctx->srcFutures.get(i);
-      std::function<void()> func = [ctx, fut]() {
+      std::function<void(ivalue::Future&)> func = [ctx](ivalue::Future& fut) {
         // Set error and exit early if encountered.
-        if (fut->hasError()) {
-          ctx->dstFuture->setErrorIfNeeded(fut->exception_ptr());
+        if (fut.hasError()) {
+          ctx->dstFuture->setErrorIfNeeded(fut.exception_ptr());
           return;
         }
 
@@ -1053,22 +1061,21 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     intrusive_ptr<ivalue::Future> dstFuture;
   };
   auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr, devices);
-  std::function<void(size_t)> func = [ctx](size_t index) {
+  std::function<void(ivalue::Future&)> func = [ctx](ivalue::Future& src) {
     if (!ctx->done.exchange(true)) {
       intrusive_ptr<ivalue::Future> dst = ctx->dstFuture;
-      intrusive_ptr<ivalue::Future> src = ctx->srcFutures.get(index);
       ctx->dstFuture.reset(); // Once future is satisfied, remove refs.
       ctx->srcFutures =
           List<intrusive_ptr<ivalue::Future>>(ctx->srcFutures.elementType());
-      if (src->hasError()) {
-        dst->setError(src->exception_ptr());
+      if (src.hasError()) {
+        dst->setError(src.exception_ptr());
       } else {
-        dst->markCompleted(src->constValue(), src->dataPtrs());
+        dst->markCompleted(src.constValue(), src.dataPtrs());
       }
     }
   };
   for (const auto i : c10::irange(ctx->srcFutures.size())) {
-    ctx->srcFutures.get(i)->addCallback([func, i]() { func(i); });
+    ctx->srcFutures.get(i)->addCallback(func);
   }
   return ctx->dstFuture;
 }

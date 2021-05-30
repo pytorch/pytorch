@@ -7,10 +7,8 @@ float float_from_bytes(uint32_t sign, uint32_t exponent, uint32_t fraction) {
   uint32_t bytes;
   bytes = 0;
   bytes |= sign;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bytes <<= 8;
   bytes |= exponent;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bytes <<= 23;
   bytes |= fraction;
 
@@ -24,7 +22,6 @@ float float_from_bytes(uint32_t sign, uint32_t exponent, uint32_t fraction) {
 TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float in[100];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 100; ++i) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
     in[i] = i + 1.25;
@@ -35,7 +32,6 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float out[100];
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 100; ++i) {
     bfloats[i].x = c10::detail::bits_from_f32(in[i]);
     out[i] = c10::detail::f32_from_bits(bfloats[i].x);
@@ -50,7 +46,6 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
 TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float in[100];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 100; ++i) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
     in[i] = i + 1.25;
@@ -61,7 +56,6 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float out[100];
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 100; ++i) {
     bfloats[i].x = c10::detail::round_to_nearest_even(in[i]);
     out[i] = c10::detail::f32_from_bits(bfloats[i].x);
@@ -74,7 +68,6 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Conversion, NaN) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float inNaN = float_from_bytes(0, 0xFF, 0x7FFFFF);
   EXPECT_TRUE(std::isnan(inNaN));
 
@@ -86,7 +79,6 @@ TEST(BFloat16Conversion, NaN) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Conversion, Inf) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float inInf = float_from_bytes(0, 0xFF, 0);
   EXPECT_TRUE(std::isinf(inInf));
 
@@ -114,13 +106,11 @@ TEST(BFloat16Math, Addition) {
   // input bits
   // S | Exponent | Mantissa
   // 0 | 10000000 | 10010000000000000000000 = 3.125
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float input = float_from_bytes(0, 0, 0x40480000);
 
   // expected bits
   // S | Exponent | Mantissa
   // 0 | 10000001 | 10010000000000000000000 = 6.25
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float expected = float_from_bytes(0, 0, 0x40c80000);
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -140,19 +130,16 @@ TEST(BFloat16Math, Subtraction) {
   // input bits
   // S | Exponent | Mantissa
   // 0 | 10000001 | 11101000000000000000000 = 7.625
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float input = float_from_bytes(0, 0, 0x40f40000);
 
   // expected bits
   // S | Exponent | Mantissa
   // 0 | 10000000 | 01010000000000000000000 = 2.625
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float expected = float_from_bytes(0, 0, 0x40280000);
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   c10::BFloat16 b;
   b.x = c10::detail::bits_from_f32(input);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   b = b - 5;
 
   float res = c10::detail::f32_from_bits(b.x);

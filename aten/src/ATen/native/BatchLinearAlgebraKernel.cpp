@@ -81,7 +81,6 @@ void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bo
     };
   }
   // For small matrices OpenMP overhead is too large
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n < 256) {
     loop(0, n);
   } else {
@@ -697,7 +696,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 // This is a type and driver dispatching helper function for 'apply_lstsq'
 void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
 
-  static auto driver_string_to_type = std::unordered_map<std::string, LapackLstsqDriverType>({
+  static auto driver_string_to_type = std::unordered_map<c10::string_view, LapackLstsqDriverType>({
     {"gels", at::native::LapackLstsqDriverType::Gels},
     {"gelsy", at::native::LapackLstsqDriverType::Gelsy},
     {"gelsd", at::native::LapackLstsqDriverType::Gelsd},
@@ -847,6 +846,55 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
 }
 
 /*
+  Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
+  This is an in-place routine, content of 'input', 'pivots', and 'infos' is overwritten.
+
+  Args:
+  * `input` - [in] the input matrix for LU decomposition
+              [out] the LU decomposition
+  * `pivots` - [out] the pivot indices
+  * `infos` - [out] error codes, positive values indicate singular matrices
+  * `compute_pivots` - should always be true (can be false only for CUDA)
+
+  For further details, please see the LAPACK documentation for GETRF.
+*/
+template <typename scalar_t>
+void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(
+      false,
+      "Calling torch.lu on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  TORCH_CHECK(compute_pivots, "lu without pivoting is not implemented on the CPU");
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
+  auto infos_data = infos.data_ptr<int>();
+  auto input_matrix_stride = matrixStride(input);
+  auto pivots_stride = pivots.size(-1);
+  auto batch_size = batchCount(input);
+  auto m = input.size(-2);
+  auto n = input.size(-1);
+  auto leading_dimension = std::max<int64_t>(1, m);
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    int* infos_working_ptr = &infos_data[i];
+    lapackLu<scalar_t>(m, n, input_working_ptr, leading_dimension, pivots_working_ptr, infos_working_ptr);
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_lu'
+void lu_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_cpu", [&]{
+    apply_lu<scalar_t>(input, pivots, infos, compute_pivots);
+  });
+}
+
+/*
   Solves the matrix equation A X = B
   X and B are n-by-nrhs matrices, A is represented using the LU factorization.
   This is an in-place routine, content of `b` is overwritten.
@@ -984,6 +1032,11 @@ REGISTER_AVX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+
+REGISTER_ARCH_DISPATCH(lu_stub, DEFAULT, &lu_kernel);
+REGISTER_AVX_DISPATCH(lu_stub, &lu_kernel);
+REGISTER_AVX2_DISPATCH(lu_stub, &lu_kernel);
+REGISTER_VSX_DISPATCH(lu_stub, &lu_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
 REGISTER_AVX_DISPATCH(lu_solve_stub, &lu_solve_kernel);

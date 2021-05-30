@@ -31,7 +31,6 @@ class StuckBlockingOp final : public Operator<CPUContext> {
     stuckRun = true;
 
     while (!cancelled_) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
@@ -112,7 +111,6 @@ class ErrorOp final : public Operator<CPUContext> {
   bool RunOnDevice() override {
     // Wait for StuckAsyncOp or StuckBlockingOp to run first.
     while (!stuckRun) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     throw TestError();
@@ -137,7 +135,6 @@ class BlockingErrorOp final : public Operator<CPUContext> {
     if (blockingErrorRuns.fetch_sub(1) >= 1) {
       LOG(INFO) << "blocking";
       while (true) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         std::this_thread::sleep_for(std::chrono::hours(10));
       }
     } else {
@@ -254,7 +251,6 @@ PlanDef reporterErrorPlanWithCancellableStuckNet() {
 }
 
 struct HandleExecutorThreadExceptionsGuard {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   HandleExecutorThreadExceptionsGuard(int timeout = 60) {
     globalInit({
         "caffe2",
@@ -400,7 +396,6 @@ PlanDef shouldStopWithCancelPlan() {
     auto* substep2 = substep->add_substep();
     substep2->set_name("should_stop_net");
     substep2->add_network(should_stop_net->name());
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     substep2->set_num_iter(10);
   }
   {

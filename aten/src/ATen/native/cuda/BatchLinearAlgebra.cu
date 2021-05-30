@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
 #include <ATen/native/LinearAlgebraUtils.h>
@@ -1698,13 +1697,9 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
   }
 }
 
-// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used
-//     here. Batched cholesky is dispatched to magma.
-//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
-//     See https://github.com/pytorch/pytorch/issues/53879.
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
 #ifdef USE_CUSOLVER
-  if (batchCount(input) == 1 || !use_magma_) {
+  if (batchCount(input) == 1 || !use_magma_ || use_cusolver_potrf_batched_) {
     cholesky_helper_cusolver(input, upper, info);
   } else {
     cholesky_helper_magma(input, upper, info);
@@ -1790,100 +1785,149 @@ REGISTER_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/*
+  Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
+  This is an in-place routine, content of 'input', 'pivots', and 'infos' is overwritten.
+  This is a "looped" variant for calling single input MAGMA function on batched input.
+
+  Args:
+  * `input` - [in] the input matrix for LU decomposition
+              [out] the LU decomposition
+  * `pivots` - [out] the pivot indices
+  * `infos` - [out] error codes, positive values indicate singular matrices
+  * `compute_pivots` - controls whether LU is computed with or without pivoting
+
+  For further details, please see the MAGMA documentation for magma_dgetrf_gpu.
+*/
 template <typename scalar_t>
-static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos, bool get_pivots) {
+static void apply_lu_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #ifndef USE_MAGMA
-AT_ERROR("lu: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+  TORCH_CHECK(
+      false,
+      "Calling torch.lu on a CUDA tensor requires compiling ",
+      "PyTorch with MAGMA. lease rebuild with MAGMA.");
 #else
-  auto self_data = self.data_ptr<scalar_t>();
-  magma_int_t m = magma_int_cast(self.size(-2), "m");
-  magma_int_t n = magma_int_cast(self.size(-1), "n");
-  magma_int_t k = std::min(m, n);
+  // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
+  // the data is later copied back to the appropriate output tensor
+  Tensor infos_cpu = at::empty_like(infos, infos.options().device(kCPU).pinned_memory(true));
 
-  if (self.dim() == 2) {
-    // If `pivots` is defined, then we have to compute them.
-    // magmaLu and magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
-    // the partially-pivoted LU decomposition with / without pivots.
-    // The driver routines magma_(d/s)getrf_(nopiv_)gpu accepts a tensor on the CPU for pivots.
-    // The data is later copied back to the appropriate output tensor.
-    Tensor info_tmp = at::zeros({}, at::kInt);
-    if (get_pivots) {
-      Tensor piv_tmp = at::empty({k}, at::kInt);
-      magmaLu<scalar_t>(
-        m, n, self_data, m, piv_tmp.data_ptr<magma_int_t>(), info_tmp.data_ptr<magma_int_t>());
-      pivots.copy_(piv_tmp);
-    } else {
-      magmaLuNoPiv<scalar_t>(m, n, self_data, m, info_tmp.data_ptr<magma_int_t>());
+  auto input_data = input.data_ptr<scalar_t>();
+  auto infos_data = infos_cpu.data_ptr<magma_int_t>();
+  auto input_matrix_stride = matrixStride(input);
+  auto pivots_stride = pivots.size(-1);
+  auto batch_size = batchCount(input);
+  magma_int_t m = magma_int_cast(input.size(-2), "m");
+  magma_int_t n = magma_int_cast(input.size(-1), "n");
+  auto leading_dimension = std::max<magma_int_t>(1, m);
+
+  if (compute_pivots) {
+    Tensor pivots_cpu = at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
+    auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
+    for (decltype(batch_size) i = 0; i < batch_size; i++) {
+      scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+      int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+      int* infos_working_ptr = &infos_data[i];
+      magmaLu<scalar_t>(m, n, input_working_ptr, leading_dimension, pivots_working_ptr, infos_working_ptr);
     }
-    infos.copy_(info_tmp);
+    pivots.copy_(pivots_cpu, /*non_blocking=*/true);
   } else {
-    auto self_matrix_stride = matrixStride(self);
-    magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
+    for (decltype(batch_size) i = 0; i < batch_size; i++) {
+      scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+      int* infos_working_ptr = &infos_data[i];
+      magmaLuNoPiv<scalar_t>(m, n, input_working_ptr, leading_dimension, infos_working_ptr);
+    }
 
-    scalar_t** self_array;
-    ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
+    // fill the pivots tensor with indices using 1-based (Fortran) indexing
+    auto k = std::min(m, n);
+    Tensor pivots_tmp = at::arange(1, k + 1, input.options().dtype(at::kInt)).expand_as(pivots);
+    pivots.copy_(pivots_tmp);
+  }
+  infos.copy_(infos_cpu, /*non_blocking=*/true);
+#endif
+}
 
-    // Set up the created arrays
+/*
+  Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
+  This is an in-place routine, content of 'input', 'pivots', and 'infos' is overwritten.
+  This is a specialized batched variant, it is expected to be faster than the "looped" version only for small inputs.
+
+  Args:
+  * `input` - [in] the input matrix for LU decomposition
+              [out] the LU decomposition
+  * `pivots` - [out] the pivot indices
+  * `infos` - [out] error codes, positive values indicate singular matrices
+  * `compute_pivots` - controls whether LU is computed with or without pivoting
+
+  For further details, please see the MAGMA documentation for magma_dgetrf_batched.
+*/
+template <typename scalar_t>
+static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+#ifndef USE_MAGMA
+  TORCH_CHECK(
+      false,
+      "Calling torch.lu on a CUDA tensor requires compiling ",
+      "PyTorch with MAGMA. lease rebuild with MAGMA.");
+#else
+  auto input_data = input.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<magma_int_t>();
+  auto input_matrix_stride = matrixStride(input);
+  magma_int_t batch_size = magma_int_cast(batchCount(input), "batchCount");
+
+  // magmaLuBatched doesn't work with zero batch dimensions
+  // it gives CUDA error: invalid configuration argument
+  if (batch_size == 0) {
+    infos.fill_(0);
+    return;
+  }
+
+  magma_int_t m = magma_int_cast(input.size(-2), "m");
+  magma_int_t n = magma_int_cast(input.size(-1), "n");
+  auto leading_dimension = std::max<magma_int_t>(1, m);
+
+  scalar_t** input_array;
+  ALLOCATE_ARRAY(input_array, scalar_t*, batch_size);
+
+  // Set up array of pointers to matrices
+  for (int64_t i = 0; i < batch_size; i++) {
+    input_array[i] = &input_data[i * input_matrix_stride];
+  }
+
+  MAGMAQueue magma_queue(input.get_device());
+
+  if (compute_pivots) {
+    auto pivots_data = pivots.data_ptr<magma_int_t>();
+    auto pivots_stride = pivots.size(-1);
+    magma_int_t** pivots_array;
+    ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
     for (int64_t i = 0; i < batch_size; i++) {
-      self_array[i] = &self_data[i * self_matrix_stride];
+      pivots_array[i] = &pivots_data[i * pivots_stride];
     }
+    magmaLuBatched<scalar_t>(m, n, input_array, leading_dimension, pivots_array, infos_data, batch_size, magma_queue);
+  } else {
+    magmaLuNoPivBatched<scalar_t>(m, n, input_array, leading_dimension, infos_data, batch_size, magma_queue);
 
-    MAGMAQueue magma_queue(self.get_device());
-
-    // Same comment as in the case of single matrix above.
-    if (get_pivots) {
-      auto pivots_data = pivots.data_ptr<magma_int_t>();
-      auto pivots_matrix_stride = pivots.size(-1);
-      magma_int_t** pivots_array;
-      ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
-      for (int64_t i = 0; i < batch_size; i++) {
-        pivots_array[i] = &pivots_data[i * pivots_matrix_stride];
-      }
-      magmaLuBatched<scalar_t>(
-        m, n, self_array, m, pivots_array,
-        infos.data_ptr<magma_int_t>(), batch_size, magma_queue);
-    } else {
-      magmaLuNoPivBatched<scalar_t>(
-        m, n, self_array, m, infos.data_ptr<magma_int_t>(),
-        batch_size, magma_queue);
-    }
+    // fill the pivots tensor with indices using 1-based (Fortran) indexing
+    auto k = std::min(m, n);
+    Tensor pivots_tmp = at::arange(1, k + 1, input.options().dtype(at::kInt)).expand_as(pivots);
+    pivots.copy_(pivots_tmp);
   }
 #endif
 }
 
-std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool pivot, bool check_errors) {
-  TORCH_CHECK(self.dim() >= 2,
-           "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
-           " instead");
-  auto m = self.size(-2);
-  auto n = self.size(-1);
-  auto k = std::min(m, n);
-  auto req_size = self.sizes().vec();
-  req_size.pop_back();
-  req_size.back() = k;
-  Tensor pivots_tensor = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand(req_size).contiguous();
-  req_size.pop_back();
-  auto infos_tensor = at::zeros(req_size, self.options().dtype(at::kInt));
-
-  Tensor self_working_copy;
-  if (self.numel() == 0) {
-    self_working_copy = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+static void lu_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  // TODO: compare performance and use the best performing option based on input's sizes
+  if (input.dim() == 2) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
+      apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
+    });
   } else {
-    self_working_copy = cloneBatchedColumnMajor(self);
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cuda", [&]{
-        apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor, pivot);
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
+      apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
     });
   }
-  if (check_errors) {
-    if (self.dim() == 2) {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
-    } else {
-      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
-    }
-  }
-  return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
 }
+
+REGISTER_DISPATCH(lu_stub, &lu_magma);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1900,13 +1944,14 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t m = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t n = magma_int_cast(A.size(-1), "A.size(-1)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
   // magma returns early if m <= 0 || n <= 0 for magmaTriangularSolveBatched
   // magmaTriangularSolve is calling cuBLAS and it prints
   // ** On entry to DTRSM  parameter number 9 had an illegal value
   // so let's use proper lda parameter here
-  magma_int_t lda = std::max<magma_int_t>(1, n);
+  magma_int_t lda = std::max<magma_int_t>(1, m);
   magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
   auto A_mat_stride = matrixStride(A);
@@ -2143,7 +2188,7 @@ AT_ERROR("qr: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, std::string mode) {
+std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, c10::string_view mode) {
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = _parse_qr_mode(mode);
 
@@ -2193,7 +2238,7 @@ std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, std::strin
   return std::make_tuple(q_working_copy, r_working_copy);
 }
 
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, std::string mode) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
 #if defined(USE_CUSOLVER)
   // _linalg_qr_helper_default is a generic function that is implemented using
   // geqrf_stub and orgqr_stub. It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
@@ -2851,14 +2896,146 @@ static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
 #endif
 }
 
-void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
-  (void)rank;  // unused
-  (void)singular_values;  // unused
-  (void)rcond;  // unused
-  (void)driver_name;  // unused
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "linalg_lstsq_cuda", [&] {
+void gels_magma(const Tensor& a, Tensor& b, Tensor& infos) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "gels_magma", [&] {
     apply_gels<scalar_t>(a, b, infos);
   });
+}
+
+void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& infos) {
+  // The steps for using the QR decomposition for solving least squares problems
+  // are outlined here https://en.wikipedia.org/wiki/QR_decomposition#Using_for_solution_to_linear_inverse_problems
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  auto mn = std::min(m, n);
+
+  // explicitly broadcast the batch dimensions of A
+  // TODO: revisit this later to use batch_iterator_with_broadcasting in triangular_solve
+  IntArrayRef A_batch_sizes(A.sizes().data(), A.dim() - 2);
+  IntArrayRef B_batch_sizes(B.sizes().data(), B.dim() - 2);
+  std::vector<int64_t> expand_batch_portion = at::infer_size(A_batch_sizes, B_batch_sizes);
+
+  auto tau_shape = A.sizes().vec();
+  tau_shape.pop_back();
+  tau_shape.back() = mn;
+  Tensor tau = at::empty(tau_shape, A.options());
+
+  if (m >= n) {
+    // Step 1: compute QR factorization using geqrf
+    geqrf_kernel(A, tau);
+
+    // explicitly broadcast the batch dimensions of A
+    // we do it after geqrf so that we don't do redundant computations for the same input
+    auto A_expand_batch = expand_batch_portion;
+    A_expand_batch.insert(A_expand_batch.end(), {A.size(-2), A.size(-1)});
+    Tensor A_expanded = A.expand({A_expand_batch});
+    bool is_fortran_contiguous = A_expanded.transpose(-2, -1).is_contiguous();
+    Tensor A_broadcasted = is_fortran_contiguous ? A_expanded : cloneBatchedColumnMajor(A_expanded);
+    auto tau_expand_batch = expand_batch_portion;
+    tau_expand_batch.push_back(tau.size(-1));
+    Tensor tau_broadcasted = tau.expand({tau_expand_batch}).contiguous();
+
+    // Step 2: B <- Q^H B
+    ormqr_kernel(A_broadcasted, tau_broadcasted, B, /*left=*/true, /*transpose=*/true);
+
+    // Step 3: solve R X = B
+    bool upper = true;
+    bool transpose = false;
+    bool conjugate_transpose = false;
+    bool unitriangular = false;
+    triangular_solve_kernel(
+        const_cast<Tensor&>(A_broadcasted),
+        const_cast<Tensor&>(B),
+        const_cast<Tensor&>(infos),
+        upper, transpose, conjugate_transpose, unitriangular);
+  } else { // underdetermined case
+    Tensor Ah = cloneBatchedColumnMajor(A.conj().transpose(-2, -1));
+
+    // Step 1: compute QR factorization of conjugate transpose of A using geqrf
+    geqrf_kernel(Ah, tau);
+
+    // explicitly broadcast the batch dimensions of A
+    // we do it after geqrf so that we don't do redundant computations for the same input
+    auto A_expand_batch = expand_batch_portion;
+    A_expand_batch.insert(A_expand_batch.end(), {Ah.size(-2), Ah.size(-1)});
+    Tensor Ah_expanded = Ah.expand({A_expand_batch});
+    bool is_fortran_contiguous = Ah_expanded.transpose(-2, -1).is_contiguous();
+    Tensor Ah_broadcasted = is_fortran_contiguous ? Ah_expanded : cloneBatchedColumnMajor(Ah_expanded);
+
+    // Step 2: R^H Z = B
+    bool upper = true;
+    bool transpose = true;
+    bool conjugate_transpose = true;
+    bool unitriangular = false;
+    triangular_solve_kernel(
+        const_cast<Tensor&>(Ah_broadcasted),
+        const_cast<Tensor&>(B),
+        const_cast<Tensor&>(infos),
+        upper, transpose, conjugate_transpose, unitriangular);
+
+    // B matrix has the size max(m, n) x nrhs
+    // triangular_solve_kernel writes its output into the first m rows of B leaving the rest untouched
+    // we need to set the rest of the rows to zero so that the multiplication from step 3 is correct
+    B.narrow(-2, m, n - m).zero_();
+
+    auto tau_expand_batch = expand_batch_portion;
+    tau_expand_batch.push_back(tau.size(-1));
+    Tensor tau_broadcasted = tau.expand({tau_expand_batch}).contiguous();
+
+    // Step 3: X <- Q Z
+    ormqr_kernel(Ah_broadcasted, tau_broadcasted, B, /*left=*/true, /*transpose=*/false);
+  }
+}
+
+void gels_looped(const Tensor& a, Tensor& b, Tensor& infos) {
+#if defined(USE_CUSOLVER)
+  // linalg_lstsq_gels is a generic function that is implemented using
+  // geqrf_stub, ormqr_stub, and triangular_solve_stub
+  // It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
+  return linalg_lstsq_gels(a, b, infos);
+#else
+  return gels_magma(a, b, infos);
+#endif
+}
+
+void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singular_values*/, Tensor& infos, double /*rcond*/, std::string /*driver_name*/)  {
+  auto m = a.size(-2);
+  auto n = a.size(-1);
+
+  // first handle the underdetermined case (m < n)
+  // this case is not supported by MAGMA or cuBLAS
+  if (m < n) {
+#if defined(USE_CUSOLVER)
+    linalg_lstsq_gels(a, b, infos);
+#else
+    TORCH_CHECK(
+        false,
+        "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA. ",
+        "Please rebuild with cuSOLVER.");
+#endif
+  } else { // m >= n
+#ifndef USE_MAGMA
+    // MAGMA is not available we can either use cuBLAS or cuSOLVER here
+    // the batched vs looped dispatch is implemented based on the following performance results
+    // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
+    if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
+      // if CUDART_VERSION is defined then cuBLAS is available
+      #ifdef CUDART_VERSION
+      gels_batched_cublas(a, b, infos);
+      #else
+      // this would either call cuSOLVER or MAGMA,
+      // if MAGMA is called a runtime error is thrown about not finding MAGMA in compilation
+      gels_looped(a, b, infos);
+      #endif // CUDART_VERSION
+    } else {
+      gels_looped(a, b, infos);
+    }
+#else
+    // if both MAGMA and cuSOLVER are available this would call cuSOLVER
+    // MAGMA is called if cuSOLVER is not available
+    gels_looped(a, b, infos);
+#endif // USE_MAGMA
+  }
 }
 
 REGISTER_DISPATCH(lstsq_stub, &lstsq_kernel);

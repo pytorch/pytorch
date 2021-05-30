@@ -505,10 +505,9 @@ void ProcessGroupNCCL::setSequenceNumberForGroup() {
 }
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
-  TORCH_CHECK(
-      sequenceNum_ != c10::nullopt,
-      "Sequence number is not set for rank ",
-      rank_);
+  if (sequenceNum_ == c10::nullopt) {
+    return 0;
+  }
   return sequenceNum_->get();
 }
 
@@ -1152,7 +1151,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     // cudaEvents_ ensuring appropriate synchronization.
     if (work->recordFunctionEndCallback_) {
       work->future_->addCallback(
-          [work]() { work->recordFunctionEndCallback_(); });
+          [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });
     }
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
@@ -1261,7 +1260,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   // cudaEvents_ ensuring appropriate synchronization.
   if (work->recordFunctionEndCallback_) {
     work->future_->addCallback(
-        [work]() { work->recordFunctionEndCallback_(); });
+        [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });
   }
 
   return work;
@@ -1621,7 +1620,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
         "all_to_all",             // colName
         inputTensor.numel(),      // inSize
         outputTensor.numel(),     // outSize
-        at::kByte,                // dType
+        inputTensor.scalar_type(),// dType
         std::vector<int64_t>(),   // inSplitSizes
         std::vector<int64_t>());  // outSplitSizes
 
@@ -1648,13 +1647,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     std::vector<at::Tensor> outputTensors = {outputTensor};
 
     RECORD_PARAM_COMMS(
-        rank_,                 // rank
-        "all_to_allv",         // colName
-        inputTensor.numel(),   // inSize
-        outputTensor.numel(),  // outSize
-        at::kByte,             // dType
-        inputSplitSizes,       // inSplitSizes
-        outputSplitSizes);     // outSplitSizes
+        rank_,                    // rank
+        "all_to_allv",            // colName
+        inputTensor.numel(),      // inSize
+        outputTensor.numel(),     // outSize
+        inputTensor.scalar_type(),// dType
+        inputSplitSizes,          // inSplitSizes
+        outputSplitSizes);        // outSplitSizes
 
     return collective(
         inputTensors,
