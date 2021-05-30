@@ -49,6 +49,7 @@ CREATE_UNARY_FLOAT_META_FUNC(erfinv)
 CREATE_UNARY_FLOAT_META_FUNC(exp)
 CREATE_UNARY_FLOAT_META_FUNC(exp2)
 CREATE_UNARY_FLOAT_META_FUNC(expm1)
+CREATE_UNARY_FLOAT_META_FUNC(i0)
 CREATE_UNARY_FLOAT_META_FUNC(lgamma)
 CREATE_UNARY_FLOAT_META_FUNC(log)
 CREATE_UNARY_FLOAT_META_FUNC(log10)
@@ -62,6 +63,8 @@ CREATE_UNARY_FLOAT_META_FUNC(sinc)
 CREATE_UNARY_FLOAT_META_FUNC(sinh)
 CREATE_UNARY_FLOAT_META_FUNC(special_entr)
 CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1e)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
@@ -78,7 +81,6 @@ TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   }
 CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
-CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
 CREATE_UNARY_META_FUNC(sgn)
 
@@ -165,6 +167,8 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_entr)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
@@ -531,8 +535,8 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(const Tensor& self, Tensor& result) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_borrowed_output(result)
-    .add_borrowed_input(self)
+    .add_output(result)
+    .add_input(self)
     .build();
   logical_not_stub(iter.device_type(), iter);
   return result;
@@ -548,8 +552,8 @@ Tensor& signbit_out(const Tensor& self, Tensor& result) {
   } else {
     TensorIterator iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .add_borrowed_output(result)
-      .add_borrowed_input(self)
+      .add_output(result)
+      .add_input(self)
       .build();
     signbit_stub(iter.device_type(), iter);
   }
@@ -627,9 +631,9 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
               "but got ", exponent.dtype());
 
   auto iter = TensorIteratorConfig()
-    .add_borrowed_output(mantissa)
-    .add_borrowed_output(exponent)
-    .add_borrowed_input(self)
+    .add_output(mantissa)
+    .add_output(exponent)
+    .add_input(self)
     .check_all_same_dtype(false)
     .set_check_mem_overlap(true)
     .build();
@@ -671,6 +675,8 @@ DEFINE_DISPATCH(frac_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(frexp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_i0e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log10_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log1p_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

@@ -1018,6 +1018,35 @@ class TestUnaryUfuncs(TestCase):
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
 
+    @skipIfNoSciPy
+    @dtypes(torch.float, torch.double)
+    def test_mish(self, device, dtype):
+        input_np = np.random.randn(5, 8)
+        special_input = [[-1000, -1, -0.1, 0, 0.5, 1, 2, 1000]]
+        input_np = np.concatenate((input_np, special_input), axis=0).astype(
+            torch_to_numpy_dtype_dict[dtype])
+        expected_output_np = input_np * np.tanh(np.log1p(np.exp(input_np)))
+
+        expected_output = torch.from_numpy(expected_output_np).to(device)
+        expected_output_noncontig = expected_output.transpose(0, 1)
+
+        atol = 1e-6
+        rtol = 1e-6
+
+        input = torch.from_numpy(input_np).clone().contiguous().to(device)
+        self.assertEqual(torch.nn.functional.mish(input), expected_output,
+                         atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.mish(input, inplace=True),
+                         expected_output, atol=atol, rtol=rtol)
+
+        input = torch.from_numpy(input_np).clone().to(device)
+        input_noncontig = input.transpose(0, 1)
+        self.assertEqual(torch.nn.functional.mish(input_noncontig),
+                         expected_output_noncontig, atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.mish(
+            input_noncontig, inplace=True), expected_output_noncontig,
+            atol=atol, rtol=rtol)
+
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
@@ -1190,13 +1219,13 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    def test_special_i0e_vs_scipy(self, device, dtype):
-        def check_equal(t):
+    def test_special_i0_i1_vs_scipy(self, device, dtype):
+        def check_equal(t, torch_fn, scipy_fn):
             # Test by comparing to scipy
-            actual = torch.special.i0e(t)
+            actual = torch_fn(t)
             if dtype is torch.bfloat16:
                 t = t.to(torch.float32)
-            expected = scipy.special.i0e(t.cpu().numpy())
+            expected = scipy_fn(t.cpu().numpy())
 
             # Casting down for dtype float16 is required since scipy upcasts to float32
             if dtype is torch.bfloat16 or dtype is torch.float16:
@@ -1204,20 +1233,32 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(actual, expected)
 
         t = torch.tensor([], device=device, dtype=dtype)
-        check_equal(t)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
         range = (-1e7, 1e7)
         if dtype == torch.half:
             range = (-65000, 65000)
 
         t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
-        check_equal(t)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
         # NaN, inf, -inf are tested in reference_numerics tests.
         info = torch.finfo(dtype)
         min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
         t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
-        check_equal(t)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
     # TODO: allow large opinfo values to be opted-into via metadata
     @dtypes(torch.long)
