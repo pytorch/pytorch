@@ -2634,6 +2634,7 @@ class TestOperatorSignatures(JitTestCase):
                            'einsum',
                            'expand',
                            'expand_as',
+                           'fill_',
                            'hstack',
                            'linalg.multi_dot',
                            'polygamma',
