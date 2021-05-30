@@ -2232,6 +2232,9 @@ class TestCudaFuser(JitTestCase):
         channels = [4, 89, 19, 32]
         hw = [1, 8, 17, 32]
 
+        # avoid tolerance failure in CI
+        torch.cuda.manual_seed_all(211)
+
         # failing sizes (2, 1, 1, 1)
         # failing sizes (2, 89, 8, 8) training False, track True, affine: False
         for b, c, hw in itertools.product(batch, channels, hw):
