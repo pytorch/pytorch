@@ -6048,6 +6048,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('eig',
            op=torch.eig,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_eig,
