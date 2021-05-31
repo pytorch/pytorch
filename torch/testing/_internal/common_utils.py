@@ -1370,12 +1370,21 @@ class TestCase(expecttest.TestCase):
             x = maybe_to_tensor(x)
             y = maybe_to_tensor(y)
 
-            kwargs = dict(atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device)
             if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-                self.assertEqual(x, y, **kwargs)
+                self.assertEqual(
+                    x, y, atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device
+                )
             else:
                 # In case we can't convert the array to a tensor, we fall back to comparing the elements as scalars
-                self.assertEqual(x.tolist(), y.tolist(), **kwargs)
+                self.assertEqual(
+                    x.tolist(),
+                    y.tolist(),
+                    atol=atol,
+                    rtol=rtol,
+                    msg=msg,
+                    exact_dtype=exact_dtype,
+                    exact_device=exact_device
+                )
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
                          f"Expected: {repr(x)}; Actual: {repr(y)}.")
