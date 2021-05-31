@@ -2640,6 +2640,8 @@ class TestOperatorSignatures(JitTestCase):
                            'polygamma',
                            'repeat',
                            'reshape_as',
+                           'resize_',
+                           'resize_as_',
                            'stack',
                            'view',
                            'view_as',
