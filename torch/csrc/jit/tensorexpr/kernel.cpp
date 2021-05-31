@@ -2516,7 +2516,8 @@ Tensor* tensorexpr::computeOperandValue(
             return A.load(new_axes);
           });
     }
-    case aten::expand: {
+    case aten::expand:
+    case aten::expand_as: {
       auto A = c10::get<BufHandle>(inputs[0]);
       return Compute(
           "aten_expand",
@@ -2524,6 +2525,57 @@ Tensor* tensorexpr::computeOperandValue(
           [&](const std::vector<VarHandle>& axes) {
             std::vector<ExprHandle> indices(axes.begin(), axes.end());
             return broadcast(A, indices);
+          });
+    }
+    case aten::reshape:
+    case aten::view: {
+      auto A = c10::get<BufHandle>(inputs[0]);
+      auto view_dims = c10::get<IntList>(inputs[1]);
+      return Compute(
+          "aten_reshape",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<VarHandle> new_axes;
+            assert(view_dims.size() == axes.size());
+            /*
+            Example for the index transformation. Assume we have a tensor A and
+            its view B:
+              A.size() = [6,2,3]
+              B = A.view(2,1,9,1,2)
+
+            In TE IR we would want to represent B as the following loopnest:
+              for (i1 in 0..2)
+                for (i2 in 0..1)
+                  for (i3 in 0..9)
+                    for (i4 in 0..1)
+                      for (i5 in 0..2)
+                        idx = i5 + i4*2 + i3*2 + i2*18 + i1*18
+                        B[i1,i2,i3,i4,i5] = A[idx/(3*2), (idx/3)%2, idx%3]
+            */
+            ExprHandle cur_stride = 1;
+            std::vector<const Expr*> dims, indices;
+            for (size_t idx = 0; idx < view_dims.size(); idx++) {
+              dims.push_back(new IntImm(view_dims[idx]));
+              indices.push_back(axes[idx].node());
+            }
+            ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
+            std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
+            ExprHandle stride = IntImm::make(1);
+            for (size_t idx = 0; idx < A.ndim(); idx++) {
+              size_t dim_idx = A.ndim() - idx - 1;
+              // We don't need to generate mod-div for the first dimension -
+              // ideally IRSimlifier would get rid of that for us, but for now
+              // let's just avoid generating it in the first place.
+              if (dim_idx > 0) {
+                orig_buf_indexes[dim_idx] = flat_idx / stride % A.dim(dim_idx);
+              } else {
+                orig_buf_indexes[dim_idx] = flat_idx / stride;
+              }
+              // In the example above the stride is initially 1 for dim_idx = 2,
+              // then it's 3 for dim_idx = 1, and then it's 3*2 for dim_idx = 0.
+              stride = stride * A.dim(dim_idx);
+            }
+            return A.load(orig_buf_indexes);
           });
     }
     case aten::mm: // aten::mm is a subset of aten::matmul where both inputs are
@@ -2642,10 +2694,13 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::t:
     case aten::transpose:
     case aten::expand:
+    case aten::expand_as:
     case aten::permute:
     case aten::mm:
     case aten::matmul:
     case aten::cat:
+    case aten::view:
+    case aten::reshape:
     case aten::sum:
     case aten::softmax:
     case aten::log_softmax:

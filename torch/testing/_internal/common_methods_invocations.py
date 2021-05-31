@@ -473,19 +473,30 @@ class UnaryUfuncInfo(OpInfo):
         self._domain_eps = 1e-5
 
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
-    return (SampleInput(make_tensor((S, S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(torch.tensor([1, 2, 3]),),),
-            SampleInput(make_tensor((S, S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(torch.tensor(1),),),
-            SampleInput(make_tensor((S, S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(torch.tensor([1, 2, 3]),),
-                        kwargs=dict(dim=1)),)
+    make_input = partial(make_tensor, device=device, dtype=dtype,
+                         low=None, high=None, requires_grad=requires_grad)
+
+    args_cases = (
+        # Cases with tensor indices.
+        (torch.tensor([1, 2, 3]),),
+        (torch.tensor(1),),
+        (torch.tensor([1, 2, 3]), 1),
+        # Cases with list of indices.
+        ((2, 4),),
+        ((2, 4), 1),
+        ((2, 4), -1),
+        # Cases with integer section.
+        (3,),
+        (3, 1),
+        (3, -1),
+    )
+
+    def generator():
+        for args in args_cases:
+            yield SampleInput(make_input((S, S, S)), args=args)
+
+    return list(generator())
+
 
 def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
     kw = dict(device=device, dtype=dtype)
@@ -726,6 +737,8 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 # Then one sample input would also be generated corresponding to the value of alpha provided.
 # In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
 # specify scalars of floating, integral & complex types as values for "alpha".
+# Keyword argument `rhs_exclude_zero` is used to exclude zero values from rhs tensor argument
+# This is necessary for operations like `true_divide`, where divide by zero throws an exception.
 def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
@@ -747,8 +760,9 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     for first_shape, shape_or_scalar, broadcasts_input in test_cases:
         arg = shape_or_scalar
         if isinstance(shape_or_scalar, tuple):
+            exclude_zero = kwargs.get('rhs_exclude_zero', False)
             arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
-                              requires_grad=requires_grad)
+                              requires_grad=requires_grad, exclude_zero=exclude_zero)
         samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                requires_grad=requires_grad),
                                    args=(arg,),
@@ -1041,6 +1055,21 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad))),)
+
+
+def sample_inputs_renorm(self, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    cases = (((S, S, S), (2, 1, 0.5)),
+             ((S, S, S), (2, -1, 0.5)),
+             ((S, S, S), (1, 2, 3)),
+             ((S, S, S), (float('inf'), 2, 0.5)),
+             )
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
 
 
 def sample_inputs_transpose_swapdims(self, device, dtype, requires_grad, **kwargs):
@@ -2052,23 +2081,6 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     def is_integral(dtype):
         return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
 
-    # NOTE: Promotion in PyTorch is from integer types to the default dtype
-    np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
-
-    @wraps(fn)
-    def wrapped_fn(x):
-        if is_integral(x.dtype):
-            return fn(x, dtype=np_dtype)
-        return fn(x)
-
-    return wrapped_fn
-
-
-def np_unary_ufunc_integer_promotion_wrapper_with_astype(fn):
-    # Check np_unary_ufunc_integer_promotion_wrapper
-    def is_integral(dtype):
-        return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
-
     @wraps(fn)
     def wrapped_fn(x):
         # As the default dtype can change, acquire it when function is called.
@@ -2076,7 +2088,7 @@ def np_unary_ufunc_integer_promotion_wrapper_with_astype(fn):
         np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
 
         if is_integral(x.dtype):
-            return fn(x).astype(np_dtype)
+            return fn(x.astype(np_dtype))
         return fn(x)
 
     return wrapped_fn
@@ -3289,6 +3301,38 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
                                     low=low,
                                     requires_grad=requires_grad)))
 
+# TODO: Consolidate `i0e` with sample_inputs_unary when `make_tensor`,
+#       supports `exclude` argument.
+#       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
+def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
+
+    samples = (SampleInput(make_tensor((S,), device, dtype,
+                                       requires_grad=requires_grad)),
+               SampleInput(make_tensor((), device, dtype,
+                                       requires_grad=requires_grad)))
+
+    if requires_grad and op_info.op == torch.special.i0e:
+        # NOTE: `i0e`'s first-order gradient is not continous
+        # at `0`, hence we don't test `i0e` with any input being `0`.
+        # TODO: Remove this when `make_tensor` supports excluding `0`.
+        with torch.no_grad():
+            for sample in samples:
+                t = sample.input
+                t[t == 0] = torch.finfo(dtype).eps  # type: ignore[index]
+    elif requires_grad and op_info.op != torch.special.i0e:
+        # Special Case for gradient
+        # Sample with `0` in the input
+        t = make_tensor((S,), device, dtype,
+                        requires_grad=requires_grad)
+
+        with torch.no_grad():
+            t[0] = 0
+
+        samples += (SampleInput(t),)  # type: ignore[assignment]
+
+    return samples
+
+
 def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -3639,6 +3683,21 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
                                        requires_grad=requires_grad)),)
 
     return samples
+
+
+def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    cases = (((M, M), ()),
+             ((M, M), (2,),),
+             ((S, M, M), ()),
+             ((S, M, M), (2,)),
+             ((3, 3, S, S), ()),)
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
 
 
 def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
@@ -4646,6 +4705,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_div, rounding_mode='floor'),
            skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            assert_autodiffed=True),
+    OpInfo('true_divide',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, rhs_exclude_zero=True)),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -4833,22 +4895,45 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            supports_out=False),
     UnaryUfuncInfo('i0',
-                   ref=np_unary_ufunc_integer_promotion_wrapper_with_astype(
+                   ref=np_unary_ufunc_integer_promotion_wrapper(
                        scipy.special.i0) if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
+                   backward_dtypesIfCPU=floating_types(),
+                   backward_dtypesIfCUDA=floating_types(),
+                   backward_dtypesIfROCM=floating_types(),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
-                   supports_autograd=False),
+                   sample_inputs_func=sample_inputs_i0_i1),
     UnaryUfuncInfo('special.i0e',
                    aten_name='special_i0e',
                    ref=scipy.special.i0e if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 3e-1}),),
+                   backward_dtypesIfCPU=floating_types(),
+                   backward_dtypesIfCUDA=floating_types(),
+                   backward_dtypesIfROCM=floating_types(),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   supports_autograd=False,
+                   sample_inputs_func=sample_inputs_i0_i1,
+                   safe_casts_outputs=True),
+    UnaryUfuncInfo('special.i1',
+                   aten_name='special_i1',
+                   ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1),
+                   decorators=(precisionOverride({torch.float: 1e-4}),),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool),
+                   sample_inputs_func=sample_inputs_i0_i1,
+                   safe_casts_outputs=True),
+    UnaryUfuncInfo('special.i1e',
+                   aten_name='special_i1e',
+                   ref=scipy.special.i1e,
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool),
+                   sample_inputs_func=sample_inputs_i0_i1,
                    safe_casts_outputs=True),
     OpInfo('floor_divide',
            dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -5823,7 +5908,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -6395,6 +6479,14 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            sample_inputs_func=sample_movedim_moveaxis),
+    OpInfo('renorm',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_renorm,
+           skips=(
+               # AssertionError: Resized a non-empty tensor but did not warn about it.
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
@@ -6482,6 +6574,12 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
+    OpInfo('tril',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_tril_triu),
+    OpInfo('triu',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -6776,15 +6874,6 @@ def method_tests():
         ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
         ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
-        ('true_divide', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
-        ('true_divide', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs', (True,)),
-        ('true_divide', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
-        ('true_divide', (S, 1, S), (torch.rand(M, S) + 0.1,), 'broadcast_all', (True,)),
-        ('true_divide', (), (uniform_scalar(0.1),), 'scalar', (True,)),
-        ('true_divide', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
-        ('true_divide', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
-        ('true_divide', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
-        ('true_divide', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('div', (S, S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex', (True,)),
         ('div', (S, S, S), (torch.rand(S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_rhs', (True,)),
         ('div', (S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_lhs', (True,)),
@@ -6817,9 +6906,6 @@ def method_tests():
         ('std_mean', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
         ('std_mean', (S,), (0,), 'dim_1d', [0]),
         ('std_mean', (S,), (0, True, True), 'keepdim_dim_1d', [0]),
-        ('renorm', (S, S, S), (2, 1, 0.5), 'dim', (), [1]),
-        ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
-        ('renorm', (S, S, S), (inf, 2, 0.5), 'norm_inf'),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
         ('zero_', (S, S, S), NO_ARGS),
         ('zero_', (), NO_ARGS, 'scalar'),
@@ -6857,22 +6943,8 @@ def method_tests():
         ('norm', (), (3, 0), '3_dim_scalar', (), [1]),
         ('norm', (), (2, 0, True), 'keepdim_2_dim_scalar', (), [1]),
         ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', (), [1]),
-        ('tril', (M, M), NO_ARGS),
-        ('tril', (M, M), (2,), 'idx'),
-        ('tril', (S, M, M), NO_ARGS, 'batched'),
-        ('tril', (S, M, M), (2,), 'batched_idx'),
-        ('tril', (3, 3, S, S), NO_ARGS, 'more_batched'),
-        ('triu', (M, M), NO_ARGS),
-        ('triu', (M, M), (2,), 'idx'),
-        ('triu', (S, M, M), NO_ARGS, 'batched'),
-        ('triu', (S, M, M), (2,), 'batched_idx'),
-        ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('tensor_split', (S, S, S), (3,), 'sections', (False,)),
-        ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
-        ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
-        ('tensor_split', (S, S, S), ([2, 4], 1), 'indices_dim', (False,), [1]),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
