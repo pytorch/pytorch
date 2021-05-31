@@ -219,41 +219,44 @@ inline void _vec_softmax(
   int64_t outer_stride = dim_size * dim_stride;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
-      0, outer_size * inner_size, grain_size,
-      [&](int64_t begin, int64_t end) {
+      0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
         while (idx < end) {
           int64_t outer_idx = idx / inner_size;
           int64_t inner_idx = idx % inner_size;
-          if (((inner_idx+8) <= inner_size) && ((idx+8) <= end)) {
+          if (((inner_idx + 8) <= inner_size) && ((idx + 8) <= end)) {
+            // Vectorization
             scalar_t* input_data =
                 input_data_base + outer_idx * outer_stride + inner_idx;
             scalar_t* output_data =
                 output_data_base + outer_idx * outer_stride + inner_idx;
             // Step 1: Get max Score
-            Vec max_m256 =  Vec::loadu(input_data);
+            Vec max_m256 = Vec::loadu(input_data);
             for (int64_t d = 1; d < dim_size; d += 1) {
-              Vec input_m256 =  Vec::loadu(input_data + d * dim_stride);
+              Vec input_m256 = Vec::loadu(input_data + d * dim_stride);
               max_m256 = vec::maximum(max_m256, input_m256);
             }
             // Step2: Calculate sum
             Vec sum_m256 = Vec(0.0);
             for (int64_t d = 0; d < dim_size; d += 1) {
-              Vec output_m256 = (Vec::loadu(input_data + d * dim_stride) - max_m256).exp();
+              Vec output_m256 =
+                  (Vec::loadu(input_data + d * dim_stride) - max_m256).exp();
               output_m256.store(output_data + d * dim_stride);
               sum_m256 = sum_m256 + output_m256;
             }
             // Step3: Unify
             for (int64_t d = 0; d < dim_size; d += 1) {
-              Vec output_m256 = Vec::loadu(output_data + d * dim_stride) / sum_m256;
+              Vec output_m256 =
+                  Vec::loadu(output_data + d * dim_stride) / sum_m256;
               output_m256.store(output_data + d * dim_stride);
             }
             idx += 8;
           } else {
-            // Tail case is exactly same logic as host_softmax inside aten/src/ATen/native/SoftMax.cpp.
-            // There are 2 kind of cases which will fall through this tail case:
-            // Case 1. For the idx at the end of each thread, there are not enough numbers for parallization
-            // Case 2. For the idx at the end of the inner_size dim inside thread, there are not enough numbers for parallization
+            // Tail case(Scalar): it is exactly same logic as host_softmax
+            // inside aten/src/ATen/native/SoftMax.cpp. There are 2 kind of
+            // cases which will fall through this part:
+            // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallization.
+            // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallization.
             int64_t tail_number = ((idx+8) > end) ? (end - idx) : (inner_size - inner_idx);
             for (int64_t i=0; i < tail_number; i++) {
               outer_idx = (idx + i) / inner_size;
@@ -262,7 +265,6 @@ inline void _vec_softmax(
                   input_data_base + outer_idx * outer_stride + inner_idx;
               scalar_t* output_data =
                   output_data_base + outer_idx * outer_stride + inner_idx;
-
               // Step1: Get max score
               scalar_t max_input = input_data[0];
               for (int64_t d = 1; d < dim_size; d += 1) {
@@ -271,12 +273,14 @@ inline void _vec_softmax(
               // Step2: Calculate the Sum
               scalar_t sum_data = 0;
               for (int64_t d = 0; d < dim_size; d += 1) {
-                output_data[d * dim_stride] = std::exp(input_data[d * dim_stride] - max_input);
+                output_data[d * dim_stride] =
+                    std::exp(input_data[d * dim_stride] - max_input);
                 sum_data += output_data[d * dim_stride];
               }
               // Step3: Unify
               for (int64_t d = 0; d < dim_size; d += 1) {
-                output_data[d * dim_stride] = output_data[d * dim_stride]/sum_data;
+                output_data[d * dim_stride] =
+                    output_data[d * dim_stride]/sum_data;
               }
             }
             idx += tail_number;
