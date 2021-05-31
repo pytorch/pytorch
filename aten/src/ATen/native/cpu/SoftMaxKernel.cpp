@@ -223,13 +223,13 @@ inline void _vec_softmax(
       [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
         while (idx < end) {
-
           int64_t outer_idx = idx / inner_size;
           int64_t inner_idx = idx % inner_size;
-
           if (((inner_idx+8) <= inner_size) && ((idx+8) <= end)) {
-            scalar_t* input_data = input_data_base + outer_idx * outer_stride + inner_idx;
-            scalar_t* output_data = output_data_base + outer_idx * outer_stride + inner_idx;
+            scalar_t* input_data =
+                input_data_base + outer_idx * outer_stride + inner_idx;
+            scalar_t* output_data =
+                output_data_base + outer_idx * outer_stride + inner_idx;
             // Step 1: Get max Score
             Vec max_m256 =  Vec::loadu(input_data);
             for (int64_t d = 1; d < dim_size; d += 1) {
@@ -250,7 +250,8 @@ inline void _vec_softmax(
             }
             idx += 8;
           } else {
-            // There are 2 kind of tail cases:
+            // Tail case is exactly same logic as host_softmax inside aten/src/ATen/native/SoftMax.cpp.
+            // There are 2 kind of cases which will fall through this tail case:
             // Case 1. For the idx at the end of each thread, there are not enough numbers for parallization
             // Case 2. For the idx at the end of the inner_size dim inside thread, there are not enough numbers for parallization
             int64_t tail_number = ((idx+8) > end) ? (end - idx) : (inner_size - inner_idx);
