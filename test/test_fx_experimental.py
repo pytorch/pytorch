@@ -1323,6 +1323,8 @@ class TestNormalizeOperators(JitTestCase):
                    'polygamma',
                    'repeat',
                    'reshape_as',
+                   'resize_',
+                   'resize_as_',
                    'view',
                    'view_as',
                    'unfold',
