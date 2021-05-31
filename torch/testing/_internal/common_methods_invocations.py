@@ -3720,6 +3720,30 @@ def sample_inputs_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device)
+    cases = (((S, S, S), (S * S, S)),
+             ((), ()),
+             ((), (1, 1, 1)),
+             )
+
+    def generator():
+        for shape, args_or_shape in cases:
+            # Update `args` based on operator
+            if op_info.name == 'resize_':
+                # resize_ takes shape/tuple of ints,
+                args = (args_or_shape, )
+            elif op_info.name == 'resize_as_':
+                # resize_as_ takes another tensor
+                args = (make_arg(shape, requires_grad=False), )  # type:ignore[assignment]
+            else:
+                raise ValueError("sample_inputs_resize_ops is being used with incorrect operator")
+
+            yield(SampleInput(make_arg(shape, requires_grad=requires_grad), args=args))
+
+    return list(generator())
+
+
 def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -6514,6 +6538,30 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_fill_),
+    OpInfo('resize_',
+           op=lambda x, shape: x.clone().resize_(shape),
+           method_variant=None,
+           inplace_variant=None,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # JIT has issue when op is passed as lambda
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_resize_ops),
+    OpInfo('resize_as_',
+           op=lambda x, other: torch.resize_as_(x.clone(), other),
+           method_variant=None,
+           inplace_variant=torch.Tensor.resize_as_,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # JIT has issue when op is passed as lambda
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -6945,12 +6993,6 @@ def method_tests():
         ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', (), [1]),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
-        ('resize_', (), (dont_convert(()),), 'scalar'),
-        ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
-        ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
-        ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
-        ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
         ('to_sparse', (S, S), (1,), 'dim', (), (), [], lambda x: x.to_dense())
     ]
