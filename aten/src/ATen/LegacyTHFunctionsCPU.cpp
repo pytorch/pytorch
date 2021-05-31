@@ -35,6 +35,159 @@ namespace {
   }
 }
 
+Tensor & _th_nonzero_out(const Tensor & self, Tensor & result) {
+    // DeviceGuard omitted
+    auto dispatch_scalar_type = infer_scalar_type(self);
+
+    switch (dispatch_scalar_type) {
+        case ScalarType::Bool: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THBoolTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Byte: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THByteTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Char: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THCharTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Double: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THDoubleTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Float: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THFloatTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Int: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THIntTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Long: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THLongTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Short: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THShortTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Half: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THHalfTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::BFloat16: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THBFloat16Tensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::ComplexDouble: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexDoubleTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::ComplexFloat: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CPU, ScalarType::Long);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexFloatTensor_nonzero(result_, self_);
+            break;
+        }
+        default:
+            AT_ERROR("_th_nonzero_out not supported on CPUType for ", dispatch_scalar_type);
+    }
+    return result;
+}
+Tensor _th_nonzero(const Tensor & self) {
+    // DeviceGuard omitted
+    auto dispatch_scalar_type = infer_scalar_type(self);
+    auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(ScalarType::Long)).release();
+    auto result = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(result_));
+    switch (dispatch_scalar_type) {
+        case ScalarType::Bool: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THBoolTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Byte: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THByteTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Char: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THCharTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Double: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THDoubleTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Float: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THFloatTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Int: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THIntTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Long: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THLongTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Short: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THShortTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::Half: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THHalfTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::BFloat16: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THBFloat16Tensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::ComplexDouble: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexDoubleTensor_nonzero(result_, self_);
+            break;
+        }
+        case ScalarType::ComplexFloat: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CPU, dispatch_scalar_type);
+            THComplexFloatTensor_nonzero(result_, self_);
+            break;
+        }
+        default:
+            AT_ERROR("_th_nonzero not supported on CPUType for ", dispatch_scalar_type);
+    }
+    return result;
+}
 Scalar _th_std_var(const Tensor& self, int64_t correction, bool take_sqrt) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
