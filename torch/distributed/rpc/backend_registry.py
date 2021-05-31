@@ -202,7 +202,9 @@ def _tensorpipe_validate_devices(devices, device_count):
 def _tensorpipe_exchange_and_check_all_device_maps(
     my_name, my_device_count, my_device_maps, my_devices, group
 ):
-    gathered = [None] * group.size()
+    gathered: List[
+        Tuple[str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.Device]]
+    ] = [None] * group.size()
     dist.all_gather_object(
         gathered, (my_name, my_device_count, my_device_maps, my_devices), group
     )
@@ -229,7 +231,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
         if not set(all_device_maps[source_node].keys()).issubset(all_names):
             raise ValueError(
                 f"Node {source_node} has invalid target node names in its device maps\n"
-                f"device map = {map_}\n"
+                f"device maps = {all_device_maps[source_node].keys()}\n"
                 f"node names = {all_names}"
             )
         for target_node, map_ in all_device_maps[source_node].items():
