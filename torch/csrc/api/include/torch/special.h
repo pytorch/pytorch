@@ -210,7 +210,7 @@ inline Tensor ndtr(const Tensor& self) {
   return torch::special_ndtr(self);
 }
 
-inline Tensor ndtr_out(Tensor& result, const Tensor& self) {
+inline Tensor& ndtr_out(Tensor& result, const Tensor& self) {
   return torch::special_ndtr_out(result, self);
 }
 
@@ -226,7 +226,7 @@ inline Tensor i0e(const Tensor& self) {
   return torch::special_i0e(self);
 }
 
-inline Tensor i0e_out(Tensor& result, const Tensor& self) {
+inline Tensor& i0e_out(Tensor& result, const Tensor& self) {
   return torch::special_i0e_out(result, self);
 }
 
@@ -242,7 +242,7 @@ inline Tensor i1(const Tensor& self) {
   return torch::special_i1(self);
 }
 
-inline Tensor i1_out(Tensor& result, const Tensor& self) {
+inline Tensor& i1_out(Tensor& result, const Tensor& self) {
   return torch::special_i1_out(result, self);
 }
 
@@ -258,7 +258,7 @@ inline Tensor i1e(const Tensor& self) {
   return torch::special_i1e(self);
 }
 
-inline Tensor i1e_out(Tensor& result, const Tensor& self) {
+inline Tensor& i1e_out(Tensor& result, const Tensor& self) {
   return torch::special_i1e_out(result, self);
 }
 
