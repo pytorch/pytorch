@@ -436,7 +436,7 @@ Module Module::clone_impl(
 void Module::train(bool on) {
   int i = 0;
   for (Module m : modules()) {
-    std::cout << "jit: module " << i++ << std::endl ;
+    std::cout << "jit: module " << i++ << std::endl;
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
       std::cout << "jit:  ivalue name is: " << m._ivalue()->name() << std::endl;
       m._ivalue()->setSlot(*slot, on);

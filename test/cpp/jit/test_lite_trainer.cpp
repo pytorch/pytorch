@@ -18,14 +18,14 @@
 namespace torch {
 namespace jit {
 
-TEST(LiteTrainerTest, CustomOP){
-    std::string model_file = "/Users/chenlai/Documents/pytorch/data/model_f269583363.ptl";
-    Module m = load(model_file);
-    m.train(true);
+TEST(LiteTrainerTest, CustomOP) {
+  std::string model_file =
+      "/Users/chenlai/Documents/pytorch/data/model_f269583363.ptl";
+  Module m = load(model_file);
+  m.train(true);
 
-
-    mobile::Module mobile_module = _load_for_mobile(model_file);
-    mobile_module.train(true);
+  mobile::Module mobile_module = _load_for_mobile(model_file);
+  mobile_module.train(true);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

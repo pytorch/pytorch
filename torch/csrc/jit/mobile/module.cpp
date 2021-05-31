@@ -48,18 +48,16 @@ namespace {
 void set_train_recurse(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     bool on) {
-
   std::cout << "mobile: ivalue name: " << obj->name() << std::endl;
   if (auto slot = obj->type()->findAttributeSlot("training")) {
-
     obj->setSlot(*slot, on);
   } else {
     TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
   }
   for (const auto& slot : obj->slots()) {
-    if (slot.isModule() && slot.isObject()) {
+    if (slot.isObject() && slot.toObjectRef().type()->is_module()) {
       auto slot_obj = slot.toObject();
-      if(slot_obj->type()->hasAttribute("training")) {
+      if (slot_obj->type()->hasAttribute("training")) {
         set_train_recurse(slot.toObject(), on);
       }
     }
@@ -147,7 +145,7 @@ void Module::train(bool on) {
   set_train_recurse(object_, on);
 }
 
-//void Module::train(bool on) {
+// void Module::train(bool on) {
 ////  if (auto slot = object_->type()->findAttributeSlot("training")) {
 ////    object_->setSlot(*slot, on);
 ////  } else {
