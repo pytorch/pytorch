@@ -29,6 +29,7 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau);
 void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
 void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
 void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots);
 
 #ifdef USE_CUSOLVER
 
@@ -49,9 +50,7 @@ void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other,
 Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
 void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
-
 void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots);
-void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots);
 
 #endif  // USE_CUSOLVER
 
