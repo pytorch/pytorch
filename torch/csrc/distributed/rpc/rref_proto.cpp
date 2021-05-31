@@ -189,7 +189,8 @@ std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
 }
 
 c10::intrusive_ptr<Message> RRefAck::toMessageImpl() && {
-  return c10::make_intrusive<Message>(std::vector<char>{}, std::vector<torch::Tensor>{}, MessageType::RREF_ACK);
+  return c10::make_intrusive<Message>(
+      std::vector<char>{}, std::vector<torch::Tensor>{}, MessageType::RREF_ACK);
 }
 
 std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {
