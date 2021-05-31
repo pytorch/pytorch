@@ -412,6 +412,40 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
+namespace {
+
+inline Tensor calc_ndtr(const Tensor& self) {
+  auto x_sqrt_2 = self / std::sqrt(2.);
+  return (1 + at::erf(x_sqrt_2)) * 0.5;
+}
+
+} // namespace
+
+// special_ndtr
+Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
+  TORCH_CHECK(
+      self.device() == result.device(),
+      "Expected all tensors to be on the same device, but found at least two devices, ",
+      self.device(),
+      " and ",
+      result.device(),
+      "!");
+
+  auto ndtr = calc_ndtr(self);
+  TORCH_CHECK(
+      at::can_cast(ndtr.scalar_type(), result.scalar_type()),
+      "result type ",
+      ndtr.scalar_type(),
+      " can't be cast to the desired output type ",
+      result.scalar_type());
+
+  at::native::resize_output(result, ndtr.sizes());
+  return result.copy_(ndtr);
+}
+Tensor special_ndtr(const Tensor& self) {
+  return calc_ndtr(self);
+}
+
 // FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {

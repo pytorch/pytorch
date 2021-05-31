@@ -9353,6 +9353,14 @@
 - func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
+- func: special_ndtr(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_ndtr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 - func: special_xlog1py(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: special
