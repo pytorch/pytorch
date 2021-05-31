@@ -195,7 +195,8 @@ inline Tensor i0(const Tensor& self) {
 }
 
 inline Tensor& i0_out(Tensor& result, const Tensor& self) {
-  return torch::special_i0(result, self);
+  return torch::special_i0_out(result, self);
+}
 
 /// Computes the area under the standard Gaussian probability density function,
 /// integrated from minus infinity to :attr:`input`, elementwise
