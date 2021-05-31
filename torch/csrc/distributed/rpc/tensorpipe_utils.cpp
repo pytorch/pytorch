@@ -38,12 +38,25 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
   }
 }
 
+// As the vector of streams will typically be very small (1-8 items) we expect
+// a linear search to be as fast (or faster?) than if we used a hashmap.
+inline const c10::Stream& getStreamForDevice(
+    const std::vector<c10::Stream>& streams,
+    const c10::Device& device) {
+  for (const c10::Stream& stream : streams) {
+    if (stream.device() == device) {
+      return stream;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(false, "No stream found for device ", device);
+}
+
 } // namespace
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     c10::intrusive_ptr<Message> rpcMessage,
     std::vector<c10::Device> devices,
-    const std::shared_ptr<LazyStreamContext>& ctx) {
+    const std::vector<c10::Stream>& streams) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
@@ -71,8 +84,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     // The function below might allocate new tensors if there are Tensor views.
     // Apply stream guard here to include those Tensor allocation operations to
     // the streams.
-    c10::MultiStreamGuard guard(
-        ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
+    c10::MultiStreamGuard guard(streams);
     // Tensors
     buffers.tensors = cloneSparseTensors(rpcMessage->tensors()).vec();
   }
@@ -132,8 +144,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         tpMessage.tensors.push_back(std::move(tensor));
 #ifdef USE_CUDA_NOT_ROCM
       } else if (tensorDataVec[i].device().is_cuda()) {
-        auto stream =
-            at::cuda::CUDAStream(ctx->getStream(tensorDataVec[i].device()));
+        auto stream = at::cuda::CUDAStream(
+            getStreamForDevice(streams, tensorDataVec[i].device()));
         tensorpipe::CudaBuffer buffer;
         buffer.ptr = tensorPtr;
         buffer.stream = stream.stream();
@@ -163,7 +175,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
 
 std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
     const tensorpipe::Descriptor& tpDescriptor,
-    const std::shared_ptr<LazyStreamContext>& ctx) {
+    const std::vector<c10::Stream>& streams) {
   tensorpipe::Allocation tpAllocation;
   TensorpipeReadBuffers buffers;
 
@@ -216,7 +228,7 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 #ifdef USE_CUDA_NOT_ROCM
     } else if (tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       c10::Device device(c10::kCUDA, tensor.targetDevice->index);
-      auto stream = at::cuda::CUDAStream(ctx->getStream(device));
+      auto stream = at::cuda::CUDAStream(getStreamForDevice(streams, device));
       // CUDACachingAllocator will call recordStream accordingly on the current
       // stream.
       at::cuda::CUDAStreamGuard guard(stream);
