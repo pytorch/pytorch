@@ -3840,7 +3840,7 @@ add_docstr(torch.histogram,
            r"""
 histogram(input, bins, *, min=None, max=None, weight=None, density=False) -> (Tensor, Tensor)
 
-Computes the histogram of a tensor. The histogram is computed over the flattened values.
+Computes the histogram of the values in a tensor.
 
 Args:
     {input}

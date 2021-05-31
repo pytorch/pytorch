@@ -4886,7 +4886,6 @@ else:
             torch.diff(scalar)
 
     def _test_histogram_numpy(self, t, bins, bin_range, weights, density):
-        # Helper for test_histogram to compare with NumPy reference implementation
         def to_np(t):
             if not torch.is_tensor(t):
                 return t
@@ -4895,15 +4894,18 @@ else:
             else:
                 return t.cpu().numpy()
 
-        np_t = to_np(t)
-        np_bins = to_np(bins)
-        np_weights = to_np(weights)
-
         (minv, maxv) = bin_range if bin_range else (None, None)
-
         (actual_hist, actual_bin_edges) = torch.histogram(t, bins, min=minv, max=maxv, weight=weights, density=density)
-        (expected_hist, expected_bin_edges) = map(torch.from_numpy, \
-                np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density))
+
+        actual_dtype = actual_hist.dtype
+
+        # Helper for test_histogram to compare with NumPy reference implementation
+        def reference_histogram(self, t, bins, bin_range, weights, density):
+            (np_t, np_bins, np_weights) = map(to_np, [t, bins, weights])
+            (np_hist, np_bin_edges) = np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density)
+            return (torch.from_numpy(np_hist).to(actual_dtype), torch.from_numpy(np_bin_edges).to(actual_dtype))
+
+        (expected_hist, expected_bin_edges) = reference_histogram(self, t, bins, bin_range, weights, density)
 
         """
         Works around linspace discrepancies by passing torch's constructed bin_edges to numpy.
@@ -4914,14 +4916,12 @@ else:
         Issue: https://github.com/pytorch/pytorch/issues/58758
         """
         if not torch.is_tensor(bins):
-            self.assertEqual(actual_bin_edges, expected_bin_edges.to(actual_bin_edges.dtype), atol=1e-5, rtol=1e-5)
-
+            self.assertEqual(actual_bin_edges, expected_bin_edges, atol=1e-5, rtol=1e-5)
             # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins argument
-            (expected_hist, expected_bin_edges) = map(torch.from_numpy, \
-                    np.histogram(np_t, to_np(actual_bin_edges), range=bin_range, weights=np_weights, density=density))
+            (expected_hist, expected_bin_edges) = reference_histogram(self, t, actual_bin_edges, bin_range, weights, density)
 
-        self.assertEqual(actual_hist, expected_hist.to(actual_hist.dtype))
-        self.assertEqual(actual_bin_edges, expected_bin_edges.to(actual_bin_edges.dtype))
+        self.assertEqual(actual_hist, expected_hist)
+        self.assertEqual(actual_bin_edges, expected_bin_edges)
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64)
@@ -4933,8 +4933,8 @@ else:
             (1, 5, 1),
             (2, 3, 5))
 
-        for contig, bin_ct, minmax, weighted, density, shape in \
-                product([True, False], range(1, 10), [True, False], [True, False], [True, False], shapes):
+        for contig, bins_contig, bin_ct, minmax, weighted, density, shape in \
+                product([True, False], [True, False], range(1, 10), [True, False], [True, False], [True, False], shapes):
             values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous = not contig)
             bin_range = sorted((random.uniform(-9, 9), random.uniform(-9, 9))) if minmax else None
             weights = make_tensor(shape, device, dtype, low=0, high=9, noncontiguous = not contig) if weighted else None
@@ -4943,7 +4943,13 @@ else:
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
 
             # Tests with caller-specified bin edges
-            bin_edges = make_tensor((bin_ct + 1), device, dtype, low=-9, high=9).msort()
+            bin_edges = make_tensor(bin_ct + 1, device, dtype, low=-9, high=9).msort()
+            if not bins_contig:
+                # Necessary because msort always produces contiguous output
+                bin_edges_noncontig = make_tensor(bin_ct + 1, device, dtype, noncontiguous = not bins_contig)
+                bin_edges_noncontig.copy_(bin_edges)
+                bin_edges = bin_edges_noncontig
+            self.assertEqual(bin_edges.is_contiguous(), bins_contig)
             self._test_histogram_numpy(values, bin_edges, bin_range, weights, density)
 
         # Tests values of default args
@@ -4955,6 +4961,9 @@ else:
             self.assertEqual(actual_hist, expected_hist)
             self.assertEqual(actual_bin_edges, expected_bin_edges)
 
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64)
+    def test_histogram_error_handling(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, 'not supported on CPU for dtype'):
             values = make_tensor((), device, dtype=torch.int32)
             torch.histogram(values, 1)
@@ -5001,14 +5010,6 @@ else:
             hist = make_tensor((2), device, dtype=dtype, noncontiguous=True)
             bin_edges = make_tensor((), device, dtype=dtype)
             torch.histogram(values, 2, out=(hist, bin_edges))
-
-    @onlyCPU
-    @dtypes(torch.float32, torch.float64)
-    def test_histogram_noncontig(self, device, dtype):
-        # Tests handling of non-contiguous bins tensor
-        values = make_tensor((3, 5), device, dtype, low=-9, high=9)
-        bin_edges = make_tensor(10, device, dtype, low=-9, high=9).msort()[::2]
-        self._test_histogram_numpy(values, bin_edges, None, None, False)
 
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):

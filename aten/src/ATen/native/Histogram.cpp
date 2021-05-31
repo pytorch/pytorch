@@ -46,7 +46,7 @@ namespace {
  */
 void histogram_check_inputs(const Tensor& input, const Tensor& bins, const c10::optional<Tensor>& weight) {
     TORCH_CHECK(input.dtype() == bins.dtype(), "torch.histogram: input tensor and bins tensor should",
-            " have same dtype, but got input ", input.dtype(), " and bins ", bins.dtype());
+            " have the same dtype, but got input ", input.dtype(), " and bins ", bins.dtype());
 
     TORCH_CHECK(bins.dim() == 1, "torch.histogram: bins tensor should have dimension 1,",
             " but got ", bins.dim(), " dimension");
@@ -56,11 +56,11 @@ void histogram_check_inputs(const Tensor& input, const Tensor& bins, const c10::
 
     if (weight.has_value()) {
         TORCH_CHECK(input.dtype() == weight.value().dtype(), "torch.histogram: if weight tensor is provided,"
-                " input tensor and weight tensor should have same dtype, but got input(", input.dtype(), ")",
+                " input tensor and weight tensor should have the same dtype, but got input(", input.dtype(), ")",
                 ", and weight(", weight.value().dtype(), ")");
 
         TORCH_CHECK(input.sizes() == weight.value().sizes(), "torch.histogram: if weight tensor is provided,"
-                " input tensor and weight tensor should have same shape, but got input(", input.sizes(), ")",
+                " input tensor and weight tensor should have the same shape, but got input(", input.sizes(), ")",
                 ", and weight(", weight.value().sizes(), ")");
     }
 }
@@ -70,10 +70,10 @@ void histogram_check_inputs(const Tensor& input, const Tensor& bins, const c10::
 void histogram_prepare_out(const Tensor& input, int64_t bin_ct,
         const Tensor& hist, const Tensor& bin_edges) {
     TORCH_CHECK(input.dtype() == hist.dtype(), "torch.histogram: input tensor and hist tensor should",
-            " have same dtype, but got input ", input.dtype(), " and hist ", hist.dtype());
+            " have the same dtype, but got input ", input.dtype(), " and hist ", hist.dtype());
 
     TORCH_CHECK(input.dtype() == bin_edges.dtype(), "torch.histogram: input tensor and bin_edges tensor should",
-            " have same dtype, but got input ", input.dtype(), " and bin_edges ", bin_edges.dtype());
+            " have the same dtype, but got input ", input.dtype(), " and bin_edges ", bin_edges.dtype());
 
     at::native::resize_output(hist, bin_ct);
 
