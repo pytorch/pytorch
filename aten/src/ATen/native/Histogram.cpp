@@ -6,7 +6,7 @@
 #include <ATen/native/Resize.h>
 
 #include <tuple>
-#include "c10/core/DefaultDtype.h"
+#include <c10/core/DefaultDtype.h>
 
 /* Implement a numpy-like histogram function running on cpu
  * https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
