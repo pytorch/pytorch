@@ -196,6 +196,22 @@ inline Tensor i0(const Tensor& self) {
 
 inline Tensor& i0_out(Tensor& result, const Tensor& self) {
   return torch::special_i0(result, self);
+
+/// Computes the area under the standard Gaussian probability density function,
+/// integrated from minus infinity to :attr:`input`, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.ndtr
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::ndtr(t);
+/// ```
+inline Tensor ndtr(const Tensor& self) {
+  return torch::special_ndtr(self);
+}
+
+inline Tensor ndtr_out(Tensor& result, const Tensor& self) {
+  return torch::special_ndtr_out(result, self);
 }
 
 /// Computes the exponentially scaled zeroth order modified Bessel function of the first kind
