@@ -103,6 +103,7 @@ jobs:
           export PYTHONPATH=$PWD
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
+          pip3 install requests
           python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
 
 concurrency:
