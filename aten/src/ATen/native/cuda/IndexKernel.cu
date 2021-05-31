@@ -482,7 +482,7 @@ void flip_kernel_impl(TensorIterator& iter) {
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
 }
 
-void flip_kernel(TensorIterator& iter) {
+void flip_kernel(TensorIterator& iter, const bool /*quantized // Not implemented for QuantizedCUDA*/) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
                                          iter.dtype(), "flip_cuda",
   [&] {

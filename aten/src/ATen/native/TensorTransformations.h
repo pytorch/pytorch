@@ -23,7 +23,7 @@ static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArra
   return at::roll(first_dim_rolled, tail_shifts, tail_dims);
 }
 
-using flip_fn = void(*)(TensorIterator &);
+using flip_fn = void(*)(TensorIterator &, const bool);
 DECLARE_DISPATCH(flip_fn, flip_stub);
 
 }}  // namespace at::native

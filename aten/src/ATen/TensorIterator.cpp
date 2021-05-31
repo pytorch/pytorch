@@ -13,6 +13,7 @@
 
 #include <array>
 #include <algorithm>
+#include <cmath>
 
 namespace at {
 
@@ -1120,12 +1121,14 @@ int TensorIteratorBase::get_dim_to_split() const {
   int64_t max_extent = -1;
   int dim_to_split = -1;
   for (int dim = ndim() - 1; dim >= 0; dim--) {
-    if (shape_[dim] == 0) {
+    const int64_t size = shape_[dim];
+    if (size == 0) {
       continue;
     }
-    int64_t size = shape_[dim];
     for (auto& op : operands_) {
-      int64_t extent = (size - 1) * op.stride_bytes[dim];
+      // std::abs is necessary to handle some special cases where we support negative strides
+      // see the CUDA backend of at::flip
+      const int64_t extent = (size - 1) * std::abs(op.stride_bytes[dim]);
       if (extent > max_extent) {
         max_extent = extent;
         dim_to_split = dim;

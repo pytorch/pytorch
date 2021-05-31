@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -17,7 +18,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
   Tensor out_tensor = at::empty_like(in_tensor, MemoryFormat::Contiguous);
   int n = 0;
-  auto strides = out_tensor.strides().vec();
+  auto strides = DimVector(out_tensor.strides());
   for(int64_t i = 0; i < total_dims; i++) {
     if(flip_dims_b[i] && out_tensor.size(i) > 1) {
       n++;
@@ -44,7 +45,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
 
   auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
   const auto sizes = iter.shape();
-  auto strides_bytes = iter.strides(0).vec();
+  auto strides_bytes = DimVector(iter.strides(0));
   const auto strides_dummy = iter.strides(2);
 
   // To understand this transformation, think of a 3D cube.
@@ -60,10 +61,10 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
       strides_bytes[i] = - strides_bytes[i];
     }
   }
-  iter.set_arg_strides(0, strides_bytes);
-  iter.set_arg_data(0, reinterpret_cast<void*>(data));
+  iter._unsafe_set_arg_strides(0, strides_bytes);
+  iter._unsafe_set_arg_data(0, reinterpret_cast<void*>(data));
 
-  flip_stub(iter.device_type(), iter);
+  flip_stub(iter.device_type(), iter, self.is_quantized());
 
   return out_tensor;
 }
