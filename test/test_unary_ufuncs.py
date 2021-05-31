@@ -1260,6 +1260,26 @@ class TestUnaryUfuncs(TestCase):
             check_equal(t, torch.special.i1, scipy.special.i1)
             check_equal(t, torch.special.i1e, scipy.special.i1e)
 
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_special_ndtr_vs_scipy(self, device, dtype):
+        def check_equal(t):
+            # Test by comparing to scipy
+            actual = torch.special.ndtr(t)
+            expected = scipy.special.ndtr(t.cpu().numpy())
+            self.assertEqual(actual, expected)
+
+        range = (-10, 10)
+
+        t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
+        check_equal(t)
+
+        # NaN, inf, -inf are tested in reference_numerics tests.
+        info = torch.finfo(dtype)
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
+        t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
+        check_equal(t)
+
     # TODO: allow large opinfo values to be opted-into via metadata
     @dtypes(torch.long)
     def test_abs_big_number(self, device, dtype):
