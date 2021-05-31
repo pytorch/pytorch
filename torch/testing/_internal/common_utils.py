@@ -40,7 +40,7 @@ import json
 from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
 
 import numpy as np
 
@@ -1356,18 +1356,26 @@ class TestCase(expecttest.TestCase):
                     assert debug_msg_generic is not None
                     debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        # Tensor x Numpy array
-        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
-            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Tensor
-        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
-            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Numpy array
-        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+        elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
+            def maybe_to_tensor(a: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+                if isinstance(a, torch.Tensor):
+                    return a
+
+                try:
+                    return torch.from_numpy(a)
+                except TypeError:
+                    # This happens if the dtype is non-numeric or not supported by torch
+                    return a
+
+            x = maybe_to_tensor(x)
+            y = maybe_to_tensor(y)
+
+            kwargs = dict(atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device)
+            if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+                self.assertEqual(x, y, **kwargs)
+            else:
+                # In case we can't convert the array to a tensor, we fall back to comparing the elements as scalars
+                self.assertEqual(x.tolist(), y.tolist(), **kwargs)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
                          f"Expected: {repr(x)}; Actual: {repr(y)}.")
