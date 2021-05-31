@@ -218,7 +218,8 @@ def load_signatures(
     skip_deprecated: bool = False,
     pyi: bool = False,
 ) -> Sequence[PythonSignatureNativeFunctionPair]:
-    native_functions = list(filter(should_generate_py_binding, parse_native_yaml(native_yaml_path)))
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
 
     @with_native_function
     def gen_signature_pairs(f: NativeFunction) -> PythonSignatureNativeFunctionPair:

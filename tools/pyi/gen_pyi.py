@@ -291,11 +291,17 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
-        'sparse_csr_tensor' : ['def sparse_csr_tensor(crow_indices: Tensor, col_indices: Tensor,'
-                               ' values: Tensor, size: Optional[_size]=None,'
+        'sparse_csr_tensor' : ['def sparse_csr_tensor(crow_indices: Union[Tensor, List],'
+                               'col_indices: Union[Tensor, List],'
+                               ' values: Union[Tensor, List], size: Optional[_size]=None,'
                                ' *, dtype: Optional[_dtype]=None,'
                                ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
         '_sparse_coo_tensor_unsafe': ['def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],'
+                                      ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
+                                      ' requires_grad: bool = False) -> Tensor: ...'],
+        '_sparse_csr_tensor_unsafe': ['def _sparse_csr_tensor_unsafe(crow_indices: Union[Tensor, List],'
+                                      'col_indices: Union[Tensor, List],'
+                                      ' values: Union[Tensor, List], size: List[int],'
                                       ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
                                       ' requires_grad: bool = False) -> Tensor: ...'],
         'range': ['def range(start: Number, end: Number,'
@@ -327,6 +333,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
+        'is_inference_mode_enabled': ['def is_inference_mode_enabled() -> _bool: ...'],
         'nonzero': ['def nonzero(input: Tensor, *, as_tuple: Literal[False]=False, out: Optional[Tensor]=None) -> Tensor: ...',
                     'def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...'],
         'binary_cross_entropy_with_logits': ['def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, '
@@ -396,7 +403,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     unsorted_tensor_method_hints: Dict[str, List[str]] = collections.defaultdict(list)
     unsorted_tensor_method_hints.update({
         'size': ['def size(self) -> Size: ...',
-                 'def size(self, _int) -> _int: ...'],
+                 'def size(self, dim: _int) -> _int: ...'],
         'stride': ['def stride(self) -> Tuple[_int]: ...',
                    'def stride(self, _int) -> _int: ...'],
         'new_ones': ['def new_ones(self, size: _size, {}) -> Tensor: ...'.
