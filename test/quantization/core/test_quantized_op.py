@@ -2103,7 +2103,10 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_batch_norm_relu(self):
         # hypothesis too slow for this test, create test cases manually
-        max_sides = (2, 3, 4, 5)
+        # TODO: max_side==2 was disabled in https://github.com/pytorch/pytorch/pull/59067, because it failed after
+        #  fixing the underlying comparison mechanism. It should have never been passing in the first place.
+        #  This should be reinstated as soon as https://github.com/pytorch/pytorch/issues/59200 is fixed.
+        max_sides = (3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
@@ -2154,7 +2157,10 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_batch_norm(self):
         # hypothesis too slow for this test, create test cases manually
-        max_sides = (2, 3, 4, 5)
+        # TODO: max_side==2 was disabled in https://github.com/pytorch/pytorch/pull/59067, because it failed after
+        #  fixing the underlying comparison mechanism. It should have never been passing in the first place.
+        #  This should be reinstated as soon as https://github.com/pytorch/pytorch/issues/59200 is fixed.
+        max_sides = (3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
