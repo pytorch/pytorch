@@ -280,8 +280,6 @@ class DeviceTypeTestBase(TestCase):
             # Constructs the test
             @wraps(test_fn)
             def instantiated_test(self, name=name, test=test_fn, dtype=dtype, op=op):
-                if op:
-                    op.reset()
                 device_arg: str = cls.get_primary_device()
                 if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
@@ -302,6 +300,8 @@ class DeviceTypeTestBase(TestCase):
                     raise rte
                 finally:
                     self.precision = guard_precision
+                    if op:
+                        op.reset()
 
                 return result
 
