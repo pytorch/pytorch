@@ -1,4 +1,5 @@
 import torch
+from . import _functional as F
 from ..optimizer import Optimizer, required
 from collections import defaultdict
 
@@ -86,11 +87,6 @@ class SGD(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            weight_decay = group['weight_decay']
-            momentum = group['momentum']
-            dampening = group['dampening']
-            nesterov = group['nesterov']
-
             grads = []
             params_with_grad = []
             states = []
@@ -105,51 +101,21 @@ class SGD(Optimizer):
                     if p.grad.is_sparse:
                         has_sparse_grad = True
 
-                        if momentum != 0:
+                        if group['momentum'] != 0:
                             raise RuntimeError('SGD does not support momentum for sparse gradients')
 
             if grads == []:
                 return loss
 
-            if weight_decay != 0:
-                grads = torch._foreach_add(grads, params_with_grad, alpha=weight_decay)
-
-            if momentum != 0:
-                bufs = []
-
-                all_states_with_momentum_buffer = True
-                for i in range(len(states)):
-                    if 'momentum_buffer' not in states[i]:
-                        all_states_with_momentum_buffer = False
-                        break
-                    else:
-                        bufs.append(states[i]['momentum_buffer'])
-
-                if all_states_with_momentum_buffer:
-                    torch._foreach_mul_(bufs, momentum)
-                    torch._foreach_add_(bufs, grads, alpha=1 - dampening)
-                else:
-                    bufs = []
-                    for i in range(len(states)):
-                        if 'momentum_buffer' not in states[i]:
-                            buf = states[i]['momentum_buffer'] = torch.clone(grads[i]).detach()
-                        else:
-                            buf = states[i]['momentum_buffer']
-                            buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
-
-                        bufs.append(buf)
-
-                if nesterov:
-                    torch._foreach_add_(grads, bufs, alpha=momentum)
-                else:
-                    grads = bufs
-
-            if not has_sparse_grad:
-                torch._foreach_add_(params_with_grad, grads, alpha=-group['lr'])
-            else:
-                # foreach APIs dont support sparse
-                for i in range(len(params_with_grad)):
-                    params_with_grad[i].add_(grads[i], alpha=-group['lr'])
+            F.sgd(params_with_grad,
+                  grads,
+                  states,
+                  momentum=group['momentum'],
+                  has_sparse_grad=has_sparse_grad,
+                  dampening=group['dampening'],
+                  nesterov=group['nesterov'],
+                  weight_decay=group['weight_decay'],
+                  lr=group['lr'])
 
         return loss
 
