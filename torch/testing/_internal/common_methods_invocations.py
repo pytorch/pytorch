@@ -4155,35 +4155,35 @@ foreach_unary_op_db: List[OpInfo] = [
         'ceil',
         dtypes=floating_types(),
         dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
         'erf',
         dtypes=floating_types(),
         dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
         'erfc',
         dtypes=floating_types(),
         dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
         'expm1',
         dtypes=floating_types(),
         dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
         'floor',
         dtypes=floating_types(),
         dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
@@ -4197,14 +4197,14 @@ foreach_unary_op_db: List[OpInfo] = [
         'round',
         dtypes=floating_types(),
         dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
         'frac',
         dtypes=floating_types(),
         dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
@@ -4225,7 +4225,7 @@ foreach_unary_op_db: List[OpInfo] = [
         'trunc',
         dtypes=floating_types(),
         dtypesIfCPU=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
@@ -4234,6 +4234,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         safe_casts_outputs=False,
+        supports_forward_ad=True,
     ),
 ]
 
