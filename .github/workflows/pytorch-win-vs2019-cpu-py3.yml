@@ -1,9 +1,10 @@
 # @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/windows_ci_workflow.yml
+# Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Windows CI (pytorch-win-vs2019-cpu-py3)
 
 on:
+  pull_request:
   push:
     branches:
       - master
@@ -23,12 +24,20 @@ env:
   VC_VERSION: ""
   VC_YEAR: "2019"
 
+concurrency:
+  group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: "windows.4xlarge"
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+      - name: Install 7zip if not already installed
+        shell: powershell
+        run: |
+          choco install 7zip.install -y
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -71,6 +80,10 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+      - name: Install 7zip if not already installed
+        shell: powershell
+        run: |
+          choco install 7zip.install -y
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
