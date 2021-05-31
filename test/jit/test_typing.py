@@ -200,12 +200,14 @@ class TestTyping(JitTestCase):
         self.checkScript(fn, [])
         self.checkScript(fn2, (torch.ones(2, 2),))
 
-        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
+        with self.assertRaisesRegex(RuntimeError, "Lists must contain "
+                                    "only a single type"):
             @torch.jit.script
             def fn():
                 return [1, 1.2]
 
-        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
+        with self.assertRaisesRegex(RuntimeError, "Lists must contain "
+                                    "only a single type"):
             @torch.jit.script
             def fn():
                 return [1, torch.ones(1, 2)]

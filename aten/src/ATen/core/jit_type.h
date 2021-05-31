@@ -1572,6 +1572,8 @@ TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t2,
     bool default_to_any = false);
 
+// Get the smallest common supertype (excluding `Any`) of all the values
+// in the list. If there is no common supertype, return `c10::nullopt`
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not);
