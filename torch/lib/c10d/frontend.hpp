@@ -14,7 +14,7 @@
 namespace c10d {
 
 #ifdef USE_C10D_GLOO
-constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 #endif
 
 inline std::vector<std::string> split(
@@ -258,5 +258,8 @@ class TORCH_PYTHON_API DistributedC10d : public torch::CustomClassHolder {
 
   int64_t group_count_;
 };
+
+// Must be called to initialize Torchbind bindings for c10d.
+void initCustomClassBindings();
 
 } // namespace c10d
