@@ -752,10 +752,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 # Handle functions like stack
                 # For these, we don't unpack anything and always call the user function
                 if not (len(differentiable_inputs) == 1 and is_tensor_list_type(differentiable_inputs[0].type)):
-                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor even though a '
-                                       'forward gradient formula has been defined for it. This case should only happen '
-                                       'for function that take a single TensorList as input. All other cases are not '
-                                       'supported right now.')
+                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor (as the provided'
+                                       'forward AD formula does not use any input tangent) even though a forward gradient '
+                                       'formula has been defined for it. This case should only happen for function that '
+                                       'take a single TensorList as input. All other cases are not supported right now.')
                 requires_fw_grad = "true"
             unpacked_arguments = ""
             for inp in differentiable_inputs:
