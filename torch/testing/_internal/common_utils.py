@@ -1789,9 +1789,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         else:
             assert dtype in complex_types()
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
-            real = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
-            imag = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
-            replace_with = torch.complex(real, imag)
+            float_eps = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=float_dtype)
+            replace_with = torch.complex(float_eps, float_eps)
         result[result == 0] = replace_with
 
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\

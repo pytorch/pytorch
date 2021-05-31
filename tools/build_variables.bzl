@@ -663,7 +663,6 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/lib/c10d/comm.cpp",
     "torch/lib/c10d/default_comm_hooks.cpp",
-    "torch/lib/c10d/frontend.cpp",
     "torch/lib/c10d/reducer.cpp",
     "torch/lib/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
