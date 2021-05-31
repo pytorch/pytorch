@@ -19,6 +19,9 @@ namespace at { namespace native {
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
 
+// The check from resize_output, without actually reshaping the tensor
+TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
+
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
 // to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
