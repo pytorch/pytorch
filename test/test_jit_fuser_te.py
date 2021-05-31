@@ -1896,6 +1896,7 @@ works_list = [
     'tan',
     'tanh',
     'transpose',
+    'true_divide',
     'trunc',
     'unsqueeze',
     'view',

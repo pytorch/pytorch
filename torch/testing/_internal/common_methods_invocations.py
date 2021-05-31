@@ -737,6 +737,8 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 # Then one sample input would also be generated corresponding to the value of alpha provided.
 # In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
 # specify scalars of floating, integral & complex types as values for "alpha".
+# Keyword argument `rhs_exclude_zero` is used to exclude zero values from rhs tensor argument
+# This is necessary for operations like `true_divide`, where divide by zero throws an exception.
 def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
@@ -758,8 +760,9 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     for first_shape, shape_or_scalar, broadcasts_input in test_cases:
         arg = shape_or_scalar
         if isinstance(shape_or_scalar, tuple):
+            exclude_zero = kwargs.get('rhs_exclude_zero', False)
             arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
-                              requires_grad=requires_grad)
+                              requires_grad=requires_grad, exclude_zero=exclude_zero)
         samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                requires_grad=requires_grad),
                                    args=(arg,),
@@ -4702,6 +4705,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_div, rounding_mode='floor'),
            skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            assert_autodiffed=True),
+    OpInfo('true_divide',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, rhs_exclude_zero=True)),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -6868,15 +6874,6 @@ def method_tests():
         ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
         ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
-        ('true_divide', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
-        ('true_divide', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs', (True,)),
-        ('true_divide', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
-        ('true_divide', (S, 1, S), (torch.rand(M, S) + 0.1,), 'broadcast_all', (True,)),
-        ('true_divide', (), (uniform_scalar(0.1),), 'scalar', (True,)),
-        ('true_divide', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
-        ('true_divide', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
-        ('true_divide', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
-        ('true_divide', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('div', (S, S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex', (True,)),
         ('div', (S, S, S), (torch.rand(S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_rhs', (True,)),
         ('div', (S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_lhs', (True,)),
