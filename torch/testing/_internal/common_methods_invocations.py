@@ -1018,6 +1018,16 @@ def sample_inputs_xlog1py(self, device, dtype, requires_grad):
 
     return list(generator())
 
+def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = ((), (S, S, S), (S,))
+
+    def generator():
+        for shape in cases:
+            yield(SampleInput(make_arg(shape)))
+
+    return list(generator())
 
 def sample_inputs_logsumexp(self, device, dtype, requires_grad):
     inputs = (
@@ -6604,6 +6614,17 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
+    OpInfo('zero_',
+           op=lambda x: torch.zero_(x.clone()),
+           method_variant=None,
+           inplace_variant=torch.Tensor.zero_,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           skips=(
+               # JIT has issue when op is passed as lambda
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_zero_),
     OpInfo('special.xlog1py',
            aten_name='special_xlog1py',
            dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -6963,8 +6984,6 @@ def method_tests():
         ('std_mean', (S,), (0,), 'dim_1d', [0]),
         ('std_mean', (S,), (0, True, True), 'keepdim_dim_1d', [0]),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
-        ('zero_', (S, S, S), NO_ARGS),
-        ('zero_', (), NO_ARGS, 'scalar'),
         ('norm', (S, S), (), 'default'),
         ('norm', (S, S), (2,), '2'),
         ('norm', (S, S), (0,), '0'),

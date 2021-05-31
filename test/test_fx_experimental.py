@@ -1329,6 +1329,7 @@ class TestNormalizeOperators(JitTestCase):
                    'view_as',
                    'unfold',
                    'where',
+                   'zero_',
                    '__getitem__',
                    '__radd__',
                    '__rsub__',
