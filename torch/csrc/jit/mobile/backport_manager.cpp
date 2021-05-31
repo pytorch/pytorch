@@ -64,7 +64,7 @@ void selective_copy(
     // version
     bool skip = false;
 
-    // Skip files (exaxt path)
+    // Skip files (exact path)
     for (const auto& excluded_file : excluded_files) {
       if (record == excluded_file) {
         skip = true;
@@ -212,6 +212,38 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   return ouput_model_stream;
 }
 
+void writeArchiveOnly(
+    PyTorchStreamWriter& writer,
+    const std::string& archive_name,
+    const c10::IValue& value) {
+  std::vector<char> data;
+  // Vector to capture the run-time class types during pickling the IValues
+  std::vector<c10::ClassTypePtr> memoizedClassTypes;
+  std::vector<std::string> tensor_names;
+  Pickler data_pickle(
+      [&](const char* buf, size_t size) {
+        data.insert(data.end(), buf, buf + size);
+      },
+      nullptr,
+      nullptr,
+      &memoizedClassTypes,
+      [&](const at::Tensor& tensor) {
+        // returns a string to use in picker.cpp as storage obj key
+        tensor_names.push_back(
+            std::to_string(reinterpret_cast<std::intptr_t>(
+                tensor.storage().unsafeGetStorageImpl())) +
+            ".storage");
+        return tensor_names.back();
+      });
+  data_pickle.protocol();
+  data_pickle.pushIValue(value);
+  data_pickle.stop();
+  std::string fname = archive_name + ".pkl";
+  TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
+
+  writer.writeRecord(fname, data.data(), data.size());
+}
+
 std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   std::shared_ptr<IStreamAdapter> rai =
       std::make_shared<IStreamAdapter>(&input_model_stream);
@@ -220,8 +252,17 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   // If there are debug info files in the original model file, it should also
   // show up in the backported model
   bool hasBytecodeDebug = reader->hasRecord("mobile_debug_handles.pkl");
+
   // extra_files are kept
+  auto records = reader->getAllRecords();
   ExtraFilesMap extra_files;
+  for (const auto& record : records) {
+    std::size_t found = record.find_last_of("/\\");
+    auto path = record.substr(0, found);
+    if ("extra" == path) {
+      extra_files.emplace(record.substr(found + 1), "");
+    }
+  }
   // Loading the TS module is required for this backport, because bytecode needs
   // to be re-emitted (refer to the comments below)
   Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
@@ -231,11 +272,42 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   // the instructions (LOADC, for example), to push the values to the stack. It
   // restores the behavior of V5 and before. For V6, the default arg values are
   // resolved at runtime init stage for better operator compatibility.
-  BytecodeEmitDefaultInputsGuard argNumGuard(true);
-  std::stringstream ouput_model_stream;
-  torch_script._save_for_mobile(
-      ouput_model_stream, extra_files, hasBytecodeDebug);
-  return ouput_model_stream;
+  std::stringstream intermediate_model_stream;
+  {
+    BytecodeEmitDefaultInputsGuard argNumGuard(true);
+    torch_script._save_for_mobile(
+        intermediate_model_stream, extra_files, hasBytecodeDebug);
+  }
+  return intermediate_model_stream;
+
+  //  // Update the bytecode version (from 6 to 5), which does not work with the
+  //  code below. PyTorchStreamReader
+  //  reader_bytecode(&intermediate_model_stream); std::vector<IValue>
+  //  bytecode_values = get_bytecode_ivalues(reader_bytecode);
+  //  std::unordered_set<std::string> excluded_files{
+  //      "bytecode.pkl",
+  //      "version",
+  //  };
+  //  std::unordered_set<std::string> excluded_dirs{};
+  //
+  //  std::stringstream ouput_model_stream;
+  //  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+  //    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
+  //    return !ouput_model_stream ? 0 : nbytes;
+  //  };
+  //
+  //  PyTorchStreamWriter writer_bytecode(writer_func);
+  //
+  //  selective_copy(reader_bytecode, writer_bytecode, excluded_files,
+  //  excluded_dirs);
+  //
+  //  update_bytecode_version(bytecode_values, kBytecodeVersionV5);
+  //  auto bytecode_tuple =
+  //  c10::ivalue::Tuple::create(std::move(bytecode_values));
+  //  // write `bytecode` archive
+  //  writeArchiveOnly(writer_bytecode, kArchiveNameBytecode, bytecode_tuple);
+
+  //  return ouput_model_stream;
 }
 } // namespace
 

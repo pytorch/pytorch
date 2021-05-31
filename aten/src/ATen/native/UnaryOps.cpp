@@ -63,6 +63,8 @@ CREATE_UNARY_FLOAT_META_FUNC(sinc)
 CREATE_UNARY_FLOAT_META_FUNC(sinh)
 CREATE_UNARY_FLOAT_META_FUNC(special_entr)
 CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1e)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
@@ -165,6 +167,8 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_entr)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
@@ -407,6 +411,40 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
+
+namespace {
+
+inline Tensor calc_ndtr(const Tensor& self) {
+  auto x_sqrt_2 = self / std::sqrt(2.);
+  return (1 + at::erf(x_sqrt_2)) * 0.5;
+}
+
+} // namespace
+
+// special_ndtr
+Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
+  TORCH_CHECK(
+      self.device() == result.device(),
+      "Expected all tensors to be on the same device, but found at least two devices, ",
+      self.device(),
+      " and ",
+      result.device(),
+      "!");
+
+  auto ndtr = calc_ndtr(self);
+  TORCH_CHECK(
+      at::can_cast(ndtr.scalar_type(), result.scalar_type()),
+      "result type ",
+      ndtr.scalar_type(),
+      " can't be cast to the desired output type ",
+      result.scalar_type());
+
+  at::native::resize_output(result, ndtr.sizes());
+  return result.copy_(ndtr);
+}
+Tensor special_ndtr(const Tensor& self) {
+  return calc_ndtr(self);
+}
 
 // FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
@@ -671,6 +709,8 @@ DEFINE_DISPATCH(frac_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(frexp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_i0e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log10_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log1p_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

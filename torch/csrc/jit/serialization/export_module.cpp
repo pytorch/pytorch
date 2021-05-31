@@ -74,7 +74,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   code = std::make_shared<MobileCode>(
       graph,
       func.name(),
-      BytecodeEmitDefaultInputsMode::
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::
           is_enabled() /* emit_default_input_instructions */);
   auto instructions_copy = code->instructions();
 
@@ -171,7 +171,7 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    if (BytecodeEmitDefaultInputsMode::is_enabled()) {
+    if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
       operators.emplace_back(Tup({opname.name, opname.overload_name}));
     } else {
       operators.emplace_back(
@@ -634,7 +634,8 @@ void ScriptModuleSerializer::writeByteCode(
   // backport function, change version number in both bytecode.pkl,
   // and other files containling the version number, like
   // mobile_debug_handles.pkl.
-  if (version_to_write == 6 && BytecodeEmitDefaultInputsMode::is_enabled()) {
+  if (version_to_write >= 6 &&
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
     version_to_write = 5;
   }
   elements.emplace_back(static_cast<int64_t>(version_to_write));
@@ -855,14 +856,15 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
-// Thread local floag (only happens in export, i.e. on server side)
-// to control if
+// Thread local flag (only happens in export, i.e. on server side)
+// to control if instructions for bytecode default inputs are emitted
+// or not. It's the major difference between bytecode v5 and v6.
 thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
-bool BytecodeEmitDefaultInputsMode::is_enabled() {
+bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
   return emitBytecodeDefaultInputs;
 }
-void BytecodeEmitDefaultInputsMode::set_enabled(bool enabled) {
+void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
   emitBytecodeDefaultInputs = enabled;
 }
 
