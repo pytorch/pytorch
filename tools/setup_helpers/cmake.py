@@ -235,6 +235,7 @@ class CMake:
             # CMakeLists.txt.
             var: var for var in
             ('BLAS',
+             'WITH_BLAS',
              'BUILDING_WITH_TORCH_LIBS',
              'CUDA_HOST_COMPILER',
              'CUDA_NVCC_EXECUTABLE',
