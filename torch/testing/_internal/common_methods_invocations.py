@@ -128,13 +128,6 @@ class SampleInput(object):
         # friendly format.
         # It formats `Tensor` and `TensorList`
         # in a more condensed representation.
-        def is_iter(arg):
-            try:
-                iter(arg)
-                return True
-            except TypeError as te:
-                return False
-
         def formatter(arg):
             # Format any instance of `Tensor` (standalone, in list, or in dict)
             # by Tensor[TensorShape]
@@ -146,7 +139,7 @@ class SampleInput(object):
                 return {k: formatter(v) for k, v in arg.items()}
             elif is_iterable_of_tensors(arg):
                 return "TensorList[" + ", ".join(map(formatter, arg)) + "]"
-            elif is_iter(arg) and not isinstance(arg, str):  # Handle list, tuple or any iterable type
+            elif isinstance(arg, (list, tuple)):  # Handle list, tuple
                 return "(" + ",".join(map(formatter, arg)) + ")"
 
             return repr(arg)
@@ -725,8 +718,10 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 # specify scalars of floating, integral & complex types as values for "alpha".
 # Keyword argument `rhs_exclude_zero` is used to exclude zero values from rhs tensor argument
 # This is necessary for operations like `true_divide`, where divide by zero throws an exception.
-# Keyword argument `rounding_mode` is specifically used for the same kwarg supported by `torch.div`.
-def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, extra_kwargs=None, **kwargs):
+    if extra_kwargs is None:
+        extra_kwargs = {}
+
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
     tests_list = [
@@ -747,23 +742,20 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     for first_shape, shape_or_scalar, broadcasts_input in test_cases:
         arg = shape_or_scalar
 
-        sample_kwargs = None  # type: ignore[assignment]
-        rounding_mode = kwargs.get('rounding_mode', None)
-        if rounding_mode is not None:
-            sample_kwargs = dict(rounding_mode=rounding_mode)
         if isinstance(shape_or_scalar, tuple):
             exclude_zero = kwargs.get('rhs_exclude_zero', False)
             arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
                               requires_grad=requires_grad, exclude_zero=exclude_zero)
         samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                requires_grad=requires_grad),
-                                   args=(arg,), kwargs=sample_kwargs,
+                                   args=(arg,), kwargs=extra_kwargs,
                                    broadcasts_input=broadcasts_input))
     # Adds an extra sample using "alpha" if it's passed in kwargs
     if 'alpha' in kwargs:
         a = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
         b = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
-        sample = SampleInput(a, args=(b,), kwargs={'alpha': kwargs['alpha']})
+        extra_kwargs['alpha'] = kwargs['alpha']
+        sample = SampleInput(a, args=(b,), kwargs=extra_kwargs)
         samples.append(sample)
     return tuple(samples)
 
@@ -4565,14 +4557,10 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_binary_pwise, rhs_exclude_zero=True),
            assert_autodiffed=True),
     OpInfo('div',
-           variant_test_name='true_rounding',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode=None, rhs_exclude_zero=True),
-           assert_autodiffed=True),
-    OpInfo('div',
            variant_test_name='trunc_rounding',
            dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode='trunc', rhs_exclude_zero=True),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, extra_kwargs={
+                                      "rounding_mode": 'trunc'}, rhs_exclude_zero=True),
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/59174
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
@@ -4581,7 +4569,8 @@ op_db: List[OpInfo] = [
     OpInfo('div',
            variant_test_name='floor_rounding',
            dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode='floor', rhs_exclude_zero=True),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, extra_kwargs={
+                                      "rounding_mode": 'floor'}, rhs_exclude_zero=True),
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/59174
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
