@@ -257,7 +257,7 @@ inline void _vec_softmax(
             // cases which will fall through this part:
             // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallization.
             // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallization.
-            int64_t tail_number = ((idx+8) > end) ? (end - idx) : (inner_size - inner_idx);
+            int64_t tail_number = ((idx+8) > end) ? /*Case1*/ (end - idx) : /*Case2*/ (inner_size - inner_idx);
             for (int64_t i=0; i < tail_number; i++) {
               outer_idx = (idx + i) / inner_size;
               inner_idx = (idx + i) % inner_size;
