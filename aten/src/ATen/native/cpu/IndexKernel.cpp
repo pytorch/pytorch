@@ -548,8 +548,11 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
     });
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
-        [&iter] { cpu_kernel(iter,
+        [&iter] { cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
+            return a;
+        },
+          [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
             return a;
         });
     });
