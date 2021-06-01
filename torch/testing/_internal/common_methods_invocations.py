@@ -6828,7 +6828,6 @@ op_db: List[OpInfo] = [
            ),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
     OpInfo('norm',
-           variant_test_name='norm_normal',
            backward_dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            sample_inputs_func=sample_inputs_norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
