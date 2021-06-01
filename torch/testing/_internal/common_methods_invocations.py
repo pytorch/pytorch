@@ -4452,12 +4452,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_atan2,
            ),
-    OpInfo('atan2',
-           dtypes=opinfo_helper.get_supported_dtypes(torch.atan2, sample_inputs_atan2, 'cpu'),
-           dtypesIfCUDA=opinfo_helper.get_supported_dtypes(torch.atan2, sample_inputs_atan2, 'cuda'),
-           variant_test_name='1',
-           sample_inputs_func=sample_inputs_atan2,
-           ),
     UnaryUfuncInfo('atanh',
                    aliases=('arctanh', ),
                    ref=np.arctanh,
@@ -5465,15 +5459,6 @@ op_db: List[OpInfo] = [
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
-           sample_inputs_func=sample_inputs_topk,
-           skips=(
-               # Topk is not raising a warning when the out is resized
-               SkipInfo('TestCommon', 'test_out'),
-           )),
-    OpInfo('topk',
-           dtypes=opinfo_helper.get_supported_dtypes(torch.topk, sample_inputs_topk, 'cpu'),
-           dtypesIfCUDA=opinfo_helper.get_supported_dtypes(torch.topk, sample_inputs_topk, 'cuda'),
-           variant_test_name='1',
            sample_inputs_func=sample_inputs_topk,
            skips=(
                # Topk is not raising a warning when the out is resized
