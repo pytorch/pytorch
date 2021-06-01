@@ -1,5 +1,6 @@
 name: PyTorch release testing CI (pytorch-linux-py3.8-cu102)
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       pytorch_version:
@@ -35,8 +36,10 @@ jobs:
       - name: Install PyTorch and setup environment
         run: |
           . activate reltest
-          conda install -y -c pytorch-test pytorch=${{ github.event.inputs.pytorch_version }} \
+          conda install -y -c pytorch-test pytorch=1.9.0 \
                                            torchvision torchtext torchaudio cudatoolkit=10.2
+          # conda install -y -c pytorch-test pytorch=${{ github.event.inputs.pytorch_version }} \
+          #                                  torchvision torchtext torchaudio cudatoolkit=10.2
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
           echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
           echo "Result dir: ${RESULT_DIR} "
