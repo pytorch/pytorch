@@ -245,6 +245,8 @@ class OpInfo(object):
             dtypes, opinfo_helper._dynamic_dispatch_dtypes), (dtypes, dtypesIfCUDA)))
 
         if self.dynamic_dtypes:
+            # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU
+            # This is because, below we set dtypesIfCUDA to dtypes if they are None.
             assert isinstance(dtypesIfCUDA, opinfo_helper._dynamic_dispatch_dtypes), \
                 (f"To use dynamic dypes for operator {name}, "
                  "use the helper function for arguments `dtypesIfCUDA`")
