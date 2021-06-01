@@ -427,6 +427,11 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc) -> None:
+        # Creating a Manager will spawn a subprocess which will in turn launch
+        # a thread. TSAN doesn't like this because there could have been other
+        # threads already in the parent process and mixing all this is unsafe.
+        # Instead we should exec after the fork (i.e., use the "spawn" method)
+        # so that we reset the subprocess's state before creating new threads.
         test_skips_manager = torch.multiprocessing.get_context("spawn").Manager()
         test_skips = test_skips_manager.dict()
         global TEST_SKIPS
