@@ -17,6 +17,13 @@
 #define THC_NONCONTIG_REDUCE_BLOCK_SIZE 32 * 16
 #define CHUNKPERBLOCK 256
 
+// Also defined in <ATen/native/cuda/SortingCommon.cuh>
+template <typename index_t>
+__device__ __forceinline__ index_t getLinearBlockId() {
+  return blockIdx.z * gridDim.y * gridDim.x + blockIdx.y * gridDim.x +
+      blockIdx.x;
+}
+
 template <typename IndexType>
 __device__ __forceinline__ IndexType getReduceNoncontigDimSliceIndex() {
   // Each thread handles one slice
