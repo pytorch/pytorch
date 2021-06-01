@@ -74,7 +74,7 @@ class DeterminationTest(unittest.TestCase):
             ["distributed/rpc/test_process_group_agent"],
         )
         self.assertEqual(
-            self.determined_tests(["test/quantization/test_quantize.py"]),
+            self.determined_tests(["test/quantization/eager/test_quantize_eager_ptq.py"]),
             ["test_quantization"],
         )
 

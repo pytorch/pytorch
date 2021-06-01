@@ -207,7 +207,7 @@ class Pipeline:
                         else:
                             return partition(*inputs)
 
-                chk = Checkpointing(function, batch)  # type: ignore
+                chk = Checkpointing(function, batch)  # type: ignore[arg-type]
                 task = Task(streams[j], compute=chk.checkpoint, finalize=chk.recompute)
                 del function, chk
 

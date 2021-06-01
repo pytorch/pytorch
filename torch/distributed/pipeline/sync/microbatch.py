@@ -170,13 +170,13 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
         # Handle sequences for backward compatibility.
         if len(inputs) == 1 and isinstance(inputs[0], Sequence):
             is_single_sequence = True
-            inputs = inputs[0]  # type: ignore
+            inputs = inputs[0]  # type: ignore[assignment]
 
         for tensor in inputs:
             tensors = tensor.chunk(chunks)
             rotated.append(tensors)
 
-        unwrapped_inputs = zip(*rotated)  # type: ignore
+        unwrapped_inputs = zip(*rotated)  # type: ignore[assignment]
 
     return [Batch(x, is_single_sequence) for x in unwrapped_inputs]
 

@@ -508,10 +508,6 @@ class DistributedDataParallel(Module):
             os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
         )
 
-        # TODO(wayi@): Remove this field since SPMD is no longer supported,
-        # and also remove all the relevant unnecessary loops.
-        # Module replication within process (single-process multi device)
-        self._module_copies = [self.module]
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
@@ -583,7 +579,7 @@ class DistributedDataParallel(Module):
         )
 
         # passing a handle to torch.nn.SyncBatchNorm layer
-        self._passing_sync_batchnorm_handle(self._module_copies)
+        self._passing_sync_batchnorm_handle(self.module)
 
     def __getstate__(self):
         self._check_default_group()
@@ -615,7 +611,7 @@ class DistributedDataParallel(Module):
         modules_and_parameters = [
             [
                 (module, parameter)
-                for module_name, module in replica.named_modules()
+                for module_name, module in self.module.named_modules()
                 for parameter in [
                     param
                     # Note that we access module.named_parameters instead of
@@ -627,7 +623,6 @@ class DistributedDataParallel(Module):
                     and f"{module_name}.{param_name}" not in self.parameters_to_ignore
                 ]
             ]
-            for replica in self._module_copies
         ]
 
         # Deduplicate any parameters that might be shared across child modules.
@@ -663,12 +658,11 @@ class DistributedDataParallel(Module):
         # The following modules_params and modules_buffers are used for
         # param/buffer sync in _sync_params.
         self.modules_params = [
-            list(self._get_parameters(m)) for m in self._module_copies
+            list(self._get_parameters(self.module))
         ]
         # Collect buffers for modules, filtering out buffers that should be ignored.
         named_module_buffers = [
-            [(buffer, buffer_name) for buffer_name, buffer in m.named_buffers()]
-            for m in self._module_copies
+            [(buffer, buffer_name) for buffer_name, buffer in self.module.named_buffers()]
         ]
         self.modules_buffers = [
             [
@@ -1345,13 +1339,12 @@ class DistributedDataParallel(Module):
                     authoritative_rank,
                 )
 
-    def _passing_sync_batchnorm_handle(self, module_copies):
-        for dev_idx, module in enumerate(module_copies):
-            for layer in module.modules():
-                if isinstance(layer, torch.nn.modules.SyncBatchNorm):
-                    assert (
-                        self.device_type != "cpu"
-                    ), "SyncBatchNorm layers only work with GPU modules"
+    def _passing_sync_batchnorm_handle(self, module):
+        for layer in module.modules():
+            if isinstance(layer, torch.nn.modules.SyncBatchNorm):
+                assert (
+                    self.device_type != "cpu"
+                ), "SyncBatchNorm layers only work with GPU modules"
 
     def _check_comm_hook(self, hook):
         if not callable(hook):

@@ -125,7 +125,7 @@ class PipeSequential(nn.Sequential):
 
     def forward(self, *inputs):
         for module in self:
-            if isinstance(inputs, Tuple):
+            if isinstance(inputs, Tuple):  # type: ignore[arg-type]
                 inputs = module(*inputs)
             else:
                 # Don't expand single variables (ex: lists/Tensor)
@@ -369,7 +369,7 @@ class Pipe(Module):
 
         return self._copy_streams
 
-    def forward(self, *inputs) -> RRef:  # type: ignore
+    def forward(self, *inputs) -> RRef:
         """
         Processes a single input mini-batch through the pipe and returns an
         :class:`~torch.distributed.rpc.RRef` pointing to the output.
