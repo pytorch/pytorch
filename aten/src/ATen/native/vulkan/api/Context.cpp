@@ -175,7 +175,7 @@ struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
     return available();
   }
 
-  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
+  const Tensor& vulkan_copy_(const Tensor& self, const Tensor& src) const override {
     return vulkan::ops::copy_(self, src);
   }
 };
