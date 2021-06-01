@@ -531,10 +531,11 @@ def arange(g, *args):
     return arange_tensor
 
 def linspace(g, start, end, steps, dtype, layout, device, pin_memory):
+    dtype = sym_help._maybe_get_const(dtype, "i")
     step = div(g, sub(g, end, start), sub(g, steps, g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))))
-    type, end, start, step = sym_help._arange_cast_helper(g, start=start, end=end, step=step, dtype=dtype)
-    range_tensor = g.op("Range", start, end, step)
-    return range_tensor
+    end_epsilon = g.op("Add", step, end)
+    type, end, start, step = sym_help._arange_cast_helper(g, start=start, end=end_epsilon, step=step, dtype=dtype)
+    return g.op("Range", start, end, step)
 
 @parse_args("v", "i")
 def _dim_arange(g, like, dim):
