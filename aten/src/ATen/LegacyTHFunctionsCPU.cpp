@@ -207,6 +207,81 @@ Scalar _th_std_var(const Tensor& self, int64_t correction, bool take_sqrt) {
             AT_ERROR("_th_var not supported on CPUType for ", dispatch_scalar_type);
     }
 }
+Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result) {
+    // DeviceGuard omitted
+    auto dispatch_scalar_type = infer_scalar_type(self);
+
+    switch (dispatch_scalar_type) {
+        case ScalarType::Double: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_renorm_out", false, DeviceType::CPU, dispatch_scalar_type);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_renorm_out", false, DeviceType::CPU, dispatch_scalar_type);
+            auto p_ = p.toDouble();
+            auto maxnorm_ = maxnorm.toDouble();
+            THDoubleTensor_renorm(result_, self_, p_, dim, maxnorm_);
+            break;
+        }
+        case ScalarType::Float: {
+            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_renorm_out", false, DeviceType::CPU, dispatch_scalar_type);
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_renorm_out", false, DeviceType::CPU, dispatch_scalar_type);
+            auto p_ = p.toFloat();
+            auto maxnorm_ = maxnorm.toFloat();
+            THFloatTensor_renorm(result_, self_, p_, dim, maxnorm_);
+            break;
+        }
+        default:
+            AT_ERROR("_th_renorm_out not supported on CPUType for ", dispatch_scalar_type);
+    }
+    return result;
+}
+Tensor _th_renorm(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
+    // DeviceGuard omitted
+    auto dispatch_scalar_type = infer_scalar_type(self);
+    auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
+    auto result = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(result_));
+    switch (dispatch_scalar_type) {
+        case ScalarType::Double: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_renorm", false, DeviceType::CPU, dispatch_scalar_type);
+            auto p_ = p.toDouble();
+            auto maxnorm_ = maxnorm.toDouble();
+            THDoubleTensor_renorm(result_, self_, p_, dim, maxnorm_);
+            break;
+        }
+        case ScalarType::Float: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_renorm", false, DeviceType::CPU, dispatch_scalar_type);
+            auto p_ = p.toFloat();
+            auto maxnorm_ = maxnorm.toFloat();
+            THFloatTensor_renorm(result_, self_, p_, dim, maxnorm_);
+            break;
+        }
+        default:
+            AT_ERROR("_th_renorm not supported on CPUType for ", dispatch_scalar_type);
+    }
+    return result;
+}
+Tensor & _th_renorm_(Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
+    // DeviceGuard omitted
+    auto dispatch_scalar_type = infer_scalar_type(self);
+
+    switch (dispatch_scalar_type) {
+        case ScalarType::Double: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_renorm_", false, DeviceType::CPU, dispatch_scalar_type);
+            auto p_ = p.toDouble();
+            auto maxnorm_ = maxnorm.toDouble();
+            THDoubleTensor_renorm(self_, self_, p_, dim, maxnorm_);
+            break;
+        }
+        case ScalarType::Float: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_renorm_", false, DeviceType::CPU, dispatch_scalar_type);
+            auto p_ = p.toFloat();
+            auto maxnorm_ = maxnorm.toFloat();
+            THFloatTensor_renorm(self_, self_, p_, dim, maxnorm_);
+            break;
+        }
+        default:
+            AT_ERROR("_th_renorm_ not supported on CPUType for ", dispatch_scalar_type);
+    }
+    return self;
+}
 Tensor & _th_histc_out(const Tensor & self, int64_t bins, const Scalar& min, const Scalar& max, Tensor & result) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
