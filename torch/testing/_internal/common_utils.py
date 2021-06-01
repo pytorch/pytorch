@@ -1358,7 +1358,7 @@ class TestCase(expecttest.TestCase):
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
             def maybe_to_tensor(a: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
-                if isinstance(a, torch.Tensor):
+                if not isinstance(a, np.ndarray):
                     return a
 
                 try:
@@ -1381,7 +1381,7 @@ class TestCase(expecttest.TestCase):
                     x, y, atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device
                 )
             else:
-                # In case we can't convert the array to a tensor, we fall back to comparing the elements as iterables
+                # In case we can't convert the array to a tensor, we fall back to comparing x and y as iterables
                 self.assertEqual(
                     maybe_to_list(x),
                     maybe_to_list(y),
