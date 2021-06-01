@@ -194,7 +194,7 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
 
         if all_tensors:
             is_single_sequence = True
-            inputs = inputs[0]  # type: ignore
+            inputs = inputs[0]  # type: ignore[assignment]
 
     batches: List[Any] = [[] for _ in range(chunks)]
     # Actual number of chunks produced

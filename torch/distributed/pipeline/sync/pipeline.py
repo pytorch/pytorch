@@ -85,7 +85,7 @@ class Pipeline:
 
     def __init__(
         self,
-        partitions: nn.Sequential,
+        partitions: List[nn.Sequential],
         devices: List[torch.device],
         copy_streams: List[List[AbstractStream]],
         skip_layout: SkipLayout,
@@ -210,7 +210,7 @@ class Pipeline:
                         else:
                             return partition(*inputs)
 
-                chk = Checkpointing(function, batch)  # type: ignore
+                chk = Checkpointing(function, batch)  # type: ignore[arg-type]
                 task = Task(streams[j], compute=chk.checkpoint, finalize=chk.recompute)
                 del function, chk
 

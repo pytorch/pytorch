@@ -910,7 +910,7 @@ tensor([1., 2., 3., 4.], dtype=torch.float64)
 ```
 
 GDB tries to automatically load `pytorch-gdb` thanks to the
-[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, auto-loadings is disabled by default, because of security reasons:
+[.gdbinit](.gdbinit) at the root of the pytorch repo. However, auto-loadings is disabled by default, because of security reasons:
 
 ```
 $ gdb

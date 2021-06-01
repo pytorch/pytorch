@@ -279,6 +279,7 @@ class Checkpoint(torch.autograd.Function):
 
         with torch.no_grad(), enable_checkpointing():
             if input_atomic:
+                assert len(inputs) == 1
                 output = function(inputs[0])
             else:
                 output = function(*inputs)
@@ -347,6 +348,7 @@ class Recompute(torch.autograd.Function):
         with restore_rng_states(device, ctx.rng_states):
             with torch.enable_grad(), enable_recomputing():
                 if ctx.input_atomic:
+                    assert len(inputs_leaf) == 1
                     output = ctx.function(inputs_leaf[0])
                 else:
                     output = ctx.function(*inputs_leaf)
