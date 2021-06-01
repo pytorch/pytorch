@@ -2429,7 +2429,7 @@ class TestReductions(TestCase):
             ('argmax', torch.argmax, {'dtype': torch.int64}, np.argmax),
             ('argmin', torch.argmin, {'dtype': torch.int64}, np.argmin),
             ('kthvalue', lambda *args, k=1, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,
-             {}, lambda *args, k=1, axis=None, **kwargs: np.partition(*args, k, **kwargs).take(k-1, axis=axis))
+             {}, lambda *args, k=1, axis=None, **kwargs: np.partition(*args, k, **kwargs).take(k - 1, axis=axis))
         ]
 
         for name, fn, dtype, np_function in test_functions:
