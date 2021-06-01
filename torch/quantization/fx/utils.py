@@ -96,7 +96,7 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Optional[Union[Callable, str]], Dict[str, Any]]:
+def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Union[Callable, str], Dict[str, Any]]:
     ''' Given an activation_post_process module,
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
@@ -119,6 +119,9 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
+    else:
+        raise Exception("Unsupported dtype in get_quantize_node_info:" + str(dtype))
+    assert quantize_op is not None
     return node_type, quantize_op, qparams
 
 def quantize_node(
@@ -127,6 +130,7 @@ def quantize_node(
         obs_module: torch.nn.Module,
         obs_node: Node,
         modules: Dict[str, torch.nn.Module],
+        quantized_graph: Graph,
         is_input: bool) -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
@@ -164,7 +168,7 @@ def quantize_node(
         # we can fix it later if needed
         module_path = ""
     root_module = modules['']
-    graph = quantizer.quantized_graph
+    graph = quantized_graph
     node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
     inputs = [in_node]
 
@@ -346,15 +350,17 @@ def create_qparam_nodes(
         node_name: str,
         scale: Any,
         zero_point: Any,
-        modules: Dict[str, torch.nn.Module]) -> Tuple[Node, Node]:
+        modules: Dict[str, torch.nn.Module],
+        quantized_graph: Graph
+) -> Tuple[Node, Node]:
     """
     Create getattr nodes in the quantizer graph for scale and zero point values.
     The nodes are registered with the root_module of the model.
     """
     root_module = modules['']
     module_path, _ = quantizer.node_name_to_scope[node_name]
-    scale_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_scale_"), scale)
-    zero_point_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_zero_point_"), zero_point)
+    scale_node = create_getattr_from_value(root_module, quantized_graph, (module_path + "_scale_"), scale)
+    zero_point_node = create_getattr_from_value(root_module, quantized_graph, (module_path + "_zero_point_"), zero_point)
     return (scale_node, zero_point_node)
 
 
