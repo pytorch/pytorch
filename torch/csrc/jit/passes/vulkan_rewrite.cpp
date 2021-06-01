@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -213,6 +214,11 @@ void vulkanRemoveMutation(script::Module& module) {
   RemoveTensorMutation(graph);
 }
 
+void vulkanRunCanonicalOptimizations(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  runOptimization(graph, false /* no loop unrolling */);
+}
+
 script::Module vulkanOptimizeForMobile(
     const script::Module& m,
     const std::vector<std::string>& preserved_methods) {
@@ -225,6 +231,9 @@ script::Module vulkanOptimizeForMobile(
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
   vulkanRemoveMutation(cloned_module);
+  // remove duplicated constants
+  vulkanRunCanonicalOptimizations(cloned_module);
+
   cloned_module.register_attribute(
       "optimized_for_vulkan", BoolType::get(), true);
   return cloned_module;
