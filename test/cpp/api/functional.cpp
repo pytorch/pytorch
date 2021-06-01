@@ -1061,17 +1061,6 @@ TEST_F(FunctionalTest, OneHot) {
     ASSERT_TRUE(torch::allclose(y, expected));
     ASSERT_EQ(y.sizes(), std::vector<int64_t>({3, 2, 3}));
   }
-
-  { // Test #4
-    auto x = torch::arange(0, 5, torch::kLong);
-    auto y = F::one_hot(x % 3, 3, torch::kUInt8);
-    auto expected = torch::tensor(
-        {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}}, torch::kUInt8);
-
-    ASSERT_EQ(y.ndimension(), 2);
-    ASSERT_TRUE(torch::allclose(y, expected));
-    ASSERT_EQ(y.sizes(), std::vector<int64_t>({5, 3}));
-  }
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
