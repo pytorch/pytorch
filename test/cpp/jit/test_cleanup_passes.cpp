@@ -33,7 +33,7 @@ graph(%cond.1 : Tensor,
   return (%25)
   )IR",
       &*graph);
-  runCleanupPasses(graph);
+  RunCleanupPasses(graph);
   testing::FileCheck()
       .check_count(
           "prim::Constant[value=\"same string with a twist\"]",
@@ -42,7 +42,7 @@ graph(%cond.1 : Tensor,
       ->run(*graph);
 
   auto graph_after_pass_once = graph->toString();
-  runCleanupPasses(graph);
+  RunCleanupPasses(graph);
   auto graph_after_pass_twice = graph->toString();
   ASSERT_EQ(graph_after_pass_once, graph_after_pass_twice);
 }

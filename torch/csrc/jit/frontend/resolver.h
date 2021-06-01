@@ -64,5 +64,33 @@ struct NativeResolver : public Resolver {
 inline std::shared_ptr<NativeResolver> nativeResolver() {
   return std::make_shared<NativeResolver>();
 }
+
+struct FunctionResolver : public Resolver {
+  explicit FunctionResolver(
+      Resolver* otherResolver,
+      const std::unordered_map<std::string, Function*>& functionTable)
+      : otherResolver_(otherResolver), functionTable_(functionTable) {}
+
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) override {
+    auto it = functionTable_.find(name);
+    if (it != functionTable_.end()) {
+      return std::make_shared<FunctionValue>(it->second);
+    }
+    return otherResolver_->resolveValue(name, m, loc);
+  }
+
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      override {
+    return otherResolver_->resolveType(name, loc);
+  }
+
+ private:
+  Resolver* otherResolver_;
+  const std::unordered_map<std::string, Function*>& functionTable_;
+};
+
 } // namespace jit
 } // namespace torch

@@ -487,7 +487,7 @@ void convertTracedForksToRealForks(const std::shared_ptr<Graph>& g) {
 }
 
 // Run a few clean-up passes to make the graph a bit cleaner.
-void runCleanupPasses(const std::shared_ptr<Graph>& g) {
+void RunCleanupPasses(const std::shared_ptr<Graph>& g) {
   for (Node* n : g->nodes()) {
     if (n->kind() == prim::TracedFork) {
       auto subgraph = n->g(attr::Subgraph);
@@ -509,13 +509,13 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   LintGraph(g);
 }
 
-void runCleanupPasses(Module* m) {
+void RunCleanupPasses(Module* m) {
   auto methods = m->get_methods();
   for (auto module : m->children()) {
-    runCleanupPasses(&module);
+    RunCleanupPasses(&module);
   }
   for (auto& method : methods) {
-    runCleanupPasses(method.graph());
+    RunCleanupPasses(method.graph());
   }
 }
 
@@ -537,14 +537,14 @@ void FixupTraceScopeBlocks(std::shared_ptr<Graph>& graph, Module* self) {
     inlineScopeBlocks(graph->block());
     // For TracedFork nodes
     lambdaLiftBlocksAndConvertToGraph(graph->block());
-    runCleanupPasses(graph);
+    RunCleanupPasses(graph);
   } else {
     lambdaLiftBlocksAndConvertToGraph(graph->block());
     createMethodCalls(graph);
-    runCleanupPasses(self);
+    RunCleanupPasses(self);
     // `graph` isn't referenced in `self` yet, so we need to run
     // this separately
-    runCleanupPasses(graph);
+    RunCleanupPasses(graph);
   }
 }
 

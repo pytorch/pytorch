@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void runCleanupPasses(std::shared_ptr<Graph>& to_clean);
+TORCH_API void RunCleanupPasses(std::shared_ptr<Graph>& to_clean);
 
 TORCH_API bool meaningfulName(const std::string& name);
 
