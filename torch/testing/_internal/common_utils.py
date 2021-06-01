@@ -1367,6 +1367,12 @@ class TestCase(expecttest.TestCase):
                     # This happens if the dtype is non-numeric or not supported by torch
                     return a
 
+            def maybe_to_list(a: Any) -> Any:
+                if not isinstance(a, (np.ndarray, torch.Tensor)):
+                    return a
+
+                return a.tolist()
+
             x = maybe_to_tensor(x)
             y = maybe_to_tensor(y)
 
@@ -1375,10 +1381,10 @@ class TestCase(expecttest.TestCase):
                     x, y, atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device
                 )
             else:
-                # In case we can't convert the array to a tensor, we fall back to comparing the elements as scalars
+                # In case we can't convert the array to a tensor, we fall back to comparing the elements as iterables
                 self.assertEqual(
-                    x.tolist(),
-                    y.tolist(),
+                    maybe_to_list(x),
+                    maybe_to_list(y),
                     atol=atol,
                     rtol=rtol,
                     msg=msg,
