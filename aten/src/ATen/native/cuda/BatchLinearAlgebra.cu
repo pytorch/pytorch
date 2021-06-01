@@ -2197,7 +2197,7 @@ AT_ERROR("qr: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, std::string mode) {
+std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, c10::string_view mode) {
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = _parse_qr_mode(mode);
 
@@ -2247,7 +2247,7 @@ std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, std::strin
   return std::make_tuple(q_working_copy, r_working_copy);
 }
 
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, std::string mode) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
 #if defined(USE_CUSOLVER)
   // _linalg_qr_helper_default is a generic function that is implemented using
   // geqrf_stub and orgqr_stub. It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
