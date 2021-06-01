@@ -1741,22 +1741,20 @@ graph(%Ra, %Rb):
             self.assertEqual(fn(*args), jitted(*args))
 
         def equation_format(x, y):
-            return torch.einsum('i,j->ij', (x, y))
+            return torch.einsum('i,j->ij', [x, y])
+
+        def equation_format_varargs(x, y):
+            return torch.einsum('i,j->ij', x, y)
 
         def sublist_format(x, y):
             return torch.einsum(x, [0], y, [1], [0, 1])
 
-        # Sublist format cannot be scripted because it is
-        # a NumPy API only feature
-        with self.assertRaises(RuntimeError):
-            torch.jit.script(sublist_format)
-
         x = make_tensor((5,), 'cpu', torch.float32)
         y = make_tensor((10,), 'cpu', torch.float32)
 
-        check(equation_format, torch.jit.script(equation_format), x, y)
-        check(equation_format, torch.jit.trace(equation_format, (x, y)), x, y)
-        check(sublist_format, torch.jit.trace(sublist_format, (x, y)), x, y)
+        for fn in [equation_format, equation_format_varargs, sublist_format]:
+            check(fn, torch.jit.script(fn), x, y)
+            check(fn, torch.jit.script(fn), x, y)
 
     def test_python_ivalue(self):
         # Test if pure python object can be hold as IValue and conversion
