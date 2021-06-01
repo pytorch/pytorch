@@ -38,7 +38,7 @@ TORCH_META_FUNC2(div, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
+TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode) {
   if (!rounding_mode.has_value()) {
     build_borrowing_binary_float_op(maybe_get_output(), self, other);
   // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -80,6 +80,10 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC2(remainder, Tensor)(const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
 // These are normal binary ops that preserve dtype
 #define CREATE_BINARY_META_FUNC(func)                                 \
   TORCH_META_FUNC(func) (const Tensor& self, const Tensor& other) {   \
@@ -103,6 +107,16 @@ TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
 TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
+    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
+    build_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
+    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+    build_binary_op(maybe_get_output(), self, other);
 }
 
 } // namespace meta
@@ -221,7 +235,7 @@ TORCH_IMPL_FUNC(div_out) (const Tensor& self, const Tensor& other, const Tensor&
 }
 
 TORCH_IMPL_FUNC(div_out_mode) (
-  const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, const Tensor& result
+  const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode, const Tensor& result
 ) {
   if (!rounding_mode.has_value()) {
     div_true_stub(device_type(), *this);
@@ -243,6 +257,8 @@ TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tens
 
 CREATE_BINARY_TORCH_IMPL_FUNC(maximum);
 CREATE_BINARY_TORCH_IMPL_FUNC(minimum);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmax);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmin);
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp);
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2);
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
@@ -251,6 +267,7 @@ CREATE_BINARY_TORCH_IMPL_FUNC(hypot);
 CREATE_BINARY_TORCH_IMPL_FUNC(igamma);
 CREATE_BINARY_TORCH_IMPL_FUNC(igammac);
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter);
+CREATE_BINARY_TORCH_IMPL_FUNC(remainder);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -353,11 +370,11 @@ Tensor& div_(Tensor& self, const Scalar& other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
-Tensor div(const Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
+Tensor div(const Tensor& self, const Scalar& other, c10::optional<c10::string_view> rounding_mode) {
   return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
-Tensor& div_(Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
+Tensor& div_(Tensor& self, const Scalar& other, c10::optional<c10::string_view> rounding_mode) {
   return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
@@ -382,23 +399,23 @@ Tensor& divide_(Tensor& self, const Scalar& other) {
   return self.div_(other);
 }
 
-Tensor& divide_out(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, Tensor& result) {
+Tensor& divide_out(const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode, Tensor& result) {
   return at::div_out(result, self, other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
+Tensor divide(const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
+Tensor& divide_(Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
+Tensor divide(const Tensor& self, const Scalar& other, c10::optional<c10::string_view> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
+Tensor& divide_(Tensor& self, const Scalar& other, c10::optional<c10::string_view> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
@@ -421,23 +438,6 @@ Tensor true_divide(const Tensor& self, const Scalar& divisor) {
 
 Tensor& true_divide_(Tensor& self, const Scalar& divisor) {
   return self.div_(divisor);
-}
-
-Tensor& remainder_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor remainder(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& remainder_(Tensor& self, const Tensor& other) {
-  return native::remainder_out(self, other, self);
 }
 
 Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -615,15 +615,18 @@ Tensor& add_(Tensor& self, const Scalar& other, const Scalar& alpha) {
 }
 
 Tensor remainder(const Tensor& self, const Scalar& other) {
-  return native::remainder(self, wrapped_scalar_tensor(other));
+  // redispatch
+  return at::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, const Scalar& other) {
-  return native::remainder_(self, wrapped_scalar_tensor(other));
+  // redispatch
+  return self.remainder_(wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return native::remainder_out(self, wrapped_scalar_tensor(other), result);
+  // redispatch
+  return at::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, const Scalar& other, const Scalar& alpha) {
@@ -986,23 +989,6 @@ Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor max(const Tensor& self, const Tensor& other) {
   return at::maximum(self, other);
-}
-
-Tensor& fmax_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
-
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmax_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor fmax(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
-
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmax_stub(iter.device_type(), iter);
-  return iter.output();
 }
 
 // binary min, alias for minimum
