@@ -953,6 +953,30 @@ def run_weight_observers(observed: GraphModule) -> None:
                         # run the weight observer
                         weight_observer_module()
 
+def save_state(
+    observed: GraphModule,
+    qconfig_map: Dict[str, QConfigAny],
+    node_name_to_scope: Dict[str, Tuple[str, type]],
+    patterns: Dict[Pattern, QuantizeHandler],
+    prepare_custom_config_dict: Dict[str, Any]
+) -> None:
+    observed._patterns = patterns  # type: ignore[assignment]
+    observed._qconfig_map = qconfig_map  # type: ignore[assignment]
+    observed._prepare_custom_config_dict = \
+        prepare_custom_config_dict  # type: ignore[assignment]
+    observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
+
+def restore_state(
+        observed: GraphModule
+) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]], Dict[str, Any]]:
+    assert is_observed_module(observed), \
+        'incoming model must be produced by prepare_fx'
+    prepare_custom_config_dict: Dict[str, Any] = \
+        observed._prepare_custom_config_dict  # type: ignore[assignment]
+    node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
+    patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
+    return patterns, node_name_to_scope, prepare_custom_config_dict
+
 class Quantizer:
     def _prepare(
             self,
@@ -1047,7 +1071,7 @@ class Quantizer:
             model.graph, prepare_custom_config_dict,
             input_quantized_idxs, output_quantized_idxs)
 
-        self.save_state(model, qconfig_map, node_name_to_scope, patterns, prepare_custom_config_dict)
+        save_state(model, qconfig_map, node_name_to_scope, patterns, prepare_custom_config_dict)
         preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
         model = ObservedGraphModule(model, model.graph, preserved_attributes)
         if is_standalone_module:
@@ -1062,32 +1086,6 @@ class Quantizer:
                 torch.tensor(input_quantized_idxs)
             model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
         return model
-
-    def save_state(
-            self,
-            observed: GraphModule,
-            qconfig_map: Dict[str, QConfigAny],
-            node_name_to_scope: Dict[str, Tuple[str, type]],
-            patterns: Dict[Pattern, QuantizeHandler],
-            prepare_custom_config_dict: Dict[str, Any]
-    ) -> None:
-        observed._patterns = patterns  # type: ignore[assignment]
-        observed._qconfig_map = qconfig_map  # type: ignore[assignment]
-        observed._prepare_custom_config_dict = \
-            prepare_custom_config_dict  # type: ignore[assignment]
-        observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
-
-    def restore_state(
-            self,
-            observed: GraphModule
-    ) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]], Dict[str, Any]]:
-        assert is_observed_module(observed), \
-            'incoming model must be produced by prepare_fx'
-        prepare_custom_config_dict: Dict[str, Any] = \
-            observed._prepare_custom_config_dict  # type: ignore[assignment]
-        node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
-        patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
-        return patterns, node_name_to_scope, prepare_custom_config_dict
 
     def prepare(
             self,
@@ -1114,7 +1112,7 @@ class Quantizer:
         """
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
-        patterns, node_name_to_scope, prepare_custom_config_dict = self.restore_state(model)
+        patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
         qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
         # always run weight observers in the top level forward method
         # for dynamic quant ops or weight only quant ops
