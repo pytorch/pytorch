@@ -69,6 +69,10 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
                 pos = static_cast<int64_t>((elt - leftmost_bin_edge)
                         / (rightmost_bin_edge - leftmost_bin_edge)
                         * (numel_be - 1));
+
+                int64_t pos_min = std::max(static_cast<int64_t>(0), pos - 1);
+                int64_t pos_max = std::min(pos + 2, numel_be);
+                pos = std::upper_bound(data_be + pos_min, data_be + pos_max, elt) - data_be - 1;
             } else {
                 // Handles the general case via binary search on the bin edges.
                 pos = std::upper_bound(data_be, data_be + numel_be, elt) - data_be - 1;
