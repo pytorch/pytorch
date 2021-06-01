@@ -6,7 +6,7 @@ from unittest import skipIf
 
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 try:
     from .common import PackageTestCase
@@ -224,19 +224,27 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        try:
+        with self.assertRaises(PackagingError) as e:
             with PackageExporter(buffer, verbose=False) as he:
                 he.save_pickle("obj", "obj.pkl", obj2)
-        except PackagingError as e:
-            self.assertEqual(e.unhandled, set(["package_a", "package_a.subpackage"]))
-        else:
-            self.fail("PackagingError should have been raised")
+
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Module did not match against any action pattern. Extern, mock, or intern it.
+                    package_a
+                    package_a.subpackage
+                """
+            ),
+        )
 
         # Interning all dependencies should work
         with PackageExporter(buffer, verbose=False) as he:
             he.intern(["package_a", "package_a.subpackage"])
             he.save_pickle("obj", "obj.pkl", obj2)
 
+    @skipIf(IS_WINDOWS, "extension modules have a different file extension on windows")
     def test_broken_dependency(self):
         """A unpackageable dependency should raise a PackagingError."""
 
@@ -262,16 +270,23 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        try:
+        with self.assertRaises(PackagingError) as e:
             with PackageExporter(
                 buffer, verbose=False, importer=BrokenImporter()
             ) as exporter:
                 exporter.intern(["foo", "bar"])
                 exporter.save_source_string("my_module", "import foo; import bar")
-        except PackagingError as e:
-            self.assertEqual(set(e.broken.keys()), set(["foo", "bar"]))
-        else:
-            self.fail("PackagingError should have been raised")
+
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Module is a C extension module. torch.package supports Python modules only.
+                    foo
+                    bar
+                """
+            ),
+        )
 
 
 if __name__ == "__main__":
