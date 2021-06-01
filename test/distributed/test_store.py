@@ -47,6 +47,7 @@ DEFAULT_HOSTNAME = "localhost"
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
     GPUs on each node. Nccl backend requires equal #GPUs in each process.
@@ -61,6 +62,7 @@ def gpus_for_rank(world_size):
             visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process]
         )
     return gpus_for_rank
+
 
 class StoreTestBase(object):
     def _create_store(self, i):

@@ -43,6 +43,7 @@ else:
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
     GPUs on each node. Nccl backend requires equal #GPUs in each process.
@@ -349,6 +350,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 wrapper_pg.scatter([outputs[self.rank]], [input], opts).wait()
             else:
                 wrapper_pg.scatter([outputs[self.rank]], [], opts).wait()
+
 
 class AbstractDistributedDataParallelTest(object):
     def tearDown(self):
