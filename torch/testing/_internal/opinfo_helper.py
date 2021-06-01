@@ -4,7 +4,6 @@ from functools import partial
 
 import torch
 from torch.testing._internal.common_cuda import (TEST_CUDA)
-import torch.testing._internal.common_methods_invocations as cmi
 from torch.testing._core import _dispatch_dtypes
 from torch.testing import (all_types_and_complex_and,
                            all_types_and_complex,
@@ -73,7 +72,7 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
 
 
 def dtypes_dispatch_hint(dtypes):
-    return_type = collections.namedtuple('dispatch_hint_return_type', 'dispatch_fn dispatch_fn_str')
+    return_type = collections.namedtuple('return_type', 'dispatch_fn dispatch_fn_str')
 
     # CUDA is not available, dtypes will be empty.
     if len(dtypes) == 0:
@@ -129,6 +128,9 @@ def str_format_dynamic_dtype(op):
 
 # Run using `python -m torch.testing._internal.opinfo_helper`
 if __name__ == '__main__':
+    # import here to break circular dependency(?)
+    import torch.testing._internal.common_methods_invocations as cmi
+
     filtered_ops = list(filter(is_dynamic_dtype_set, cmi.op_db))
     print("The operator/s below is using dynamic_dtypes in the OpInfo entry!")
     for op in filtered_ops:

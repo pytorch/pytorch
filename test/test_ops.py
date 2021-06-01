@@ -28,7 +28,7 @@ class TestOpInfo(TestCase):
     exact_dtype = True
 
     @classmethod
-    def tearDownClass(self):
+    def tearDownClass(cls):
         if IS_PYTORCH_CI:
             # Assure no opinfo entry has dynamic_dtypes
             filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
