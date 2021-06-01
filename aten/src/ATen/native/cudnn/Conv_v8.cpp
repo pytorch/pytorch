@@ -84,7 +84,7 @@ struct CacheKey {
 };
 
 // FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
+std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
 
 }
 
@@ -96,12 +96,7 @@ void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, c
    key.w_alignment = getAlignment(w);
 }
 
-void run_conv_cfg(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, cudnn_frontend::ManagedOpaqueDescriptor cfg) {
-    auto plan = cudnn_frontend::ExecutionPlanBuilder()
-        .setHandle(handle)
-        .setEngineConfig(cfg)
-        .build();
-
+void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, cudnn_frontend::ExecutionPlan& plan) {
     auto workspace_size = plan.getWorkspaceSize();
     Tensor workspace;
     workspace = at::empty({workspace_size}, x.options().dtype(kByte));
@@ -145,10 +140,15 @@ void get_configs_from_heuristics(cudnn_frontend::EngineConfigList& filtered_conf
 }
 
 void try_filtered_configs(const cudnn_frontend::EngineConfigList filtered_configs, const CacheKey key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
-  for (auto &cfg : filtered_configs) {
+  for (auto cfg : filtered_configs) {
     try {
-      run_conv_cfg(handle, x, y, w, cfg);
-      engine_cache[key] = cfg;
+      auto plan = cudnn_frontend::ExecutionPlanBuilder()
+          .setHandle(handle)
+          .setEngineConfig(cfg)
+          .build();
+      run_conv_plan(handle, x, y, w, plan);
+      engine_cache.emplace(key, std::move(plan));
+      //TORCH_CHECK(engine_cache.count(key), "this never fires");
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
   }
@@ -167,7 +167,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   get_cachekey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
   auto search = engine_cache.find(key);
   if (search != engine_cache.end()) {
-    run_conv_cfg(handle, x, y, w, search->second);
+    run_conv_plan(handle, x, y, w, search->second);
     return;
   }
 
