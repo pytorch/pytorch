@@ -30,15 +30,15 @@ class TestOpInfo(TestCase):
     @classmethod
     def tearDownClass(cls):
         if IS_PYTORCH_CI:
+            err_msg = ("The operator/s below is using dynamic_dtypes in the OpInfo entry!"
+                       "Please set the dtypes manually")
             # Assure no opinfo entry has dynamic_dtypes
             filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
             for op in filtered_ops:
                 fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
-                print(fmt_str)
+                err_msg += "\n" + fmt_str
 
-            assert len(filtered_ops) == 0, \
-                ("The above operator/s is using dynamic_dtypes in the OpInfo entry!"
-                    "Please set the dtypes manually")
+            assert len(filtered_ops) == 0, err_msg
 
     # Verifies that ops have their unsupported dtypes
     #   registered correctly by testing that each claimed unsupported dtype
