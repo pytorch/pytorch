@@ -1219,13 +1219,13 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    def test_special_i0e_vs_scipy(self, device, dtype):
-        def check_equal(t):
+    def test_special_i0_i1_vs_scipy(self, device, dtype):
+        def check_equal(t, torch_fn, scipy_fn):
             # Test by comparing to scipy
-            actual = torch.special.i0e(t)
+            actual = torch_fn(t)
             if dtype is torch.bfloat16:
                 t = t.to(torch.float32)
-            expected = scipy.special.i0e(t.cpu().numpy())
+            expected = scipy_fn(t.cpu().numpy())
 
             # Casting down for dtype float16 is required since scipy upcasts to float32
             if dtype is torch.bfloat16 or dtype is torch.float16:
@@ -1233,11 +1233,43 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(actual, expected)
 
         t = torch.tensor([], device=device, dtype=dtype)
-        check_equal(t)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
         range = (-1e7, 1e7)
         if dtype == torch.half:
             range = (-65000, 65000)
+
+        t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
+
+        # NaN, inf, -inf are tested in reference_numerics tests.
+        info = torch.finfo(dtype)
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
+        t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
+
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_special_ndtr_vs_scipy(self, device, dtype):
+        def check_equal(t):
+            # Test by comparing to scipy
+            actual = torch.special.ndtr(t)
+            expected = scipy.special.ndtr(t.cpu().numpy())
+            self.assertEqual(actual, expected)
+
+        range = (-10, 10)
 
         t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
         check_equal(t)
