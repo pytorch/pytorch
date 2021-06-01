@@ -1136,7 +1136,7 @@ class Quantizer:
             qconfig_map,
             custom_module_classes=custom_module_classes)
 
-        self.quantized_graph = Graph()
+        quantized_graph = Graph()
         env: Dict[str, Tuple[Node, Optional[torch.dtype]]] = {}
 
         graph_inputs: List[str] = []
@@ -1279,7 +1279,7 @@ class Quantizer:
             prev_node = node.args[0]
             if observer_module.dtype == torch.float32:
                 # copy the observer for fp32 dtype
-                env[node.name] = self.quantized_graph.node_copy(
+                env[node.name] = quantized_graph.node_copy(
                     node, load_non_quantized), torch.float
             elif isinstance(prev_node, Node) and prev_node.name in env:
                 # if previous node is already quantized, we'll just remove the
@@ -1294,7 +1294,7 @@ class Quantizer:
                     observer_dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                     env[node.name] = (
                         quantize_node(self, load_non_quantized(prev_node),
-                                      observer_module, node, modules, is_input=True),
+                                      observer_module, node, modules, quantized_graph, is_input=True),
                         observer_dtype)
             else:
                 # replace activation post process with quantization ops
@@ -1303,7 +1303,7 @@ class Quantizer:
                 dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                 env[node.name] = (
                     quantize_node(self, load_non_quantized(node.args[0]),
-                                  observer_module, node, modules, is_input=True),
+                                  observer_module, node, modules, quantized_graph, is_input=True),
                     dtype)
 
         # additional state to override inputs to be quantized, if specified
@@ -1325,7 +1325,7 @@ class Quantizer:
                     graph_output = map_arg(node.args[0], load_x)
                 else:
                     graph_output = map_arg(node.args[0], load_non_quantized)
-                self.quantized_graph.output(graph_output)
+                quantized_graph.output(graph_output)
                 continue
             root_node, matched, matched_pattern, obj, qconfig = \
                 matches.get(node.name, (None, None, None, None, None))
@@ -1336,7 +1336,7 @@ class Quantizer:
                         modules[node.target])
                 )
                 if qconfig is None and not is_observed_standalone_module_node:
-                    result = self.quantized_graph.node_copy(
+                    result = quantized_graph.node_copy(
                         node, load_non_quantized)
                     quantized = False
                 else:
@@ -1352,7 +1352,7 @@ class Quantizer:
 
                     qconfig = qconfig_map[node.name]
                     result = obj.convert(
-                        self, node, qconfig, modules, load_arg, is_reference=is_reference,
+                        self, node, qconfig, modules, quantized_graph, load_arg, is_reference=is_reference,
                         convert_custom_config_dict=convert_custom_config_dict)
                     if not is_observed_standalone_module_node:
                         quantized = is_output_quantized(node, obj, qconfig, modules)
@@ -1372,7 +1372,7 @@ class Quantizer:
                     # In this case, we need to make sure to populate the env with
                     # intermediate nodes manually, because the QuantizeHandler.convert
                     # function will not be called.
-                    result = self.quantized_graph.node_copy(
+                    result = quantized_graph.node_copy(
                         node, load_non_quantized)
                     env[node.name] = result, torch.float
                 continue
@@ -1386,11 +1386,11 @@ class Quantizer:
                 placeholder_node_seen_cnt += 1
                 if cur_placeholder_node_idx in input_quantized_idxs:
                     env[node.name] = \
-                        self.quantized_graph.node_copy(
+                        quantized_graph.node_copy(
                             node, load_non_quantized), torch.quint8
                 else:
                     env[node.name] = \
-                        self.quantized_graph.node_copy(node, load_non_quantized), torch.float
+                        quantized_graph.node_copy(node, load_non_quantized), torch.float
             else:
                 # copy quantized or non-quantized node
                 # get_tensor_info_node like shape works for both
@@ -1398,10 +1398,10 @@ class Quantizer:
                 # (we use None for dtype currently for non-Tensors)
                 if is_get_tensor_info_node(node):
                     env[node.name] = \
-                        self.quantized_graph.node_copy(node, load_x), None
+                        quantized_graph.node_copy(node, load_x), None
                 else:
                     env[node.name] = \
-                        self.quantized_graph.node_copy(node, load_non_quantized), torch.float
+                        quantized_graph.node_copy(node, load_non_quantized), torch.float
 
         # remove activation post process
         act_post_process_removed_graph = Graph()
@@ -1410,7 +1410,7 @@ class Quantizer:
         def load_arg_remove(a: Argument) -> Argument:
             return map_arg(a, lambda node: remove_env[node.name])
 
-        for node in self.quantized_graph.nodes:
+        for node in quantized_graph.nodes:
             if node.op == 'output':
                 act_post_process_removed_graph.output(
                     map_arg(node.args[0], load_arg_remove))
