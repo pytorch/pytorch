@@ -1436,7 +1436,7 @@ AT_ERROR("inverse: MAGMA library not found in "
   magmaGetri<scalar_t>(
     n, self_data, lda, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, &info_getri_cpu);
   info_lu.fill_(info_lu_cpu);
-  info_getri.fill_(info_lu_cpu);
+  info_getri.fill_(info_getri_cpu);
 #endif
 }
 
