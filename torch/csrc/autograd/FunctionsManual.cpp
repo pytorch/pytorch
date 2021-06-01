@@ -2,6 +2,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/Reduction.h>
@@ -784,30 +785,32 @@ Tensor sparse_sparse_matmul_backward(
   return _sparse_matrix_mask(b_grad.coalesce(), b.coalesce());
 }
 
-Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
-  auto transposed_sizes = self.transpose(dim, 0).sizes().vec();
-  auto flatten = [&](const Tensor & t) {
-    return t.transpose(dim, 0).contiguous().view({t.size(dim), -1});
-  };
-  auto unflatten = [&](const Tensor & t) {
-    return t.contiguous().view(transposed_sizes).transpose(dim, 0);
-  };
+Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p_s, int64_t dim, const Scalar& maxnorm) {
+  auto self_sizes = self.sizes();
+  at::DimVector reduce_dims(self_sizes.size());
+  std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
+  reduce_dims.erase(reduce_dims.begin() + dim);
 
-  // renorm computes the norm over all dimensions except `dim`, which is why
-  // we need the flatten and unflatten business. TODO: simplify this when we
-  // add support for norm over multiple dimensions.
-  auto self_flat = flatten(self);
-  auto grad_flat = flatten(grad);
-  auto norm_flat = self_flat.norm(p, 1, true);
-  auto grad_output = (self_flat * grad_flat).sum(1, true);
-  auto nb = norm_backward(grad_output, self_flat, p, norm_flat, 1, true);
-  auto invnorm = (norm_flat + 1e-7).reciprocal();
-  auto grad_norm = unflatten(maxnorm * invnorm * (grad_flat - invnorm * nb));
-  auto norm = unflatten(norm_flat.expand_as(self_flat));
+  auto dtype = self.scalar_type();
+  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
+  const auto p = p_s.toDouble();
 
-  // TODO: remove the detach once comparison ops no longer require grad
-  auto mask = Variable(norm < maxnorm).detach();
-  return at::where(mask, grad, grad_norm);
+  Tensor norm;
+  if (acc_type != dtype) {
+    norm = at::linalg_vector_norm(
+        self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
+  } else {
+    norm = at::linalg_vector_norm(
+        self, p, reduce_dims, /*keepdim=*/true);
+  }
+  auto grad_output = (self.conj() * grad).sum(
+      reduce_dims, /*keepdim=*/true, /*dtype=*/c10::toValueType(acc_type));
+  auto nb = linalg_vector_norm_backward(
+      grad_output, self, p, norm, reduce_dims, /*keepdim=*/true);
+
+  auto invnorm = (norm + 1e-7).reciprocal();
+  auto grad_norm = maxnorm * invnorm * (grad - invnorm * nb);
+  return at::where(norm > maxnorm, grad_norm.to(grad.scalar_type()), grad);
 }
 
 Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape) {
