@@ -144,7 +144,7 @@ constexpr struct trivial_init_t {
 struct nullopt_t {
   constexpr explicit nullopt_t(int) {}
 };
-constexpr nullopt_t nullopt{0};
+constexpr c10::nullopt_t nullopt{0};
 
 // 20.5.8, class bad_optional_access
 class bad_optional_access : public std::logic_error {
@@ -1107,18 +1107,19 @@ constexpr bool operator>=(const T& v, const optional<const T&>& x) {
 
 // 20.5.12, Specialized algorithms
 template <class T>
-void swap(optional<T>& x, optional<T>& y) noexcept(noexcept(x.swap(y))) {
+void swap(c10::optional<T>& x, c10::optional<T>& y) noexcept(
+    noexcept(x.swap(y))) {
   x.swap(y);
 }
 
 template <class T>
-constexpr optional<typename std::decay<T>::type> make_optional(T&& v) {
-  return optional<typename std::decay<T>::type>(constexpr_forward<T>(v));
+constexpr c10::optional<typename std::decay<T>::type> make_optional(T&& v) {
+  return c10::optional<typename std::decay<T>::type>(constexpr_forward<T>(v));
 }
 
 template <class X>
-constexpr optional<X&> make_optional(std::reference_wrapper<X> v) {
-  return optional<X&>(v.get());
+constexpr c10::optional<X&> make_optional(std::reference_wrapper<X> v) {
+  return c10::optional<X&>(v.get());
 }
 
 } // namespace c10

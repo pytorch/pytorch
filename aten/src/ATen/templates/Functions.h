@@ -86,7 +86,7 @@ class TORCH_API TensorMaker {
  public:
   using ContextDeleter = DeleterFnPtr;
 
-  TensorMaker& strides(optional<IntArrayRef> value) noexcept {
+  TensorMaker& strides(c10::optional<IntArrayRef> value) noexcept {
     strides_ = value;
 
     return *this;
@@ -105,7 +105,7 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  TensorMaker& target_device(optional<Device> value) noexcept {
+  TensorMaker& target_device(c10::optional<Device> value) noexcept {
     device_ = value;
 
     return *this;
@@ -133,10 +133,10 @@ class TORCH_API TensorMaker {
 
   void* data_;
   IntArrayRef sizes_;
-  optional<IntArrayRef> strides_{};
+  c10::optional<IntArrayRef> strides_{};
   std::function<void(void*)> deleter_{};
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
-  optional<Device> device_{};
+  c10::optional<Device> device_{};
   TensorOptions opts_{};
 };
 
