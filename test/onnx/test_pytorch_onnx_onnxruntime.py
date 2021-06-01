@@ -5023,6 +5023,16 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Zero_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Zero_(), x, remained_onnx_input_idx=[])
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_new_ones(self):
+        class OnesModel(torch.nn.Module):
+            def forward(self, x):
+                return x.new_ones(x.shape[1:2]), x.new_ones(x.shape[2:], dtype=torch.long)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(OnesModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(OnesModel(), x, remained_onnx_input_idx=[])
+
     @skipIfONNXShapeInference(True)
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tolist(self):
