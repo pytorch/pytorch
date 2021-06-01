@@ -163,6 +163,16 @@ const auto flatten_script_2 = R"JIT(
       return torch.flatten(b, start_dim, end_dim)
 )JIT";
 
+const auto clone_script_0 = R"JIT(
+  def forward(self, input):
+      return torch.clone(input)
+)JIT";
+
+const auto clone_script_1 = R"JIT(
+  def forward(self, input: Tensor, memory_format: int):
+      return torch.clone(input, memory_format=memory_format)
+)JIT";
+
 const auto aten_sum = R"JIT(
   def forward(self, input):
       return torch.sum(input)
@@ -321,4 +331,39 @@ const auto norm_5arg = R"JIT(
 const auto aten_matmul = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.matmul(a, b)
+)JIT";
+
+const std::string repeat = R"JIT(
+  def forward(self, a: Tensor, repeats: List[int]):
+      return torch.repeat(a, repeats)
+)JIT";
+
+const auto clamp_script_1 = R"JIT(
+  def forward(self, inp: Tensor, min: int, max: int):
+      a = torch.clamp(inp, min, max)
+      return (a)
+)JIT";
+
+const auto clamp_script_2 = R"JIT(
+  def forward(self, inp: Tensor, min: Tensor, max: Tensor):
+      a = torch.clamp(inp, min, max)
+      return (a)
+)JIT";
+
+const auto full_like_script = R"JIT(
+  def forward(self,
+              a: Tensor,
+              fill_value: int,
+              dtype: Optional[int],
+              layout: Optional[int],
+              device: Optional[Device],
+              pin_memory: Optional[bool],
+              memory_format: Optional[int]):
+      return torch.full_like(a,
+                             fill_value,
+                             dtype=dtype,
+                             layout=layout,
+                             device=device,
+                             pin_memory=pin_memory,
+                             memory_format=memory_format)
 )JIT";

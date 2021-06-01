@@ -420,13 +420,17 @@ const auto kLoopbackAddress = "127.0.0.1";
 
 // static
 void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
-  std::exception_ptr eptr;
   try {
     work->run();
   } catch (...) {
-    eptr = std::current_exception();
+    work->finishWorkGlooError(std::current_exception());
+    return;
   }
-  work->finish(eptr);
+
+  // FIXME: We need to call it here since Future completion requires all
+  // the work to be synchronized to CUDA.
+  work->synchronize();
+  work->finishWorkGloo();
 }
 
 std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
@@ -435,9 +439,59 @@ std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
       "Work needs to be completed before calling result(). "
       "Should call wait() before result().");
   TORCH_CHECK(
-      outputTensors_.size() <= 1, "work result does not support list of lists.");
+      outputTensors_.size() <= 1,
+      "work result does not support list of lists, use .getFuture() and value()");
   return outputTensors_.size() == 0 ? std::vector<at::Tensor>()
                                     : outputTensors_.at(0);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
+    getFuture() {
+  return future_;
+}
+
+namespace {
+c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
+    const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  if (outputTensors.size() > 1) {
+    return c10::make_intrusive<c10::ivalue::Future>(
+        c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+  }
+  return c10::make_intrusive<c10::ivalue::Future>(
+      c10::ListType::create(c10::TensorType::get()));
+}
+
+void returnFutureWithOutput(
+    c10::intrusive_ptr<c10::ivalue::Future>& future,
+    const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  if (outputTensors.size() == 0) {
+    future->markCompleted(c10::IValue(std::vector<at::Tensor>()));
+    return;
+  }
+  if (outputTensors.size() > 1) {
+    future->markCompleted(c10::IValue(outputTensors));
+    return;
+  }
+  future->markCompleted(c10::IValue(outputTensors[0]));
+}
+} // namespace
+
+ProcessGroupGloo::AsyncWork::AsyncWork(
+    std::vector<std::vector<at::Tensor>> outputTensors,
+    const char* profilingTitle,
+    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+      outputTensors_(std::move(outputTensors)),
+      future_(createFutureAsOutput(outputTensors)) {}
+
+void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
+  future_->setError(eptr);
+  finish(eptr);
+}
+
+void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
+  returnFutureWithOutput(future_, outputTensors_);
+  finish();
 }
 
 ProcessGroupGloo::SendWork::SendWork(
@@ -2779,7 +2833,10 @@ void ProcessGroupGloo::monitoredBarrier(
         }
         // If we are collecting all failed ranks, check if we need to throw if
         // some ranks have not responded.
-        if (waitAllRanks && processedRanks.size() != size_) {
+        // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
+        // processed.
+        auto rankFailure = (processedRanks.size() != size_ - 1);
+        if (waitAllRanks && rankFailure) {
           std::vector<int> failedRanks;
           for (int i = 1; i < size_; ++i) {
             if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
@@ -2835,10 +2892,9 @@ void ProcessGroupGloo::setSequenceNumberForGroup() {
 }
 
 uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
-  TORCH_CHECK(
-      sequenceNum_ != c10::nullopt,
-      "Sequence number is not set for rank ",
-      rank_);
+  if (sequenceNum_ == c10::nullopt) {
+    return 0;
+  }
   return sequenceNum_->get();
 }
 
