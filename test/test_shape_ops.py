@@ -365,10 +365,10 @@ class TestShapeOps(TestCase):
             data = torch.arange(1, 9, device=device).view(2, 2, 2)
             nonctg = make_tensor((2, 2, 2), device, dtype=data.dtype, noncontiguous=True).copy_(data)
 
-            dims_result = ((0,         torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2)),
-                           (1,         torch.tensor([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2)),
-                           (2,         torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2)),
-                           ((0, 1),    torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2)),
+            dims_result = ((0, torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2)),
+                           (1, torch.tensor([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2)),
+                           (2, torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2)),
+                           ((0, 1), torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2)),
                            ((0, 1, 2), torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2)))
             for in_tensor, (dims, out_tensor) in product((data, nonctg), dims_result):
                 yield in_tensor, dims, out_tensor
