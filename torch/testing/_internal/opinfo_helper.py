@@ -59,14 +59,22 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
     supported_dtypes = set()
     for dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
         samples = sample_inputs_fn(op, device_type, dtype, False)
+
+        # We assume the dtype is supported
+        # only if all samples pass for the given dtype.
+        supported = True
         for sample in samples:
             try:
                 op(sample.input, *sample.args, **sample.kwargs)
-                supported_dtypes.add(dtype)
             except RuntimeError as re:
                 if "not implemented for" not in str(re):
                     raise re
-                pass
+                else:
+                    # dtype is not supported
+                    supported = False
+
+        if supported:
+            supported_dtypes.add(dtype)
 
     return _dynamic_dispatch_dtypes(supported_dtypes)
 
