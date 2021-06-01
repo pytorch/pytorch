@@ -787,7 +787,7 @@ inline v16sf sin512_ps(v16sf x) { // any x
      Both branches will be computed.
   */
   imm2 = _mm512_and_si512(imm2, *(v16si*)_pi32_512_2);
-  __mmask16 imm2_mask = _mm512_cmpeq_epi32_mask(imm2,*(v16si*)_pi32_512_0); 
+  __mmask16 imm2_mask = _mm512_cmpeq_epi32_mask(imm2,*(v16si*)_pi32_512_0);
   v16si all_one = _mm512_set1_epi32(0xffffffff);
   v16si all_zero = _mm512_set1_epi32(0x00000000);
   imm2 = _mm512_mask_blend_epi32(imm2_mask, all_zero, all_one);
