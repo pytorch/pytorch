@@ -89,6 +89,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/runtime/static/init.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
@@ -168,11 +169,22 @@ void initJITBindings(PyObject* module) {
           "_new_symbolic_shape_symbol",
           []() { return c10::ShapeSymbol::newSymbol().value(); })
       .def(
-          "_jit_register_operator_shape_function",
-          RegisterOperatorShapeFunction)
+          "_jit_shape_compute_graph_for_node",
+          [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
+            if (!n->maybeSchema()) {
+              return c10::nullopt;
+            }
+            return shapeComputeGraphForSchema(n->schema());
+          })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
+      .def(
+          "_jit_set_symbolic_shapes_test_mode",
+          &setSymbolicShapeAnalysisTestMode)
+      .def(
+          "_jit_symbolic_shapes_test_mode_enabled",
+          &symbolicShapeAnalysisTestModeEnabled)
       .def(
           "_jit_pass_onnx_fold_if",
           [](std::shared_ptr<Graph>& graph) {

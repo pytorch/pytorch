@@ -278,7 +278,6 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9), sparse.values())
 
-    @onlyCPU
     @dtypes(torch.double)
     def test_dense_convert(self, device, dtype):
         size = (5, 5)
@@ -400,7 +399,35 @@ class TestSparseCSR(TestCase):
                 for k in range(2, 8):
                     test_shape(i, j, k, i * j // 2)
 
-    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_add(self, device, dtype):
+        def _test_spadd_shape(nnz, shape):
+            x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
+            y = torch.randn(*shape, dtype=dtype, device=device)
+            r = random.random()
+
+            res = torch.add(y, x, alpha=r)
+            expected = y + r * x.to_dense()
+            self.assertEqual(res, expected)
+
+            # Non contiguous dense tensor
+            s = list(shape)
+            s[0] = shape[-1]
+            s[-1] = shape[0]
+            y = torch.randn(*s, dtype=torch.double, device=device)
+            y.transpose_(0, len(s) - 1)
+            r = random.random()
+
+            res = torch.add(y, x, alpha=r)
+            expected = y + r * x.to_dense()
+
+            self.assertEqual(res, expected)
+
+        _test_spadd_shape(10, [100, 100])
+        _test_spadd_shape(0, [100, 100])
+        _test_spadd_shape(10, [100, 1])
+        _test_spadd_shape(10, [1, 100])
+
     @dtypes(*torch.testing.floating_types())
     def test_coo_csr_conversion(self, device, dtype):
         size = (5, 5)
