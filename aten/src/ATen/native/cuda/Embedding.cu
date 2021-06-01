@@ -8,7 +8,6 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCThrustAllocator.cuh>
-#include <THC/THCReduce.cuh>
 
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
