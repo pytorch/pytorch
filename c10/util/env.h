@@ -3,8 +3,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <cstring>
-#include <iostream>
-#include <sstream>
 
 namespace c10 {
 namespace utils {
@@ -31,7 +29,7 @@ optional<bool> check_env(const char* name) {
         envar,
         "valid values are 0 or 1.");
   }
-  return {};
+  return c10::nullopt;
 }
 } // namespace utils
 } // namespace c10
