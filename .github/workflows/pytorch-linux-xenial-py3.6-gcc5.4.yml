@@ -1,5 +1,5 @@
 # @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/linux_ci_workflow.yml
+# Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Linux CI (pytorch-linux-xenial-py3.6-gcc5.4)
 
@@ -21,6 +21,10 @@ env:
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+
+concurrency:
+  group: pytorch-linux-xenial-py3.6-gcc5.4-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   calculate-docker-image:
