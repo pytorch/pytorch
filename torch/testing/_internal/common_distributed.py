@@ -2,7 +2,6 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 import faulthandler
-from multiprocessing import Manager
 from io import StringIO
 import os
 import sys
@@ -428,7 +427,7 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc) -> None:
-        test_skips_manager = Manager()
+        test_skips_manager = torch.multiprocessing.get_context("spawn").Manager()
         test_skips = test_skips_manager.dict()
         global TEST_SKIPS
         test_skips.update(TEST_SKIPS)
