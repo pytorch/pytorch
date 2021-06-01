@@ -1919,7 +1919,8 @@ static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& in
 #ifdef USE_CUSOLVER
   // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
   auto m = input.size(-2);
-  if (batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_) {
+  // exclude complex128 since nan_to_num_ does not work with it.
+  if (batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_ || !input.is_complex()) {
     lu_cusolver_looped(input, pivots, infos, compute_pivots);
   }
 #else
