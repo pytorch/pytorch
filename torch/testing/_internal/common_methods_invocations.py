@@ -6418,7 +6418,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hypot,
            ),
     OpInfo('histogram',
-           dtypes=[],
+           dtypes=_dispatch_dtypes(), # histogram is only implemented on CPU
            dtypesIfCPU=floating_types(),
            sample_inputs_func=sample_inputs_histogram,
            supports_autograd=False,
