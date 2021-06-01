@@ -546,7 +546,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             remote_module2 = rpc.rpc_sync(
                 dst_worker2_name,
                 create_remote_module_by_module_rref,
-                ("{}/cuda:0".format(dst_worker2_name), remote_module.module_rref),
+                (dst_worker2_name, remote_module.get_module_rref()),
             )
 
             args = (torch.ones(1), 2, "3")
