@@ -1219,7 +1219,7 @@ class Quantizer:
                 'trying to load quantized node but did not find node:' + \
                 n.name + ' in environment:' + str(env)
             quantized_node, dtype = env[n.name]
-            assert dtype in [torch.quint8, torch.int8, torch.float16], \
+            assert dtype in [torch.quint8, torch.qint8, torch.float16], \
                 f'Expecting node {quantized_node} to be quantized but got dtype: {dtype}'
             return quantized_node
 
@@ -1450,7 +1450,7 @@ class Quantizer:
                 if cur_placeholder_node_idx in input_quantized_idxs:
                     env[node.name] = \
                         quantized_graph.node_copy(
-                            node, load_non_quantized), activation_dtype(qconfig) if qconfig else torch.float
+                            node, load_non_quantized), torch.quint8
                 else:
                     env[node.name] = \
                         quantized_graph.node_copy(node, load_non_quantized), torch.float
