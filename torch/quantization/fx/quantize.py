@@ -955,14 +955,6 @@ def run_weight_observers(observed: GraphModule) -> None:
 
 class Quantizer:
     def __init__(self):
-        # mapping from fully qualified module name to module instance
-        # for example,
-        # {
-        #   '': Model(...),
-        #   'linear': Linear(...),
-        #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
-        # }
-        self.modules: Dict[str, torch.nn.Module] = {}
         # mapping from a tuple of nodes in reverse order to uninitialized
         #   QuantizeHandler subclass. For example,
         # {
@@ -1021,11 +1013,18 @@ class Quantizer:
                 "additional_qat_module_mapping", {})
             qat_swap_modules(model, additional_qat_module_mapping)
 
-        self.modules = dict(model.named_modules())
+        # mapping from fully qualified module name to module instance
+        # for example,
+        # {
+        #   '': Model(...),
+        #   'linear': Linear(...),
+        #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
+        # }
+        modules = dict(model.named_modules())
 
         self.node_name_to_scope = node_name_to_scope
         # fill qconfig_map, a map from node name to qconfig, used in _find_matches
-        qconfig_map = generate_qconfig_map(model, self.modules, model.graph, qconfig_dict, node_name_to_scope)
+        qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_dict, node_name_to_scope)
 
         # match the patterns that will get quantized
         standalone_module_name_configs = prepare_custom_config_dict.get(
@@ -1038,7 +1037,7 @@ class Quantizer:
         custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         matches = self._find_matches(
-            model.graph, self.modules, self.patterns, qconfig_map, standalone_module_names,
+            model.graph, modules, self.patterns, qconfig_map, standalone_module_names,
             standalone_module_classes, custom_module_classes)
 
         input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
@@ -1047,10 +1046,10 @@ class Quantizer:
             "output_quantized_idxs", [])
 
         run_prepare_fx_on_standalone_modules(
-            model, self.modules, matches, prepare_custom_config_dict)
+            model, modules, matches, prepare_custom_config_dict)
 
         result_node = insert_observers_for_model(
-            model, self.modules, matches, qconfig_map,
+            model, modules, matches, qconfig_map,
             model.graph, prepare_custom_config_dict,
             input_quantized_idxs, output_quantized_idxs)
 
@@ -1118,13 +1117,22 @@ class Quantizer:
 
         # move to cpu since we only have quantized cpu kernels
         model.eval().cpu()
-        self.modules = dict(model.named_modules(remove_duplicate=False))
+        # mapping from fully qualified module name to module instance
+        # for example,
+        # {
+        #   '': Model(...),
+        #   'linear': Linear(...),
+        #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
+        # }
+        # We use remove_duplicate=False here because torch.cat uses
+        # the same activation_post_process module instance but different names
+        modules = dict(model.named_modules(remove_duplicate=False))
 
         custom_module_classes = get_custom_module_class_keys(
             convert_custom_config_dict,
             "observed_to_quantized_custom_module_class")
         matches = self._find_matches(
-            model.graph, self.modules, self.patterns,
+            model.graph, modules, self.patterns,
             qconfig_map,
             custom_module_classes=custom_module_classes)
 
@@ -1233,9 +1241,9 @@ class Quantizer:
             else:
                 return False
 
-        def is_output_quantized(node: Node, obj: QuantizeHandler, qconfig: QConfigAny) -> bool:
+        def is_output_quantized(node: Node, obj: QuantizeHandler, qconfig: QConfigAny, modules: Dict[str, torch.nn.Module]) -> bool:
             """ Check if output node is quantized or not """
-            assert self.modules is not None
+            assert modules is not None
             # by default the output for a quantizable node is expected to be quantized
             quantized = True
 
@@ -1262,12 +1270,12 @@ class Quantizer:
 
             return quantized
 
-        def insert_quantize_node(node: Node) -> None:
+        def insert_quantize_node(node: Node, modules: Dict[str, torch.nn.Module]) -> None:
             """ Given a activation_post_process module call node, insert a
             quantize node"""
-            assert self.modules is not None
+            assert modules is not None
             assert isinstance(node.target, str)
-            observer_module = self.modules[node.target]
+            observer_module = modules[node.target]
             prev_node = node.args[0]
             if observer_module.dtype == torch.float32:
                 # copy the observer for fp32 dtype
@@ -1281,21 +1289,21 @@ class Quantizer:
                 if prev_dtype == current_dtype:
                     env[node.name] = env[prev_node.name]
                 else:
-                    root_module = self.modules[""]
+                    root_module = modules[""]
                     assert isinstance(prev_node, Node)
                     observer_dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                     env[node.name] = (
                         quantize_node(self, load_non_quantized(prev_node),
-                                      observer_module, node, is_input=True),
+                                      observer_module, node, modules, is_input=True),
                         observer_dtype)
             else:
                 # replace activation post process with quantization ops
-                root_module = self.modules[""]
+                root_module = modules[""]
                 assert isinstance(node.args[0], Node)
                 dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                 env[node.name] = (
                     quantize_node(self, load_non_quantized(node.args[0]),
-                                  observer_module, node, is_input=True),
+                                  observer_module, node, modules, is_input=True),
                     dtype)
 
         # additional state to override inputs to be quantized, if specified
@@ -1325,7 +1333,7 @@ class Quantizer:
                 is_observed_standalone_module_node = (
                     node.op == 'call_module' and
                     is_observed_standalone_module(
-                        self.modules[node.target])
+                        modules[node.target])
                 )
                 if qconfig is None and not is_observed_standalone_module_node:
                     result = self.quantized_graph.node_copy(
@@ -1338,16 +1346,16 @@ class Quantizer:
                     # for non-standalone module, since _standalone_module_output_quantized_idxs
                     # is only available in observed standalone module
                     if is_observed_standalone_module_node:
-                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator] # noqa: B950
+                        out_quant_idxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator] # noqa: B950
                         assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                         quantized = 0 in out_quant_idxs
 
                     qconfig = qconfig_map[node.name]
                     result = obj.convert(
-                        self, node, qconfig, load_arg, is_reference=is_reference,
+                        self, node, qconfig, modules, load_arg, is_reference=is_reference,
                         convert_custom_config_dict=convert_custom_config_dict)
                     if not is_observed_standalone_module_node:
-                        quantized = is_output_quantized(node, obj, qconfig)
+                        quantized = is_output_quantized(node, obj, qconfig, modules)
 
                 if quantized:
                     env[node.name] = result, activation_dtype(qconfig)
@@ -1371,8 +1379,8 @@ class Quantizer:
 
             # handle activation post process calls
             if node.op == 'call_module' and \
-                    is_activation_post_process(self.modules[node.target]):
-                insert_quantize_node(node)
+                    is_activation_post_process(modules[node.target]):
+                insert_quantize_node(node, modules)
             elif node.op == 'placeholder':
                 cur_placeholder_node_idx = placeholder_node_seen_cnt
                 placeholder_node_seen_cnt += 1
@@ -1408,7 +1416,7 @@ class Quantizer:
                     map_arg(node.args[0], load_arg_remove))
                 continue
             if node.op == 'call_module' and \
-               is_activation_post_process(self.modules[node.target]):
+               is_activation_post_process(modules[node.target]):
                 # remove activation post process node
                 remove_env[node.name] = remove_env[node.args[0].name]
             else:
@@ -1589,39 +1597,39 @@ class Quantizer:
                             record_match(pattern, node, matched)
                             for n in matched:
                                 match_map[n.name] = (
-                                    node, matched, pattern, value(self, node),  # type: ignore[operator]
+                                    node, matched, pattern, value(self, node, modules),  # type: ignore[operator]
                                     qconfig_map[n.name])
                                 all_matched.add(n.name)
                             # break after finding the first match
                             break
 
         # add custom module instances to the match result
-        assert self.modules is not None
+        assert modules is not None
         for node in graph.nodes:
             if node.op == 'call_module' and \
-               type(self.modules[node.target]) in custom_module_classes:
+               type(modules[node.target]) in custom_module_classes:
                 custom_module_qconfig = qconfig_map[node.name]
                 match_map[node.name] = (
-                    node, [node], None, CustomModuleQuantizeHandler(self, node),
+                    node, [node], None, CustomModuleQuantizeHandler(self, node, modules),
                     custom_module_qconfig)
 
-        def is_standalone_module(node_target):
-            assert self.modules is not None
+        def is_standalone_module(node_target: str, modules: Dict[str, torch.nn.Module]):
+            assert modules is not None
             return (
                 node_target in standalone_module_names or  # type: ignore[operator]
-                type(self.modules[node_target]) in standalone_module_classes  # type: ignore[operator]
+                type(modules[node_target]) in standalone_module_classes  # type: ignore[operator]
             )
 
         # add standalone modules to the match
         for node in graph.nodes:
             if node.op == 'call_module' and \
-               (is_standalone_module(node.target) or
-                    is_observed_standalone_module(self.modules[node.target])):
+               (is_standalone_module(node.target, modules) or
+                    is_observed_standalone_module(modules[node.target])):
                 # add node to matched nodes
                 custom_module_qconfig = qconfig_map[node.name]
                 match_map[node.name] = (
                     node, [node], None,
-                    StandaloneModuleQuantizeHandler(self, node),
+                    StandaloneModuleQuantizeHandler(self, node, modules),
                     custom_module_qconfig)
 
         return match_map
