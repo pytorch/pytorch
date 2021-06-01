@@ -27,6 +27,19 @@ method_tested_operators = set(map(lambda test_details: test_details[0], method_t
 class TestOpInfo(TestCase):
     exact_dtype = True
 
+    @classmethod
+    def tearDownClass(self):
+        if IS_PYTORCH_CI:
+            # Assure no opinfo entry has dynamic_dtypes
+            filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
+            for op in filtered_ops:
+                fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
+                print(fmt_str)
+
+            assert len(filtered_ops) == 0, \
+                ("The above operator/s is using dynamic_dtypes in the OpInfo entry!"
+                    "Please set the dtypes manually")
+
     # Verifies that ops have their unsupported dtypes
     #   registered correctly by testing that each claimed unsupported dtype
     #   throws a runtime error
@@ -740,15 +753,4 @@ instantiate_device_type_tests(TestGradients, globals())
 instantiate_device_type_tests(TestCommon, globals())
 
 if __name__ == '__main__':
-    if IS_PYTORCH_CI:
-        # Assure no opinfo entry has dynamic_dtypes
-        filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
-        for op in filtered_ops:
-            fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
-            print(fmt_str)
-
-        assert len(filtered_ops) == 0, \
-            ("The above operator/s is using dynamic_dtypes in the OpInfo entry!"
-             "Please set the dtypes manually")
-
     run_tests()
