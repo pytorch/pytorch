@@ -2351,6 +2351,34 @@ class TestQuantizeFx(QuantizationTestCase):
         mp = prepare_fx(m, qconfig_dict)
         mc = convert_fx(mp)
 
+    def test_shape_followed_by_quantized_op(self):
+        """ Make sure that shape does not dequantize
+        the Tensor before the next operator
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2)
+                self.conv2 = torch.nn.Conv2d(2, 2, 2)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                s = x.shape
+                torch._assert(s == x.shape, "")
+                x = self.conv2(x)
+                return x
+
+        # make sure quantization runs
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        m(torch.randn(2, 2, 4, 4))
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method("dequantize"): 1
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

@@ -114,6 +114,7 @@ class QuantizeHandler(ABC):
 
     def should_mark_output_quantized_from_input_quantized_status(
         self,
+        qconfig: QConfigAny
     ) -> bool:
         """
         Returns true if after convert, the output of the matched pattern is
@@ -1087,8 +1088,10 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 
     def should_mark_output_quantized_from_input_quantized_status(
         self,
+        qconfig: QConfigAny
     ) -> bool:
-        return True
+        # FixQParamOps are the same as CopyNode in int8 quantization
+        return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
 
     # some qhandlers override the activations constructor
     def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
@@ -1180,6 +1183,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 class CopyNodeQuantizeHandler(QuantizeHandler):
     def should_mark_output_quantized_from_input_quantized_status(
         self,
+        qconfig: QConfigAny
     ) -> bool:
         return True
 
