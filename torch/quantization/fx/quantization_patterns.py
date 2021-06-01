@@ -65,7 +65,7 @@ from typing import Any, Callable, Dict, Union, Optional, Tuple, List
 class QuantizeHandler(ABC):
     """ Base handler class for the quantizer patterns
     """
-    def __init__(self, quantizer: QuantizerCls, node: Node, modules: Dict[str, torch.nn.Module]):
+    def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
         """ Records pattern information in __init__, which will be used
         in convert
         """
@@ -211,10 +211,9 @@ binary_reference_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[tor
 class BinaryOpQuantizeHandler(QuantizeHandler):
     def __init__(
             self,
-            quantizer: QuantizerCls,
             node: Node,
             modules: Dict[str, torch.nn.Module]):
-        super().__init__(quantizer, node, modules)
+        super().__init__(node, modules)
         self.relu_node = None
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(modules[str(node.target)], torch.nn.ReLU)):
@@ -438,8 +437,8 @@ class CatQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
 class ConvReluQuantizeHandler(QuantizeHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node, modules: Dict[str, torch.nn.Module]):
-        super().__init__(quantizer, node, modules)
+    def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
+        super().__init__(node, modules)
         self.relu_node = None
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(modules[str(node.target)], torch.nn.ReLU)):
@@ -608,11 +607,11 @@ class ConvReluQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Linear))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Linear))
 class LinearReLUQuantizeHandler(QuantizeHandler):
-    def __init__(self,
-                 quantizer: QuantizerCls,
-                 node: Node,
-                 modules: Dict[str, torch.nn.Module]):
-        super().__init__(quantizer, node, modules)
+    def __init__(
+            self,
+            node: Node,
+            modules: Dict[str, torch.nn.Module]):
+        super().__init__(node, modules)
         self.relu_node = None
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(modules[str(node.target)], torch.nn.ReLU)):
@@ -820,11 +819,11 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
 class BatchNormQuantizeHandler(QuantizeHandler):
-    def __init__(self,
-                 quantizer: QuantizerCls,
-                 node: Node,
-                 modules: Dict[str, torch.nn.Module]):
-        super().__init__(quantizer, node, modules)
+    def __init__(
+            self,
+            node: Node,
+            modules: Dict[str, torch.nn.Module]):
+        super().__init__(node, modules)
         assert node.op == 'call_module'
         self.bn_node = node
         self.bn = modules[str(self.bn_node.target)]
@@ -860,11 +859,11 @@ class BatchNormQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
 class EmbeddingQuantizeHandler(QuantizeHandler):
-    def __init__(self,
-                 quantizer: QuantizerCls,
-                 node: Node,
-                 modules: Dict[str, torch.nn.Module]):
-        super().__init__(quantizer, node, modules)
+    def __init__(
+            self,
+            node: Node,
+            modules: Dict[str, torch.nn.Module]):
+        super().__init__(node, modules)
 
     def input_output_observed(self) -> bool:
         return False
@@ -916,11 +915,11 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.RNNCell)
 @register_quant_pattern(torch.nn.LSTM)
 class RNNDynamicQuantizeHandler(QuantizeHandler):
-    def __init__(self,
-                 quantizer: QuantizerCls,
-                 node: Node,
-                 modules: Dict[str, torch.nn.Module]):
-        super().__init__(quantizer, node, modules)
+    def __init__(
+            self,
+            node: Node,
+            modules: Dict[str, torch.nn.Module]):
+        super().__init__(node, modules)
 
     def input_output_observed(self) -> bool:
         return False
@@ -999,11 +998,11 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
 
-    def __init__(self,
-                 quantizer: QuantizerCls,
-                 node: Node,
-                 modules: Dict[str, torch.nn.Module]):
-        super().__init__(quantizer, node, modules)
+    def __init__(
+            self,
+            node: Node,
+            modules: Dict[str, torch.nn.Module]):
+        super().__init__(node, modules)
         if node.op == "call_function" or node.op == "call_method":
             self.op = node.target
         elif node.op == "call_module":
@@ -1182,10 +1181,9 @@ class ELUQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('tanh_', default_symmetric_fixed_qparams_fake_quant)
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
     def __init__(self,
-                 quantizer: QuantizerCls,
                  node: Node,
                  modules: Dict[str, torch.nn.Module]):
-        super().__init__(quantizer, node, modules)
+        super().__init__(node, modules)
         self.node = node
 
     def should_insert_observer_for_output(
