@@ -2815,17 +2815,16 @@ def sample_inputs_geqrf(op_info, device, dtype, requires_grad=False):
         samples.append(SampleInput(a))
     return samples
 
-def sample_inputs_flip(op_info, device, dtype, requires_grad, **kwargs):
-    tensors = (
-        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    )
+def sample_inputs_flip(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    sizes = ((S, M, S), (S, 0, M))
+    all_dims = ((0, 1, 2), (0,), (0, 2), (-1,), ())
 
-    dims = ((0, 1, 2), (0,), (0, 2), (-1,), ())
+    def gen_samples():
+        for size, dims in product(sizes, all_dims):
+            yield SampleInput(make_arg(size), kwargs={"dims": dims})
 
-    samples = [SampleInput(tensor, kwargs={'dims': dim}) for tensor, dim in product(tensors, dims)]
-
-    return samples
+    return list(gen_samples())
 
 def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs):
     tensors = (

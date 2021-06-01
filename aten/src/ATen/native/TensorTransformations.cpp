@@ -13,10 +13,16 @@ namespace at {
 namespace native {
 
 Tensor flip(const Tensor& self, IntArrayRef dims) {
-  auto in_tensor = self;
-  const int64_t total_dims = in_tensor.dim();
+  // Nothing to do, we return fast (accounts for cases like size = (3, 0), dim = {0})
+  if (self.numel() == 0) {
+    return self.clone(MemoryFormat::Preserve);
+  }
+  const int64_t total_dims = self.dim();
+  // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  Tensor out_tensor = at::empty_like(in_tensor, MemoryFormat::Contiguous);
+  Tensor out_tensor = at::empty_like(self, MemoryFormat::Preserve);
+
+  // Count dimensions in which we need to do work
   int n = 0;
   auto strides = DimVector(out_tensor.strides());
   for(int64_t i = 0; i < total_dims; i++) {
@@ -34,17 +40,18 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
 
   //create dummy output with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
   auto restrided_out = out_tensor.as_strided(out_tensor.sizes(), strides);
-  TensorIteratorConfig config;
-  config.set_check_mem_overlap(false)
-        .check_all_same_dtype(false)
-        .declare_static_dtype_and_device(self.scalar_type(), self.device())
-        .add_output(out_tensor)
-        .add_input(self)
-        .add_input(restrided_out);
-  auto iter = config.build();
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .declare_static_dtype_and_device(self.scalar_type(), self.device())
+    .add_output(out_tensor)
+    .add_input(self)
+    .add_input(restrided_out)
+    .build();
 
   auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
   const auto sizes = iter.shape();
+  // This is a SmallVector of _signed_ ints
   auto strides_bytes = DimVector(iter.strides(0));
   const auto strides_dummy = iter.strides(2);
 
@@ -58,7 +65,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   for (int i=0; i<iter.ndim(); i++){
     if (strides_dummy[i] == 0) {
       data += strides_bytes[i] * (sizes[i]-1);
-      strides_bytes[i] = - strides_bytes[i];
+      strides_bytes[i] *= -1;
     }
   }
   iter._unsafe_set_arg_strides(0, strides_bytes);

@@ -475,8 +475,8 @@ void flip_kernel_impl(TensorIterator& iter) {
   auto loop = [=]C10_DEVICE(const int i) {
     const auto offsets = offset_calc.get(i);
     // offsets can be negative here, but it's fine
-    scalar_t* out_data = reinterpret_cast<scalar_t*>(out_ptr + offsets[0]);
-    const scalar_t* in_data = reinterpret_cast<const scalar_t*>(in_ptr + offsets[1]);
+    scalar_t* const __restrict__ out_data = reinterpret_cast<scalar_t*>(out_ptr + offsets[0]);
+    const scalar_t* const __restrict__ in_data = reinterpret_cast<const scalar_t*>(in_ptr + offsets[1]);
     *out_data = *in_data;
   };
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
