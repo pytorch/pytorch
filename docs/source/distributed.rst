@@ -419,6 +419,8 @@ Collective functions
 
 .. autofunction:: barrier
 
+.. autofunction:: monitored_barrier
+
 .. autoclass:: ReduceOp
 
 .. class:: reduce_op
