@@ -318,6 +318,21 @@ Node* CloneNodeToGraph(
   return clone_node;
 }
 
+bool IsBlockValidForInference(Block* block) {
+  for (auto n : block->nodes()) {
+    for (auto subblock : n->blocks()) {
+      if (!IsBlockValidForInference(subblock)) {
+        return false;
+      }
+    }
+
+    if (n->kind() == ::c10::onnx::Identity) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
   // Verify if every input has type(either Tensor or Sequence) and scalar type.
   // This is a requirement for ONNX graph inputs.
@@ -340,7 +355,7 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
       return false;
     }
   }
-  return true;
+  return IsBlockValidForInference(graph->block());
 }
 
 void ConvertGraphToONNXProto(
@@ -1153,17 +1168,6 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
 // Any additional post process that are specific to individual node kind.
 void SpecialPostProcess(Node* n) {
   switch (n->kind()) {
-    case ::c10::onnx::If: {
-      if (!IsBlockReturnTypeSame(n) && IsStaticConditionONNX(n)) {
-        auto cond = ConditionValueONNX(n);
-        auto block_idx = cond ? 0 : 1;
-        for (const auto i : c10::irange(n->outputs().size())) {
-          n->outputs()[i]->setType(
-              n->blocks()[block_idx]->outputs()[i]->type());
-        }
-      }
-      break;
-    }
     case ::c10::onnx::SequenceInsert: {
       // Special case when input sequence to SequenceInsert is empty.
       // onnx Sequence type requires element type to be set.
@@ -1236,12 +1240,7 @@ void SpecialPostProcess(Node* n) {
       };
 
       if (seq_node && t_type && t_type->scalarType()) {
-        if (seq_node->kind() == prim::ListConstruct &&
-            seq_node->inputs().size() != 0) {
-          // When prim::ListConstruct is not yet converted to
-          // onnx::SequenceEmpty
-          n->output()->setType(ListType::create(t_type));
-        } else if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
+        if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
           update_sequence_empty_dtype(seq_node, t_type);
         } else if (seq_node->kind() == prim::Param) {
           // Try to find original onnx::SequenceEmpty node in outer block.
@@ -1250,6 +1249,7 @@ void SpecialPostProcess(Node* n) {
             update_sequence_empty_dtype(seq_empty_n, t_type);
           }
         }
+        n->output()->setType(ListType::create(t_type));
       }
 
       break;
@@ -1305,6 +1305,22 @@ void SpecialPostProcess(Node* n) {
           v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
           n->output()->setType(v_type);
         }
+      }
+      break;
+    }
+    case ::c10::onnx::Identity: {
+      n->output()->setType(n->input()->type());
+      break;
+    }
+    case ::c10::onnx::If: {
+      for (size_t i = 0; i < n->outputs().size(); ++i) {
+        n->output(i)->setType(n->blocks().at(0)->outputs().at(i)->type());
+      }
+      break;
+    }
+    case ::c10::onnx::Loop: {
+      for (size_t i = 0; i < n->outputs().size(); ++i) {
+        n->output(i)->setType(n->blocks().at(0)->outputs().at(i + 1)->type());
       }
       break;
     }
