@@ -934,6 +934,25 @@ WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.conv3d_prepack,
 }
 
+def run_weight_observers(observed: GraphModule) -> None:
+    r''' Extract the subgraph that produces the weight for dynamic quant
+    or weight only quant node and run the subgraph to observe the weight.
+    Note that the observers of dynamic quant or weight only quant ops are
+    run during the convert step.
+    '''
+    for node in observed.graph.nodes:
+        if node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT:
+            for i, node_arg in enumerate(node.args):
+                if i in WEIGHT_INDEX_DICT[node.target]:
+                    # node_arg is weight
+                    weight_observer_nodes = collect_producer_nodes(node_arg)
+                    if weight_observer_nodes is not None:
+                        weight_observer_module = \
+                            graph_module_from_producer_nodes(
+                                observed, weight_observer_nodes)
+                        # run the weight observer
+                        weight_observer_module()
+
 class Quantizer:
     def __init__(self):
         # mapping from fully qualified module name to module instance
@@ -1077,26 +1096,6 @@ class Quantizer:
             model, qconfig_dict, node_name_to_scope, prepare_custom_config_dict,
             is_standalone_module)
 
-    def _run_weight_observers(self, observed: GraphModule) -> None:
-        r''' Extract the subgraph that produces the weight for dynamic quant
-        or weight only quant node and run the subgraph to observe the weight.
-        Note that the observers of dynamic quant or weight only quant ops are
-        run during the convert step.
-        '''
-        for node in observed.graph.nodes:
-            if node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT:
-                for i, node_arg in enumerate(node.args):
-                    if i in WEIGHT_INDEX_DICT[node.target]:
-                        # node_arg is weight
-                        weight_observer_nodes = collect_producer_nodes(node_arg)
-                        if weight_observer_nodes is not None:
-                            weight_observer_module = \
-                                graph_module_from_producer_nodes(
-                                    observed, weight_observer_nodes)
-                            # run the weight observer
-                            weight_observer_module()
-        return
-
     def _convert(self, model: GraphModule, is_reference: bool = False,
                  convert_custom_config_dict: Dict[str, Any] = None,
                  is_standalone_module: bool = False,
@@ -1115,7 +1114,7 @@ class Quantizer:
         qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
         # always run weight observers in the top level forward method
         # for dynamic quant ops or weight only quant ops
-        self._run_weight_observers(model)
+        run_weight_observers(model)
 
         # move to cpu since we only have quantized cpu kernels
         model.eval().cpu()
