@@ -3,7 +3,7 @@ name: Lint
 on:
   push:
     branches:
-    - master
+      - master
   pull_request:
 
 jobs:
@@ -23,13 +23,6 @@ jobs:
       - name: Ensure consistent CircleCI YAML config
         if: always() && steps.requirements.outcome == 'success'
         run: cd .circleci && ./ensure-consistency.py
-      - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
-        if: always() && steps.requirements.outcome == 'success'
-        run: |
-          pip install ruamel.yaml==0.17.4
-          echo "Please locally run .github/scripts/regenerate_cancel_redundant_workflow.py and commit if this step fails."
-          .github/scripts/regenerate_cancel_redundant_workflow.py
-          git diff --exit-code .github/workflows/cancel_redundant_workflows.yml
       - name: Lint native_functions.yaml
         if: always() && steps.requirements.outcome == 'success'
         run: |
@@ -128,6 +121,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Regenerate workflows
+        id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
       - name: Assert that regenerating the workflows didn't change them
         run: .github/scripts/report_git_status.sh .github/workflows
@@ -152,6 +146,10 @@ jobs:
         if: always() && steps.install_shellcheck.outcome == 'success'
         run: |
           tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch
+      - name: Check that jobs will be cancelled
+        if: always() && steps.generate_workflows.outcome == 'success'
+        run: |
+          .github/scripts/ensure_actions_will_cancel.py
 
   toc:
     runs-on: ubuntu-18.04
@@ -371,3 +369,7 @@ jobs:
         run: |
           set -eux
           for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
