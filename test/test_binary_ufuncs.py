@@ -2879,14 +2879,13 @@ tensor_binary_ops = [
     '__pow__', '__rpow__', '__ipow__',
     '__lshift__', '__rlshift__', '__ilshift__',
     '__rshift__', '__rrshift__', '__irshift__',
-    '__and__', '__iand__',
-    '__xor__', '__ixor__',
-    '__or__', '__ior__',
+    '__and__', '__rand__', '__iand__',
+    '__xor__', '__rxor__', '__ixor__',
+    '__or__', '__ror__', '__ior__',
 
     # Unsupported operators
     # '__imatmul__',
     # '__divmod__', '__rdivmod__', '__idivmod__',
-    # '__rand__', '__ror__', '__rxor__',
 ]
 
 # Test that binary math operations return NotImplemented for unknown types.
