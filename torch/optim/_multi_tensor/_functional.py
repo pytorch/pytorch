@@ -193,3 +193,76 @@ def sgd(params: List[Tensor],
         # foreach APIs dont support sparse
         for i in range(len(params)):
             params[i].add_(grads[i], alpha=-lr)
+
+
+def adadelta(params: List[Tensor],
+             grads: List[Tensor],
+             square_avgs: List[Tensor],
+             acc_deltas: List[Tensor],
+             *
+             lr: float,
+             weight_decay: float,
+             rho: float):
+    r"""Functional API that performs Adadelta algorithm computation.
+
+    See :class:`~torch.optim.Adadelta` for details.
+    """
+
+    if weight_decay != 0:
+        torch._foreach_add_(grads, params, alpha=weight_decay)
+
+    torch._foreach_mul_(square_avgs, rho)
+    torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - rho)
+
+    std = torch._foreach_add(square_avgs, eps)
+    torch._foreach_sqrt_(std)
+
+    deltas = torch._foreach_add(acc_deltas, eps)
+    torch._foreach_sqrt_(deltas)
+    torch._foreach_div_(deltas, std)
+    torch._foreach_mul_(deltas, grads)
+
+    torch._foreach_add_(params, deltas, alpha=-lr)
+
+    torch._foreach_mul_(acc_deltas, rho)
+    torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)
+
+
+def rprop(params: List[Tensor],
+          grads: List[Tensor],
+          states: List[Tensor],
+          step_sizes: List[int],
+          *
+          step_size_max: float,
+          step_size_min: float,
+          etaminus: float,
+          etaplus: float):
+    r"""Functional API that performs Rprop algorithm computation.
+
+    See :class:`~torch.optim.Rprop` for details.
+    """
+
+    signs = torch._foreach_mul(grads, [s['prev'] for s in states])
+    signs = [s.sign() for s in signs]
+    for sign in signs:
+        sign[sign.gt(0)] = etaplus
+        sign[sign.lt(0)] = etaminus
+        sign[sign.eq(0)] = 1
+
+    # update stepsizes with step size updates
+    torch._foreach_mul_(step_sizes, signs)
+    for step_size in step_sizes:
+        step_size.clamp_(step_size_min, step_size_max)
+
+    # for dir<0, dfdx=0
+    # for dir>=0 dfdx=dfdx
+    for i in range(len(grads)):
+        grads[i] = grads[i].clone(memory_format=torch.preserve_format)
+        grads[i][signs[i].eq(etaminus)] = 0
+
+    # update parameters
+    grad_signs = [grad.sign() for grad in grads]
+    torch._foreach_addcmul_(params_with_grad, grad_signs, step_sizes, value=-1)
+
+    for i in range(len(states)):
+        states[i]['prev'].copy_(grads[i])
