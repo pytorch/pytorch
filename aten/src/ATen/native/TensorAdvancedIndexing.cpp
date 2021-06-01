@@ -1484,13 +1484,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   const auto self_sizes = self.sizes();
   const auto total_nonzero = thread_count_nonzero.back();
   const int64_t ndim = self_sizes.size();
-  const int64_t out_sizes[] = {total_nonzero, ndim};
-  if (resize_output_check(result, out_sizes)) {
-    // Reshape to fortran-contiguous output (see gh-46224)
-    auto impl = result.unsafeGetTensorImpl();
-    const int64_t out_strides[] = {1, total_nonzero};
-    at::native::resize_impl_cpu_(impl, out_sizes, out_strides);
-  }
+  resize_output(result, {total_nonzero, ndim});
 
   if (result.numel() == 0) {
     return result;
@@ -1565,7 +1559,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 Tensor nonzero_cpu(const Tensor& self) {
   auto result = at::empty({0}, self.options().dtype(kLong));
   nonzero_out_cpu(self, result);
-  return result.contiguous();
+  return result;
 }
 
 std::vector<Tensor> nonzero_numpy(const Tensor& self) {
