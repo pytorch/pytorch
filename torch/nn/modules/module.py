@@ -856,7 +856,7 @@ class Module:
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
-        This function is deprecated in favor of :meth:`nn.Module.register_full_backward_hook` and
+        This function is deprecated in favor of :meth:`~torch.nn.Module.register_full_backward_hook` and
         the behavior of this function will change in future versions.
 
         Returns:
