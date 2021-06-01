@@ -11,6 +11,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Type,
     TypeVar,
     Union,
 )
@@ -110,7 +111,7 @@ class _RemoteModule(nn.Module):
     def __init__(
         self,
         remote_device: str,
-        module_cls: nn.Module,
+        module_cls: Type[nn.Module],
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
         _module_interface_cls: Any = None,
@@ -422,10 +423,10 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
-        return self.module_rref.rpc_sync().train() # type: ignore[Tensor]
+        return self.module_rref.rpc_sync().train() # type: ignore[operator]
 
     def eval(self: T) -> T:  # type: ignore[return]
-        return self.module_rref.rpc_sync().eval() # type: ignore[Tensor]
+        return self.module_rref.rpc_sync().eval() # type: ignore[operator] 
 
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
@@ -517,7 +518,7 @@ class RemoteModule(_RemoteModule):
     def __init__(
         self,
         remote_device: str,
-        module_cls: nn.Module,
+        module_cls: Type[nn.Module],
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
     ):
