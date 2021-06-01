@@ -131,6 +131,7 @@ def quantize_node(
         obs_node: Node,
         modules: Dict[str, torch.nn.Module],
         quantized_graph: Graph,
+        node_name_to_scope: Dict[str, Tuple[str, type]],
         is_input: bool) -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
@@ -160,8 +161,8 @@ def quantize_node(
         first_linear_use_or_first_use = in_node
         prefix = "_output"
 
-    if first_linear_use_or_first_use and first_linear_use_or_first_use.name in quantizer.node_name_to_scope:
-        module_path, _ = quantizer.node_name_to_scope[first_linear_use_or_first_use.name]
+    if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
+        module_path, _ = node_name_to_scope[first_linear_use_or_first_use.name]
     else:
         # TODO: it's not used, so actually we can skip quantization
         # but this requires changing return type of quantize_node
@@ -351,14 +352,15 @@ def create_qparam_nodes(
         scale: Any,
         zero_point: Any,
         modules: Dict[str, torch.nn.Module],
-        quantized_graph: Graph
+        quantized_graph: Graph,
+        node_name_to_scope: Dict[str, Tuple[str, type]]
 ) -> Tuple[Node, Node]:
     """
     Create getattr nodes in the quantizer graph for scale and zero point values.
     The nodes are registered with the root_module of the model.
     """
     root_module = modules['']
-    module_path, _ = quantizer.node_name_to_scope[node_name]
+    module_path, _ = node_name_to_scope[node_name]
     scale_node = create_getattr_from_value(root_module, quantized_graph, (module_path + "_scale_"), scale)
     zero_point_node = create_getattr_from_value(root_module, quantized_graph, (module_path + "_zero_point_"), zero_point)
     return (scale_node, zero_point_node)

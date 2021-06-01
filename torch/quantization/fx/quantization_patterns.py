@@ -145,6 +145,7 @@ class QuantizeHandler(ABC):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -279,6 +280,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -302,7 +304,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 assert activation_post_process is not None
                 return quantize_node(
                     quantizer, op_out, activation_post_process,
-                    node, modules, quantized_graph, is_input=False)
+                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
             else:
                 warnings.warn(
                     "No implementation found for dtype combination: {}"
@@ -335,7 +337,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     scale = float(scale)
                     zero_point = int(zero_point)
                     scale_arg, zero_point_arg = \
-                        create_qparam_nodes(quantizer, node.name, scale, zero_point, modules, quantized_graph)
+                        create_qparam_nodes(
+                            quantizer, node.name, scale, zero_point, modules,
+                            quantized_graph, node_name_to_scope)
                     kwargs = {**self.binary_op_node.kwargs}
                     add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
                     op = quantized_graph.create_node(
@@ -392,6 +396,7 @@ class CatQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -452,6 +457,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -536,6 +542,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                         act_post_process_node,
                         modules,
                         quantized_graph,
+                        node_name_to_scope,
                         is_input=False)
                 else:
                     # output for dynamically quantized conv op is not quantized
@@ -572,7 +579,9 @@ class ConvReluQuantizeHandler(QuantizeHandler):
 
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                     scale_node, zero_point_node = \
-                        create_qparam_nodes(quantizer, self.conv_node.name, scale, zero_point, modules, quantized_graph)
+                        create_qparam_nodes(
+                            quantizer, self.conv_node.name, scale, zero_point, modules,
+                            quantized_graph, node_name_to_scope)
                     qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
                     kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                     op = quantized_graph.create_node(
@@ -580,7 +589,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # Store the name of the fused op to get the path of node after fusion as well.
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
-                    quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.conv_node.name]
+                    node_name_to_scope[op.name] = node_name_to_scope[self.conv_node.name]
                     return op
                 else:
                     # conv2d_dyanmic branch
@@ -619,6 +628,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -721,6 +731,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         act_post_process_node,
                         modules,
                         quantized_graph,
+                        node_name_to_scope,
                         is_input=False)
                 else:
                     # output for dynamically quantized linear op is not quantized
@@ -759,9 +770,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         self._maybe_get_last_node_only_observer(quantizer, modules)
                     assert activation_post_process is not None
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
-
                     scale_node, zero_point_node = \
-                        create_qparam_nodes(quantizer, self.linear_node.name, scale, zero_point, modules, quantized_graph)
+                        create_qparam_nodes(
+                            quantizer, self.linear_node.name, scale, zero_point, modules,
+                            quantized_graph, node_name_to_scope)
 
                     qlinear_args = (linear_input, packed_weight, scale_node, zero_point_node)
                     op = quantized_graph.create_node(
@@ -769,7 +781,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # Store the name of the fused op to get the path of node after fusion as well.
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
-                    quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.linear_node.name]
+                    node_name_to_scope[op.name] = node_name_to_scope[self.linear_node.name]
                     return op
                 elif dtypes in [(torch.float32, torch.qint8, torch.quint8),
                                 (torch.float32, torch.float16, None)]:
@@ -784,7 +796,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # Store the name of the dynamic op to get the path of node after replacement as well.
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
-                    quantizer.node_name_to_scope[op_out.name] = quantizer.node_name_to_scope[self.linear_node.name]
+                    node_name_to_scope[op_out.name] = node_name_to_scope[self.linear_node.name]
                     if self.relu_node:
                         op_out = quantized_graph.create_node("call_function", torch.nn.functional.relu, (op_out,), {})
                     return op_out
@@ -823,6 +835,7 @@ class BatchNormQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -862,6 +875,7 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -917,6 +931,7 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -1000,6 +1015,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -1076,9 +1092,10 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[operator]
                     scale = float(scale)
                     zero_point = int(zero_point)
-
                     scale_arg, zero_point_arg = \
-                        create_qparam_nodes(quantizer, node.name, scale, zero_point, modules, quantized_graph)
+                        create_qparam_nodes(
+                            quantizer, node.name, scale, zero_point, modules,
+                            quantized_graph, node_name_to_scope)
 
                     assert not isinstance(node.target, str), "Expecting node.target for "
                     "call_function to be a function instead of a string"
@@ -1114,7 +1131,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 assert activation_post_process is not None
                 return quantize_node(
                     quantizer, op_out, activation_post_process,
-                    node, modules, quantized_graph, is_input=False)
+                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
             else:
                 assert dtypes in [(torch.float16, torch.float16, None)]
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
@@ -1131,6 +1148,7 @@ class ELUQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -1141,7 +1159,7 @@ class ELUQuantizeHandler(QuantizeHandler):
         scale = float(scale)
         zero_point = int(zero_point)
 
-        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point, modules, quantized_graph)
+        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
 
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
@@ -1203,6 +1221,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -1295,6 +1314,7 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -1307,6 +1327,7 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -1345,6 +1366,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
                 quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
