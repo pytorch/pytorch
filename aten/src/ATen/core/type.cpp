@@ -366,14 +366,30 @@ c10::optional<TypePtr> unifyTypeList(
       if (*type == *comparison) {
         continue;
       }
+
       auto maybe_parent = unifyTypes(type, comparison, /*default_to_any=*/false);
-      if (maybe_parent && **maybe_parent == *type) {
-        seen.erase(comparison);
+
+      // This logic covers the case in which `unifyTypes` returns a
+      // completely new type (e.g. `unifyTypes(T, None)` produces
+      // `Optional[T]`)
+      if (maybe_parent && type->isSubtypeOf(*maybe_parent)) {
+        seen.erase(type);
+        seen.insert(*maybe_parent);
       };
+      if (maybe_parent && comparison->isSubtypeOf(*maybe_parent)) {
+        seen.erase(comparison);
+        seen.insert(*maybe_parent);
+      };
+
     }
   }
 
-  return seen.size() == 1 ? c10::optional<TypePtr>{*seen.begin()} : c10::nullopt;
+  if (seen.size() != 1) {
+    why_not << "Could not unify type list";
+    return c10::nullopt;
+  }
+
+  return c10::optional<TypePtr>{*seen.begin()};
 }
 
 MatchTypeReturn matchTypeVariables(
