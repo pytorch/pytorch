@@ -1,0 +1,100 @@
+name: PyTorch release testing CI (pytorch-linux-py3.8-cu102)
+on:
+  workflow_dispatch:
+    inputs:
+      pytorch_version:
+        description: "The version of PyTorch to test"
+        required: true
+        default: "1.9.0"
+
+jobs:
+  release-testing:
+    runs-on: [self-hosted, bm-runner]
+    env:
+      GPU_FREQUENCY: "5001,900"
+      CUDA_VISIBLE_DEVICES: "0"
+      CORE_LIST: "24-47"
+    steps:
+      - name: Check out pytorch/pytorch
+        uses: actions/checkout@v2
+        with:
+          path: pytorch 
+      - name: Check out pytorch/examples
+        uses: actions/checkout@v2
+        with:
+          repository: pytorch/examples
+          path: examples
+      - name: Checkout pytorch/benchmark
+        uses: actions/checkout@v2
+        with:
+          repository: pytorch/benchmark
+          path: benchmark
+      - name: Create Conda env
+        run: |
+          conda create -y -n reltest python=3.8
+      - name: Install PyTorch and setup environment
+        run: |
+          . activate reltest
+          conda install -y -c pytorch-test pytorch=${{ github.event.inputs.pytorch_version }} \
+                                           torchvision torchtext torchaudio cudatoolkit=10.2
+          sudo nvidia-smi -ac ${GPU_FREQUENCY}
+          echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
+          echo "Result dir: ${RESULT_DIR} "
+      - name: Check machine tuned
+        run: |
+          echo "Make sure the machine is tuned."
+          pushd benchmark
+          sudo python3 torchbenchmark/util/machine_config.py
+          popd
+      - name: Run MNist
+        run: |
+          . activate reltest
+          mkdir -p ${RESULT_DIR}/mnist
+          pushd examples/mnist
+          export LOG_FILE=${RESULT_DIR}/mnist/result.log
+          export MEM_FILE=${RESULT_DIR}/mnist/result_mem.log
+          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 1
+      - name: Run MNist HogWild
+        run: |
+          . activate reltest
+          mkdir -p ${RESULT_DIR}/mnist_hogwild
+          pushd examples/mnist_hogwild
+          export LOG_FILE=${RESULT_DIR}/mnist_hogwild/result.log
+          export MEM_FILE=${RESULT_DIR}/mnist_hogwild/result_mem.log
+          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10
+      - name: Run CPU WLM LSTM
+        run: |
+          . activate reltest
+          mkdir -p ${RESULT_DIR}/wlm_cpu_lstm
+          pushd examples/word_language_model
+          export LOG_FILE=${RESULT_DIR}/wlm_cpu_lstm/result.log
+          export MEM_FILE=${RESULT_DIR}/wlm_cpu_lstm/result_mem.log
+          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM
+      - name: Run GPU WLM LSTM
+        run: |
+          . activate reltest
+          mkdir -p ${RESULT_DIR}/wlm_gpu_lstm
+          pushd examples/word_language_model
+          export LOG_FILE=${RESULT_DIR}/wlm_gpu_lstm/result.log
+          export MEM_FILE=${RESULT_DIR}/wlm_gpu_lstm/result_mem.log
+          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM --cuda
+      - name: Run CPU WLM Transformer
+        run: |
+          . activate reltest
+          mkdir -p ${RESULT_DIR}/wlm_cpu_trans
+          pushd examples/word_language_model
+          export LOG_FILE=${RESULT_DIR}/wlm_cpu_trans/result.log
+          export MEM_FILE=${RESULT_DIR}/wlm_cpu_trans/result_mem.log
+          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model Transformer
+      - name: Run GPU WLM Transformer
+        run: |
+          . activate reltest
+          mkdir -p ${RESULT_DIR}/wlm_gpu_trans
+          pushd examples/word_language_model
+          export LOG_FILE=${RESULT_DIR}/wlm_gpu_trans/result.log
+          export MEM_FILE=${RESULT_DIR}/wlm_gpu_trans/result_mem.log
+          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model Transformer --cuda
+      - name: Remove Conda env
+        run: |
+          conda env remove --name reltest
+    
