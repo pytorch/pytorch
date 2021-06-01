@@ -4267,7 +4267,7 @@ Example::
 one_hot = _add_docstr(
     torch._C._nn.one_hot,
     r"""
-one_hot(tensor, num_classes=-1, dtype=torch.long) -> LongTensor
+one_hot(tensor, num_classes=-1) -> LongTensor
 
 Takes LongTensor with index values of shape ``(*)`` and returns a tensor
 of shape ``(*, num_classes)`` that have zeros everywhere except where the
@@ -4284,8 +4284,6 @@ Arguments:
     num_classes (int):  Total number of classes. If set to -1, the number
         of classes will be inferred as one greater than the largest class
         value in the input tensor.
-    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
-        Default: ``torch.int64``.
 
 Returns:
     LongTensor that has one more dimension with 1 values at the
