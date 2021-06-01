@@ -1434,12 +1434,12 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
         input_tensor = make_arg(size)
         weight_tensor = make_arg(size) if weighted else None
 
-        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,), \
-            kwargs=dict(weight=weight_tensor, density=density)))
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
+                kwargs=dict(weight=weight_tensor, density=density)))
 
         bins_tensor = make_arg((bin_ct + 1,))
-        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,), \
-            kwargs=dict(weight=weight_tensor, density=density)))
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
+                kwargs=dict(weight=weight_tensor, density=density)))
 
     return sample_inputs
 
@@ -6418,6 +6418,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hypot,
            ),
     OpInfo('histogram',
+           dtypes=[],
            dtypesIfCPU=floating_types(),
            sample_inputs_func=sample_inputs_histogram,
            supports_autograd=False,
