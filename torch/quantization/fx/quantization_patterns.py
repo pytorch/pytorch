@@ -1158,8 +1158,8 @@ class ELUQuantizeHandler(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[operator]
         scale = float(scale)
         zero_point = int(zero_point)
-
-        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
+        scale_arg, zero_point_arg = create_qparam_nodes(
+            quantizer, node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
 
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
