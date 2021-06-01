@@ -743,10 +743,10 @@ def sample_inputs_norm(op_info, device, dtype, requires_grad, sample_types='defa
             for shape, args, name in cases_nonzero_input:
                 yield SampleInput(make_arg(shape, exclude_zero=True), args=args, name=name)
         elif sample_types == 'nuc':
-            for shape, args, name in cases_nuc:
+            for shape, args, name in cases_nuc:  # type: ignore[assignment]
                 yield SampleInput(make_arg(shape), args=args, name=name)
         elif sample_types == 'jit':
-            for shape, args, name in cases_jit_failing_cases:
+            for shape, args, name in cases_jit_failing_cases:  # type: ignore[assignment]
                 yield SampleInput(make_arg(shape), args=args, name=name)
         elif sample_types == 'inf':
             for shape, args, name in cases_inf:
