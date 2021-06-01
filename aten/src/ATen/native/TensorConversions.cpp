@@ -35,11 +35,17 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides
-      auto r = at::empty_strided(self.sizes(),
+      if (self.is_quantized()){
+        auto r = at::empty_quantized(self.sizes(), self, options);
+        r.copy_(self, non_blocking);
+        return r;
+      } else {
+        auto r = at::empty_strided(self.sizes(),
                                  self.strides(),
                                  options.memory_format(c10::nullopt).pinned_memory(pin_out));
-      r.copy_(self, non_blocking);
-      return r;
+        r.copy_(self, non_blocking);
+        return r;
+      }
     } else {
       memory_format = self.suggest_memory_format();
     }
@@ -104,6 +110,17 @@ Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c1
 Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto options = other.options();
   return to_impl(self, options.memory_format(optional_memory_format), non_blocking, copy);
+}
+
+// This op is important primarily for lazy / graph-based backends.
+// While this vanilla implementation loops through each tensor and independently converts it to cpu,
+// a lazy backend like XLA might need to tell sync updates across tensors.
+std::vector<Tensor> _to_cpu(TensorList tensors) {
+    std::vector<Tensor> cpu_tensors;
+    for (const auto& t : tensors) {
+        cpu_tensors.push_back(t.cpu());
+    }
+    return cpu_tensors;
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {

@@ -48,7 +48,8 @@ class NormalizeArgs(Transformer):
             out = self.call_function(n.target, args, kwargs, arg_types, kwarg_types)
         else:
             out = super().run_node(n)
-        self.node_map[out] = n
+        if n.op != "output":
+            self.node_map[out] = n
         return out
 
     def call_function(

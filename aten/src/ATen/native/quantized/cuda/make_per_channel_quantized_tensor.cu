@@ -9,9 +9,6 @@ Tensor make_per_channel_quantized_tensor_cuda(
   const Tensor& scales,
   const Tensor& zero_points,
   int64_t axis) {
-    std::vector<int64_t> expected_shape(rtensor.dim(), 1);
-    expected_shape[axis] = rtensor.size(axis);
-
     Tensor dst = at::_empty_per_channel_affine_quantized(
     self.sizes(),
     scales,

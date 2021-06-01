@@ -94,19 +94,22 @@ Tensor empty_per_channel_affine_quantized_other_backends_stub(
 
 // Create an empty quantized Tensor with size, based on the options
 // and quantization parameters of the input quantized Tensor
-Tensor empty_quantized(IntArrayRef size, const Tensor& qtensor) {
+Tensor empty_quantized(IntArrayRef size, const Tensor& qtensor, c10::optional<ScalarType> dtype_opt,
+                         c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  TensorOptions specified_options = TensorOptions().dtype(dtype_opt).layout(layout_opt).device(device_opt).pinned_memory(pin_memory_opt);
   Tensor output;
+
   if (qtensor.qscheme() == kPerTensorAffine) {
-    output = at::_empty_affine_quantized(size, qtensor.options(),
+    output = at::_empty_affine_quantized(size, qtensor.options().merge_in(specified_options),
                                          qtensor.q_scale(),
                                          qtensor.q_zero_point());
-  } else if (qtensor.qscheme() == kPerChannelAffine) {
+  } else if (qtensor.qscheme() == kPerChannelAffine || qtensor.qscheme() == kPerChannelAffineFloatQParams) {
     output = at::_empty_per_channel_affine_quantized(
         size,
         qtensor.q_per_channel_scales(),
         qtensor.q_per_channel_zero_points(),
         qtensor.q_per_channel_axis(),
-        qtensor.options());
+        qtensor.options().merge_in(specified_options));
   } else {
     TORCH_CHECK(false,
                 "QScheme not supported by empty_quantized:",

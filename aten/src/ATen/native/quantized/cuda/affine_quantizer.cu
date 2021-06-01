@@ -9,8 +9,8 @@ namespace native {
 namespace {
 
 void quantize_tensor_per_tensor_affine_cuda(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -38,8 +38,8 @@ void quantize_tensor_per_tensor_affine_cuda(
 }
 
 void dequantize_tensor_per_tensor_affine_cuda(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -77,7 +77,7 @@ void quantize_tensor_per_channel_affine_cuda(
 
 
   AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cuda", [&]() {
+    qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cuda_handler", [&]() {
       constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
       constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
       // trying to match _quantize_per_channel_ref_nd in test_quantized_tensor.py
@@ -106,7 +106,7 @@ void dequantize_tensor_per_channel_affine_cuda(
   expected_shape[axis] = rtensor.size(axis);
 
   AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cuda", [&]() {
+    qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cuda_handler", [&]() {
       auto iter = TensorIteratorConfig()
         .check_all_same_dtype(false)
         .add_output(rtensor)
@@ -142,8 +142,8 @@ void quantize_tensor_per_channel_float_qparams_cuda(
 
 
 
-  AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cuda", [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+    qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cuda_handler", [&]() {
       constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
       constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
       // trying to match _quantize_per_channel_ref_nd in test_quantized_tensor.py
@@ -151,8 +151,7 @@ void quantize_tensor_per_channel_float_qparams_cuda(
           iter,
           [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, float scale, float zero_point) -> scalar_t {
             float inv_scale = 1.0f/scale;
-            int64_t qvalue =
-                static_cast<int64_t>(nearbyint(raw_val*inv_scale + zero_point));
+            int64_t qvalue = lrintf(raw_val*inv_scale + zero_point);
             qvalue = std::max<int64_t>(qvalue, qmin);
             qvalue = std::min<int64_t>(qvalue, qmax);
             quantized_val.val_ = qvalue;
@@ -171,8 +170,8 @@ void dequantize_tensor_per_channel_float_qparams_cuda(
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
-  AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cuda", [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+    qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cuda_handler", [&]() {
       auto iter = TensorIteratorConfig()
         .check_all_same_dtype(false)
         .add_output(rtensor)
