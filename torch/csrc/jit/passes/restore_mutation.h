@@ -11,25 +11,24 @@ namespace torch {
 namespace jit {
 
 // A map which stores if an activation operator can perform type promotion
-const std::unordered_map<Symbol, bool>
-    activation_type_promotion_mapping = {
-        {aten::sigmoid, true},
-        {aten::tanh, true},
-        {aten::celu, false},
-        {aten::elu, false},
-        {aten::gelu, false},
-        {aten::glu, false},
-        {aten::hardshrink, false},
-        {aten::hardsigmoid, false},
-        {aten::hardswish, false},
-        {aten::hardtanh, false},
-        {aten::leaky_relu, false},
-        {aten::prelu, false},
-        {aten::relu6, false},
-        {aten::relu, false},
-        {aten::rrelu, false},
-        {aten::selu, false},
-        {aten::silu, false}};
+const std::unordered_map<Symbol, bool> activation_type_promotion_mapping = {
+    {aten::sigmoid, true},
+    {aten::tanh, true},
+    {aten::celu, false},
+    {aten::elu, false},
+    {aten::gelu, false},
+    {aten::glu, false},
+    {aten::hardshrink, false},
+    {aten::hardsigmoid, false},
+    {aten::hardswish, false},
+    {aten::hardtanh, false},
+    {aten::leaky_relu, false},
+    {aten::prelu, false},
+    {aten::relu6, false},
+    {aten::relu, false},
+    {aten::rrelu, false},
+    {aten::selu, false},
+    {aten::silu, false}};
 
 class FunctionalToInplaceRewriter {
  public:

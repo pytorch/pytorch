@@ -58,9 +58,9 @@ class TestFunctionalToInplaceActivation(JitTestCase):
             inp = torch.normal(0, 5, size=(4, 4)).to(dtype)
             try:
                 out = activation(inp)
-                if dtype != out.dtype:
-                    exit()
-            except Exception:
+                self.assertEqual(dtype, out.dtype)
+            except RuntimeError:
+                # Skip the not implemented error
                 pass
 
     def test_functional_to_inplace_activation(self):
