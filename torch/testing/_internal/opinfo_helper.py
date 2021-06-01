@@ -50,15 +50,16 @@ class _dynamic_dispatch_dtypes(_dispatch_dtypes):
     pass
 
 
-def get_supported_dtypes(op, sample_inputs_fn, device):
-    # Returns the supported dtypes for the given operator and device pair.
-    assert device in ['cpu', 'cuda']
-    if not TEST_CUDA and device == 'cuda':
+def get_supported_dtypes(op, sample_inputs_fn, device_type):
+    # Returns the supported dtypes for the given operator and device_type pair.
+    assert device_type in ['cpu', 'cuda']
+    if not TEST_CUDA and device_type == 'cuda':
         warnings.warn("WARNING: CUDA is not available, information pertaining to CUDA dtypes could be wrong")
+        return _dynamic_dispatch_dtypes(())
 
     supported_dtypes = set()
     for dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
-        samples = sample_inputs_fn(op, device, dtype, False)
+        samples = sample_inputs_fn(op, device_type, dtype, False)
         for sample in samples:
             try:
                 op(sample.input, *sample.args, **sample.kwargs)
@@ -74,6 +75,10 @@ def get_supported_dtypes(op, sample_inputs_fn, device):
 def dtypes_dispatch_hint(dtypes):
     return_type = collections.namedtuple('dispatch_hint_return_type', 'dispatch_fn dispatch_fn_str')
 
+    # CUDA is not available, dtypes will be empty.
+    if len(dtypes) == 0:
+        return return_type((), str(tuple()))
+
     # Find the closest dispatcher from the set of available dispatchers
 
     # Metric for finding the closest dispatcher
@@ -88,7 +93,17 @@ def dtypes_dispatch_hint(dtypes):
     if dispatch in COMPLETE_DTYPES_DISPATCH and score == 1.0:
         return return_type(dispatch, dispatch.__name__ + "()")
 
-    dispatch_iou_score = {dispatch: iou(dispatch()) for dispatch in EXTENSIBLE_DTYPE_DISPATCH}
+    def subset_or_equal(dispatch_dtypes):
+        return len(set(dispatch_dtypes) - set(dtypes)) == 0
+
+    filtered_dispatches = list(filter(lambda dispatch: subset_or_equal(dispatch()), EXTENSIBLE_DTYPE_DISPATCH))
+
+    # If user passed dtypes which are lower than the lowest
+    # dispatch type available (not likely but possible in code path).
+    if len(filtered_dispatches) == 0:
+        return return_type((), str(dtypes))
+
+    dispatch_iou_score = {dispatch: iou(dispatch()) for dispatch in filtered_dispatches}
     dispatch, _ = max(dispatch_iou_score.items(), key=lambda x: x[1])
 
     return return_type(partial(dispatch, *tuple(set(dtypes) - set(dispatch()))),
@@ -115,6 +130,6 @@ def str_format_dynamic_dtype(op):
 # Run using `python -m torch.testing._internal.opinfo_helper`
 if __name__ == '__main__':
     filtered_ops = list(filter(is_dynamic_dtype_set, cmi.op_db))
-
+    print("The operator/s below is using dynamic_dtypes in the OpInfo entry!")
     for op in filtered_ops:
         print(str_format_dynamic_dtype(op))
