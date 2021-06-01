@@ -704,6 +704,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     return _libtorch_python_sources
 
 aten_cpu_source_non_codegen_list = [
+    "aten/src/ATen/AccumulateType.cpp",
     "aten/src/ATen/BatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
     "aten/src/ATen/Context.cpp",
