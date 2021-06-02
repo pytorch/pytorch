@@ -39,9 +39,9 @@ TORCH_API ContextPtr addRecvRpcBackward(
 // case, return RpcWithAutograd message; otherwise return original rpc message.
 // NB: forceGradRecording is useful when the request does not contain any tensor
 // but the corresponding response does.
-TORCH_API rpc::Message getMessageWithAutograd(
+TORCH_API c10::intrusive_ptr<rpc::Message> getMessageWithAutograd(
     const rpc::worker_id_t dstId,
-    rpc::Message&& wrappedRpcMsg,
+    c10::intrusive_ptr<rpc::Message> wrappedRpcMsg,
     rpc::MessageType msgType,
     bool forceGradRecording = false,
     const std::unordered_map<c10::Device, c10::Device>& deviceMap =
@@ -52,7 +52,7 @@ TORCH_API c10::intrusive_ptr<c10::ivalue::Future>
 sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
-    rpc::Message&& wrappedRpcMsg,
+    c10::intrusive_ptr<rpc::Message> wrappedRpcMsg,
     bool forceGradRecording = false,
     const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
     bool forceDisableProfiling = false);
