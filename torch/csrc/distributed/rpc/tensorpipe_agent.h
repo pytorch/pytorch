@@ -176,7 +176,7 @@ class TensorPipeAgent : public RpcAgent {
 
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      Message&& message,
+      c10::intrusive_ptr<Message> message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
       const DeviceMap& deviceMap = {}) override;
 
@@ -234,14 +234,14 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       std::function<void(
           const tensorpipe::Error&,
-          Message&&,
+          c10::intrusive_ptr<Message>,
           std::shared_ptr<LazyStreamContext>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
   void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      Message&& message,
+      c10::intrusive_ptr<Message> message,
       std::vector<c10::Device>&& devices,
       std::shared_ptr<LazyStreamContext> ctx,
       std::function<void(const tensorpipe::Error&)>) noexcept;
@@ -436,7 +436,7 @@ class TensorPipeAgent : public RpcAgent {
   // Helpers to set the state of the requests.
   void markFutureAsComplete(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
-      Message message,
+      c10::intrusive_ptr<Message> message,
       std::shared_ptr<LazyStreamContext> ctx);
   void markFutureWithError(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
