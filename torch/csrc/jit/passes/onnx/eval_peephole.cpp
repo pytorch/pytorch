@@ -119,12 +119,26 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       valsToParamsMap.insert(
           {conv_W, std::make_pair(conv_W->debugName(), w_conv)});
       conv_W->inferTypeFrom(w_conv);
+      for (int j = 0; j < it->inputs().size(); j++) {
+        if (it->inputs()[j]->debugName().find("weight") != std::string::npos) {
+          conv_W->setDebugName(it->inputs()[j]->debugName().c_str());
+          break;
+        }
+      }
+
       convNode->addInput(conv_W);
 
       auto conv_B = b->addInput();
       valsToParamsMap.insert(
           {conv_B, std::make_pair(conv_B->debugName(), b_conv)});
       conv_B->inferTypeFrom(b_conv);
+      for (int j = 0; j < bnNode->inputs().size(); j++) {
+        if (bnNode->inputs()[j]->debugName().find("bias") != std::string::npos) {
+          conv_B->setDebugName(bnNode->inputs()[j]->debugName().c_str());
+          break;
+        }
+      }
+
       convNode->addInput(conv_B);
 
       bnNode->replaceAllUsesWith(convNode);
