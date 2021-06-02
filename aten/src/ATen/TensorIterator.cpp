@@ -1,6 +1,5 @@
 #include <ATen/TensorIterator.h>
 
-#include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TypeProperties.h>
@@ -10,6 +9,10 @@
 #include <ATen/TensorIteratorInternal.h>
 
 #include <c10/util/irange.h>
+#include <c10/util/SmallBuffer.h>
+
+#include <array>
+#include <algorithm>
 
 namespace at {
 
@@ -17,6 +20,29 @@ using DimMask = TensorIteratorBase::DimMask;
 using PtrVector = TensorIteratorBase::PtrVector;
 using loop2d_t = TensorIteratorBase::loop2d_t;
 using StrideVector = TensorIteratorBase::StrideVector;
+
+namespace {
+
+inline void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
+  std::transform(operands.begin(), operands.end(), ptrs, [](const OperandInfo& op) {
+    return static_cast<char*>(op.data);
+  });
+}
+
+inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
+  for (int64_t dim = 0; dim < ndim; ++dim) {
+    for (size_t arg = 0; arg < operands.size(); ++arg) {
+      *strides++ = operands[arg].stride_bytes[dim];
+    }
+  }
+  // Always at least 2d strides to support 2d for_each loops
+  if (ndim < 2) {
+    const int64_t ntensors = operands.size();
+    std::fill_n(strides, (2 - ndim) * ntensors, 0);
+  }
+}
+
+}
 
 /// Construction
 TensorIteratorConfig& TensorIteratorConfig::add_owned_output(const Tensor& output) {
@@ -129,12 +155,6 @@ void TensorIteratorBase::reorder_dimensions() {
 
   // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm_.rbegin(), perm_.rend(), 0);
-
-  // Reordering dimensions changes iteraton order
-  if (enforce_linear_iteration_) {
-    permute_dimensions(perm_);
-    return;
-  }
 
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
@@ -578,10 +598,8 @@ StrideVector TensorIteratorBase::get_dim_strides(int dim) const {
 }
 
 SmallVector<char*, 4> TensorIteratorBase::get_base_ptrs() const {
-  auto ptrs = SmallVector<char*, 4>();
-  for (int i = 0; i < ntensors(); i++) {
-    ptrs.push_back((char*)data_ptr(i));
-  }
+  auto ptrs = SmallVector<char*, 4>(ntensors());
+  at::get_base_ptrs(ptrs.data(), operands_);
   return ptrs;
 }
 
@@ -648,12 +666,9 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
 }
 
 StrideVector TensorIteratorBase::get_strides() const {
-  StrideVector strides;
-  for (int dim = 0; dim < ndim(); dim++) {
-    for (int arg = 0; arg < ntensors(); arg++) {
-      strides.emplace_back(operands_[arg].stride_bytes[dim]);
-    }
-  }
+  const auto dim = ndim();
+  StrideVector strides(std::max(dim, 2) * ntensors());
+  at::get_strides(strides.data(), operands_, dim);
   return strides;
 }
 
@@ -661,7 +676,17 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
   if (range.size() == 0) {
     return;
   }
-  at::internal::serial_for_each(shape_, get_strides(), get_base_ptrs(), loop, range);
+
+  const auto ntensors = this->ntensors();
+  const auto ndim = this->ndim();
+
+  c10::SmallBuffer<char*, 4> ptrs(ntensors);
+  c10::SmallBuffer<int64_t, 8> strides(ntensors * std::max(ndim, 2));
+
+  at::get_base_ptrs(ptrs.data(), operands_);
+  at::get_strides(strides.data(), operands_, ndim);
+  at::internal::serial_for_each(
+      shape_, strides, ptrs.data(), ptrs.size(), loop, range);
 }
 
 bool TensorIteratorBase::is_trivial_1d() const {
@@ -1187,20 +1212,6 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
     return FastSetupType::NONE;
   }
 
-  // For linear iteration, only contiguous tensors can be coalesced
-  // Fast setup of any other format requires changing iteration order
-  if (enforce_linear_iteration_) {
-    for (const auto& op : operands_) {
-      if (op.tensor->defined() && !op.will_resize) {
-        auto is_contiguous = op.tensor->is_contiguous(at::MemoryFormat::Contiguous);
-        if (!is_contiguous) {
-          return FastSetupType::NONE;
-        }
-      }
-    }
-    return FastSetupType::CONTIGUOUS;
-  }
-
   bool is_contiguous = true;
   bool is_channels_last = true;
   bool is_non_overlapping_and_dense = true;
@@ -1253,7 +1264,6 @@ TensorIteratorBase::TensorIteratorBase() = default;
 void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // populate some persistent configuration fields
   is_reduction_ = config.is_reduction_;
-  enforce_linear_iteration_ = config.enforce_linear_iteration_;
 
   // fill in operands_ based on configuration
   populate_operands(config);
@@ -1446,8 +1456,13 @@ SplitUntil32Bit::iterator SplitUntil32Bit::end() const {
 DimCounter::DimCounter(IntArrayRef shape, Range range)
   : shape(shape)
   , range(range)
-  , values(shape.size(), 0)
+  , values(shape.size())
   , offset(range.begin) {
+  std::fill(values.begin(), values.end(), 0);
+  if (range.begin == 0) {
+    return;
+  }
+
   int64_t linear_offset = range.begin;
   int64_t ndim = values.size();
   for (const auto dim : c10::irange(ndim)) {
