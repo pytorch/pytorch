@@ -12,10 +12,38 @@ from ... import Tensor, Generator
 
 # from torch.utils.data.datapipes.iter.dataframes import DFIterDataPipe as DFIterDataPipe
 
+# import pandas
 
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
+
+# Similar to list but expands DataFrames transparently
+class DataChunk(object):
+    def __init__(self, items):
+        self.items = items
+
+    def __getitem__(self, key):
+        return self.items[key]
+
+    def __len__(self):
+        return len(self.items)
+
+    def as_str(self, indent = ''):
+        res = "[" + ",".join([str(i) for i in iter(self)]) + "]"
+        return res        
+
+    def __str__(self):
+        return self.as_str()
+
+    def __iter__(self):
+        for i in self.items:
+            yield i
+
+    def raw_iterator(self):
+        for i in self.items:
+            yield i 
+
 
 class Dataset(Generic[T_co]):
     r"""An abstract class representing a :class:`Dataset`.
@@ -182,7 +210,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             # print('runtime call of ', function_name)
             result_pipe = cls(source_dp, *args, **kwargs)
             if is_df or isinstance(source_dp, DFIterDataPipe) or getattr(result_pipe, '_dp_cast_to_df', False):
-                if function_name != 'trace_as_dataframe' and function_name != 'batch' and function_name != 'groupby':
+                if function_name != 'trace_as_dataframe' and function_name != 'batch' and function_name != 'groupby' and function_name != 'dataframes_as_tuples':
                     result_pipe = result_pipe.trace_as_dataframe()
             # else:
                 # print(function_name, 'will not return DF')
