@@ -11,7 +11,11 @@
 #include <torch/library.h>
 
 #include <fmt/format.h>
+#include <mutex>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include "ATen/core/qualified_name.h"
 
 using at::Scalar;
 using at::Tensor;
@@ -26,6 +30,34 @@ namespace {
 static auto workerInfo =
     torch::class_<dist_rpc::WorkerInfo>("dist_rpc", "WorkerInfo")
         .def(torch::init<std::string, int64_t>());
+
+struct FunctionSchemaCache {
+  const c10::FunctionSchema& getSchema(const c10::QualifiedName& qual_name) {
+    std::string qual_name_str = qual_name.qualifiedName();
+
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = cache.find(qual_name_str);
+    if (it != cache.end()) {
+      return it->second;
+    }
+    // get schema from python_cu and update the cache
+    if (!cuPtr) {
+      py::gil_scoped_acquire acquire;
+      cuPtr = get_python_cu();
+    }
+
+    auto& func_schema =
+        cuPtr->get_function(c10::QualifiedName(qual_name)).getSchema();
+    cache.emplace(qual_name_str, func_schema);
+    return func_schema;
+  }
+
+  std::unordered_map<std::string, c10::FunctionSchema> cache;
+  std::mutex mutex;
+  std::shared_ptr<CompilationUnit> cuPtr;
+};
+
+static FunctionSchemaCache schema_cache;
 
 // prepare the rpc input arguments and call the C++ impls
 void prepare_and_call_rpc_op(
@@ -60,12 +92,7 @@ void prepare_and_call_rpc_op(
 
   // Get FunctionSchema for qualifiedName.
   auto qualifiedName = c10::QualifiedName(qualifiedNameIValue.toStringRef());
-  std::shared_ptr<CompilationUnit> cuPtr;
-  {
-    py::gil_scoped_acquire acquire;
-    cuPtr = get_python_cu();
-  }
-  auto& functionSchema = cuPtr->get_function(qualifiedName).getSchema();
+  auto& functionSchema = schema_cache.getSchema(qualifiedName);
 
   // Build the stack for the user callable.
   // It's similar to
