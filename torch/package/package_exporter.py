@@ -201,8 +201,7 @@ class PackageExporter:
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
         self.verbose = verbose
-        self._implicitly_externed = []
-
+        self._implicitly_externed: List[str] = []
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
         # These are OrderedDicts for compatibility with RemovableHandle.
