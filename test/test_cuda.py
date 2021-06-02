@@ -1480,7 +1480,8 @@ class TestCuda(TestCase):
         except RuntimeError as e:
             return e
 
-    @slowTest
+    # TEMPORARILY REMOVE slowTest since ROCm CI does not run slow tests
+    # @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_multinomial_invalid_probs_cuda(self):
