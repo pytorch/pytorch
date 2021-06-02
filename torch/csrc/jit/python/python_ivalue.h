@@ -49,9 +49,9 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     // when using C++. The reason is unclear.
     try {
       pybind11::gil_scoped_acquire ag;
-      return py::module::import("torch._jit_internal")
-          .attr("_extract_tensors")(py_obj_)
-          .cast<std::vector<at::Tensor>>();
+      static py::object& extractorFn = *new py::object(
+          py::module::import("torch._jit_internal").attr("_extract_tensors"));
+      return extractorFn(py_obj_).cast<std::vector<at::Tensor>>();
     } catch (py::error_already_set& e) {
       auto err = std::runtime_error(
           c10::str("Cannot extract tensors from value: ", e.what()));

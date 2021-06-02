@@ -5,6 +5,7 @@ import io
 import linecache
 import os.path
 import types
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, List, Optional, Union
 from weakref import WeakValueDictionary
@@ -12,8 +13,6 @@ from weakref import WeakValueDictionary
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
-from .file_structure_representation import Directory, _create_directory_from_file_list
-from .glob_group import GlobPattern
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -24,6 +23,8 @@ from ._importlib import (
 from ._mangling import PackageMangler, demangle
 from ._mock_zipreader import MockZipReader
 from ._package_unpickler import PackageUnpickler
+from .file_structure_representation import Directory, _create_directory_from_file_list
+from .glob_group import GlobPattern
 from .importer import Importer
 
 
@@ -44,7 +45,7 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to `sys.modules` but
     local to this importer.
     """
-    modules: Dict[str, Optional[types.ModuleType]]
+    modules: Dict[str, types.ModuleType]
 
     def __init__(
         self,
@@ -99,6 +100,10 @@ class PackageImporter(Importer):
         self.modules["torch_package_importer"] = self  # type: ignore[assignment]
 
         self._mangler = PackageMangler()
+
+        # used for reduce deserializaiton
+        self.storage_context: Any = None
+        self.last_map_location = None
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
@@ -167,14 +172,22 @@ class PackageImporter(Importer):
         pickle_file = self._zipfile_path(package, resource)
         restore_location = _get_restore_location(map_location)
         loaded_storages = {}
+        loaded_reduces = {}
+        storage_context = torch._C.StorageContext()
 
         def load_tensor(data_type, size, key, location, restore_location):
-            name = f".data/{key}.storage"
+            name = f"{key}.storage"
             dtype = data_type(0).dtype
 
-            storage = self.zip_reader.get_storage_from_record(
-                name, size, dtype
-            ).storage()
+            if storage_context.has_storage(name):
+                storage = storage_context.get_storage(name, dtype).storage()
+            else:
+                tensor = self.zip_reader.get_storage_from_record(
+                    ".data/" + name, size, dtype
+                )
+                if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
+                    storage_context.add_storage(name, tensor)
+                storage = tensor.storage()
             loaded_storages[key] = restore_location(storage, location)
 
         def persistent_load(saved_id):
@@ -195,16 +208,36 @@ class PackageImporter(Importer):
                 storage = loaded_storages[key]
                 return storage
             elif typename == "reduce_package":
-                func, args = data
-                return func(self, *args)
+                # to fix BC breaking change, objects on this load path
+                # will be loaded multiple times erroneously
+                if len(data) == 2:
+                    func, args = data
+                    return func(self, *args)
+                reduce_id, func, args = data
+                if reduce_id not in loaded_reduces:
+                    loaded_reduces[reduce_id] = func(self, *args)
+                return loaded_reduces[reduce_id]
             else:
-                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+                f"Unknown typename for persistent_load, expected 'storage' or 'reduce_package' but got '{typename}'"
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
-        result = unpickler.load()
+
+        @contextmanager
+        def set_deserialization_context():
+            # to let reduce_package access deserializaiton context
+            self.storage_context = storage_context
+            self.last_map_location = map_location
+            try:
+                yield
+            finally:
+                self.storage_context = None
+                self.last_map_location = None
+
+        with set_deserialization_context():
+            result = unpickler.load()
 
         # TODO from zdevito:
         #   This stateful weird function will need to be removed in our efforts
@@ -253,7 +286,12 @@ class PackageImporter(Importer):
         self, name: str, filename: Optional[str], is_package: bool, parent: str
     ):
         mangled_filename = self._mangler.mangle(filename) if filename else None
-        spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore[arg-type]
+        spec = importlib.machinery.ModuleSpec(
+            name,
+            self,  # type: ignore[arg-type]
+            origin="<package_importer>",
+            is_package=is_package,
+        )
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
         module.__name__ = self._mangler.mangle(name)
@@ -343,7 +381,7 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
             try:
-                path = parent_module.__path__  # type: ignore[union-attr]
+                path = parent_module.__path__  # type: ignore[attr-defined]
             except AttributeError:
                 msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None
@@ -495,7 +533,14 @@ class PackageImporter(Importer):
         return cur
 
     def _add_file(self, filename: str):
+        """Assembles a Python module out of the given file. Will ignore files in the .data directory.
+
+        Args:
+            filename (str): the name of the file inside of the package archive to be added
+        """
         *prefix, last = filename.split("/")
+        if len(prefix) > 1 and prefix[0] == ".data":
+            return
         package = self._get_or_create_package(prefix)
         if isinstance(package, _ExternNode):
             raise ImportError(

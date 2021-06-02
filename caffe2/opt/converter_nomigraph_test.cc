@@ -7,7 +7,6 @@
 TEST(Converter, Basic) {
   using namespace caffe2::testing;
   caffe2::NetDef net;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 10; ++i) {
     // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     if (rand() % 2) {

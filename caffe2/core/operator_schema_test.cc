@@ -121,7 +121,6 @@ TEST(OperatorSchemaTest, SameInputOutput) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaCalculateOutputOp)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(1, 5).NumOutputs(2, 6)
     .OutputCalculator([](int n) { return n + 1; });
 
@@ -211,7 +210,6 @@ OPERATOR_SCHEMA(OpSchemaArbitraryTensorInference)
         [](const OperatorDef&, const vector<TensorShape>&) {
           vector<TensorShape> shapes(1);
           shapes[0].set_data_type(TensorProto::FLOAT);
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           shapes[0].add_dims(1701);
           return shapes;
         });
@@ -289,14 +287,10 @@ TEST(OperatorSchemaTest, TestCostInference) {
       "OpSchemaCostInference", "", vector<string>{"in"}, vector<string>{"out"});
   vector<TensorShape> shapes(2);
   shapes[0].set_data_type(TensorProto::FLOAT);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   shapes[0].add_dims(10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   shapes[0].add_dims(10);
   shapes[1].set_data_type(TensorProto::FLOAT);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   shapes[1].add_dims(10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   shapes[1].add_dims(10);
   EXPECT_EQ(2000, schema->InferCost(def, shapes).flops);
 }

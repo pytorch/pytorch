@@ -93,16 +93,82 @@ class TORCH_API LoopNest {
   bool computeInline(const Buf* b);
   void inlineIntermediateBufs(bool allow_duplicated_work);
 
-  static void splitWithTail(For* f, int factor);
-  static void splitWithTail(
-      For* f,
-      int factor,
-      For** outer,
-      For** inner,
-      For** tail);
+  // Optimizes conditionals.
+  //
+  // Currently, only the following pattern of conditionals is optimized.
+  // This corresponds to the conditional format that is generated to handle
+  // `aten::cat` op.
+  //
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //   }
+  //
+  // Constraints that must be satisfied for this optimization:
+  //   * All conditions should be of the form "var < expr".
+  //   * All conditions should have the same variable, say v.
+  //   * The condition variable found should be the same as the inner-most
+  //     loop variable. TODO: Remove this constraint.
+  //   * If there are multiple stores that contain conditionals using the same
+  //     loop variable, only the first conditional will be optimized.
+  //     TODO: Remove this constraint.
+  bool optimizeConditionals();
 
+  // Splits the given loop into 2 nested loops with the given factor as the
+  // inner loop bound. If the factor does not evenly divide the loop bound,
+  // then the remainining iterations are extracted into a tail loop that is
+  // added after the given loop.
+  //
+  // For example, consider the following code:
+  //   for (int i = 0; i < 100; ++i) {
+  //     A[i] =
+  //   }
+  //
+  // splitWithTail(i, 8, ...) will result in:
+  //   for (int i_outer = 0; i_outer < 12; ++i_outer) {
+  //     for (int i_inner = 0; i_inner < 8; ++i_inner) {
+  //       A[i_outer * 8 + i_inner] =
+  //     }
+  //   }
+  //   for (int i_tail = 0; i_tail < 4; ++i_tail) {
+  //     A[i_tail + 96] =
+  //   }
+  //
+  // The given loop will be transformed to the outer loop after splitting.
+  // So, the pointer to the input loop should be valid after splitting and
+  // will point to the outer loop. The `inner` and `tail` parameters will be
+  // set to point to the inner and tail loops that are generated.
+  static void splitWithTail(For* f, int factor, For** inner, For** tail);
+  // A convenience wrapper when the caller does not need to access the
+  // split loops.
+  static void splitWithTail(For* f, int factor);
+
+  // Splits the given loop into 2 nested loops with the given factor as the
+  // inner loop bound. If the factor does not evenly divide the loop bound,
+  // then a conditional is inserted into the body to handle the remaining
+  // iterations appropriately.
+  //
+  // For example, consider the following code:
+  //   for (int i = 0; i < 100; ++i) {
+  //     A[i] =
+  //   }
+  //
+  // splitWithMask(i, 8, ...) will result in:
+  //   for (int i_outer = 0; i_outer < 13; ++i_outer) {
+  //     for (int i_inner = 0; i_inner < 8; ++i_inner) {
+  //       if (i_outer * 8 + i_inner < 100) {
+  //         A[i_outer * 8 + i_inner] =
+  //       }
+  //     }
+  //   }
+  //
+  // The given loop will be transformed to the outer loop after splitting.
+  // So, the pointer to the input loop should be valid after splitting and
+  // will point to the outer loop. The `inner` parameter will be set to point
+  // to the inner loop that is generated.
+  static void splitWithMask(For* f, int factor, For** inner);
+  // A convenience wrapper when the caller does not need to access the
+  // split loops.
   static void splitWithMask(For* f, int factor);
-  static void splitWithMask(For* f, int factor, For** outer, For** inner);
 
   // The following methods support loop distribution.
   // For example, consider the following code. This will be used to
@@ -222,12 +288,13 @@ class TORCH_API LoopNest {
       const std::vector<For*>& loops,
       const std::vector<size_t>& permutation);
 
-  // Tile takes a 2d domain (x, y) and split it into small rectangular blocks
+  // Tile takes a 2d domain (x, y) and splits it into small rectangular blocks
   // each with shape (x_factor, y_factor). The traversal over the domain turns
-  // into an outter iteration over the blocks and an inner traversal over all
+  // into an outer iteration over the blocks and an inner traversal over all
   // points in the block.
   // Note that if x dim % x_factor or y dim % y_factor does not equal to 0, the
-  // loop body will be guarded by boundary checks.
+  // loop body will generate corresponding tailing loops.
+  // Returns: {xo, yo, xi, yi, xtail, ytail}
   //
   // For example, consider the following code:
   //   for i: [0, 64)
@@ -236,24 +303,28 @@ class TORCH_API LoopNest {
   //         A[i, j] = B[i, k] + C[j, k]
   //
   // tile(i, j, 4, 8) will return the following nested loop:
-  //   for i_outter: [0, 16)
-  //     for j_outter: [0, 8)
+  //   for i_outer: [0, 16)
+  //     for j_outer: [0, 8)
   //       for i_inner: [0, 4)
   //         for j_inner: [0, 8)
   //           for k: [0, 32)
-  //             A[i_outter * 4 + i_inner, j_outter * 8 + j_inner] =
-  //             B[i_outter * 4 + i_inner, k] + C[j_outter * 8 + j_inner]
+  //             A[i_outer * 4 + i_inner, j_outer * 8 + j_inner] =
+  //             B[i_outer * 4 + i_inner, k] + C[j_outer * 8 + j_inner, k]
   //
   // tile(i, j, 4, 9) will return the following nested loop:
-  //   for i_outter: [0, 16)
-  //     for j_outter: [0, 8)
+  //   for i_outer: [0, 16)
+  //     for j_outer: [0, 7)
   //       for i_inner: [0, 4)
   //         for j_inner: [0, 9)
-  //           if (j_outter * 9 + j_inner < 64)
-  //             for k: (0, 32)
-  //               A[i_outter * 4 + i_inner, j_outter * 9 + j_inner] =
-  //               B[i_outter * 4 + i_inner, k] + C[j_outter * 9 + j_inner]
-  void tile(For* x, For* y, int x_factor, int y_factor);
+  //           for k: (0, 32)
+  //             A[i_outer * 4 + i_inner, j_outer * 9 + j_inner] =
+  //             B[i_outer * 4 + i_inner, k] + C[j_outer * 9 + j_inner, k]
+  //     for i_inner: [0, 4)
+  //       for j_tail: [0, 1)
+  //         for k: (0, 32)
+  //           A[i_outer * 4 + i_inner, 7 * 9 + j_tail] =
+  //           B[i_outer * 4 + i_inner, k] + C[7 * 9 + j_tail, k]
+  std::vector<For*> tile(For* x, For* y, int x_factor, int y_factor);
 
   // Returns true if the given loops are perfectly nested, i.e., every loop
   // (except the innermost) should have exactly one statement in its body
@@ -265,7 +336,10 @@ class TORCH_API LoopNest {
 
   static void unroll(For* f, Stmt** unrolled);
   static void unroll(For* f);
+
   static bool normalize(For* f);
+  static bool isNormalized(For* f);
+
   static bool flatten(const std::vector<For*>& f, For** flattened);
   static bool flatten(const std::vector<For*>& f);
 

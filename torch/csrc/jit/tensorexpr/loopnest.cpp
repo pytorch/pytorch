@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
+#include <algorithm>
 #include <stdexcept>
+#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -961,6 +963,208 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = insertAllocFree(root_stmt_);
 }
 
+namespace {
+
+class IfThenElseReplacer : public IRMutator {
+ public:
+  IfThenElseReplacer(const IfThenElse* to_replace, const Expr* new_expr)
+      : to_replace_(to_replace), new_expr_(new_expr) {}
+
+  const Expr* mutate(const IfThenElse* i) override {
+    if (i == to_replace_) {
+      return new_expr_;
+    }
+    return i;
+  }
+
+ private:
+  const IfThenElse* to_replace_;
+  const Expr* new_expr_;
+};
+
+// Check if the given condition is optimizable.
+// Specifically, this function looks for the following pattern:
+//    "var < expr"
+//
+// If this pattern is found, then this function:
+//   * sets `cond_var` to `var`,
+//   * sets `compared_value` to `expr`, and
+//   * returns true.
+bool isConditionOptimizable(
+    const Expr* condition,
+    const Var** cond_var,
+    const Expr** compared_value) {
+  auto cs = dynamic_cast<const CompareSelect*>(condition);
+  if (cs && cs->compare_select_op() == kLT) {
+    auto var = dynamic_cast<const Var*>(cs->lhs());
+    if (var) {
+      *cond_var = var;
+      *compared_value = cs->rhs();
+      return true;
+    }
+  }
+  return false;
+}
+
+// Checks if the given if-then-else expression is a conditional that is
+// generated from `aten::cat`.
+//
+// The expected format of conditionals is:
+//     IfThenElse(var < val1? 1 : 0,
+//       IfThenElse (var < val2? 1 : 0,
+//         IfThenElse (var < val3? 1 : 0,
+//           sub-expr1,
+//           sub-expr2),
+//         sub-expr3),
+//       sub-expr4)
+//
+// If such a conditional is found, this function also sets:
+//   * cond_var to the condition variable found in this expression.
+//   * comp_values to the list of compared values in the condition expressions.
+//   * sub_exprs to the list of sub-expressions that are the result of this
+//     if-then-else expression.
+bool isConditionalFromCat(
+    const IfThenElse* ite,
+    const Var** cond_var,
+    std::vector<const Expr*>* comp_values,
+    std::vector<const Expr*>* sub_exprs) {
+  const Var* var = nullptr;
+  const Expr* comp_value;
+  if (isConditionOptimizable(ite->condition(), &var, &comp_value)) {
+    if (*cond_var == nullptr) {
+      *cond_var = var;
+    } else if (*cond_var != var) {
+      // Different condition variables found in nested if-then-else
+      // expressions. Can not optimize such cases.
+      return false;
+    }
+    auto true_ite = dynamic_cast<const IfThenElse*>(ite->true_value());
+    if (true_ite) {
+      if (!isConditionalFromCat(true_ite, cond_var, comp_values, sub_exprs)) {
+        return false;
+      }
+    } else {
+      sub_exprs->push_back(ite->true_value());
+    }
+    auto false_ite = dynamic_cast<const IfThenElse*>(ite->false_value());
+    if (false_ite) {
+      return false;
+    }
+    comp_values->push_back(comp_value);
+    sub_exprs->push_back(ite->false_value());
+    return true;
+  }
+  return false;
+}
+
+bool areConstantsAndSorted(const std::vector<const Expr*>& comp_values) {
+  std::vector<int> comp_consts;
+  comp_consts.reserve(comp_values.size());
+  for (auto c : comp_values) {
+    if (!c->isConstant()) {
+      return false;
+    }
+    comp_consts.push_back(immediateAs<int>(c));
+  }
+  return std::is_sorted(comp_consts.begin(), comp_consts.end());
+}
+
+} // namespace
+
+bool LoopNest::optimizeConditionals() {
+  // Consider every store in the root_stmt_ and try to optimize the
+  // conditionals in that store.
+  auto stores = NodeFinder<Store>::find(root_stmt_);
+  std::unordered_set<For*> split_fors;
+  for (auto store : stores) {
+    const Var* cond_var = nullptr;
+    // `comp_values` represent the list of compared values that will be
+    // collected as we check for the expected pattern. Since that will
+    // only include the RHS of the conditions in the if-then-else expressions
+    // we need to start with `0` which is the initial bound, given that we
+    // only handle normalized loops (check for this is done below).
+    std::vector<const Expr*> comp_values = {new IntImm(0)};
+    std::vector<const Expr*> sub_exprs;
+    auto ifthenelse_exprs = NodeFinder<IfThenElse>::find(store);
+    if (ifthenelse_exprs.empty()) {
+      continue;
+    }
+    // We only check if the first if-then-else expression in this store
+    // corresponds to a conditional of the required format. If there are more
+    // than one such conditional, optimizing them requires checking if the
+    // conditions are exactly the same across them and handling all of them
+    // together. Currently, this is not handled.
+    if (!isConditionalFromCat(
+            ifthenelse_exprs.front(), &cond_var, &comp_values, &sub_exprs)) {
+      continue;
+    }
+
+    auto fors = getLoopStmtsFor(store);
+    if (cond_var != fors.back()->var()) {
+      // Currently, we only handle the case where the condition variable
+      // is the same as the inner-most loop variable.
+      // TODO: Handle all other cases here.
+      //
+      // In order to handle all other cases, the method `clone_and_replace`
+      // called below to clone the body of the loop with a new store needs
+      // to recursively handle cloning of the loops and other blocks it
+      // contains.
+      continue;
+    }
+
+    auto for_to_split = fors.back();
+    if (!LoopNest::isNormalized(for_to_split)) {
+      // Do not optimize this conditional since the condition variable
+      // refers to a loop that is not normalized.
+      continue;
+    }
+    if (split_fors.count(for_to_split)) {
+      // This loop has already been split while optimizing conditionals
+      // earlier.
+      //
+      // Optimizing multiple conditionals that require splitting the same loop
+      // is tricky. It requires checking if the conditions are exactly the same
+      // across them and handling all of them together by splitting the loop
+      // exactly once.
+      //
+      // Currently, this case is not supported.
+      continue;
+    }
+    split_fors.insert(for_to_split);
+
+    // `comp_values` needs to include the end bound, which is `for_to_split`
+    // stop value.
+    comp_values.push_back(for_to_split->stop());
+
+    // Check if all `comp_values` are constants and they are sorted.
+    if (!areConstantsAndSorted(comp_values)) {
+      continue;
+    }
+
+    // Remove all the if-then-else expressions from this store and create
+    // one loop per sub-expression.
+    std::vector<Stmt*> split_loops;
+    auto cond_to_replace = ifthenelse_exprs.front();
+    for (size_t i = 0; i < sub_exprs.size(); ++i) {
+      IfThenElseReplacer ifthenelseReplacer(cond_to_replace, sub_exprs[i]);
+      auto new_store = store->accept_mutator(&ifthenelseReplacer);
+      auto new_for_body =
+          for_to_split->body()->clone_and_replace(store, new_store);
+      auto new_for = new For(
+          for_to_split->var(),
+          comp_values[i],
+          comp_values[i + 1],
+          new_for_body);
+      LoopNest::normalize(new_for);
+      split_loops.push_back(new_for);
+    }
+    auto par = dynamic_cast<Block*>(for_to_split->get_parent());
+    par->replace_stmt(for_to_split, new Block(split_loops));
+  }
+  root_stmt_ = IRSimplifier::simplify(root_stmt_);
+  return true;
+}
+
 void LoopNest::vectorizeInnerLoops() {
   std::vector<For*> innerLoops;
   std::vector<For*> worklist;
@@ -1008,25 +1212,21 @@ void LoopNest::vectorizeInnerLoops() {
   // vectorize inner loops.
   for (For* loop : innerLoops) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* outer1;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* split1;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* tail1;
 
     static const int kBodyVectorWidth = 8;
-    splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
+    splitWithTail(loop, kBodyVectorWidth, &split1, &tail1);
     vectorize(split1);
 
     if (tail1) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      For* outer2;
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       For* split2;
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       For* tail2;
       static const int kTailVectorWidth = 4;
-      splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
+      splitWithTail(tail1, kTailVectorWidth, &split2, &tail2);
       vectorize(split2);
     }
   }
@@ -1122,16 +1322,11 @@ void LoopNest::sliceTail(For* f, int factor) {
 
 void LoopNest::splitWithTail(For* f, int factor) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *outer, *inner, *tail;
-  splitWithTail(f, factor, &outer, &inner, &tail);
+  For *inner, *tail;
+  splitWithTail(f, factor, &inner, &tail);
 }
 
-void LoopNest::splitWithTail(
-    For* f,
-    int factor,
-    For** outer,
-    For** inner,
-    For** tail) {
+void LoopNest::splitWithTail(For* f, int factor, For** inner, For** tail) {
   if (!f) {
     throw malformed_input("splitWithTail attempted on null loop", f);
   }
@@ -1167,16 +1362,6 @@ void LoopNest::splitWithTail(
   // x -> x.outer * inner.size + x.inner
   const Expr* combined_index1 = new Add(new Mul(i_outer, factor_expr), i_inner);
 
-  Stmt* body_inner =
-      Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
-
-  *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer =
-      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
-
-  // TODO: cleanup API for adding/removing statements
-  p->replace_stmt(f, *outer);
-
   if (tail_is_needed) {
     const Var* i_tail = new Var(loop_var_name + "_tail", loop_var_dtype);
     // x -> x.tail + outer.size * inner.size
@@ -1187,19 +1372,28 @@ void LoopNest::splitWithTail(
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
     *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
-    p->insert_stmt_after(*tail, *outer);
+    p->insert_stmt_after(*tail, f);
   } else {
     *tail = nullptr;
   }
+
+  Stmt* body_inner = Substitute(f->removeBody(), {{f->var(), combined_index1}});
+
+  *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
+  // The input loop `f` will be the outer loop after split.
+  f->setVar(i_outer);
+  f->setStart(new IntImm(0));
+  f->setStop(split_count);
+  f->setBody(*inner);
 }
 
 void LoopNest::splitWithMask(For* f, int factor) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *outer, *inner;
-  splitWithMask(f, factor, &outer, &inner);
+  For* inner;
+  splitWithMask(f, factor, &inner);
 }
 
-void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
+void LoopNest::splitWithMask(For* f, int factor, For** inner) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!p) {
     std::cerr << "Parent is not a Block!\n";
@@ -1234,7 +1428,7 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   // x -> x.outer * inner.size + x.inner
   const Expr* combined_index = new Add(new Mul(i_outer, factor_expr), i_inner);
 
-  Stmt* body_inner = Stmt::clone(f->body());
+  Stmt* body_inner = f->removeBody();
   // TODO: is it ok that we're doing it eagerly? In the other implementation we
   // are only materializing predicates at the last, lowering, step.
   if (tail_is_needed) {
@@ -1251,10 +1445,11 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer =
-      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
-
-  p->replace_stmt(f, *outer);
+  // The input loop `f` will be the outer loop after split.
+  f->setVar(i_outer);
+  f->setStart(new IntImm(0));
+  f->setStop(split_count);
+  f->setBody(*inner);
 }
 
 std::vector<For*> LoopNest::distributeLoop(
@@ -1274,7 +1469,8 @@ std::vector<For*> LoopNest::distributeLoop(
   // Extract bodies for all the loops after distribution.
   std::vector<Block*> new_loop_bodies;
   auto new_loop_body = new Block({});
-  while (auto s = loop->body()->front()) {
+  while (!loop->body()->empty()) {
+    auto s = loop->body()->front();
     loop->body()->remove_stmt(s);
     new_loop_body->append_stmt(s);
     if (pivots.count(s)) {
@@ -1715,7 +1911,7 @@ std::vector<For*> LoopNest::reorder(
   return result;
 }
 
-void LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
+std::vector<For*> LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
   auto parent = dynamic_cast<Block*>(x->get_parent());
   if (parent == nullptr) {
     throw malformed_input("parent of the loops must be a Block");
@@ -1725,54 +1921,46 @@ void LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
   }
 
   // Split x, y axes by x_factor and y_factor
-  For *yo, *yi;
-  splitWithMask(y, y_factor, &yo, &yi);
-  For *xo, *xi;
-  splitWithMask(x, x_factor, &xo, &xi);
+  For *yi, *ytail;
+  splitWithTail(y, y_factor, &yi, &ytail);
+  For *xi, *xtail;
+  splitWithTail(x, x_factor, &xi, &xtail);
 
-  // Re-identify yo, yi
-  bool handle_conds = false;
-  ExprHandle conds;
-  if (auto* xcond = dynamic_cast<Cond*>(xi->body()->front())) {
-    conds = ExprHandle(xcond->condition());
-    handle_conds = true;
-    yo = dynamic_cast<For*>(xcond->true_stmt()->front());
-  } else {
-    yo = dynamic_cast<For*>(xi->body()->front());
-  }
+  // Distribute xi over yo and ytail so we can manipulate the loop order of {xo,
+  // xi, yo, yi}
+  auto loops = distributeLoop(xi);
+
+  // For {xo, xi, yo, yi}, reorder the axes to be xo, yo, xi, yi
+  xi = loops.front();
+  For* yo = dynamic_cast<For*>(xi->body()->stmts().front());
   CHECK(yo);
-  yi = dynamic_cast<For*>(yo->body()->front());
+  reorderAxis(xi, yo);
+
+  // Re-Identify loop handles of yo, xi, yi, ytail
+  For* xo = x;
+  yo = dynamic_cast<For*>(xo->body()->stmts().front());
+  CHECK(yo);
+  xi = dynamic_cast<For*>(yo->body()->stmts().front());
+  CHECK(xi);
+  yi = dynamic_cast<For*>(xi->body()->stmts().front());
   CHECK(yi);
 
-  // If x_factor is not a divisor of x dim, we'll need to sink the x boundary
-  // check
-  if (handle_conds) {
-    Cond* body_new = nullptr;
-    if (yi->body()->nstmts() == 1) {
-      if (auto ycond = dynamic_cast<Cond*>(yi->body()->front())) {
-        // yi body is an if-stmt. Add the x boundary check into the condition of
-        // the if-stmt
-        body_new = Cond::make(
-            conds && ExprHandle(ycond->condition()),
-            ycond->true_stmt(),
-            ycond->false_stmt());
-      } else {
-        // Construct a cond-stmt with the x boundary check and add the stmt in
-        // yi body as the true_branch of the cond-stmt
-        body_new = Cond::make(conds, yi->body()->front(), nullptr);
-      }
-    } else {
-      // If there are multiple stmts in yi body, add the stmt block(yi body)
-      // into the cond-stmt as the true_branch
-      body_new = Cond::make(conds, yi->body(), nullptr);
-    }
-    yi->setBody(body_new);
+  if (ytail) {
+    ytail = dynamic_cast<For*>(xo->body()->stmts().back());
+    CHECK(ytail);
+    ytail = dynamic_cast<For*>(ytail->body()->stmts().front());
+    CHECK(ytail);
   }
 
-  // Reorder the axes to be xo, yo, xi, yi
-  xi->setBody(yi);
-  yo->setBody(xi);
-  xo->setBody(yo);
+  std::vector<For*> result;
+  result.push_back(xo);
+  result.push_back(yo);
+  result.push_back(xi);
+  result.push_back(yi);
+  result.push_back(xtail);
+  result.push_back(ytail);
+
+  return result;
 }
 
 bool LoopNest::areLoopsPerfectlyNested(const std::vector<For*>& loops) {
@@ -1828,17 +2016,21 @@ void LoopNest::unroll(For* f) {
   unroll(f, &unrolled);
 }
 
+bool LoopNest::isNormalized(For* f) {
+  if (f->start()->isConstant()) {
+    return immediateAs<int>(f->start()) == 0;
+  }
+  return false;
+}
+
 bool LoopNest::normalize(For* f) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
   }
 
-  if (f->start()->isConstant()) {
-    int start_idx = immediateAs<int>(f->start());
-    if (start_idx == 0) {
-      // No need to normalize in this case.
-      return false;
-    }
+  if (isNormalized(f)) {
+    // No need to normalize anymore here.
+    return false;
   }
 
   auto for_body_normalized = Substitute(

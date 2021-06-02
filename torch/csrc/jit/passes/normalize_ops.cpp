@@ -20,6 +20,26 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
   return false;
 }
 
+// Normalizes a `__is__` comparison with a bool to `eq` (and same with
+// `__isnot__`)
+bool normalizeIsBool(graph_node_list_iterator& iter) {
+  ArrayRef<Value*> args = iter->inputs();
+  if (args.size() == 2 && args[0]->type() == BoolType::get() &&
+      args[1]->type() == BoolType::get()) {
+    if (iter->kind() == aten::__is__) {
+      iter->replaceWithNewSymbol(aten::eq);
+      iter.destroyCurrent();
+      return true;
+    }
+    if (iter->kind() == aten::__isnot__) {
+      iter->replaceWithNewSymbol(aten::ne);
+      iter.destroyCurrent();
+      return true;
+    }
+  }
+  return false;
+}
+
 void NormalizeOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
@@ -31,6 +51,9 @@ void NormalizeOps(Block* block) {
       continue;
     }
 
+    if (normalizeIsBool(it)) {
+      continue;
+    }
     it++;
   }
 }
@@ -94,6 +117,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_exp2, aten::exp2},
       {aten::special_expm1, aten::expm1},
       {aten::special_logit, aten::logit},
+      {aten::special_i0, aten::i0},
       {aten::orgqr, aten::linalg_householder_product},
       {aten::special_gammaln, aten::lgamma}};
   return alias_map;

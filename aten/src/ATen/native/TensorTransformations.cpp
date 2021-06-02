@@ -10,85 +10,150 @@
 
 namespace at {
 namespace native {
+namespace {
 
 constexpr size_t dim_bitset_size = 64;
 
-template <typename scalar_t>
-void inline flip_cpu_kernel(
-  const int64_t total_dims,
-  const std::vector<int64_t>& stride_contiguous_v,
-  const std::bitset<dim_bitset_size>& flip_dims_b,
-  const Tensor& in_tensor,
-  Tensor& out_tensor
-){
-  const int64_t numel = in_tensor.numel();
-  const scalar_t* in_tensor_d = in_tensor.data_ptr<scalar_t>();
-  scalar_t* out_tensor_d = out_tensor.data_ptr<scalar_t>();
-  auto sizes_v = in_tensor.sizes().vec();
-  auto strides_v = in_tensor.strides().vec();
+Tensor build_index(Tensor input, int64_t flip_dim) {
+  int64_t element_size_bytes = input.element_size();
+  auto num_dims = input.ndimension();
+  auto dim_size = input.size(flip_dim);
+  auto stride = input.stride(flip_dim);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  at::parallel_for(0, numel, 1000, [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t cur_indices = i;
-      int64_t rem = 0;
-      int64_t dst_offset = 0;
+  auto new_shape = std::vector<int64_t>(num_dims, 1);
+  new_shape[flip_dim] = dim_size;
 
-      for (int64_t d = 0; d < total_dims; d++) {
-        int64_t temp = cur_indices;
-        cur_indices = cur_indices / stride_contiguous_v[d];
-        rem = temp - cur_indices * stride_contiguous_v[d];
-        dst_offset += flip_dims_b[d] ? (sizes_v[d] - 1 - cur_indices) * strides_v[d] : cur_indices * strides_v[d];
-        cur_indices = rem;
-      }
-      out_tensor_d[i] = in_tensor_d[dst_offset];
-    }
-  });
+  TensorOptions tensor_options =
+    TensorOptions(c10::kLong).
+    device(c10::kCPU);
+
+  auto index = at::empty(new_shape, tensor_options);
+  auto input_index_ptr = index.data_ptr<int64_t>();
+
+  for(int64_t i = 0; i < dim_size; i++) {
+    input_index_ptr[i] = static_cast<int64_t>(dim_size - i - 1) * stride * element_size_bytes;
+  }
+  return index;
 }
 
-Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
-  auto in_tensor = self;
-  const int64_t total_dims = in_tensor.dim();
-  auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  Tensor out_tensor = at::empty_like(in_tensor, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  // create contiguous strides for input tensor
-  auto stride_contiguous_v = std::vector<int64_t>(total_dims);
-  for (int64_t i = total_dims - 1; i >= 0; i--) {
-    if (i == total_dims - 1) {
-      stride_contiguous_v[i] = 1;
-    } else {
-      stride_contiguous_v[i] = std::max<int64_t>(in_tensor.size(i + 1), 1) * stride_contiguous_v[i + 1];
+std::vector<Tensor> build_indices_loop(Tensor input, IntArrayRef flip_dims) {
+  std::vector<Tensor> indices;
+  for(auto dim: flip_dims) {
+    auto index = build_index(input, dim);
+    indices.push_back(index);
+  }
+  return indices;
+}
+
+static TensorIterator make_index_iterator(const Tensor& input, const std::vector<Tensor> indices) {
+  TensorIteratorConfig config;
+
+  auto output_tensor = Tensor();
+  if(input.is_quantized()) {
+    double scale = input.q_scale();
+    int64_t zero_point = input.q_zero_point();
+    output_tensor = at::_empty_affine_quantized(
+        input.sizes(), at::device(c10::kCPU).dtype(input.scalar_type()), scale, zero_point);
+  }
+
+  config.set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
+        .declare_static_dtype_and_device(input.scalar_type(), input.device())
+        .add_owned_output(output_tensor)
+        .add_input(input);
+  for (auto& index : indices) {
+    config.add_input(index);
+  }
+  return config.build();
+}
+
+struct Indexer {
+  Indexer(int64_t num_indexers, char** indexers, const int64_t* indexer_strides)
+      : num_indexers(num_indexers),
+        indexers(indexers),
+        indexer_strides(indexer_strides) {}
+
+  int64_t num_indexers;
+  char** indexers;
+  const int64_t* indexer_strides;
+
+  int64_t get(int64_t idx) {
+    int64_t offset = *(int64_t*)&indexers[0][idx * indexer_strides[0]];
+    for (int j = 1; j < num_indexers; j++) {
+      offset += *(int64_t*)&indexers[j][idx * indexer_strides[j]];
     }
+    return offset;
+  }
+};
+
+template <typename scalar_t>
+void flip_cpu_kernel(TensorIterator& iter) {
+  int ntensor = iter.ntensors();
+  // When launch the index parallel version, set a relative small grain size
+  // less than the INTERNAL::GRAIN_SIZE to make the whole available thread
+  // numbers get more balanced work load and a better cache location. The grain
+  // size here is chosen by the op benchmark to overcome the thread launch
+  // overhead. This value was taken from the AdvancedIndexing kernel.
+  const int index_parallel_grain_size = 3000;
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    auto indexer = Indexer(ntensor - 2, &data[2], &strides[2]);
+    char* dst = data[0];
+    char* src = data[1];
+
+    for (int64_t i = 0; i < n; i++) {
+      int64_t offset = indexer.get(i);
+      *(scalar_t*)(dst + strides[0] * i) =
+          *(scalar_t*)(src + strides[1] * i + offset);
+    }
+  };
+
+  iter.for_each(loop, index_parallel_grain_size);
+}
+} // anonymous namespace
+
+Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
+  if(dims.size() == 0) {
+    return self.clone();
   }
 
-  if (in_tensor.is_quantized()) {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(in_tensor.scalar_type(),
-                                        "flip_quantized_cpu", [&] {
-      flip_cpu_kernel<scalar_t>(
-        total_dims,
-        stride_contiguous_v,
-        flip_dims_b,
-        in_tensor,
-        out_tensor
-      );
-    });
+  auto input = self;
+  const int64_t total_dims = input.dim();
+  auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
+
+  std::vector<int64_t> flip_dims;
+  for(int64_t i = 0; i < total_dims; i++) {
+      if(flip_dims_b[i]) {
+        flip_dims.push_back(i);
+      }
+  }
+
+  auto shape = input.sizes().vec();
+  auto strides = input.strides().vec();
+
+  // Set stride to zero on the dimensions that are going to be flipped
+  for(auto dim: flip_dims) {
+    strides[dim] = 0;
+  }
+
+  // Restride the input to index only on the dimensions to flip
+  auto restrided_input = input.as_strided(shape, strides);
+  auto indices = build_indices_loop(input, flip_dims);
+  auto iter = make_index_iterator(restrided_input, indices);
+
+  if (input.is_quantized()) {
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+        input.scalar_type(), "flip_quantized_cpu", [&] {
+          flip_cpu_kernel<scalar_t>(iter);
+        });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16,
-                                          in_tensor.scalar_type(),
-                                          "flip_cpu", [&] {
-      flip_cpu_kernel<scalar_t>(
-        total_dims,
-        stride_contiguous_v,
-        flip_dims_b,
-        in_tensor,
-        out_tensor
-      );
-    });
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kBool, kHalf, kBFloat16, input.scalar_type(), "flip_cpu", [&] {
+          flip_cpu_kernel<scalar_t>(iter);
+        });
   }
-
-  return out_tensor;
+  auto result = iter.output();
+  return result;
 }
 
 Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {

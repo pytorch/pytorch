@@ -21,13 +21,9 @@ using namespace torch::jit::tensorexpr;
 TEST(ExternalCall, Conv2d_float) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Input("Input", kFloat, {1, 3, 224, 224});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Weight("Weight", kFloat, {16, 3, 3, 3});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Bias("Bias", kFloat, {16});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
   int64_t stride = 2;
   int64_t pad = 1;
@@ -52,11 +48,8 @@ TEST(ExternalCall, Conv2d_float) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({1, 3, 224, 224}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor weight = at::ones({16, 3, 3, 3}, options) * 6.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor bias = at::ones({16}, options) * 11.f;
   at::Tensor ref = at::conv2d(
       input,
@@ -68,13 +61,9 @@ TEST(ExternalCall, Conv2d_float) {
       groups);
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input_buf(1 * 3 * 224 * 224, 5.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> weight_buf(16 * 3 * 3 * 3, 6.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> bias_buf(16, 11.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -88,7 +77,6 @@ TEST(ExternalCall, Conv2d_float) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Bias, Result});
 
   ir_eval.call({input_buf, weight_buf, bias_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
@@ -98,13 +86,9 @@ TEST(ExternalCall, Conv2d_int) {
   // A similar test, but now using kInt tensors
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Input("Input", kInt, {1, 3, 224, 224});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Weight("Weight", kInt, {16, 3, 3, 3});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Bias("Bias", kInt, {16});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kInt);
   int64_t stride = 2;
   int64_t pad = 1;
@@ -129,11 +113,8 @@ TEST(ExternalCall, Conv2d_int) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({1, 3, 224, 224}, options) * 5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor weight = at::ones({16, 3, 3, 3}, options) * 6;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor bias = at::ones({16}, options) * 11;
   at::Tensor ref = at::conv2d(
       input,
@@ -145,13 +126,9 @@ TEST(ExternalCall, Conv2d_int) {
       groups);
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int32_t> input_buf(1 * 3 * 224 * 224, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int32_t> weight_buf(16 * 3 * 3 * 3, 6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int32_t> bias_buf(16, 11);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int32_t> result_buf(1 * 16 * 112 * 112, -1);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -165,7 +142,6 @@ TEST(ExternalCall, Conv2d_int) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Bias, Result});
 
   ir_eval.call({input_buf, weight_buf, bias_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
@@ -174,11 +150,8 @@ TEST(ExternalCall, Conv2d_int) {
 TEST(ExternalCall, Conv2d_nobias_noargs) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Input("Input", kFloat, {1, 16, 112, 112});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Weight("Weight", kFloat, {16, 16, 1, 1});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
 
   Tensor* Result = new Tensor(
@@ -197,18 +170,13 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({1, 16, 112, 112}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor weight = at::ones({16, 16, 1, 1}, options) * 6.f;
   at::Tensor ref = at::conv2d(input, weight);
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input_buf(1 * 16 * 112 * 112, 5.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> weight_buf(16 * 16 * 1 * 1, 6.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -222,7 +190,6 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Weight, Result});
 
   ir_eval.call({input_buf, weight_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
@@ -231,13 +198,9 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
 TEST(ExternalCall, Addmm_float) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Input("Input", kFloat, {100, 300});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Mat1("Mat1", kFloat, {100, 200});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder Mat2("Mat2", kFloat, {200, 300});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle ResultBuf("Result", {100, 300}, kFloat);
   int64_t beta = 2;
   int64_t alpha = 2;
@@ -260,29 +223,21 @@ TEST(ExternalCall, Addmm_float) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({100, 300}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor mat1 = at::ones({100, 200}, options) * 6.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor mat2 = at::ones({200, 300}, options) * 11.f;
   at::Tensor ref = at::addmm(input, mat1, mat2, beta, alpha);
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input_buf(100 * 300, 5.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> mat1_buf(100 * 200, 6.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> mat2_buf(200 * 300, 11.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(100 * 300, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
   LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Mat1, Mat2, Result});
 
   llvm_codegen.call({input_buf, mat1_buf, mat2_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 #endif
@@ -290,7 +245,6 @@ TEST(ExternalCall, Addmm_float) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Mat1, Mat2, Result});
 
   ir_eval.call({input_buf, mat1_buf, mat2_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
@@ -307,12 +261,9 @@ TEST(ExternalCall, BinaryFloat) {
       std::string>;
   std::vector<Test> tests = {};
   tests.push_back(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Test{{100, 200}, {200, 300}, {100, 300}, at::matmul, "nnc_aten_matmul"});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tests.push_back(Test{{100, 300}, {300}, {100}, at::mv, "nnc_aten_mv"});
   tests.push_back(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Test{{100, 200}, {200, 300}, {100, 300}, at::mm, "nnc_aten_mm"});
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, bShape, resShape;
@@ -343,9 +294,7 @@ TEST(ExternalCall, BinaryFloat) {
                        .layout(at::kStrided)
                        .device(at::kCPU)
                        .requires_grad(false);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::Tensor a = at::ones(c10::IntArrayRef(aShape), options) * 5.f;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::Tensor b = at::ones(c10::IntArrayRef(bShape), options) * 6.f;
     at::Tensor ref = torchFunc(a, b);
 
@@ -355,9 +304,7 @@ TEST(ExternalCall, BinaryFloat) {
     };
 
     at::Tensor nnc_result;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_buf(prod(aShape), 5.f);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> b_buf(prod(bShape), 6.f);
     std::vector<float> result_buf(prod(resShape), -1.f);
 
@@ -395,18 +342,14 @@ TEST(ExternalCall, UnaryFloat) {
   std::vector<Test> tests = {};
   tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {1, 64, 8, 9},
-                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {1, 64, 5, 7},
                        [](at::Tensor x) {
-                         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                          return at::adaptive_avg_pool2d(x, {5, 7});
                        },
                        "nnc_aten_adaptive_avg_pool2d",
-                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        toExprHandleVec({5, 7})});
   tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {100, 200},
-                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {100},
                        [](at::Tensor x) { return at::mean(x, {1}); },
                        "nnc_aten_mean",
@@ -434,7 +377,6 @@ TEST(ExternalCall, UnaryFloat) {
                        .layout(at::kStrided)
                        .device(at::kCPU)
                        .requires_grad(false);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::Tensor a = at::ones(c10::IntArrayRef(aShape), options) * 5.f;
     at::Tensor ref = torchFunc(a);
 
@@ -444,7 +386,6 @@ TEST(ExternalCall, UnaryFloat) {
     };
 
     at::Tensor nnc_result;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_buf(prod(aShape), 5.f);
     std::vector<float> result_buf(prod(resShape), -1.f);
 
@@ -471,28 +412,22 @@ TEST(ExternalCall, ComputeInterop) {
   // use Tensors built with Compute API.
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle ConvResultBuf("ConvResult", {1, 16, 112, 112}, kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle MatmulResultBuf("MatmulResult", {1, 16, 112, 112}, kFloat);
 
   Tensor* Input = Compute(
       "Input",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{1, "n"}, {16, "c"}, {112, "h"}, {112, "w"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           const VarHandle& w) { return FloatImm::make(5.0f); });
   Tensor* Weight = Compute(
       "Weight",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{16, "n"}, {16, "c"}, {1, "kh"}, {1, "kw"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           const VarHandle& w) { return FloatImm::make(6.0f); });
 
   Tensor* ConvResult = new Tensor(
@@ -511,7 +446,6 @@ TEST(ExternalCall, ComputeInterop) {
           {}));
   Tensor* Result = Compute(
       "Result",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{1, "n"}, {16, "c"}, {112, "h"}, {112, "w"}},
       [&](const VarHandle& n,
           const VarHandle& c,
@@ -534,24 +468,17 @@ TEST(ExternalCall, ComputeInterop) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor input = at::ones({1, 16, 112, 112}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor weight = at::ones({16, 16, 1, 1}, options) * 6.f;
   at::Tensor t = at::conv2d(input, weight);
   at::Tensor t2 = at::matmul(t, t);
   at::Tensor ref = t + t2;
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input_buf(1 * 16 * 112 * 112, 5.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> weight_buf(16 * 16 * 1 * 1, 6.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> conv_result_buf(1 * 16 * 112 * 112, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> matmul_result_buf(1 * 16 * 112 * 112, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -569,7 +496,6 @@ TEST(ExternalCall, ComputeInterop) {
 
   ir_eval.call(
       {input_buf, weight_buf, conv_result_buf, matmul_result_buf, result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
@@ -580,25 +506,14 @@ TEST(ExternalCall, Inlining) {
   // can use Tensors built with Compute API.
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle MatmulResultBuf("MatmulResult", {8, 8}, kFloat);
 
   Tensor* A = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{8, "i"}, {8, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "A", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return FloatImm::make(5.0f);
       });
   Tensor* B = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{8, "i"}, {8, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return FloatImm::make(4.0f);
       });
   Tensor* MatmulResult = new Tensor(
@@ -610,10 +525,8 @@ TEST(ExternalCall, Inlining) {
           {}));
   Tensor* Result = Compute(
       "Result",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{8, "i"}, {8, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return MatmulResult->load(i, j) + FloatImm::make(3.0f);
       });
 
@@ -633,16 +546,12 @@ TEST(ExternalCall, Inlining) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor a = at::ones({8, 8}, options) * 5.f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor b = at::ones({8, 8}, options) * 4.f;
   at::Tensor t = at::matmul(a, b);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor ref = t + 3.f;
 
   at::Tensor nnc_result;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> result_buf(8 * 8);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -656,7 +565,6 @@ TEST(ExternalCall, Inlining) {
   SimpleIREvaluator ir_eval(l.root_stmt(), {Result});
 
   ir_eval.call({result_buf});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {8, 8}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }

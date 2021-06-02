@@ -413,17 +413,17 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "split_with_tail",
           [](const LoopNest& self, For* f, int factor) {
-            For *outer = nullptr, *inner = nullptr, *tail = nullptr;
-            self.splitWithTail(f, factor, &outer, &inner, &tail);
-            return std::make_tuple(outer, inner, tail);
+            For *inner = nullptr, *tail = nullptr;
+            self.splitWithTail(f, factor, &inner, &tail);
+            return std::make_tuple(inner, tail);
           },
           py::return_value_policy::reference)
       .def(
           "split_with_mask",
           [](const LoopNest& self, For* f, int factor) {
-            For *outer = nullptr, *inner = nullptr;
-            self.splitWithMask(f, factor, &outer, &inner);
-            return std::make_tuple(outer, inner);
+            For* inner = nullptr;
+            self.splitWithMask(f, factor, &inner);
+            return inner;
           },
           py::return_value_policy::reference)
       .def(
@@ -452,8 +452,9 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "tile",
           [](LoopNest& self, For* x, For* y, int x_factor, int y_factor) {
-            self.tile(x, y, x_factor, y_factor);
-          })
+            return self.tile(x, y, x_factor, y_factor);
+          },
+          py::return_value_policy::reference)
       .def_static(
           "distribute_loop",
           [](For* f) { return LoopNest::distributeLoop(f); },
@@ -499,10 +500,12 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "cache_accesses",
           [](LoopNest& self,
-             const Buf* producer,
+             const BufHandle& producer,
              const std::string& name,
              Stmt* consumer) {
-            return self.cacheAccesses(producer, name, consumer);
+            std::pair<const Buf*, Stmt*> ret =
+                self.cacheAccesses(producer.node(), name, consumer);
+            return std::make_pair(BufHandle(ret.first), ret.second);
           },
           py::return_value_policy::reference)
       .def(

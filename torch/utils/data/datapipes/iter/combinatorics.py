@@ -94,6 +94,6 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
             yield self._buffer.pop()
 
     def __len__(self) -> int:
-        if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
+        if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise NotImplementedError

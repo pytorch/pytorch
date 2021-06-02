@@ -19,7 +19,9 @@ from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
+import torch.utils._pytree as pytree
+import torch.fx._pytree as fx_pytree
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH
 import torch._C._fx
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
@@ -74,6 +76,11 @@ wrap('len')
 def wrapped_via_decorator(a):
     return a + 1
 
+wrap('wrapped_with_submodule')
+
+def wrapped_with_submodule(x: torch.Tensor, batchnorm1d: torch.nn.BatchNorm1d):
+    return batchnorm1d(x)
+
 
 real_wrapped_via_decorator = wrapped_via_decorator
 real_a_lifed_leaf = a_lifted_leaf
@@ -88,6 +95,12 @@ def wrapper_fn(x):
 class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
+
+# for testing pytrees
+class Foo(object):  # noqa: B209
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
 
 class TestFX(JitTestCase):
     def setUp(self):
@@ -295,6 +308,36 @@ class TestFX(JitTestCase):
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
         self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+
+    def test_wrap_with_submodule(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
+
+            def forward(self, x: torch.Tensor):
+                return wrapped_with_submodule(x, self.batchnorm1d)
+
+        m = symbolic_trace(M())
+
+        self.assertIn("wrapped_with_submodule", m.code)
+
+        input = torch.rand(3, 2)
+        ref_batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
+        self.assertEqual(ref_batchnorm1d(input), m(input))
+
+    def test_wrapped_retrace(self):
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
+
+        retraced = symbolic_trace(m)
+        self.assertIn('wrapped_via_decorator', retraced.code)
+        self.assertEqual(retraced(0), 1)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -876,6 +919,124 @@ class TestFX(JitTestCase):
         for s in ['args', 'kwargs', '#users']:
             assert s in stringed
 
+    def test_custom_proxy_type(self):
+        class TensorPair:
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair(x : TensorPair, y : TensorPair):
+            s = x.add(y)
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+        y = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+
+        ref_out = use_tensor_pair(x, y)
+
+        traced = symbolic_trace(use_tensor_pair)
+
+        traced_out = traced(x, y)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_type_literal(self):
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair_literal(x : TensorPair):
+            s = x.add(TensorPair(torch.zeros(5, 3), torch.zeros(5, 3)))
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+
+        ref_out = use_tensor_pair_literal(x)
+
+        traced = symbolic_trace(use_tensor_pair_literal)
+
+        traced_out = traced(x)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_dynamic_value(self):
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+            def add(self, other):
+                l = self.left + other.left
+                r = self.right + other.right
+                return TensorPair(l, r)
+
+            def mul(self, other):
+                l = self.left * other.left
+                r = self.right * other.right
+                return TensorPair(l, r)
+
+        def use_tensor_pair_ctor(x : TensorPair, y : torch.Tensor):
+            s = x.add(TensorPair(y, y))
+            return s.mul(x)
+
+        x = TensorPair(torch.randn(5, 3), torch.randn(5, 3))
+        y = torch.randn(5, 3)
+        ref_out = use_tensor_pair_ctor(x, y)
+
+        traced = symbolic_trace(use_tensor_pair_ctor)
+
+        traced_out = traced(x, y)
+        self.assertEqual(traced_out.left, ref_out.left)
+        self.assertEqual(traced_out.right, ref_out.right)
+
+    def test_custom_proxy_input_dependent_control_flow(self):
+        class ZeroTensor(metaclass=torch.fx.ProxyableClassMeta):
+            def __init__(self, inp):
+                if inp.sum() == 0:
+                    self.is_zero = True
+                    self.tensor = torch.tensor([])
+                else:
+                    self.is_zero = False
+                    self.tensor = inp
+
+            def add(self, other):
+                if self.is_zero:
+                    return ZeroTensor(other.tensor)
+                elif other.is_zero:
+                    return self
+
+        def use_zero_tensor(x : torch.Tensor, y : torch.Tensor):
+            return ZeroTensor(x + y)
+
+        x, y = torch.randn(5, 3), torch.randn(5, 3)
+
+        ref_out = use_zero_tensor(x, y)
+
+        traced = symbolic_trace(use_zero_tensor)
+
+        traced_out = traced(x, y)
+
+        self.assertEqual(traced_out.is_zero, ref_out.is_zero)
+        self.assertEqual(traced_out.tensor, ref_out.tensor)
+
     def test_graph_fns(self):
         g = Graph()
         a = g.placeholder('a')
@@ -1359,6 +1520,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
                                               type_expr=List[float])
         output : torch.fx.Node = graph.output(b)
+
         self.assertTrue('typing.List[float]' in str(graph))
 
     def test_ellipsis(self):
@@ -1472,6 +1634,37 @@ class TestFX(JitTestCase):
         input = torch.randn(33, 44)
         self.assertEqual(gm(input), torch.relu(torch.neg(input)))
 
+    def test_update_args_api(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        orig_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        inp_x, inp_y = torch.randn(5, 3), torch.randn(3, 5)
+        self.assertEqual(orig_gm(inp_x, inp_y), torch.relu(inp_x))
+
+
+        b.update_arg(0, y)
+        new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
+
+    def test_update_kwargs_api(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, kwargs={'input': x})
+        output : torch.fx.Node = graph.output(b)
+
+        orig_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        inp_x, inp_y = torch.randn(5, 3), torch.randn(3, 5)
+        self.assertEqual(orig_gm(inp_x, inp_y), torch.relu(inp_x))
+
+
+        b.update_kwarg('input', y)
+        new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
 
     def test_move_before(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -1903,8 +2096,20 @@ class TestFX(JitTestCase):
         mod = Foo()
         mod_true = symbolic_trace(mod, concrete_args={'y': True})
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
-        self.assertEqual(mod_true(3), 6)
-        self.assertEqual(mod_false(3), 3)
+        self.assertEqual(mod_true(3, True), 6)
+        print(mod_true.code)
+        assert(any([i.target == torch._assert for i in mod_true.graph.nodes]))
+        with self.assertRaises(AssertionError):
+            mod_true(3, False)
+        self.assertEqual(mod_false(3, False), 3)
+        with self.assertRaises(AssertionError):
+            mod_false(3, True)
+
+        def f_higher(a, f):
+            return f(a)
+
+        nf = symbolic_trace(f_higher, concrete_args={'f': lambda x: x * 2})
+        self.assertEqual(nf(3, lambda x: x * 2), 6)
 
     def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
         class M(torch.nn.Module):
@@ -1929,9 +2134,9 @@ class TestFX(JitTestCase):
             with self.assertRaises(TypeError):
                 traced(5)
 
-        self.assertIn("Call using an FX-traced Module, line 4 of the "
-                      "traced Module's generated forward function:",
-                      captured[0])
+        self.assertRegex(captured[0],
+                         r"Call using an FX-traced Module, line .* of the "
+                         r"traced Module's generated forward function:")
 
     def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
         class M(torch.nn.Module):
@@ -1951,9 +2156,9 @@ class TestFX(JitTestCase):
         except RuntimeError:
             captured = traceback.format_exc()
 
-        self.assertNotIn("Call using an FX-traced Module, line 4 of the"
-                         " traced Module's generated forward function:",
-                         captured)
+        self.assertNotRegex(captured,
+                            r"Call using an FX-traced Module, line .* of the "
+                            r"traced Module's generated forward function:")
 
     def test_ast_rewriter_rewrites_assert(self):
         class M(torch.nn.Module):
@@ -2238,6 +2443,30 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
+    def test_annotations_empty_tuple(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x: Tuple[()], y: Tuple[str, Tuple[()]]):
+                return "foo"
+
+        traced = torch.fx.symbolic_trace(Foo())
+
+        x = ()
+        y = ("bar", ())
+
+        traced(x, y)
+
+        FileCheck().check("_Tuple[()]")   \
+                   .check("typing_Tuple[str,typing_Tuple[()]]") \
+                   .run(traced.code)
+
+        scripted = torch.jit.script(traced)
+
+        scripted(x, y)
+
+        FileCheck().check("Tuple[()]")   \
+            .check("Tuple[str, Tuple[()]]")    \
+            .run(scripted.code)
+
     @skipIfNoTorchVision
     def test_cpatcher(self):
 
@@ -2290,8 +2519,103 @@ class TestFX(JitTestCase):
         fx_f = symbolic_trace(f, enable_cpatching=True)
         assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
 
+
+    def test_pytree(self):
+        def f_sum(x):
+            return sum(x)
+
+        def f_sum_dict(x):
+            out = 0
+            for k, v in x.items():
+                out += v
+            return out
+
+        def f_dict_list_map(x):
+            new_dict = {}
+            for k, v in x.items():
+                new_dict[k] = [i + 1 for i in v]
+            return new_dict
+
+        def f_dict_add(x):
+            return x['a'] + sum(x['z'])
+
+
+        pytree._register_pytree_node(
+            Foo,
+            lambda x: ([x.a, x.b], None),
+            lambda x, _: Foo(x[0], x[1]),
+        )
+        fx_pytree.register_pytree_flatten_spec(Foo, lambda x, _: [x.a, x.b])
+
+        def f_custom(x):
+            return x.a + x.b
+
+        def f_custom_dict(x):
+            return f_sum_dict(x.a) + x.b
+
+        def f_return_custom(x):
+            return Foo(x.b, x.a)
+
+        tests = [
+            (f_sum, [PH, PH, PH]),
+            (f_sum, []),
+            (f_sum_dict, {'a': PH, 'b': PH, 'c': PH}),
+            (f_dict_list_map, {'a': (PH, PH), 'b': [PH], 'c': []}),
+            (f_dict_list_map, {5: (PH, PH, PH)}),
+            (f_dict_add, {'a': PH, 'z': (PH, PH, PH)}),
+            (f_dict_add, {'a': PH, 'z': []}),
+            (f_custom, Foo(PH, PH)),
+            (f_custom, Foo(PH, 3)),
+            (f_custom_dict, Foo({'a': PH, 'b': PH}, PH)),
+            # (f_return_custom, Foo(PH, PH)), # Don't currently support output pytrees
+        ]
+
+        def verify_pytree(f, inp):
+            val = pytree.tree_map(lambda x: torch.randn(3) if x == PH else x, inp)
+            num_flat_args = len([i == PH for i in pytree.tree_flatten(inp)[0]])
+            orig_out = f(val)
+            nf = symbolic_trace(f, concrete_args={'x': inp})
+            self.assertEqual(nf(val), orig_out)
+            assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
+            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
+
+            nf = symbolic_trace(nf)
+            self.assertEqual(nf(val), orig_out)
+            assert "tree_flatten_spec" not in nf.code
+            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == 1)
+
+            nf = symbolic_trace(nf, concrete_args={'x': inp})
+            self.assertEqual(nf(val), orig_out)
+            assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
+            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
+
+            pickled = pickle.dumps(nf)
+            nf = pickle.loads(pickled)
+            self.assertEqual(nf(val), orig_out)
+
+        for f, inp in tests:
+            verify_pytree(f, inp)
+
+    def test_pytree_concrete(self):
+        def f(b, a):
+            if b:
+                return a['a']
+            else:
+                return a['z']
+
+        inp = {'a': {'a': PH, 'z': PH}, 'b': True}
+        nf = symbolic_trace(f, concrete_args=inp)
+        val = pytree.tree_map(lambda x: torch.randn(3) if x == PH else x, inp)
+        self.assertEqual(nf(**val), f(**val))
+
+        nf = symbolic_trace(nf)
+        self.assertEqual(nf(**val), f(**val))
+
+
+
+
 def run_getitem_target():
-    from torch.fx.symbolic_trace import _wrapped_methods_to_patch
+    from torch.fx._symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
     try:
         TestFX().getitem_inner()
@@ -2305,22 +2629,33 @@ class TestOperatorSignatures(JitTestCase):
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         known_no_schema = {'cdist',
+                           'contiguous',
                            'dstack',
                            'einsum',
+                           'expand',
+                           'expand_as',
+                           'fill_',
                            'hstack',
                            'linalg.multi_dot',
                            'polygamma',
                            'repeat',
+                           'reshape_as',
+                           'resize_',
+                           'resize_as_',
                            'stack',
                            'view',
                            'view_as',
+                           'nn.functional.hardshrink',
                            'vstack',
+                           'where',
+                           'zero_',
                            '__getitem__',
                            '__radd__',
                            '__rsub__',
                            '__rmul__',
                            '__rdiv__',
-                           '__rpow__'}
+                           '__rpow__',
+                           '__rmatmul__'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2468,6 +2803,7 @@ class TestFunctionalTracing(JitTestCase):
         "rrelu": CONTROL_FLOW,
         "selu": CONTROL_FLOW,
         "silu": CONTROL_FLOW,
+        "mish": CONTROL_FLOW,
         "smooth_l1_loss": CONTROL_FLOW,
         "soft_margin_loss": CONTROL_FLOW,
         "threshold": CONTROL_FLOW,
@@ -2497,7 +2833,7 @@ class TestFunctionalTracing(JitTestCase):
     )
 
     # Inconsistent behavior between Python 3.8 and other Python versions:
-    # - Python 3.8: Re-raise internal exception like `PROXY_ITERATED`
+    # - Python 3.8+: Re-raise internal exception like `PROXY_ITERATED`
     # - Other Python: Raise `argument of type 'Proxy' is not iterable` due to the same
     #                 internal exception above
     # Use the following map to override the expected exception for Python 3.8
@@ -2550,7 +2886,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 9):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 10):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)

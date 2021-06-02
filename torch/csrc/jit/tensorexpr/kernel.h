@@ -93,7 +93,8 @@ TORCH_API Tensor* computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType);
+    const c10::optional<ScalarType>& outputType,
+    at::Device = at::kCPU);
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
@@ -244,6 +245,7 @@ TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
 TORCH_API bool& getCatWoConditionals();
+TORCH_API bool& getOptConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);

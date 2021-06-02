@@ -319,7 +319,6 @@ TEST(ATen, addcmulInt) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     d_v(i) = 5 * i + 3;
   }
 
@@ -363,7 +362,6 @@ TEST(ATen, addcmulFloat) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     d_v(i) = 5 * i + 3;
   }
 
@@ -686,7 +684,6 @@ TEST(ATen, reluInt) {
   PaddedBuffer<int> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i - 64;
   }
 
@@ -717,7 +714,6 @@ TEST(ATen, reluFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i - 64;
   }
 
@@ -746,7 +742,6 @@ TEST(ATen, logFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -875,7 +870,6 @@ TEST(ATen, log10Float) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -904,7 +898,6 @@ TEST(ATen, log2Float) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -1038,9 +1031,7 @@ TEST(ATen, geInt) {
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
   Placeholder c(BufHandle("C", {N}, kInt));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_buffer(N, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
@@ -1067,7 +1058,6 @@ TEST(ATen, gtInt) {
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
   Placeholder c(BufHandle("C", {N}, kInt));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_buffer(N, 6);
   std::vector<int> b_buffer(N, 3);
   std::vector<int> c_buffer(N, 0);
@@ -1095,9 +1085,7 @@ TEST(ATen, leInt) {
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
   Placeholder c(BufHandle("C", {N}, kInt));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_buffer(N, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
@@ -1124,9 +1112,7 @@ TEST(ATen, ltInt) {
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
   Placeholder c(BufHandle("C", {N}, kInt));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_buffer(N, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 1);
 

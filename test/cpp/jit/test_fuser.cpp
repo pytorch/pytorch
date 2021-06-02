@@ -112,7 +112,6 @@ TEST(FuserTest, TestOne_CUDA) {
     // with the "wrong" dimensions, and then use transpose to get an
     // appropriately sized view.
     for (const auto i : c10::irange(graph.inputs().size())) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti], dims[tj]);
       inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
@@ -164,9 +163,7 @@ TEST(FuserTest, FusedConcat_CUDA) {
       %3 : Tensor = prim::FusedConcat[dim=2](%0, %2)
       return (%2, %3))IR";
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({3, 4, 5}, at::kCUDA);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = at::rand({4, 3, 5}, at::kCUDA).transpose(0, 1);
   const auto o_r = a * b;
 

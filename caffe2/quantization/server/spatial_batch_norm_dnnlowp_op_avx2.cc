@@ -140,7 +140,6 @@ void SpatialBNNHWCAVX2_uint8(
       if (ReluFused) { // static if
         quantized_down = std::max<long>(quantized_down, out_zero_point);
       }
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Y_ptr[n + j] = fbgemm::clamp<long, uint8_t>(quantized_down, 8);
     }
   }
