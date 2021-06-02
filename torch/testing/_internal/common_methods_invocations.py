@@ -193,6 +193,7 @@ class OpInfo(object):
                  name,  # the string name of the function
                  *,
                  ref=None,  # Just a reference
+                 sample_kwargs=lambda device, dtype, input: ({}, {}),
                  op=None,  # the function variant of the operation, populated as torch.<name> if None
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
@@ -243,6 +244,7 @@ class OpInfo(object):
 
         self.name = name
         self.ref = ref
+        self.sample_kwargs = sample_kwargs
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
 
