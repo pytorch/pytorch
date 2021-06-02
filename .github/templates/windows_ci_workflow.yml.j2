@@ -1,4 +1,4 @@
-# Template is at:    .github/templates/windows_ci_workflow.yml
+# Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Windows CI (!{{ build_environment }})
 
@@ -27,6 +27,10 @@ env:
 {%- if cuda_version != "cpu" %}
   USE_CUDA: 1
 {%- endif %}
+
+concurrency:
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   build:

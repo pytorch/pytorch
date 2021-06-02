@@ -290,3 +290,63 @@ Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
 """.format(**common_args))
+
+i1 = _add_docstr(_special.special_i1,
+                 r"""
+i1(input, *, out=None) -> Tensor
+Computes the first order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \frac{(\text{input}_{i})}{2} * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!) * (k+1)!}
+
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.i1(torch.arange(5, dtype=torch.float32))
+    tensor([0.0000, 0.5652, 1.5906, 3.9534, 9.7595])
+""".format(**common_args))
+
+i1e = _add_docstr(_special.special_i1e,
+                  r"""
+i1e(input, *, out=None) -> Tensor
+Computes the exponentially scaled first order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \exp(-|x|) * i1(x) =
+        \exp(-|x|) * \frac{(\text{input}_{i})}{2} * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!) * (k+1)!}
+
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.i1e(torch.arange(5, dtype=torch.float32))
+    tensor([0.0000, 0.2079, 0.2153, 0.1968, 0.1788])
+""".format(**common_args))
+
+ndtr = _add_docstr(_special.special_ndtr,
+                   r"""
+ndtr(input, *, out=None) -> Tensor
+Computes the area under the standard Gaussian probability density function,
+integrated from minus infinity to :attr:`input`, elementwise.
+
+.. math::
+    \text{ndtr}(x) = \frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
+    tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
+""".format(**common_args))
