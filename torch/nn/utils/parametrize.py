@@ -231,7 +231,7 @@ class ParametrizationList(ModuleList):
                 f"original shape: {Y.shape}\n"
                 f"new shape: {Z.shape}"
             )
-        return super().append(module)
+        return super().append(module)  # type: ignore[return-value]
 
 
 def _inject_new_class(module: Module) -> None:
