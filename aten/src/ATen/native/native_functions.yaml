@@ -1245,7 +1245,8 @@
 - func: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: count_nonzero
+    CPU: count_nonzero_cpu
+    CUDA: count_nonzero_cuda
 
 - func: count_nonzero(Tensor self, int? dim=None) -> Tensor
   variants: function, method
@@ -6234,13 +6235,13 @@
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_nonzero_out
+    CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
 
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_nonzero
+    CPU: nonzero_cpu
     CUDA: nonzero_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
