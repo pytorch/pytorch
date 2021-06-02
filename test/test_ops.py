@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, suppress_warnings)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests, test_funcs)
+    (op_db, method_tests, test_funcs, _NOTHING)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -90,6 +90,8 @@ class TestOpInfo(TestCase):
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
 
         for t in tensors:
+            print('t: ', t)
+            t = t.input
             torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
