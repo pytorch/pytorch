@@ -144,6 +144,21 @@ void checkValidDevicesOption(
   }
 }
 
+std::vector<c10::Stream> getCurrentStreamsForDevices(
+    const std::vector<c10::Device>& devices) {
+  if (devices.empty()) {
+    return {};
+  }
+  c10::impl::VirtualGuardImpl impl(devices[0].type());
+  std::vector<c10::Stream> streams;
+  streams.reserve(devices.size());
+  for (const c10::Device& device : devices) {
+    TORCH_INTERNAL_ASSERT(device.type() == impl.type());
+    streams.push_back(impl.getStream(device));
+  }
+  return streams;
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -688,7 +703,8 @@ void TensorPipeAgent::pipeRead(
     auto ctx = createCalleeStreamContext(devices_);
     tensorpipe::Allocation tpAllocation;
     TensorpipeReadBuffers tpBuffers;
-    std::tie(tpAllocation, tpBuffers) = tensorpipeAllocate(tpDescriptor, ctx);
+    std::tie(tpAllocation, tpBuffers) =
+        tensorpipeAllocate(tpDescriptor, ctx->getReservedStreams());
 
     pipe->read(
         std::move(tpAllocation),
@@ -716,27 +732,29 @@ void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     c10::intrusive_ptr<Message> rpcMessage,
     std::vector<c10::Device>&& devices,
-    std::shared_ptr<LazyStreamContext> ctx,
+    std::vector<c10::Stream> streams,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 
   std::tie(tpMessage, tpBuffers) =
-      tensorpipeSerialize(std::move(rpcMessage), std::move(devices), ctx);
+      tensorpipeSerialize(std::move(rpcMessage), std::move(devices), streams);
 
   pipe->write(
       std::move(tpMessage),
       [tpBuffers{
            std::make_shared<TensorpipeWriteBuffers>(std::move(tpBuffers))},
        fn{std::move(fn)},
-       ctx{std::move(ctx)}](const tensorpipe::Error& error) { fn(error); });
+       streams{std::move(streams)}](const tensorpipe::Error& error) {
+        fn(error);
+      });
 }
 
 void TensorPipeAgent::sendCompletedResponseMessage(
     std::shared_ptr<tensorpipe::Pipe>& pipe,
     JitFuture& futureResponseMessage,
     uint64_t messageId,
-    std::shared_ptr<LazyStreamContext> ctx) {
+    std::vector<c10::Stream> streams) {
   if (!rpcAgentRunning_.load()) {
     LOG(WARNING) << "RPC agent for " << workerInfo_.name_
                  << " won't send response to request #" << messageId << " to "
@@ -760,29 +778,26 @@ void TensorPipeAgent::sendCompletedResponseMessage(
       responseMessage = createExceptionResponse(e.what(), messageId);
     }
 
-    auto ctxDevices = ctx->devices();
-    if (!ctxDevices.empty()) {
-      // FIXME: skipping this check when ctxDevices is empty to allow
-      // RRef.to_here().
-      for (const auto& tensor : responseMessage->tensors()) {
-        const auto device = tensor.device();
-        if (!device.is_cpu() && ctxDevices.find(device) == ctxDevices.end()) {
-          std::ostringstream oss;
-          std::copy(
-              ctxDevices.begin(),
-              ctxDevices.end(),
-              std::ostream_iterator<c10::Device>(oss, ", "));
-          responseMessage = createExceptionResponse(
-              c10::str(
-                  "RPC detected that a user-function output tensor on device ",
-                  device,
-                  ". This device is not one of the input tensor devices: ",
-                  oss.str(),
-                  "which is not yet supported. Please file a feature request "
-                  "issue in PyTorch GitHub repo."),
-              messageId);
-          break;
-        }
+    for (const auto& tensor : responseMessage->tensors()) {
+      const auto device = tensor.device();
+      if (!device.is_cpu() &&
+          std::find(devices_.begin(), devices_.end(), device) ==
+              devices_.end()) {
+        std::ostringstream oss;
+        std::copy(
+            devices_.begin(),
+            devices_.end(),
+            std::ostream_iterator<c10::Device>(oss, ", "));
+        responseMessage = createExceptionResponse(
+            c10::str(
+                "RPC detected that a user-function output tensor on device ",
+                device,
+                ". This device is not one of the input tensor devices: ",
+                oss.str(),
+                "which is not yet supported. Please file a feature request "
+                "issue in PyTorch GitHub repo."),
+            messageId);
+        break;
       }
     }
 
@@ -790,7 +805,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         pipe,
         std::move(responseMessage),
         std::move(devices),
-        std::move(ctx),
+        std::move(streams),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -811,7 +826,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         createExceptionResponse(
             futureResponseMessage.tryRetrieveErrorMessage(), messageId),
         /* devices */ {},
-        std::move(ctx),
+        std::move(streams),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -878,30 +893,25 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
             // `process***Call` methods to synchronize CUDA streams there
             // to make sure that we fetch the correct value from `to_here()`
             // call.
-            futureResponseMessage = cb_->operator()(*requestMessage, ctx);
+            futureResponseMessage =
+                cb_->operator()(*requestMessage, std::move(ctx));
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 c10::make_intrusive<JitFuture>(at::AnyClassType::get());
             futureResponseMessage->setError(std::current_exception());
           }
 
-          // Shortcut if immediately done
-          if (futureResponseMessage->completed()) {
-            decreaseCallCount(serverActiveCalls_);
-            sendCompletedResponseMessage(
-                pipe, *futureResponseMessage, messageId, std::move(ctx));
-          } else {
-            // Not complete yet
-            increaseCallCount(serverActiveAsyncCalls_);
-            futureResponseMessage->addCallback(
-                [this, pipe, messageId, ctx{std::move(ctx)}](
-                    JitFuture& futureResponseMessage) mutable {
-                  decreaseCallCount(serverActiveCalls_);
-                  decreaseCallCount(serverActiveAsyncCalls_);
-                  sendCompletedResponseMessage(
-                      pipe, futureResponseMessage, messageId, std::move(ctx));
-                });
-          }
+          increaseCallCount(serverActiveAsyncCalls_);
+          futureResponseMessage->addCallback(
+              [this, pipe, messageId](
+                  JitFuture& futureResponseMessage) mutable {
+                decreaseCallCount(serverActiveCalls_);
+                decreaseCallCount(serverActiveAsyncCalls_);
+                auto streams = getCurrentStreamsForDevices(
+                    futureResponseMessage.devices());
+                sendCompletedResponseMessage(
+                    pipe, futureResponseMessage, messageId, std::move(streams));
+              });
 
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " done running request #" << messageId << " from "
@@ -1017,7 +1027,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
       clientPipe.pipe_,
       std::move(requestMessage),
       std::move(devices),
-      std::move(ctx),
+      ctx->getReservedStreams(),
       [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
