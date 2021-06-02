@@ -89,7 +89,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         range_data, shuffled_data_,
         n, false, 0, bits);
 
-      // randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else {
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
@@ -104,7 +104,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         range_data, shuffled_data_,
         n, false, 0, bits);
 
-      // randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   }
 
