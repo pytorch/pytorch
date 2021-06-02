@@ -403,8 +403,7 @@ AutogradMetaInterface::~AutogradMetaInterface() {}
 // to delete these setter code in their code which is not ideal.
 void TensorImpl::set_requires_grad(bool requires_grad) {
   TORCH_CHECK(
-      !(requires_grad && is_inference() &&
-        !c10::InferenceMode::is_enabled()),
+      !(requires_grad && is_inference() && !c10::InferenceMode::is_enabled()),
       "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
   if (!requires_grad && !autograd_meta_)
     return;

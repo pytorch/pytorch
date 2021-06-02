@@ -452,7 +452,6 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'is_sparse': ['is_sparse: _bool'],
         'is_sparse_csr' : ['is_sparse_csr: _bool'],
         'is_quantized': ['is_quantized: _bool'],
-        'is_inference': ['is_inference: _bool'],
         'is_meta': ['is_meta: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
         'is_vulkan': ['is_vulkan: _bool'],
