@@ -63,6 +63,8 @@ CREATE_UNARY_FLOAT_META_FUNC(sinc)
 CREATE_UNARY_FLOAT_META_FUNC(sinh)
 CREATE_UNARY_FLOAT_META_FUNC(special_entr)
 CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1e)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
@@ -165,6 +167,8 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_entr)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
@@ -408,6 +412,40 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
+namespace {
+
+inline Tensor calc_ndtr(const Tensor& self) {
+  auto x_sqrt_2 = self / std::sqrt(2.);
+  return (1 + at::erf(x_sqrt_2)) * 0.5;
+}
+
+} // namespace
+
+// special_ndtr
+Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
+  TORCH_CHECK(
+      self.device() == result.device(),
+      "Expected all tensors to be on the same device, but found at least two devices, ",
+      self.device(),
+      " and ",
+      result.device(),
+      "!");
+
+  auto ndtr = calc_ndtr(self);
+  TORCH_CHECK(
+      at::can_cast(ndtr.scalar_type(), result.scalar_type()),
+      "result type ",
+      ndtr.scalar_type(),
+      " can't be cast to the desired output type ",
+      result.scalar_type());
+
+  at::native::resize_output(result, ndtr.sizes());
+  return result.copy_(ndtr);
+}
+Tensor special_ndtr(const Tensor& self) {
+  return calc_ndtr(self);
+}
+
 // FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {
@@ -531,8 +569,8 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(const Tensor& self, Tensor& result) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_borrowed_output(result)
-    .add_borrowed_input(self)
+    .add_output(result)
+    .add_input(self)
     .build();
   logical_not_stub(iter.device_type(), iter);
   return result;
@@ -548,8 +586,8 @@ Tensor& signbit_out(const Tensor& self, Tensor& result) {
   } else {
     TensorIterator iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .add_borrowed_output(result)
-      .add_borrowed_input(self)
+      .add_output(result)
+      .add_input(self)
       .build();
     signbit_stub(iter.device_type(), iter);
   }
@@ -627,9 +665,9 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
               "but got ", exponent.dtype());
 
   auto iter = TensorIteratorConfig()
-    .add_borrowed_output(mantissa)
-    .add_borrowed_output(exponent)
-    .add_borrowed_input(self)
+    .add_output(mantissa)
+    .add_output(exponent)
+    .add_input(self)
     .check_all_same_dtype(false)
     .set_check_mem_overlap(true)
     .build();
@@ -671,6 +709,8 @@ DEFINE_DISPATCH(frac_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(frexp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_i0e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log10_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log1p_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
