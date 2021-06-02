@@ -22,6 +22,7 @@ These are the basic building blocks for graphs:
 
     ~parameter.Parameter
     ~parameter.UninitializedParameter
+    ~parameter.UninitializedBuffer
 
 Containers
 ----------------------------------
@@ -48,6 +49,7 @@ Global Hooks For Module
     register_module_forward_pre_hook
     register_module_forward_hook
     register_module_backward_hook
+    register_module_full_backward_hook
 
 .. currentmodule:: torch
 
