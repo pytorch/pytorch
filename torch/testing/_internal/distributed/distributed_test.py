@@ -3307,7 +3307,7 @@ class DistributedTest:
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         def test_DistributedDataParallel_requires_grad(self):
             # a module without gradients shouldn't be accepted
-            self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
+            self.assertRaises(RuntimeError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
             self._barrier()
 
         @unittest.skipIf(
