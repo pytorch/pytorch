@@ -1907,6 +1907,297 @@ TEST(NVFuserTest, FusionShiftBcast3_CUDA) {
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
+// See issue #893
+TEST(NVFuserTest, FusionShiftSyncPlacement1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv0, new Double(2));
+  auto tv3 = add(tv1, tv2);
+  auto tv4 = shift(tv3, {0, 1});
+  fusion.addOutput(tv4);
+
+  tv4->split(1, 8);
+  tv0->computeAt(tv4, 2);
+
+  tv2->computeAt(tv3, -1);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 99;
+  int numel_y = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = t0 + 2;
+  auto t3 = add(t1, t2);
+  auto t4 = shift(t3, {0, 1});
+
+  testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
+}
+
+// See issue #893. Top-level placement.
+TEST(NVFuserTest, FusionShiftSyncPlacement2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv0, new Double(2));
+  auto tv3 = add(tv1, tv2);
+  auto tv4 = shift(tv3, {1});
+  fusion.addOutput(tv4);
+
+  tv2->computeAt(tv3, -1);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 99;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = t0 + 2;
+  auto t3 = add(t1, t2);
+  auto t4 = shift(t3, {1});
+
+  testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionShiftSyncPlacement3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(2));
+  auto tv3 = shift(tv2, {1});
+  fusion.addOutput(tv3);
+
+  // This doesn't work. syncthreads is needed between tv1 and tv2, but
+  // both the loop extent of both tv1 and tv2 has halo, so the loop is
+  // not eliminated even though it is parallelized. Moving syncthreads
+  // out of the loop would make it placed before tv1, which would make
+  // it meaningless.
+  // Ideally, an exception should be thrown at this computeAt, but at
+  // this point, the fusion is not yet parallelized, nor memory type
+  // is set, so this computeAt itself is not an error yet.
+  tv1->computeAt(tv2, -1);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // The error should be detected when the fusion is lowered.
+  ASSERT_ANY_THROW(fusion.printKernel());
+}
+
+// Based on original CUDA provided by Vishal Mehta.
+// Major differences with the original version:
+// - Boundary processing. We always pad by zero. The original version
+//   is only defined for the interior domain.
+// - The original version uses additional 2 warps to load the halos
+//   along the Y dimension. The other 10 warps are used to load a 32x10
+//   tile, and all warps will do coalesced loads. No such optimization
+//   is done in the fuser version.
+TEST(NVFuserTest, FusionHorizontalDiffusion_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+  auto coeff = makeSymbolicTensor(3);
+  fusion.addInput(coeff);
+
+  std::vector<std::vector<int>> offsets{
+      {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+
+  // T2, T3, T4, T5
+  std::vector<TensorView*> inp_neighbors;
+  for (const auto& offset : offsets) {
+    inp_neighbors.push_back(shift(inp, offset));
+  }
+
+  // T8
+  TensorView* sum_of_neighbors = nullptr;
+  for (auto inp_neighbor : inp_neighbors) {
+    if (sum_of_neighbors == nullptr) {
+      sum_of_neighbors = inp_neighbor;
+    } else {
+      sum_of_neighbors = add(sum_of_neighbors, inp_neighbor);
+    }
+  }
+
+  // T9 = T0 * 4
+  // T10 = T9 - T8
+  auto lap = sub(mul(inp, new Double(4)), sum_of_neighbors);
+
+  // T11 = shift(T10)
+  // T12 = T11 - T10
+  auto flx = sub(shift(lap, {0, 0, -1}), lap);
+  // T14 = T13 - T0
+  // T15 = T12 * T14
+  // T16 = T15 > 0
+  // T17 = T16 ? 0 : T12
+  auto flx_cond = gt(mul(flx, sub(shift(inp, {0, 0, -1}), inp)), new Double(0));
+  auto flx0 = where(flx_cond, new Double(0), flx);
+
+  // T18 = shift(T10)
+  // T19 = T18 - T10
+  auto fly = sub(shift(lap, {0, -1, 0}), lap);
+  // T20 = shift(T0)
+  // T21 = T20 - T0
+  // T22 = T19 * T21
+  // T23 = T22 > 0
+  auto fly_cond = gt(mul(fly, sub(shift(inp, {0, -1, 0}), inp)), new Double(0));
+  // T24 = T23 ? 0 : T19
+  auto fly0 = where(fly_cond, new Double(0), fly);
+
+  // T25 = shift(flx0)
+  // T26 = T17 - T25
+  // T27 = shift(fly0)
+  // T28 = T24 - T27
+  // T29 = T26 + T28
+  // T30 = T1 * T29
+  // T31 = T0 - T30
+  auto out =
+      sub(inp,
+          mul(coeff,
+              add(sub(flx0, shift(flx0, {0, 0, 1})),
+                  sub(fly0, shift(fly0, {0, 1, 0})))));
+
+  fusion.addOutput(out);
+
+  /////////////////////////////////
+  // Scheduling
+  /////////////////////////////////
+
+  // Step 1: 2D Tiling
+
+  const int tile_x = 32;
+  const int tile_y = 8;
+
+  out->split(-1, tile_x);
+  out->split(-3, tile_y);
+  out->reorder({{-2, -3}});
+  inp->computeAt(out, -3);
+  coeff->computeAt(out, -3);
+
+  // Step 2: Inlining
+
+  // Inline inputs to lap
+  auto lap_vals = DependencyCheck::getAllValsBetween({inp}, {lap});
+  for (auto val : ir_utils::filterByType<TensorView>(lap_vals)) {
+    if (val != lap && val != inp) {
+      val->computeAt(lap, -1);
+    }
+  }
+
+  // Inline inputs to flx0
+  auto flx0_vals = DependencyCheck::getAllValsBetween({lap, inp}, {flx0});
+  for (auto val : ir_utils::filterByType<TensorView>(flx0_vals)) {
+    if (val != lap && val != flx0 && val != inp) {
+      val->computeAt(flx0, -1);
+    }
+  }
+
+  // Inline inputs to fly0
+  auto flxy_vals = DependencyCheck::getAllValsBetween({lap, inp}, {fly0});
+  for (auto val : ir_utils::filterByType<TensorView>(flxy_vals)) {
+    if (val != lap && val != fly0 && val != inp) {
+      val->computeAt(fly0, -1);
+    }
+  }
+
+  // Inline inputs to out
+  auto out_vals = DependencyCheck::getAllValsBetween({flx0, fly0}, {out});
+  for (auto val : ir_utils::filterByType<TensorView>(out_vals)) {
+    if (val != flx0 && val != fly0 && val != out) {
+      val->computeAt(out, -1);
+    }
+  }
+
+  // Step 3: Parallelization
+
+  // Block parallelization
+  out->axis(0)->parallelize(ParallelType::BIDz);
+  out->axis(1)->parallelize(ParallelType::BIDy);
+  out->axis(2)->parallelize(ParallelType::BIDx);
+
+  // Thread parallelization
+  for (auto tv : {out, flx0, fly0, lap}) {
+    tv->axis(3)->parallelize(ParallelType::TIDy);
+    tv->axis(4)->parallelize(ParallelType::TIDx);
+    if (tv != out) {
+      tv->setMemoryType(MemoryType::Shared);
+    }
+  }
+
+  /////////////////////////////////
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 101;
+  int numel_y = 99;
+  int numel_z = 10;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor inp_at = at::randn({numel_z, numel_y, numel_x}, options);
+  at::Tensor coeff_at = at::randn({numel_z, numel_y, numel_x}, options);
+  std::vector<IValue> inputs = {inp_at, coeff_at};
+  auto outputs = fe.runFusion(inputs);
+
+  {
+    at::Tensor zeros = at::zeros({numel_z, numel_y, numel_x}, options);
+    auto lap = inp_at * 4 -
+        (shift(inp_at, {0, 1, 0}) + shift(inp_at, {0, -1, 0}) +
+         shift(inp_at, {0, 0, 1}) + shift(inp_at, {0, 0, -1}));
+    auto flx = shift(lap, {0, 0, -1}) - lap;
+    auto flx_cond = (flx * (shift(inp_at, {0, 0, -1}) - inp_at)) > 0;
+    auto flx0 = at::where(flx_cond, zeros, flx);
+    auto fly = shift(lap, {0, -1, 0}) - lap;
+    auto fly_cond = (fly * (shift(inp_at, {0, -1, 0}) - inp_at)) > 0;
+    auto fly0 = at::where(fly_cond, zeros, fly);
+
+    auto ref = inp_at -
+        coeff_at *
+            ((flx0 - shift(flx0, {0, 0, 1})) + (fly0 - shift(fly0, {0, 1, 0})));
+
+    testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+  }
+}
+
 // 3x3 max pooling
 TEST(NVFuserTest, FusionMaxPooling_CUDA) {
   Fusion fusion;

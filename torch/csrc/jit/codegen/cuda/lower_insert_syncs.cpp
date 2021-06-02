@@ -256,8 +256,101 @@ class ExprFlattener : private kir::IrVisitor {
   }
 };
 
+class ValidatePlacementAfterWrites : private kir::IrVisitor {
+ public:
+  //! Validate no expr in writes found under loop
+  static void validate(
+      kir::ForLoop* loop,
+      const std::unordered_set<kir::Expr*>& writes) {
+    ValidatePlacementAfterWrites validator(writes);
+    validator.handle(loop);
+  }
+
+ private:
+  ValidatePlacementAfterWrites(const std::unordered_set<kir::Expr*>& writes)
+      : writes_(writes) {}
+
+  void handle(kir::Expr* expr) {
+    if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
+      expr->accept(this);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          writes_.find(expr) == writes_.end(),
+          "Block sync must be placed after ",
+          kir::toString(expr));
+    }
+  }
+
+  void visit(const kir::ForLoop* fl) final {
+    for (auto expr : fl->body().exprs()) {
+      handle(expr);
+    }
+  }
+
+  void visit(const kir::IfThenElse* ite) final {
+    for (auto expr : ite->thenBody().exprs()) {
+      handle(expr);
+    }
+    for (auto expr : ite->elseBody().exprs()) {
+      handle(expr);
+    }
+  }
+
+ private:
+  const std::unordered_set<kir::Expr*>& writes_;
+};
+
 class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
  private:
+  //! Traverse up the loop stack from loops_it and if a halo loop is
+  //! found, place a given sync expr before the outer-most halo loop.
+  bool insertBeforeHaloLoop(
+      std::vector<kir::ForLoop*>::iterator loops_it,
+      kir::Sync* sync_expr,
+      const std::unordered_set<kir::Expr*>& writes) {
+    std::vector<kir::ForLoop*>::iterator halo_loop_it;
+    bool halo_loop_found = false;
+
+    while (true) {
+      if ((*loops_it)->iter_domain()->isThreadDim() &&
+          (*loops_it)->iter_domain()->extent() != (*loops_it)->stop()) {
+        halo_loop_found = true;
+        halo_loop_it = loops_it;
+      }
+
+      if (loops_it == for_loops_.begin()) {
+        break;
+      }
+      --loops_it;
+    }
+
+    // No halo loop found. Do not place the sync expr here. Return
+    // false to indicate nothing is done.
+    if (!halo_loop_found) {
+      return false;
+    }
+
+    auto halo_loop = *halo_loop_it;
+
+    // Make sure there's no write to the smem buffer inside the halo
+    // loop. syncthreads is moved before the halo loop, so having
+    // writes inside the loop invalidates the consistency.
+    ValidatePlacementAfterWrites::validate(halo_loop, writes);
+
+    if (halo_loop_it == for_loops_.begin()) {
+      // place in global scope
+      auto place_before_it =
+          std::find(loop_nests_.begin(), loop_nests_.end(), halo_loop);
+      TORCH_INTERNAL_ASSERT(place_before_it != loop_nests_.end());
+      loop_nests_.insert(place_before_it, sync_expr);
+    } else {
+      auto place_in = *(halo_loop_it - 1);
+      place_in->body().insert_before(halo_loop, sync_expr);
+    }
+
+    return true;
+  }
+
   void handle(kir::Expr* expr) {
     if (!ir_utils::isTVOp(expr) || expr->isA<kir::Allocate>()) {
       expr->accept(this);
@@ -266,6 +359,8 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
 
     if (sync_after_.size() > 0 && sync_after_.front() == expr) {
       sync_after_.pop_front();
+      auto last_writes = last_writes_.front();
+      last_writes_.pop_front();
       // Found that a sync is needed
       TORCH_INTERNAL_ASSERT(expr->outputs()[0]->isA<kir::TensorView>());
       auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
@@ -315,6 +410,11 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
 
         TORCH_INTERNAL_ASSERT(loops_it != for_loops_.end());
 
+        // block sync must be placed before halo-extended loops
+        if (insertBeforeHaloLoop(loops_it, sync_expr, last_writes)) {
+          return;
+        }
+
         auto place_in = *loops_it;
         kir::Expr* place_after = nullptr;
 
@@ -351,31 +451,32 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
   }
 
   // Clear the modify status for all shared memory buffers
-  static void cleanSharedMemory(std::unordered_map<kir::Val*, bool>& smem) {
-    for (auto& item : smem) {
-      item.second = false;
-    }
+  static void cleanSharedMemory(
+      std::unordered_map<kir::Val*, kir::Expr*>& smem) {
+    smem.clear();
   }
 
-  // Return the status of the shared memory buffer
-  // False if TensorView is not shared memory buffer
-  bool isModifiedSharedMemory(
-      const std::unordered_map<kir::Val*, bool>& smem,
-      const std::vector<kir::Val*>& keys) const {
-    return std::any_of(keys.begin(), keys.end(), [&smem](kir::Val* key) {
-      auto it = smem.find(key);
+  // Return a set of expressions that modify shared-memory
+  // tensors. Expressions are excluded when syncthreads are already
+  // placed.
+  std::unordered_set<kir::Expr*> isModifiedSharedMemory(
+      const std::unordered_map<kir::Val*, kir::Expr*>& smem,
+      const std::vector<kir::Val*>& tvs) const {
+    std::unordered_set<kir::Expr*> last_writes;
+    for (auto tv : tvs) {
+      auto it = smem.find(tv);
       if (it != smem.end()) {
-        return it->second;
+        last_writes.insert(it->second);
       }
-      return false;
-    });
+    }
+    return last_writes;
   }
 
   ReadAfterWriteSyncs(std::vector<kir::Expr*> _loop_nests)
       : loop_nests_(std::move(_loop_nests)) {
     // Fusion shared_memory values
     // Tracks if shared memory is modified
-    std::unordered_map<kir::Val*, bool> smem;
+    std::unordered_map<kir::Val*, kir::Expr*> smem;
 
     // Flatten all the expressions
     auto flattened_exprs = ExprFlattener::flatten(loop_nests_);
@@ -386,19 +487,20 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
         continue;
       }
 
-      bool need_sync = isModifiedSharedMemory(smem, expr->inputs());
-      if (need_sync) {
+      auto last_writes = isModifiedSharedMemory(smem, expr->inputs());
+      if (!last_writes.empty()) {
         TORCH_INTERNAL_ASSERT(
             prev_tv_expr != nullptr,
             "Can't require sync on inputs, however, detected it's needed.");
         sync_after_.push_back(prev_tv_expr);
+        last_writes_.push_back(last_writes);
         cleanSharedMemory(smem);
       }
 
       for (auto out : expr->outputs()) {
         if (out->isA<kir::TensorView>()) {
           if (out->as<kir::TensorView>()->memoryType() == MemoryType::Shared) {
-            smem[out] = true;
+            smem[out] = expr;
           }
         }
       }
@@ -419,6 +521,16 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
  private:
   //! Keep track of expressions that must be followed by syncthreads
   std::deque<kir::Expr*> sync_after_;
+
+  //! Keep track of write expressions that must be placed before
+  //! syncthreads.
+  //!
+  //! syncthreads is placed after for each expression of
+  //! sync_after_. However, if it's inside a loop with halo, it must
+  //! be placed before that. last_writes_ keeps track of expressions
+  //! modifying the smem buffer each syncthreads is used for so that
+  //! it is not placed before those write expressions.
+  std::deque<std::unordered_set<kir::Expr*>> last_writes_;
 
   //! Keep track of for loops while inserting syncthreads
   std::vector<kir::ForLoop*> for_loops_;
