@@ -19,6 +19,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+const c10::Stream& getStreamForDevice(
+    const std::vector<c10::Stream>& streams,
+    const c10::Device& device);
+
 // A struct that holds pointers that keep alive all the memory that will be
 // accessed by TensorPipe during a write operation.
 struct TensorpipeWriteBuffers {
