@@ -2884,7 +2884,7 @@
   structured_delegate: mm.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA, SparseCsrCPU: _sparse_mm
+    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: _sparse_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -2892,7 +2892,7 @@
     CPU: mm_out_cpu
     CUDA: mm_out_cuda
     SparseCPU, SparseCUDA: _sparse_mm_out
-    SparseCsrCPU: _sparse_csr_mm_out
+    SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
 
@@ -2978,7 +2978,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: mv
-    SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
+    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4688,6 +4688,7 @@
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
     SparseCsrCPU: addmm_out_sparse_csr_dense_cpu
+    SparseCsrCUDA: addmm_out_sparse_csr_dense_cuda
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   structured_delegate: addmm.out
@@ -4695,7 +4696,7 @@
   dispatch:
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
-    SparseCsrCPU: addmm_sparse_csr_dense_cpu
+    SparseCsrCPU, SparseCsrCUDA: addmm_sparse_csr_dense
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: addmm.out
@@ -5700,6 +5701,13 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: digamma.out
   variants: method
+
+- func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_renorm_
+    CUDA: legacy::cuda::_th_renorm_
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6953,19 +6961,16 @@
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  structured: True
   dispatch:
-    CPU, CUDA: renorm_out
+    CPU: legacy::cpu::_th_renorm_out
+    CUDA: legacy::cuda::_th_renorm_out
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  structured_delegate: renorm.out
-
-- func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-  structured_delegate: renorm.out
+  dispatch:
+    CPU: legacy::cpu::_th_renorm
+    CUDA: legacy::cuda::_th_renorm
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
