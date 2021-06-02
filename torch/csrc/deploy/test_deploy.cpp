@@ -42,6 +42,14 @@ const char* path(const char* envname, const char* path) {
   return e ? e : path;
 }
 
+TEST(TorchpyTest, LoadLibrary) {
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(
+      path("LOAD_LIBRARY", "torch/csrc/deploy/example/generated/load_library"));
+  auto model = p.load_pickle("fn", "fn.pkl");
+  model({});
+}
+
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
