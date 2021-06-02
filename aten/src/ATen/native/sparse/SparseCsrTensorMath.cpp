@@ -57,8 +57,8 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
     auto col_indices_accessor = col_indices.accessor<index_t, 1>();
 
     auto values_accessor = values.accessor<scalar_t, 1>();
-    scalar_t* dense_ptr = dense.data<scalar_t>();
-    scalar_t* r_ptr = r.data<scalar_t>();
+    scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
+    scalar_t* r_ptr = r.data_ptr<scalar_t>();
 
     int64_t dense_stride0 = dense.stride(0);
     int64_t dense_stride1 = dense.stride(1);
@@ -149,7 +149,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
 
   // Do not use MKL for Windows due to linking issues with sparse MKL routines.
   if (at::hasMKL() && is_mkl_supported() && is_square_or_vec(dim_i, dim_j, dim_k)) {
-    AT_DISPATCH_FLOATING_TYPES(values.type(), "addmm_sparse_dense", [&] {
+    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_dense", [&] {
         scalar_t cast_beta = beta.to<scalar_t>();
         if (cast_beta == 0) {
           r.zero_();
@@ -165,7 +165,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     });
   } else {
     // r = beta * t + alpha * sparse * dense
-    AT_DISPATCH_FLOATING_TYPES(values.type(), "addmm_sparse_dense", [&] {
+    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, crow_indices, col_indices, values, dense);
     });
   }
@@ -288,12 +288,12 @@ Tensor& add_out_dense_sparse_csr_cpu(
               auto out_strides0 = resultBuffer.strides()[0];
               auto out_strides1 = resultBuffer.strides()[1];
 
-              for (int32_t irow = 0; irow < src_crow_indices.size(0) - 1;
+              for (index_t irow = 0; irow < src_crow_indices.size(0) - 1;
                    ++irow) {
-                int32_t start_index = crow_indices_accessor[irow];
-                int32_t end_index = crow_indices_accessor[irow + 1];
+                index_t start_index = crow_indices_accessor[irow];
+                index_t end_index = crow_indices_accessor[irow + 1];
 
-                for (int i = start_index; i < end_index; ++i) {
+                for (index_t i = start_index; i < end_index; ++i) {
                   auto icol = col_indices_accessor[i];
                   auto index = resultBuffer.storage_offset() + irow * out_strides0 +
                       icol * out_strides1;
