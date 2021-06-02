@@ -46,7 +46,9 @@ def remote_forward_async(remote_module, args):
 
 # RPC handler for creating a remote module by module rref on the destination worker.
 def create_remote_module_by_module_rref(remote_device, module_rref):
-    return RemoteModule(remote_device=remote_device, module_rref=module_rref)
+    remote_module = object.__new__(RemoteModule)  # type: ignore[attr-defined]
+    remote_module.init_from_module_rref(remote_device=remote_device, module_rref=module_rref)
+    return remote_module
 
 
 class ModuleCreationMode(enum.Enum):
