@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
@@ -653,6 +655,64 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       default:                                                          \
         AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");  \
     }                                                                   \
+  }()
+
+namespace {
+template <int size, int align> struct alignas(align) OpaqueType { char data[size]; };
+}
+
+// Operators like gather, scatter, index_put, etc. does not need to know the
+// exact dtype of oprands. Size and align are sufficient. For these operators,
+// using opaque type could instinate less kernels, therefore saving binary size.
+#define AT_DISPATCH_ALL_OPAQUE_TYPES(TYPE, NAME, ...)                          \
+  [&] {                                                                        \
+    const auto& the_type = TYPE;                                               \
+    /* don't use TYPE again in case it is an expensive or side-effect op*/     \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                      \
+    using opaque_bool = OpaqueType<sizeof(bool), alignof(bool)>;               \
+    using opaque_byte = OpaqueType<sizeof(uint8_t), alignof(uint8_t)>;         \
+    using opaque_char = OpaqueType<sizeof(int8_t), alignof(int8_t)>;           \
+    using opaque_double = OpaqueType<sizeof(double), alignof(double)>;         \
+    using opaque_float = OpaqueType<sizeof(float), alignof(float)>;            \
+    using opaque_half = OpaqueType<sizeof(c10::Half), alignof(c10::Half)>;     \
+    using opaque_bfloat16 =                                                    \
+        OpaqueType<sizeof(c10::BFloat16), alignof(c10::BFloat16)>;             \
+    using opaque_int = OpaqueType<sizeof(int32_t), alignof(int32_t)>;          \
+    using opaque_long = OpaqueType<sizeof(int64_t), alignof(int64_t)>;         \
+    using opaque_short = OpaqueType<sizeof(int16_t), alignof(int16_t)>;        \
+    using opaque_cfloat =                                                      \
+        OpaqueType<sizeof(c10::complex<float>), alignof(c10::complex<float>)>; \
+    using opaque_cdouble = OpaqueType<                                         \
+        sizeof(c10::complex<double>),                                          \
+        alignof(c10::complex<double>)>;                                        \
+    RECORD_KERNEL_FUNCTION_DTYPE(NAME, _st);                                   \
+    switch (_st) {                                                             \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::Bool, opaque_bool, __VA_ARGS__)                \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::Byte, opaque_byte, __VA_ARGS__)                \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::Char, opaque_char, __VA_ARGS__)                \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::Double, opaque_double, __VA_ARGS__)            \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::Float, opaque_float, __VA_ARGS__)              \
+      AT_PRIVATE_CASE_TYPE(NAME, at::ScalarType::Int, opaque_int, __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::Long, opaque_long, __VA_ARGS__)                \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::Short, opaque_short, __VA_ARGS__)              \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::Half, opaque_half, __VA_ARGS__)                \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::BFloat16, opaque_bfloat16, __VA_ARGS__)        \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::ComplexFloat, opaque_cfloat, __VA_ARGS__)      \
+      AT_PRIVATE_CASE_TYPE(                                                    \
+          NAME, at::ScalarType::ComplexDouble, opaque_cdouble, __VA_ARGS__)    \
+      default:                                                                 \
+        AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");         \
+    }                                                                          \
   }()
 
 #define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(                             \
