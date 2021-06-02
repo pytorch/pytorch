@@ -1145,7 +1145,6 @@ reflectable_magic_methods = {
     'and': '{} & {}',
     'or': '{} | {}',
     'xor': '{} ^ {}',
-    'getitem': '{}[{}]'
 }
 
 magic_methods = dict({
@@ -1157,4 +1156,5 @@ magic_methods = dict({
     'ge': '{} >= {}',
     'pos': '+{}',
     'neg': '-{}',
-    'invert': '~{}'}, **reflectable_magic_methods)
+    'invert': '~{}',
+    'getitem': '{}[{}]'}, **reflectable_magic_methods)
