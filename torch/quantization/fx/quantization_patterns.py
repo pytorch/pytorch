@@ -46,7 +46,6 @@ from .utils import (
     get_qconv_op,
 )
 
-from .quantization_types import QuantizerCls
 from .qconfig_utils import QConfigAny
 
 from abc import ABC, abstractmethod
@@ -79,7 +78,6 @@ class QuantizeHandler(ABC):
 
     def _maybe_get_last_node_only_observer(
         self,
-        quantizer: QuantizerCls,
         modules: Dict[str, torch.nn.Module]
     ) -> Optional[torch.nn.Module]:
         """
@@ -140,7 +138,6 @@ class QuantizeHandler(ABC):
 
     @abstractmethod
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -274,7 +271,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         return self.num_tensor_args > 0
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -299,7 +295,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(node.kwargs)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
                 activation_post_process = \
-                    self._maybe_get_last_node_only_observer(quantizer, modules)
+                    self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
                 return quantize_node(
                     op_out, activation_post_process,
@@ -330,14 +326,14 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                         load_arg(quantized=[quantized_index])(self.binary_op_node.args), self.binary_op_node.kwargs)
                 else:
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(quantizer, modules)
+                        self._maybe_get_last_node_only_observer(modules)
                     assert activation_post_process is not None
                     scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[operator]
                     scale = float(scale)
                     zero_point = int(zero_point)
                     scale_arg, zero_point_arg = \
                         create_qparam_nodes(
-                            quantizer, node.name, scale, zero_point, modules,
+                            node.name, scale, zero_point, modules,
                             quantized_graph, node_name_to_scope)
                     kwargs = {**self.binary_op_node.kwargs}
                     add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
@@ -390,7 +386,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -451,7 +446,6 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             self.conv = node.target  # type: ignore[assignment]
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -498,7 +492,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
             # 1. attach activation post process to module
             output_activation_post_process = \
-                self._maybe_get_last_node_only_observer(quantizer, modules)
+                self._maybe_get_last_node_only_observer(modules)
             assert output_activation_post_process is not None
             self.conv.activation_post_process = output_activation_post_process
             # 2. select quantized class
@@ -532,7 +526,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.conv_node
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(quantizer, modules)
+                        self._maybe_get_last_node_only_observer(modules)
                     assert activation_post_process is not None
                     return quantize_node(
                         op_out,
@@ -572,13 +566,13 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     conv_input = load_arg(quantized=True)(self.conv_node.args[0])
 
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(quantizer, modules)
+                        self._maybe_get_last_node_only_observer(modules)
                     assert activation_post_process is not None
 
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                     scale_node, zero_point_node = \
                         create_qparam_nodes(
-                            quantizer, self.conv_node.name, scale, zero_point, modules,
+                            self.conv_node.name, scale, zero_point, modules,
                             quantized_graph, node_name_to_scope)
                     qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
                     kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
@@ -621,7 +615,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             self.linear = modules[str(self.linear_node.target)]
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -667,7 +660,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         if self.linear_node.op == 'call_module':
 
             output_activation_post_process = \
-                self._maybe_get_last_node_only_observer(quantizer, modules)
+                self._maybe_get_last_node_only_observer(modules)
 
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
@@ -720,7 +713,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.linear_node
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(quantizer, modules)
+                        self._maybe_get_last_node_only_observer(modules)
                     assert activation_post_process is not None
                     return quantize_node(
                         op_out,
@@ -764,12 +757,12 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
                     linear_input = load_arg(quantized=True)(self.linear_node.args[0])
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(quantizer, modules)
+                        self._maybe_get_last_node_only_observer(modules)
                     assert activation_post_process is not None
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                     scale_node, zero_point_node = \
                         create_qparam_nodes(
-                            quantizer, self.linear_node.name, scale, zero_point, modules,
+                            self.linear_node.name, scale, zero_point, modules,
                             quantized_graph, node_name_to_scope)
 
                     qlinear_args = (linear_input, packed_weight, scale_node, zero_point_node)
@@ -827,7 +820,6 @@ class BatchNormQuantizeHandler(QuantizeHandler):
         self.bn = modules[str(self.bn_node.target)]
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -841,7 +833,7 @@ class BatchNormQuantizeHandler(QuantizeHandler):
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         # 1. attach activation post process to module
         activation_post_process = \
-            self._maybe_get_last_node_only_observer(quantizer, modules)
+            self._maybe_get_last_node_only_observer(modules)
         assert activation_post_process is not None
         self.bn.activation_post_process = activation_post_process
         qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
@@ -867,7 +859,6 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
         return False
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -923,7 +914,6 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
         return False
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -1007,7 +997,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             self.op = type(modules[str(node.target)])
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -1068,7 +1057,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
         if not is_reference:
             if dtypes in [(torch.quint8, torch.qint8, None)]:
                 activation_post_process = \
-                    self._maybe_get_last_node_only_observer(quantizer, modules)
+                    self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
                 if node.op == 'call_module':
                     module = modules[str(node.target)]
@@ -1091,7 +1080,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     zero_point = int(zero_point)
                     scale_arg, zero_point_arg = \
                         create_qparam_nodes(
-                            quantizer, node.name, scale, zero_point, modules,
+                            node.name, scale, zero_point, modules,
                             quantized_graph, node_name_to_scope)
 
                     assert not isinstance(node.target, str), "Expecting node.target for "
@@ -1124,7 +1113,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(node.kwargs)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
                 activation_post_process = \
-                    self._maybe_get_last_node_only_observer(quantizer, modules)
+                    self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
                 return quantize_node(
                     op_out, activation_post_process,
@@ -1140,7 +1129,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.functional.elu)
 class ELUQuantizeHandler(QuantizeHandler):
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -1150,13 +1138,13 @@ class ELUQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         activation_post_process = \
-            self._maybe_get_last_node_only_observer(quantizer, modules)
+            self._maybe_get_last_node_only_observer(modules)
         assert activation_post_process is not None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[operator]
         scale = float(scale)
         zero_point = int(zero_point)
         scale_arg, zero_point_arg = create_qparam_nodes(
-            quantizer, node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
+            node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
 
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
@@ -1212,7 +1200,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
                 pattern, None)
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -1305,7 +1292,6 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
         return True
 
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -1318,7 +1304,6 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
@@ -1334,12 +1319,13 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
         assert custom_module_class_mapping is not None
         observed_custom_module = modules[str(node.target)]
+        # TODO: remove quantizer here
         if activation_is_statically_quantized(qconfig):
-            assert node.name in quantizer.activation_post_process_map
-            cur_idx = quantizer.activation_post_process_indexes[node.name]
+            assert node.name in quantizer.activation_post_process_map  # type: ignore[name-defined]
+            cur_idx = quantizer.activation_post_process_indexes[node.name]  # type: ignore[name-defined]
             observed_custom_module.activation_post_process = \
-                modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-            quantizer.activation_post_process_indexes[node.name] += 1
+                modules[quantizer.activation_post_process_map[node.name][cur_idx]]  # type: ignore[name-defined]
+            quantizer.activation_post_process_indexes[node.name] += 1  # type: ignore[name-defined]
         quantized_custom_module_class = get_swapped_custom_module_class(
             observed_custom_module, custom_module_class_mapping, qconfig)
         quantized_custom_module = \
@@ -1357,7 +1343,6 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
     by calling convert_fx on the observed standalone module.
     """
     def convert(self,
-                quantizer: QuantizerCls,
                 node: Node,
                 qconfig: QConfigAny,
                 modules: Dict[str, torch.nn.Module],
