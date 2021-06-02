@@ -2227,7 +2227,7 @@ class TestCudaFuser(JitTestCase):
             self.assertTrue(self._compare("comparing bias grad failed",
                                           my_module.bn.bias.grad,
                                           ref_module.bn.bias.grad,
-                                          1e-5))
+                                          1e-4))
         if has_running_stats:
             self.assertTrue(self._compare("comparing running_mean failed",
                                           my_module.bn.running_mean,
