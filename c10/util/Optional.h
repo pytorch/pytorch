@@ -134,9 +134,6 @@ constexpr U convert(U v) {
   return v;
 }
 
-// REVIEW: we will end up with one shared address for this across
-// DSOs/DLLs on Linux/Windows/macOS, right?
-extern C10_API const char RESERVED;
 } // namespace detail_
 
 // \endcond
@@ -439,7 +436,14 @@ class arrayref_optional_base {
     ArrayRefT value_;
 
     constexpr storage() noexcept : uninitialized_() {
-      uninitialized_.p = &detail_::RESERVED;
+      setUninitialized();
+    }
+
+    constexpr void setUninitialized() noexcept {
+      // ArrayRef has the invariant that if Data is nullptr then
+      // Length must be zero, so this is an unused bit pattern.
+      uninitialized_.p = nullptr;
+      uninitialized_.sz = 1;
     }
 
     explicit constexpr storage(ArrayRefT& v) : value_(v) {}
@@ -471,12 +475,12 @@ class arrayref_optional_base {
   constexpr bool initialized() const noexcept {
     typename storage::raw repr;
     memcpy(&repr, &storage_, sizeof(storage_));
-    return repr.p != &detail_::RESERVED;
+    return repr.p != nullptr || repr.sz == 0;
   }
 
   void setInitialized(bool init) noexcept {
     if (!init) {
-      storage_.uninitialized_.p = &detail_::RESERVED;
+      storage_.setUninitialized();
     } else {
       assert(initialized());
     }

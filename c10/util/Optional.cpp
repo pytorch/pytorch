@@ -19,9 +19,3 @@ static_assert(
     sizeof(c10::optional<c10::IntArrayRef>) == sizeof(c10::IntArrayRef),
     "c10::optional<IntArrayRef> should be size-optimized");
 #endif
-
-namespace c10 {
-namespace detail_ {
-const char RESERVED = '\0';
-} // namespace detail_
-} // namespace c10
