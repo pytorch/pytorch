@@ -1319,13 +1319,11 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
         assert custom_module_class_mapping is not None
         observed_custom_module = modules[str(node.target)]
-        # TODO: remove quantizer here
         if activation_is_statically_quantized(qconfig):
-            assert node.name in quantizer.activation_post_process_map  # type: ignore[name-defined]
-            cur_idx = quantizer.activation_post_process_indexes[node.name]  # type: ignore[name-defined]
-            observed_custom_module.activation_post_process = \
-                modules[quantizer.activation_post_process_map[node.name][cur_idx]]  # type: ignore[name-defined]
-            quantizer.activation_post_process_indexes[node.name] += 1  # type: ignore[name-defined]
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            assert activation_post_process is not None
+            observed_custom_module.activation_post_process = activation_post_process
         quantized_custom_module_class = get_swapped_custom_module_class(
             observed_custom_module, custom_module_class_mapping, qconfig)
         quantized_custom_module = \

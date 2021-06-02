@@ -29,6 +29,7 @@ from ..quantize import (
 from ..utils import (
     get_combined_dict,
     get_qconfig_dtypes,
+    get_swapped_custom_module_class,
     weight_is_quantized,
     activation_is_statically_quantized,
     activation_is_int8_quantized,
@@ -674,6 +675,22 @@ def adjust_observers_for_cat(
 
     # TODO(future PR): delete the orphaned observer modules
 
+def swap_custom_module_to_observed(
+        node: Node,
+        qconfig: QConfigAny,
+        modules: Dict[str, torch.nn.Module],
+        prepare_custom_config_dict: Dict[str, Any]):
+    custom_module = modules[node.target]  # type: ignore[index]
+    custom_module_class_mapping = prepare_custom_config_dict.get(
+        "float_to_observed_custom_module_class", {})
+    observed_custom_module_class = \
+        get_swapped_custom_module_class(
+            custom_module, custom_module_class_mapping, qconfig)
+    observed_custom_module = \
+        observed_custom_module_class.from_float(custom_module)
+    parent_name, name = _parent_name(node.target)
+    setattr(modules[parent_name], name, observed_custom_module)
+
 def insert_observers_for_model(
     model: GraphModule,
     modules: Dict[str, torch.nn.Module],
@@ -821,6 +838,9 @@ def insert_observers_for_model(
                             # observer
                             if isinstance(qhandler, CatQuantizeHandler):
                                 adjust_observers_for_cat(node, model, modules)
+
+                            if isinstance(qhandler, CustomModuleQuantizeHandler):
+                                swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config_dict)
 
                 else:  # output
                     maybe_insert_observers_before_graph_output(
