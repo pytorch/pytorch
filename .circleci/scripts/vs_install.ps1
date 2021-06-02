@@ -15,7 +15,7 @@ $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStud
                                                      "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Win81")
 
 if (${env:INSTALL_WINDOWS_SDK} -eq "1") {
-    $VS_INSTALL_ARGS.Add("--add Microsoft.VisualStudio.Component.Windows10SDK.19041")
+    $VS_INSTALL_ARGS += "--add Microsoft.VisualStudio.Component.Windows10SDK.19041"
 }
 
 curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
