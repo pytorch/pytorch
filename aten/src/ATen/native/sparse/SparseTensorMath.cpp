@@ -1324,6 +1324,202 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   }
 
 }
+
+// --------------------------------------------------------------------
+// sparse.max()
+//
+// This implementation uses a custom function _reduce_max() to do the reduction on
+// sparse dims. Ideally in the future there should be unified reduction function
+// for ops like sum, max, and min.
+// --------------------------------------------------------------------
+
+namespace {
+
+SparseTensor _reduce_max(const SparseTensor& self) {
+  // this implementation is heavily based on coalesce()
+  AT_ASSERT(self.defined());
+  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
+  AT_ASSERT(self.is_sparse());
+  TORCH_INTERNAL_ASSERT(!self.is_coalesced());
+
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  if (self._nnz() < 2) {
+    SparseTensor dst = self.clone();
+    dst._coalesced_(true);
+    return dst;
+  }
+
+  Tensor indices = self._indices();
+  Tensor values = self._values().contiguous();
+  int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
+  int64_t nnz = self._nnz();
+
+  Tensor indices_scalar = flatten_indices(indices, self.sizes());
+
+  SparseTensor dst = at::native::new_with_dims_sparse(
+	  sparse_dim,
+	  dense_dim,
+	  self.sizes(),
+      optTypeMetaToScalarType(self.options().dtype_opt()),
+      self.options().layout_opt(),
+      self.options().device_opt(),
+      self.options().pinned_memory_opt());
+  // TODO: is there a more idiomatic way to do this?
+  Tensor newIndices = at::empty(indices.sizes(), indices.options());
+  Tensor newValues = at::empty(values.sizes(), values.options());
+  alias_into_sparse(dst, newIndices, newValues);
+
+  Tensor indicesBuffer;
+  Tensor indicesPermutation;
+  std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
+  // NB: The accessor accesses here rely on self._nnz() > 0 (tested earlier in
+  // this function)
+  auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
+  auto indicesAccessor = indices.accessor<int64_t, 2>();
+  auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
+  auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
+
+  int64_t i = -1;
+  AT_DISPATCH_ALL_TYPES(values.scalar_type(), "coalesce", [&] {
+    int64_t prev = -1;
+    int64_t blockSize = values.stride(0);
+    scalar_t* values_ptr = values.data_ptr<scalar_t>();
+    scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
+    for (int64_t j = 0; j < nnz; j++) {
+      int64_t pos = indicesPermutationAccessor[j];
+      int64_t curr = indicesBufferAccessor[j];
+      if (curr == prev) {
+        if (values.numel() >
+            0) { // if values is an empty tensor, there are no elements to copy
+		  for(int blockNum = 0; blockNum < blockSize; blockNum++){
+		    scalar_t* current_values_ptr = values_ptr + pos * blockSize + blockNum;
+		    scalar_t* desination_values_ptr = newValues_ptr + i * blockSize + blockNum;
+		    bool dest_gt_current = (*desination_values_ptr > *current_values_ptr);
+		    *desination_values_ptr = dest_gt_current * *desination_values_ptr + !dest_gt_current * *current_values_ptr;
+		  }
+        }
+      } else {
+        ++i;
+        for (int64_t d = 0; d < sparse_dim; d++) {
+          newIndicesAccessor[d][i] = indicesAccessor[d][pos];
+        }
+        if (values.numel() >
+            0) { // if values is an empty tensor, there are no elements to copy
+          at::native::cpublas::copy<scalar_t>(
+              blockSize,
+              values_ptr + pos * blockSize,
+              1,
+              newValues_ptr + i * blockSize,
+              1);
+        }
+      }
+      prev = curr;
+    }
+  });
+
+  dst._coalesced_(true);
+  get_sparse_impl(dst)->set_nnz_and_narrow(i + 1);
+
+  return dst;
+}
+} // anon namespace
+
+Tensor _sparse_max(const SparseTensor& input) {
+	return input.coalesce().values().max();
+}
+
+Tensor _sparse_max(const SparseTensor& input, ScalarType dtype) {
+  return input.coalesce().values().max().to(dtype);
+}
+
+Tensor _sparse_max(const SparseTensor& input, IntArrayRef dims_to_max, ScalarType dtype) {
+  return at::_sparse_max(input.to(dtype), dims_to_max);
+}
+
+Tensor _sparse_max(const SparseTensor& input, IntArrayRef dims_to_max) {
+  TORCH_CHECK(input._nnz() > 0, "_sparse_max: sparse tensor input._nnz() == 0, please call torch.sparse.max(input) instead.")
+
+  const int64_t input_dim = input.dim();
+  auto dims_to_max_b = dim_list_to_bitset(dims_to_max, input_dim);
+  auto dims_to_max_v = dims_to_max.vec();
+  maybe_wrap_dims(dims_to_max_v, input_dim);
+
+  SparseTensor coalesced_input = input.coalesce();
+  Tensor indices = coalesced_input._indices();
+  Tensor values = coalesced_input._values();
+  IntArrayRef sizes = coalesced_input.sizes();
+  const int64_t sparse_dim = coalesced_input.sparse_dim();
+  // const int64_t dense_dim = input.dense_dim();
+
+  auto dims_to_keep_v = std::vector<int64_t>();
+  auto dense_dims_to_max_v = std::vector<int64_t>();
+  for (int64_t d = 0; d < input_dim; d++) {
+    if (dims_to_max_b[d]) {
+      if (d >= sparse_dim) dense_dims_to_max_v.emplace_back(d + 1 - sparse_dim);
+    }
+    else {
+      dims_to_keep_v.emplace_back(d);
+    }
+  }
+  const int64_t sparse_dims_to_max_size = dims_to_max_v.size() - dense_dims_to_max_v.size();
+  const bool max_all_sparse_dim = (sparse_dim == sparse_dims_to_max_size);
+  const bool max_dense_dim = (dense_dims_to_max_v.size() > 0);
+
+  // new values
+  Tensor new_values;
+  if (max_dense_dim) {
+	// at::native::max only allows us to max over one dimension at a time so we need to loop over it
+	new_values = values;
+	std::tuple<Tensor, Tensor> new_max;
+	for (auto ir = dense_dims_to_max_v.rbegin(); ir != dense_dims_to_max_v.rend(); ++ir){
+		new_max = at::native::max(new_values, *ir, false);
+		new_values = std::get<0>(new_max);
+	}
+  }
+  else {
+    new_values = values.clone(at::MemoryFormat::Contiguous);
+  }
+
+  if (max_all_sparse_dim) {
+    // return a dense tensor if max over all sparse dims
+	std::tuple<Tensor, Tensor> new_max;
+    new_max = at::native::max(new_values, 0, false);
+	new_values = std::get<0>(new_max);
+    return new_values;
+  }
+  else { // !max_all_sparse_dim
+    Tensor new_indices;
+    if (sparse_dims_to_max_size == 0) {
+      new_indices = indices.clone(at::MemoryFormat::Contiguous);
+    }
+    else {
+      new_indices = at::empty({sparse_dim - sparse_dims_to_max_size, coalesced_input._nnz()}, indices.options());
+      for (auto i: c10::irange(dims_to_keep_v.size())) {
+        int64_t d = dims_to_keep_v[i];
+        if (d < sparse_dim) new_indices[i].copy_(indices[d]);
+        else break;
+      }
+    }
+
+    // new size
+    int64_t new_sparse_dim = new_indices.size(0);
+    int64_t new_dense_dim = new_values.dim() - 1; // exclude nnz dim
+    std::vector<int64_t> new_sizes;
+    new_sizes.reserve(dims_to_keep_v.size());
+    for (auto d : dims_to_keep_v) new_sizes.emplace_back(sizes[d]);
+    if (max_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
+
+    // use coalesce() to do max reduction
+    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, coalesced_input.options());
+    new_sparse = _reduce_max(new_sparse);
+    return new_sparse;
+  }
+
+}
+
+
 // --------------------------------------------------------------------
 // NOTE [ sparse.sum() backward ]
 //

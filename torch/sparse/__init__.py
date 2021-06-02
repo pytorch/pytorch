@@ -19,6 +19,7 @@ __all__ = [
     'addmm',
     'mm',
     'sum',
+    'max',
     'softmax',
     'log_softmax',
 ]
@@ -37,8 +38,7 @@ def addmm(mat: Tensor, mat1: Tensor, mat2: Tensor,
         mat1 (Tensor): a sparse matrix to be multiplied
         mat2 (Tensor): a dense matrix to be multiplied
         beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
-        alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
-    """
+        alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`) """
     return torch._sparse_addmm(mat, mat1, mat2, beta=beta, alpha=alpha)
 
 
@@ -158,6 +158,70 @@ def sum(input: Tensor, dim: DimOrDims = None,
         else:
             return torch._sparse_sum(input, dtype=dtype)
 
+def max(input: Tensor, dim: DimOrDims = None,
+        dtype: Optional[DType] = None) -> Tensor:
+
+    r"""
+    Returns the maximum of each row of the sparse tensor :attr:`input` in the given
+    dimensions :attr:`dim`. This function only takes the maximum over the non zero elements of the sparse tensor.
+    If :attr:`dim` is a list of dimensions,
+    reduce over all of them. When max over all ``sparse_dim``, this method
+    returns a dense tensor instead of a sparse tensor.
+
+    All summed :attr:`dim` are squeezed (see :func:`torch.squeeze`), resulting an output
+    tensor having :attr:`dim` fewer dimensions than :attr:`input`.
+
+    Args:
+        input (Tensor): the input sparse tensor
+        dim (int or tuple of ints): a dimension or a list of dimensions to reduce. Default: reduce
+            over all dims.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
+            Default: dtype of :attr:`input`.
+
+    Example::
+
+        >>> nnz = 3
+        >>> dims = [5, 5, 2, 3]
+        >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
+                           torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
+        >>> V = torch.randn(nnz, dims[2], dims[3])
+        >>> size = torch.Size(dims)
+        >>> S = torch.sparse_coo_tensor(I, V, size)
+        >>> S
+        tensor(indices=tensor([[0, 0, 1],
+                               [3, 4, 4]]),
+               values=tensor([[[ 1.7344,  0.2995,  0.0938],
+                               [ 0.7557,  0.0700, -0.3721]],
+
+                              [[-1.2939,  0.9048, -1.6043],
+                               [ 0.3932, -1.2857, -0.6237]],
+
+                              [[ 1.8163, -1.7349,  0.8071],
+                               [-1.7230, -0.1742, -0.1096]]]),
+               size=(5, 5, 2, 3), nnz=3, layout=torch.sparse_coo)
+
+        # when sum over only part of sparse_dims, return a sparse tensor
+        >>> torch.sparse.sum(S, [1, 3])
+        tensor(indices=tensor([[0, 1]]),
+               values=tensor([[ 1.7344,  0.7557],
+                              [ 1.8163, -0.1096]]),
+               size=(5, 2), nnz=2, layout=torch.sparse_coo)
+
+        # when sum over all sparse dim, return a dense tensor
+        # with summed dims squeezed
+        >>> torch.sparse.sum(S, [0, 1, 3])
+        tensor([1.8163, 0.7557])
+    """
+    if dtype is None:
+        if dim is not None:
+            return torch._sparse_max(input, dim)
+        else:
+            return torch._sparse_max(input)
+    else:
+        if dim is not None:
+            return torch._sparse_max(input, dim, dtype=dtype)
+        else:
+            return torch._sparse_max(input, dtype=dtype)
 
 def softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
     r"""Applies a softmax function.

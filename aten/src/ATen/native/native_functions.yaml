@@ -4418,6 +4418,16 @@
 
 - func: _sparse_sum.dim_dtype(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
 
+- func: _sparse_max(Tensor self) -> Tensor
+
+- func: _sparse_max.dtype(Tensor self, *, ScalarType dtype) -> Tensor
+
+- func: _sparse_max.dim(Tensor self, int[1] dim) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _sparse_max
+
+- func: _sparse_max.dim_dtype(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
+
 - func: _sparse_sum_backward(Tensor grad, Tensor self, int[] dim) -> Tensor
   dispatch:
     SparseCPU: _sparse_sum_backward_cpu

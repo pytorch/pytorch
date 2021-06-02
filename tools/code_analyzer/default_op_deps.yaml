@@ -1768,6 +1768,24 @@
   - name: aten::sum
   - name: aten::to
   - name: aten::values
+- name: aten::_sparse_max
+  depends:
+  - name: aten::_indices
+  - name: aten::_nnz
+  - name: aten::_sparse_coo_tensor_with_dims_and_tensors
+  - name: aten::_sparse_sum
+  - name: aten::_values
+  - name: aten::clone
+  - name: aten::coalesce
+  - name: aten::copy_
+  - name: aten::empty
+  - name: aten::eq
+  - name: aten::is_nonzero
+  - name: aten::select
+  - name: aten::sparse_dim
+  - name: aten::max
+  - name: aten::to
+  - name: aten::values
 - name: aten::_sparse_sum_backward
   depends:
   - name: aten::eq
