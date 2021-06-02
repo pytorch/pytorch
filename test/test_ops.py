@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, suppress_warnings)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests)
+    (op_db, method_tests, test_funcs)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -21,7 +21,7 @@ from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 
 # Get names of all the operators which have entry in `method_tests` (legacy testing infra)
 method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
-only_testing_ops = ['roll']
+only_testing_ops = list(filter(lambda op: op.ref is not _NOTHING, test_funcs))
 
 # Tests that apply to all operators
 
