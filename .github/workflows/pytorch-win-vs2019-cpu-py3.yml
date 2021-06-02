@@ -16,6 +16,7 @@ env:
   BUILD_WHEEL: 1
   CUDA_VERSION: "cpu"
   IN_CI: 1
+  INSTALL_WINDOWS_SDK: 1
   JOB_BASE_NAME: test
   PYTHON_VERSION: "3.6"
   SCCACHE_BUCKET: "ossci-compiler-cache"
