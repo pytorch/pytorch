@@ -212,7 +212,10 @@ class LLVMCodeGenImpl : public IRVisitor {
       Stmt* stmt,
       const std::vector<CodeGen::BufferArg>& args,
       at::Device device,
-      Dtype dtype);
+      Dtype dtype,
+      c10::optional<std::string> triple,
+      c10::optional<std::string> cpu,
+      c10::optional<std::string> attrs);
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
@@ -301,30 +304,13 @@ LLVMCodeGen::LLVMCodeGen(
     const std::vector<BufferArg>& args,
     at::Device device,
     const std::string& kernel_func_name,
-    Dtype dtype)
+    Dtype dtype,
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
     : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
-
-static void* argToPtr(
-    const CodeGen::BufferArg& bufferArg,
-    const CodeGen::CallArg& callArg) {
-  if (!bufferArg.isVar()) {
-    return callArg.data();
-  }
-
-  switch (bufferArg.dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-  case ScalarType::Name:    \
-    return callArg.Name##Ptr();
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    default:
-      throw unsupported_dtype();
-  }
-  return nullptr;
-}
+      impl_(std::make_unique<
+            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
 
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
@@ -380,7 +366,10 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& args,
     at::Device device,
-    Dtype dtype)
+    Dtype dtype,
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
@@ -395,10 +384,11 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
 
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
 
-  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
+  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
   module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());

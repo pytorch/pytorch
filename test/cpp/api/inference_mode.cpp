@@ -515,11 +515,11 @@ TEST(InferenceModeTest, TestAccessVersionCounter) {
     InferenceMode guard;
     t = torch::ones({1, 2, 3});
     ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-      "Inference tensor do not track version counter.");
+      "Inference tensors do not track version counter.");
     t.unsafeGetTensorImpl()->bump_version();
   }
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-    "Inference tensor do not track version counter.");
+    "Inference tensors do not track version counter.");
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->bump_version(),
     "Inplace update to inference tensor outside InferenceMode is not allowed.");
   // Suggested workaround

@@ -91,6 +91,7 @@ class TRTModule(torch.nn.Module):
 
     def forward(self, *inputs):
         batch_size = inputs[0].shape[0]
+        contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
         bindings: List[Any] = [None] * (len(self.input_names) + len(self.output_names))
 
         # create output tensors
@@ -106,7 +107,7 @@ class TRTModule(torch.nn.Module):
 
         for i, input_name in enumerate(self.input_names):
             idx = self.engine.get_binding_index(input_name)
-            bindings[idx] = inputs[i].contiguous().data_ptr()
+            bindings[idx] = contiguous_inputs[i].data_ptr()
 
         self.context.execute_async(
             batch_size, bindings, torch.cuda.current_stream().cuda_stream
@@ -148,13 +149,18 @@ class InputTensorSpec(NamedTuple):
 class TRTInterpreter(torch.fx.Interpreter):
     def __init__(self, module : torch.fx.GraphModule, input_shapes : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
         # Preprocess the model
-        module = copy.copy(module)
-        module = module.cpu()
+        module = copy.deepcopy(module)
+        module = module.cpu().float()
         module = NormalizeArgs(module).transform()
         super().__init__(module)
 
         self.logger = trt.Logger(logger_level)
         self.builder = trt.Builder(self.logger)
+
+        # TODO: explicit batching
+        # EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+        # self.network = self.builder.create_network(EXPLICIT_BATCH)
+
         self.network = self.builder.create_network()
 
         self.input_shape_itr = iter(input_shapes)
@@ -167,21 +173,37 @@ class TRTInterpreter(torch.fx.Interpreter):
     def run(
         self,
         *args,
-        max_batch_size=10,
+        max_batch_size=64,
         max_workspace_size=1 << 25,
-        fp16_mode=False,
+        fp16_mode=True,
         int8_mode=False,
-        strict_type_constraints=False
+        strict_type_constraints=True
     ):
+        # TODO hack, should check contents of args and remove fp16_mode probably
+        self.fp16_mode = fp16_mode
+
         super().run(*args)
+
+        if int8_mode:
+            assert self.builder.platform_has_fast_int8, "Current platform doesn't support int8 inference!"
+
+        if fp16_mode:
+            assert self.builder.platform_has_fast_fp16, "Current platform doesn't support fp16 inference!"
 
         self.builder.max_batch_size = max_batch_size
         self.builder.max_workspace_size = max_workspace_size
         self.builder.strict_type_constraints = strict_type_constraints
-        self.builder.fp16_mode = fp16_mode
-        self.builder.int8_mode = int8_mode
 
-        return self.builder.build_cuda_engine(self.network), self._input_names, self._output_names
+        builder_config = self.builder.create_builder_config()
+        if fp16_mode:
+            builder_config.set_flag(trt.BuilderFlag.FP16)
+
+        if int8_mode:
+            builder_config.set_flag(trt.BuilderFlag.INT8)
+
+        engine = self.builder.build_engine(self.network, builder_config), self._input_names, self._output_names
+        assert(engine)
+        return engine
 
     def run_node(self, n):
         self._cur_node_name = str(n)
@@ -235,5 +257,9 @@ class TRTInterpreter(torch.fx.Interpreter):
             # TODO: set location and dtype?
             name = f'output{i}'
             output.name = name
+            if self.fp16_mode:
+                output.dtype = trt.float16
+            else:
+                output.dtype = trt.float32
             self.network.mark_output(output)
             self._output_names.append(name)
