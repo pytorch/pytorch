@@ -623,16 +623,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def _forward(self, x_orig):
         if x_orig.numel() == 0:
             return x_orig
-
-        min_vals, max_vals = self._find_minmax(x_orig, self.min_vals, self.max_vals)
-        self.min_vals.resize_(min_vals.shape)
-        self.max_vals.resize_(max_vals.shape)
-        self.min_vals.copy_(min_vals)
-        self.max_vals.copy_(max_vals)
-        return x_orig
-
-    def _find_minmax(self, x_orig, min_vals, max_vals):
         x = x_orig.detach()  # avoid keeping autograd tape
+        min_vals = self.min_vals
+        max_vals = self.max_vals
         x_dim = x.size()
 
         new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
@@ -649,7 +642,11 @@ class PerChannelMinMaxObserver(_ObserverBase):
             min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
             min_vals = torch.min(min_vals_cur, min_vals)
             max_vals = torch.max(max_vals_cur, max_vals)
-        return min_vals, max_vals
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
+        return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -800,129 +797,6 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         self.min_vals.copy_(min_vals)
         self.max_vals.copy_(max_vals)
         return x_orig
-
-
-class InputWeightMinMaxObserver(PerChannelMinMaxObserver):
-    r"""Observer module for computing the scale factor needed for input-weight
-    equalization based on the running min and max values of the input and weight
-    columns.
-
-    This observer uses the tensor min/max statistics to compute the column
-    quantization parameters. The module records the running minimum and maximum
-    of incoming tensors, and uses this statistic to compute the scale factor.
-
-    Args:
-        ch_axis: Channel axis
-        dtype: Quantized data type
-        qscheme: Quantization scheme to be used
-        reduce_range: Reduces the range of the quantized data type by 1 bit
-        quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
-        quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
-
-    Given running min/max of the input columns as :math:`x_\text{min}` and :math:`x_\text{max}`,
-    and the running min/max of the weight columns as :math:`w_\text{min}` and :math:`w_\text{max}`,
-    scale :math:`S` is computed as:
-
-    The running minimum/maximum :math:`x_\text{min/max}` and
-    :math:`w_\text{min/max}` are computed in the same way as
-    :class:`~torch.quantization.observer.MinMaxObserver`, with the difference
-    that the running min/max values are stored per column.
-
-    The scale factor :math:`S` is then computed as:
-
-    .. math::
-        S = \sqrt{\frac{x_{max} - x_{min}}{w_{max} - w{min}}}
-
-    where :math:`X` is the observed tensor.
-
-    .. note:: If the running minimum equals to the running maximum, the scales
-              and zero_points are set to 1.0 and 0.
-    """
-    min_inputs_col: torch.Tensor
-    max_inputs_col: torch.Tensor
-    min_weights_col: torch.Tensor
-    max_weights_col: torch.Tensor
-    min_weights_row: torch.Tensor
-    max_weights_row: torch.Tensor
-
-    def __init__(self, dtype=torch.quint8,
-                 qscheme=torch.per_channel_affine, reduce_range=False,
-                 quant_min=None, quant_max=None, factory_kwargs=None) -> None:
-        super(InputWeightMinMaxObserver, self).__init__(ch_axis=1, dtype=dtype,
-                                                        qscheme=qscheme,
-                                                        reduce_range=reduce_range,
-                                                        quant_min=quant_min,
-                                                        quant_max=quant_max,
-                                                        factory_kwargs=factory_kwargs)
-
-        # We want to get the columns of the weights and inputs
-        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        self.register_buffer('min_inputs_col', torch.tensor([], **factory_kwargs))
-        self.register_buffer('max_inputs_col', torch.tensor([], **factory_kwargs))
-        self.register_buffer('min_weights_col', torch.tensor([], **factory_kwargs))
-        self.register_buffer('max_weights_col', torch.tensor([], **factory_kwargs))
-        self.register_buffer('min_weights_row', torch.tensor([], **factory_kwargs))
-        self.register_buffer('max_weights_row', torch.tensor([], **factory_kwargs))
-
-    def forward(self, x_orig, w_orig):
-        if not (x_orig.ndim == 2 and w_orig.ndim == 2 and x_orig.shape[1] == w_orig.shape[1]):
-            raise ValueError(
-                "Input and Weight must have the same column dimension. " +
-                f"Found {x_orig.shape} and {w_orig.shape} instead."
-            )
-
-        return self._forward(x_orig, w_orig)
-
-    def _forward(self, x_orig, w_orig):
-        r"""
-        Calculates the min/max values of each input column, weight column, and weight row.
-        """
-        if w_orig.numel() == 0:
-            return (x_orig, w_orig)
-
-        # Calculate the min/max of input columns
-        self.ch_axis = 1
-        min_inputs_col, max_inputs_col = self._find_minmax(x_orig, self.min_inputs_col, self.max_inputs_col)
-        self.min_inputs_col.resize_(min_inputs_col.shape)
-        self.max_inputs_col.resize_(max_inputs_col.shape)
-        self.min_inputs_col.copy_(min_inputs_col)
-        self.max_inputs_col.copy_(max_inputs_col)
-
-        # Calculate the min/max of weight columns
-        min_weights_col, max_weights_col = self._find_minmax(w_orig, self.min_weights_col, self.max_weights_col)
-        self.min_weights_col.resize_(min_weights_col.shape)
-        self.max_weights_col.resize_(max_weights_col.shape)
-        self.min_weights_col.copy_(min_weights_col)
-        self.max_weights_col.copy_(max_weights_col)
-
-        # Calculate the min/max of weight rows
-        self.ch_axis = 0
-        min_weights_row, max_weights_row = self._find_minmax(w_orig, self.min_weights_row, self.max_weights_row)
-        self.min_weights_row.resize_(min_weights_row.shape)
-        self.max_weights_row.resize_(max_weights_row.shape)
-        self.min_weights_row.copy_(min_weights_row)
-        self.max_weights_row.copy_(max_weights_row)
-
-        return x_orig, w_orig
-
-    def calculate_scale(self) -> torch.Tensor:
-        self.S = torch.sqrt((self.max_weights_col - self.min_weights_col) / (self.max_inputs_col - self.min_inputs_col))
-        return self.S
-
-    def calculate_qparams(self):
-        r"""
-        Returns the scale/zero_point for the input and weight rows
-        """
-
-        # Calculate qparams for the scaled inputs
-        min_input_scaled = torch.mul(torch.min(self.min_inputs_col), self.S)
-        max_input_scaled = torch.mul(torch.max(self.max_inputs_col), self.S)
-        (scale_input, zero_point_input) = self._calculate_qparams(min_input_scaled, max_input_scaled)
-
-        # Calculate qparams for the weights
-        (scale_weight, zero_point_weight) = self._calculate_qparams(self.min_weights_row, self.max_weights_row)
-
-        return (scale_input, zero_point_input, scale_weight, zero_point_weight)
 
 
 class HistogramObserver(_ObserverBase):

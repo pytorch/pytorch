@@ -3,7 +3,6 @@ import torch
 from torch.quantization import (
     MinMaxObserver,
     PerChannelMinMaxObserver,
-    InputWeightMinMaxObserver,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
     HistogramObserver,
@@ -227,86 +226,6 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
             self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
-
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
-           reduce_range=st.booleans())
-    def test_input_weight_observer_fixed(self, qdtype, qscheme, reduce_range):
-        # reduce_range cannot be true for symmetric quantization with uint8
-        if qscheme == torch.per_channel_affine_float_qparams:
-            reduce_range = False
-        if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
-            reduce_range = False
-
-        myobs = InputWeightMinMaxObserver(reduce_range=reduce_range, dtype=qdtype, qscheme=qscheme)
-
-        x = torch.tensor([[1.0, 2.0], [2.0, 2.5], [3.0, 4.0], [4.5, 6.0]])
-        w = torch.tensor([[-4.0, -3.0], [5.0, 5.0], [6.0, 3.0], [7.0, 8.0]])
-
-        result = myobs(x, w)
-        self.assertEqual(result, (x, w))
-
-        ref_min_inputs = [1.0, 2.0]
-        ref_max_inputs = [4.5, 6.0]
-        self.assertEqual(myobs.min_inputs_col, ref_min_inputs)
-        self.assertEqual(myobs.max_inputs_col, ref_max_inputs)
-
-        ref_min_weights_col = [-4.0, -3.0]
-        ref_max_weights_col = [7.0, 8.0]
-        self.assertEqual(myobs.min_weights_col, ref_min_weights_col)
-        self.assertEqual(myobs.max_weights_col, ref_max_weights_col)
-
-        ref_min_weights_row = [-4.0, 5.0, 3.0, 7.0]
-        ref_max_weights_row = [-3.0, 5.0, 6.0, 8.0]
-        self.assertEqual(myobs.min_weights_row, ref_min_weights_row)
-        self.assertEqual(myobs.max_weights_row, ref_max_weights_row)
-
-        scale = myobs.calculate_scale()
-        ref_scale = [np.sqrt((7.0 + 4.0) / (4.5 - 1.0)), np.sqrt((8.0 + 3.0) / (6.0 - 2.0))]
-        self.assertEqual(scale, ref_scale)
-
-        qparams = myobs.calculate_qparams()
-
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
-           reduce_range=st.booleans())
-    def test_input_weight_observer_random(self, qdtype, qscheme, reduce_range):
-        # reduce_range cannot be true for symmetric quantization with uint8
-        if qscheme == torch.per_channel_affine_float_qparams:
-            reduce_range = False
-        if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
-            reduce_range = False
-
-        myobs = InputWeightMinMaxObserver(reduce_range=reduce_range, dtype=qdtype, qscheme=qscheme)
-
-        width = np.random.randint(10) + 1
-        x_height = np.random.randint(10) + 2
-        w_height = np.random.randint(10) + 2
-
-        x = (np.random.random(size=(x_height, width)) * 10).round(decimals=2).astype(np.float32)
-        w = (np.random.random(size=(w_height, width)) * 10).round(decimals=2).astype(np.float32)
-
-        result = myobs(torch.tensor(x), torch.tensor(w))
-        self.assertEqual(result, (x, w))
-
-        ref_min_inputs = x.min(axis=0)
-        ref_max_inputs = x.max(axis=0)
-        self.assertEqual(myobs.min_inputs_col, ref_min_inputs)
-        self.assertEqual(myobs.max_inputs_col, ref_max_inputs)
-
-        ref_min_weights_col = w.min(axis=0)
-        ref_max_weights_col = w.max(axis=0)
-        self.assertEqual(myobs.min_weights_col, ref_min_weights_col)
-        self.assertEqual(myobs.max_weights_col, ref_max_weights_col)
-
-        ref_min_weights_row = w.min(axis=1)
-        ref_max_weights_row = w.max(axis=1)
-        self.assertEqual(myobs.min_weights_row, ref_min_weights_row)
-        self.assertEqual(myobs.max_weights_row, ref_max_weights_row)
-
-        scale = myobs.calculate_scale()
-        ref_scale = np.sqrt((ref_max_weights_col - ref_min_weights_col) / (ref_max_inputs - ref_min_inputs))
-        self.assertEqual(scale, ref_scale)
 
     def test_observer_scriptable(self):
         obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
