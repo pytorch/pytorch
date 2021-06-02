@@ -437,26 +437,24 @@ class TestShapeOps(TestCase):
 
 
     def _rand_shape(self, dim, min_size, max_size):
-        shape = []
-        for i in range(dim):
-            shape.append(random.randint(min_size, max_size))
-        return tuple(shape)
+        return tuple(torch.randint(min_size, max_size + 1, (dim,)))
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    # Do not include bool as address sanitiser complains
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
     def test_flip_numpy(self, device, dtype):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
-        ndim = 3
-        shape = self._rand_shape(ndim, 5, 10)
+        for ndim in [3, 4]:
+            shape = self._rand_shape(ndim, 5, 10)
+            data = make_arg(shape)
 
-        # Axis to sample for given shape.
-        for i in range(1, ndim):
-            # Check all combinations of `i` axis.
-            for flip_dim in combinations(range(ndim), i):
-                data = make_arg(shape)
-                torch_fn = partial(torch.flip, dims=flip_dim)
-                np_fn = partial(np.flip, axis=flip_dim)
-                self.compare_with_numpy(torch_fn, np_fn, data)
+            # Axis to sample for given shape.
+            for i in range(1, ndim + 1):
+                # Check all combinations of `i` axis.
+                for flip_dim in combinations(range(ndim), i):
+                    torch_fn = partial(torch.flip, dims=flip_dim)
+                    np_fn = partial(np.flip, axis=flip_dim)
+                    self.compare_with_numpy(torch_fn, np_fn, data)
 
     @onlyCUDA  # CPU is too slow
     @largeTensorTest('30GB')
