@@ -28,6 +28,11 @@ uint64_t getSampleValue() {
 }
 
 template <>
+c10::IntArrayRef getSampleValue() {
+  return {};
+}
+
+template <>
 std::string getSampleValue() {
   return "hello";
 }
@@ -37,6 +42,8 @@ using OptionalTypes = ::testing::Types<
     bool,
     // Trivially destructible but not 32-bit scalar.
     uint64_t,
+    // ArrayRef optimization.
+    c10::IntArrayRef,
     // Non-trivial destructor.
     std::string>;
 
