@@ -375,13 +375,13 @@ Example::
 """.format(**common_args))
 
 ndtri = _add_docstr(_special.special_ndtri,
-                   r"""
-ndtr(input, *, out=None) -> Tensor
-Computes the area under the standard Gaussian probability density function,
-integrated from minus infinity to :attr:`input`, elementwise.
+                    r"""
+ndtri(input, *, out=None) -> Tensor
+Computes the argument, x, for which the area under the Gaussian probability density function
+(integrated from minus infinity to x) is equal to :attr:`input`, elementwise.
 
-.. math::
-    \text{ndtr}(x) = \frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt
+.. note::
+    Also known as quantile function for Normal Distribution and probit.
 
 """ + r"""
 Args:
@@ -391,6 +391,6 @@ Keyword args:
     {out}
 
 Example::
-    >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
-    tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
+    >>> torch.special.ndtri(torch.tensor([0, 0.25, 0.5, 0.75, 1]))
+    tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
 """.format(**common_args))
