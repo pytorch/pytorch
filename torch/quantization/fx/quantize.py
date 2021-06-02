@@ -1346,7 +1346,7 @@ def _convert(model: GraphModule, is_reference: bool = False,
         custom_module_classes=custom_module_classes)
 
     quantized_graph = Graph()
-    env: Dict[str, Tuple[Node, torch.dtype]] = {}
+    env: Dict[str, Tuple[Node, Optional[torch.dtype]]] = {}
 
     graph_inputs: List[str] = []
     for node in model.graph.nodes:
@@ -1355,10 +1355,10 @@ def _convert(model: GraphModule, is_reference: bool = False,
 
     def load_non_quantized(n: Node) -> Node:
         assert n.name in env, \
-          'trying to load float node but did not find ' + \
-          'node:' + n.name + \
-          ' in env: ' + \
-          str(env)
+            'trying to load float node but did not find ' + \
+            'node:' + n.name + \
+            ' in env: ' + \
+            str(env)
         quantized_node, dtype = env[n.name]
         if dtype and dtype != torch.float:
             env[n.name] = Proxy(quantized_node).dequantize().node, torch.float
@@ -1366,11 +1366,11 @@ def _convert(model: GraphModule, is_reference: bool = False,
 
     def load_quantized(n: Node) -> Node:
         assert n.name in env, \
-          'trying to load quantized node but did not find node:' + \
-          n.name + ' in environment:' + str(env)
+            'trying to load quantized node but did not find node:' + \
+            n.name + ' in environment:' + str(env)
         quantized_node, dtype = env[n.name]
         assert dtype in [torch.quint8, torch.qint8, torch.float16], \
-          f'Expecting node {quantized_node} to be quantized but got dtype: {dtype}'
+            f'Expecting node {quantized_node} to be quantized but got dtype: {dtype}'
         return quantized_node
 
     def load_x(n: Node) -> Node:
