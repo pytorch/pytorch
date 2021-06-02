@@ -360,7 +360,12 @@ c10::optional<TypePtr> unifyTypeList(
 
   for (const TypePtr type : elements) {
     seen.insert(type);
-    for (const TypePtr comparison : seen) {
+
+    // We'll modify `seen` during this loop, so we need to make a copy
+    // of the values that we want to iterate over
+    std::vector<TypePtr> to_iterate{seen.begin(), seen.end()};
+
+    for (const TypePtr comparison : to_iterate) {
       // Don't bother compare if it's already in our set of
       // possible supertypes
       if (*type == *comparison) {
