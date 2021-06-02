@@ -137,12 +137,14 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpcWithErrors(
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
 
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
-  auto future = runJitOperator(*scriptCall.op(), scriptCall.stackRef());
+  auto future =
+      runJitOperator(*scriptCall.op(), scriptCall.stackRef(), std::move(lsctx));
 
   return future->then(
       [](JitFuture& future) {
@@ -152,7 +154,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -203,13 +206,14 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
 
   TORCH_CHECK(
       scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
-  auto future =
-      runJitOperator(*scriptRemoteCall.op(), scriptRemoteCall.stackRef());
+  auto future = runJitOperator(
+      *scriptRemoteCall.op(), scriptRemoteCall.stackRef(), std::move(lsctx));
 
   return assignOwnerRRef(
       scriptRemoteCall.retRRefId(),
@@ -510,13 +514,13 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
   // to a python object.
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
-      return processScriptCall(rpc);
+      return processScriptCall(rpc, std::move(ctx));
     }
     case MessageType::PYTHON_CALL: {
-      return processPythonCall(rpc);
+      return processPythonCall(rpc, std::move(ctx));
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
-      return processScriptRemoteCall(rpc);
+      return processScriptRemoteCall(rpc, std::move(ctx));
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       return processPythonRemoteCall(rpc, std::move(ctx));
@@ -584,7 +588,10 @@ bool RequestCallbackNoPython::cudaAvailable() const {
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
     const jit::Operator& op,
-    std::vector<at::IValue>& stack) const {
+    std::vector<at::IValue>& stack,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
+  c10::MultiStreamGuard guard(
+      lsctx ? lsctx->getReservedStreams() : ArrayRef<Stream>({}));
   try {
     op.getOperation()(&stack);
   } catch (const std::exception&) {
