@@ -212,10 +212,13 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   return ouput_model_stream;
 }
 
-void writeArchiveOnly(
+void writeArchiveV5(
     PyTorchStreamWriter& writer,
+    const IValue& value,
     const std::string& archive_name,
-    const c10::IValue& value) {
+    const std::string& archive_dir,
+    const std::string& tensor_dir,
+    bool tensor_cdata_naming_scheme) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -229,25 +232,55 @@ void writeArchiveOnly(
       &memoizedClassTypes,
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
-        tensor_names.push_back(
-            std::to_string(reinterpret_cast<std::intptr_t>(
-                tensor.storage().unsafeGetStorageImpl())) +
-            ".storage");
+        if (tensor_cdata_naming_scheme) {
+          tensor_names.push_back(
+              std::to_string(reinterpret_cast<std::intptr_t>(
+                  tensor.storage().unsafeGetStorageImpl())) +
+              ".storage");
+        } else {
+          tensor_names.push_back(std::to_string(tensor_names.size()));
+        }
         return tensor_names.back();
       });
   data_pickle.protocol();
   data_pickle.pushIValue(value);
   data_pickle.stop();
-  std::string fname = archive_name + ".pkl";
-  TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
+  // write out tensor data
+  size_t i = 0;
+  std::string prefix = archive_name + "/";
 
+  TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
+  const std::vector<std::string>& pre_serialized_files =
+      writer.getAllWrittenRecords();
+
+  for (const auto& td : data_pickle.tensorData()) {
+    WriteableTensorData writable_td = getWriteableTensorData(td);
+    std::string fname = tensor_dir + tensor_names[i++];
+    if (tensor_cdata_naming_scheme &&
+        std::find(
+            pre_serialized_files.begin(), pre_serialized_files.end(), fname) !=
+            pre_serialized_files.end()) {
+      // storage has been serialzed already, skip
+      continue;
+    }
+    writer.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+  }
+
+  std::string fname = archive_dir + archive_name + ".pkl";
   writer.writeRecord(fname, data.data(), data.size());
+
+  // serialize all the captured run-time class types
+  //  for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
+  //    convertNamedType(wroteType);
+  //  }
 }
 
 std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   std::shared_ptr<IStreamAdapter> rai =
       std::make_shared<IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
+  std::vector<IValue> constants_values =
+      readArchive(kArchiveNameConstants, *reader.get()).toTuple()->elements();
 
   // If there are debug info files in the original model file, it should also
   // show up in the backported model
@@ -278,36 +311,52 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
-  return intermediate_model_stream;
 
-  //  // Update the bytecode version (from 6 to 5), which does not work with the
-  //  code below. PyTorchStreamReader
-  //  reader_bytecode(&intermediate_model_stream); std::vector<IValue>
-  //  bytecode_values = get_bytecode_ivalues(reader_bytecode);
-  //  std::unordered_set<std::string> excluded_files{
-  //      "bytecode.pkl",
-  //      "version",
-  //  };
-  //  std::unordered_set<std::string> excluded_dirs{};
-  //
-  //  std::stringstream ouput_model_stream;
-  //  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-  //    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
-  //    return !ouput_model_stream ? 0 : nbytes;
-  //  };
-  //
-  //  PyTorchStreamWriter writer_bytecode(writer_func);
-  //
-  //  selective_copy(reader_bytecode, writer_bytecode, excluded_files,
-  //  excluded_dirs);
-  //
-  //  update_bytecode_version(bytecode_values, kBytecodeVersionV5);
-  //  auto bytecode_tuple =
-  //  c10::ivalue::Tuple::create(std::move(bytecode_values));
-  //  // write `bytecode` archive
-  //  writeArchiveOnly(writer_bytecode, kArchiveNameBytecode, bytecode_tuple);
+  // Update the bytecode version (from 6 to 5)
 
-  //  return ouput_model_stream;
+  PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
+  std::unordered_set<std::string> excluded_files{
+      "constants.pkl",
+      "bytecode.pkl",
+      "version",
+  };
+
+  std::unordered_set<std::string> excluded_dirs{
+      "constants",
+      "bytecode",
+  };
+
+  std::stringstream ouput_model_stream;
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !ouput_model_stream ? 0 : nbytes;
+  };
+
+  PyTorchStreamWriter writer_bytecode(writer_func);
+
+  selective_copy(
+      reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
+
+  update_bytecode_version(bytecode_values, kBytecodeVersionV5);
+  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
+
+  writeArchiveV5(
+      writer_bytecode,
+      c10::ivalue::Tuple::create(constants_values),
+      /*archive_name=*/"constants",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*tensor_cdata_naming_scheme=*/true);
+  writeArchiveV5(
+      writer_bytecode,
+      bytecode_tuple,
+      /*archive_name=*/"bytecode",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*tensor_cdata_naming_scheme=*/true);
+
+  return ouput_model_stream;
 }
 } // namespace
 

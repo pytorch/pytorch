@@ -629,15 +629,6 @@ void ScriptModuleSerializer::writeByteCode(
   BackendDebugInfoRecorder debug_info_recorder;
   int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
 
-  // When backporting from v6 to v5 through byte-code re-emitting, the version
-  // should be v5 instead of v6. Another option is to keep v6 here, but in the
-  // backport function, change version number in both bytecode.pkl,
-  // and other files containling the version number, like
-  // mobile_debug_handles.pkl.
-  if (version_to_write >= 6 &&
-      BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
-    version_to_write = 5;
-  }
   elements.emplace_back(static_cast<int64_t>(version_to_write));
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
