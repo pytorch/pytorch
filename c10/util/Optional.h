@@ -456,8 +456,7 @@ class arrayref_optional_base {
 
   constexpr arrayref_optional_base() noexcept = default;
 
-  explicit constexpr arrayref_optional_base(const ArrayRefT& v)
-      : storage_(v) {}
+  explicit constexpr arrayref_optional_base(const ArrayRefT& v) : storage_(v) {}
 
   template <class... Args>
   explicit constexpr arrayref_optional_base(in_place_t, Args&&... args)
@@ -513,9 +512,9 @@ using OptionalBase = std::conditional_t<
         trivially_copyable_optimization_optional_base<T>,
         std::conditional_t<
             std::is_trivially_destructible<T>::value, // if possible
-            constexpr_optional_base<std::remove_const<T>>, // use base with
-                                                           // trivial
-                                                           // destructor
+            constexpr_optional_base<std::remove_const_t<T>>, // use base with
+                                                             // trivial
+                                                             // destructor
             optional_base<std::remove_const_t<T>>>>>;
 #else
 template <class T>
