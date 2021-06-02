@@ -226,7 +226,9 @@ class _RemoteModule(nn.Module):
                 (_module_interface_cls, enable_moving_cpu_tensors_to_cuda),
             )
 
-            self._init_template(enable_moving_cpu_tensors_to_cuda)
+            self._init_template(
+                _module_interface_cls, enable_moving_cpu_tensors_to_cuda
+            )
 
             # Instantiate template on remote side.
             fut = rpc.rpc_async(
@@ -344,7 +346,9 @@ class _RemoteModule(nn.Module):
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
             self.is_scriptable = True
 
-            self._init_template(enable_moving_cpu_tensors_to_cuda)
+            self._init_template(
+                _module_interface_cls, enable_moving_cpu_tensors_to_cuda
+            )
         else:
             self.is_scriptable = False
             self.generated_methods = (
@@ -526,14 +530,12 @@ class _RemoteModule(nn.Module):
         enable_moving_cpu_tensors_to_cuda = torch.device(self.device).type == "cuda"
         return enable_moving_cpu_tensors_to_cuda
 
-    def _init_template(self, enable_moving_cpu_tensors_to_cuda):
+    def _init_template(self, module_interface_cls, enable_moving_cpu_tensors_to_cuda):
         """
         Instantiates template on local side.
         """
-        generated_module = (
-            instantiator.instantiate_scriptable_remote_module_template(
-                _module_interface_cls, enable_moving_cpu_tensors_to_cuda
-            )
+        generated_module = instantiator.instantiate_scriptable_remote_module_template(
+            module_interface_cls, enable_moving_cpu_tensors_to_cuda
         )
         self.generated_methods = generated_module._generated_methods
 
@@ -638,9 +640,8 @@ class RemoteModule(_RemoteModule):
         module_cls: Type[nn.Module] = None,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
-        module_rref: rpc.RRef[nn.Module] = None,
     ):
-        super().__init__(remote_device, module_cls, args, kwargs, module_rref)
+        super().__init__(remote_device, module_cls, args, kwargs)
 
 
 def _remote_module_receiver(
