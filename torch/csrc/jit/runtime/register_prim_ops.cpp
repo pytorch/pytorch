@@ -443,7 +443,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::einsum.sublist(...) -> Tensor"),
+         TORCH_SELECTIVE_SCHEMA("aten::einsum.sublist(Tensor a, ...) -> Tensor"),
          [](Stack* stack) {
            size_t num_inputs = pop(stack).toInt();
            einsum(*stack, num_inputs);
