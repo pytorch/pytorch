@@ -6,10 +6,10 @@ import warnings
 
 
 class _InputWeightObserver(nn.Module):
-    r"""Observer for computing the scale factor needed for input-weight
-    equalization based on the running min and max values of the input and weight
-    columns, and for computing the quantization parameters based on the running
-    min and max values of weight rows.
+    r"""Observer for computing the equalization scale factor needed for
+    input-weight equalization based on the running min and max values of the
+    input and weight columns, and for computing the quantization parameters
+    based on the running min and max values of weight rows.
 
     Args:
         input_dtype: Quantized data type for the input
@@ -37,17 +37,17 @@ class _InputWeightObserver(nn.Module):
 
     Given running min/max of the input columns as :math:`x_\text{min}` and :math:`x_\text{max}`,
     and the running min/max of the weight columns as :math:`w_\text{min}` and :math:`w_\text{max}`,
-    scale :math:`S` is computed as:
+    equalization scale :math:`S` is computed as:
 
     The running minimum/maximum :math:`x_\text{min/max}` and
     :math:`w_\text{min/max}` are computed in the same way as
-    :class:`~torch.quantization.observer.MinMaxObserver`, with the difference
+    :class:`~torch.quantization.observer.PerChannelMinMaxObserver`, with the difference
     that the running min/max values are stored per column.
 
-    The scale factor :math:`S` is then computed as:
+    The equalization scale factor :math:`S` is then computed as:
 
     .. math::
-        S = \sqrt{\frac{x_{max} - x_{min}}{w_{max} - w{min}}}
+        S = \sqrt{\frac{w_{max} - w_{min}}{x_{max} - x_{min}}}
 
     where :math:`X` is the observed tensor.
 
@@ -56,7 +56,7 @@ class _InputWeightObserver(nn.Module):
     """
 
     def __init__(self, input_dtype=torch.quint8, input_qscheme=torch.per_tensor_affine,
-                 input_quant_min=None, input_quant_max=None, weight_dtype=torch.quint8,
+                 input_quant_min=None, input_quant_max=None, weight_dtype=torch.qint8,
                  weight_qscheme=torch.per_tensor_affine, weight_quant_min=None,
                  weight_quant_max=None, factory_kwargs=(None, None)) -> None:
         super(_InputWeightObserver, self).__init__()
@@ -108,8 +108,8 @@ class _InputWeightObserver(nn.Module):
         min_weights_ind = []
         max_weights_ind = []
         for i in range(num_row):
-            min_weights_ind.append(torch.where(w_orig[i] == self.weight_row_obs.min_vals[i])[0][0])
-            max_weights_ind.append(torch.where(w_orig[i] == self.weight_row_obs.max_vals[i])[0][0])
+            min_weights_ind.append(torch.nonzero(w_orig[i] == self.weight_row_obs.min_vals[i])[0][0])
+            max_weights_ind.append(torch.nonzero(w_orig[i] == self.weight_row_obs.max_vals[i])[0][0])
         self.min_weights_ind = torch.tensor(min_weights_ind)
         self.max_weights_ind = torch.tensor(max_weights_ind)
 
