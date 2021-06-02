@@ -1,7 +1,5 @@
 #pragma once
 
-#include <type_traits>
-
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
