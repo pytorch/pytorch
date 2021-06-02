@@ -19,6 +19,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+const c10::Stream& getStreamForDevice(
+    const std::vector<c10::Stream>& streams,
+    const c10::Device& device);
+
 // A struct that holds pointers that keep alive all the memory that will be
 // accessed by TensorPipe during a write operation.
 struct TensorpipeWriteBuffers {
@@ -51,7 +55,7 @@ TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
 tensorpipeSerialize(
     c10::intrusive_ptr<Message> rpcMessage,
     std::vector<c10::Device> devices,
-    const std::shared_ptr<LazyStreamContext>& ctx);
+    const std::vector<c10::Stream>& streams);
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
@@ -60,7 +64,7 @@ tensorpipeSerialize(
 TORCH_API std::pair<tensorpipe::Allocation, TensorpipeReadBuffers>
 tensorpipeAllocate(
     const tensorpipe::Descriptor& tpDescriptor,
-    const std::shared_ptr<LazyStreamContext>& ctx);
+    const std::vector<c10::Stream>& streams);
 
 // Convert a TensorPipe message back into an RPC message. This requires the data
 // to be available and can thus only be performed once the asynchronous read has
