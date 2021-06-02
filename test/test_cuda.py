@@ -2958,6 +2958,7 @@ torch.cuda.synchronize()
         with torch.cuda.stream(s):
             a = torch.full((1000,), 1, device="cuda")
             g = torch.cuda._Graph()
+            torch.cuda.empty_cache()
             g.capture_begin()
             b = a
             for _ in range(10):
@@ -2993,6 +2994,7 @@ torch.cuda.synchronize()
                 torch.cuda.manual_seed(5)
 
                 g = torch.cuda._Graph()
+                torch.cuda.empty_cache()
                 g.capture_begin()
                 graph_out = graph_in
                 for _ in range(2):
@@ -3079,6 +3081,7 @@ torch.cuda.synchronize()
                 torch.cuda.manual_seed(5)
 
                 g = torch.cuda._Graph()
+                torch.cuda.empty_cache()
                 if (module == "torch"):
                     g.capture_begin()
                     t1 = getattr(torch, op)(*args, **kwargs)
@@ -3431,6 +3434,8 @@ torch.cuda.synchronize()
     def test_graph_record_stream(self):
         # Makes sure graph capture defers attempting to reclaim allocations used across streams. See
         # "Q. Why skip process_events if a capture might be underway?" in c10/cuda/CUDACachingAllocator.cpp
+        torch.cuda.empty_cache()
+
         potential_problem = torch.zeros((3,), device="cuda")
         a = torch.zeros((3,), device="cuda")
         s0 = torch.cuda.Stream()
@@ -3476,6 +3481,8 @@ torch.cuda.synchronize()
         # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
         # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
         # avoid syncing noncapturing streams with captured events or vice versa.
+        torch.cuda.empty_cache()
+
         model = torch.nn.LSTM(512, 512, 2, dropout=0.5).cuda()
         x = torch.ones(100, 192, 512, device="cuda")
 
