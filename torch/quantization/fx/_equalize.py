@@ -82,7 +82,7 @@ class _InputWeightObserver(nn.Module):
                                                        quant_max=weight_quant_max,
                                                        factory_kwargs=factory_kwargs[1])
 
-        self.equalization_scale = None
+        self.equalization_scale = torch.empty(0)
 
     def forward(self, x_orig, w_orig):
         # TODO: Allow for convoluational layers
@@ -136,7 +136,7 @@ class _InputWeightObserver(nn.Module):
         Returns the scale/zero_point for the input and weight rows
         """
 
-        if self.equalization_scale is None:
+        if self.equalization_scale.nelement() == 0:
             warnings.warn(
                 "Must call calculate_scale before calling calculate_qparams.\
                 Returning default scale and zero point. "

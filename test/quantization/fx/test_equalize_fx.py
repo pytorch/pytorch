@@ -14,7 +14,8 @@ class TestEqualizeFx(QuantizationTestCase):
     @given(input_qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            input_qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            weight_qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)))
+           weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric,
+                                           torch.per_channel_affine_float_qparams)))
     def test_input_weight_observer(self, input_qdtype, input_qscheme, weight_qdtype, weight_qscheme):
         myobs = _InputWeightObserver(input_dtype=input_qdtype,
                                      input_qscheme=input_qscheme,
