@@ -2425,7 +2425,7 @@ class TestNN(NNTestCase):
         self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
 
     def test_errors_parametrization(self):
-        # A simple parametrization
+        # A correct parametrization
         class Basic(nn.Module):
             def forward(self, x):
                 return 2 * x
@@ -2443,7 +2443,7 @@ class TestNN(NNTestCase):
         # A parametrization that changes the dtype in the right_inverse
         class ChangeDtypeInverse(nn.Module):
             def forward(self, x):
-                return x.bool()
+                return x
 
             def right_inverse(self, x):
                 return x.float()
@@ -2456,7 +2456,7 @@ class TestNN(NNTestCase):
             def right_inverse(self, w):
                 return w, torch.zeros_like(w)
 
-        # A parametrization with several outputs
+        # A correct parametrization with several outputs
         class Sum(nn.Module):
             def forward(self, x, y):
                 return x + y
@@ -2482,30 +2482,21 @@ class TestNN(NNTestCase):
 
         module = nn.Linear(3, 4)
         weight_init = module.weight.clone()
-        # This should not throw when registering
-        parametrize.register_parametrization(module, "weight", ChangeSize())
-        # It throws in the forward
-        with self.assertRaisesRegex(ValueError, "may not change the size"):
-            module(torch.rand(2))
-        # Undo
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        with self.assertRaisesRegex(ValueError, "may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeSize())
         self.assertFalse(parametrize.is_parametrized(module))
 
-        # This should not throw when registering
-        parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
-        # Throws when removing with leave_parametrized=True
-        with self.assertRaisesRegex(ValueError, "leave_parametrized=True"):
-            parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
-        # But not when leave_parametrized=False
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
+        self.assertFalse(parametrize.is_parametrized(module))
 
         with self.assertRaisesRegex(ValueError, "right_inverse"):
             parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
+        self.assertFalse(parametrize.is_parametrized(module))
 
         # Removing a parametrization from an unparametrized tensor throws
         with self.assertRaisesRegex(ValueError, "does not have a parametrization"):
             parametrize.remove_parametrizations(module, "bias")
-        # Nothing odd happens
         self.assertFalse(parametrize.is_parametrized(module))
 
         # Register a parametrization on a non-existing parameter throws
@@ -2525,6 +2516,17 @@ class TestNN(NNTestCase):
 
         with self.assertRaisesRegex(ValueError, "Got a sequence"):
             parametrize.register_parametrization(module, "weight", WrongRightInverseSequence())
+
+        # We check that the forward is correct if it is parametrized:
+        parametrize.register_parametrization(module, "weight", Basic())
+        with self.assertRaisesRegex(ValueError, "may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeSize())
+        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
+        self.assertTrue(parametrize.is_parametrized(module, "weight"))
+        self.assertEqual(len(module.parametrizations.weight), 1)
+        self.assertIsInstance(module.parametrizations.weight[0], Basic)
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
 
         # None of the operations above should have altered the weight
         self.assertFalse(parametrize.is_parametrized(module))
@@ -2641,24 +2643,6 @@ class TestNN(NNTestCase):
             X = model.weight
             Y = model.weight
             self.assertEqual(id(X), id(Y))
-
-    def test_dtype_parametrization(self):
-        r"""Test a case that is not allowed when removing a parametrization"""
-        class ChangeType(nn.Module):
-            def forward(self, X):
-                return X.double()
-
-        module = nn.Linear(4, 4).float()
-        input_ = torch.rand(4).double()
-        # It is allowed to register a parametrization that changes the dtype
-        parametrize.register_parametrization(module, "weight", ChangeType())
-        module(input_)
-        # We can remove it leaving the original tensor
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
-        # But leaving it parametrized breaks
-        parametrize.register_parametrization(module, "weight", ChangeType())
-        with self.assertRaisesRegex(ValueError, "changes the dtype"):
-            parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
 
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
