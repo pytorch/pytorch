@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 
 #include <THC/THC.h>
 
@@ -153,7 +154,7 @@ struct NcclCommList {
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
     if (comms) {
-      for (int i = 0; i < ndevices; i++) {
+      for(const auto i : c10::irange(ndevices)) {
         int dummy_var;
         if (cudaGetDevice(&dummy_var) != cudaSuccess) {
           /* there are cases when this destructor is called after the
@@ -649,7 +650,7 @@ void all2all_single_equal_split(at::Tensor& input,
   auto comm = to_nccl_comm(_comm);
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
+  for(const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
     // Avoid send/recv when message size is zero
     if (count != 0) {
@@ -686,7 +687,7 @@ void all2all_single_unequal_split(
   int numranks;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
+  for(const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
     // Avoid send/recv when message size is zero
     if (sendcounts[r] != 0) {

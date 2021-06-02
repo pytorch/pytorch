@@ -2,11 +2,9 @@
 
 #include <torch/csrc/python_headers.h>
 #include <structmember.h>
-#include <unordered_map>
-#include <unordered_set>
-#include <exception>
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 
 #include <torch/csrc/THP.h>
@@ -32,6 +30,8 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -271,7 +271,7 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction *self)
       "but is %s", THPUtils_typename(self->dirty_tensors));
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
   dirty_inputs.reserve(num_dirty);
-  for (int i = 0; i < num_dirty; i++) {
+  for(const auto i : c10::irange(num_dirty)) {
     PyObject *obj = PyTuple_GET_ITEM(self->dirty_tensors, i);
     THPFunction_assert(THPVariable_Check(obj), "mark_dirty can "
         "only accept variables, but argument %d is of type %s", i,
@@ -327,7 +327,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
   // Wrap only the tensor outputs.
   auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
 
-  for (int i = 0; i < num_outputs; i++) {
+  for(const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
     // Keep the non-tensor outputs as is.
     if (!THPVariable_Check(obj)) {
@@ -356,7 +356,7 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
   Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
-  for (int i = 0; i < num_saved; i++) {
+  for(const auto i : c10::irange(num_saved)) {
     PyObject *obj = PyTuple_GET_ITEM(self->to_save, i);
     if (obj == Py_None) {
       self->saved_variables.emplace_back();
@@ -367,7 +367,7 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
       self->saved_variables.emplace_back(tensor, is_output);
     } else {
       throw torch::TypeError(
-          "save_for_backward can only save variables, but argument %d is of "
+          "save_for_backward can only save variables, but argument %ld is of "
           "type %s", i, Py_TYPE(obj)->tp_name);
     }
   }
@@ -387,7 +387,7 @@ _parse_non_differentiable(THPFunction *self)
       "tuple but is %s", THPUtils_typename(self->non_differentiable));
   Py_ssize_t num_nondiff = PyTuple_GET_SIZE(self->non_differentiable);
   set.reserve(num_nondiff);
-  for (int i = 0; i < num_nondiff; i++) {
+  for(const auto i : c10::irange(num_nondiff)) {
     PyObject *t = PyTuple_GET_ITEM(self->non_differentiable, i);
     THPFunction_assert(THPVariable_Check(t), "mark_non_differentiable "
         "only accepts variable arguments, but got %s", THPUtils_typename(t));
@@ -417,7 +417,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   auto num_args = PyTuple_GET_SIZE(args);
   unpacked.input_tuple = PyTuple_New(num_args);
   flags.needs_input_grad = PyTuple_New(num_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
 
     bool is_variable = THPVariable_Check(arg);
@@ -461,7 +461,7 @@ static torch::jit::Node* _trace_pre_record(
   std::string arg_types;
   arg_types.reserve(num_args);
   scalar_args.reserve(num_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg_object = PyTuple_GET_ITEM(input_objects, i);
     if (THPVariable_Check(arg_object)) {
       arg_types.push_back('d');
@@ -707,7 +707,7 @@ static PyObject *unpack_saved_variables(
   // because we will never hit this line of code if the buffers are freed--
   // and in any case saved_for will be non-NULL.)
   TORCH_INTERNAL_ASSERT(saved_for);
-  for (int i = 0; i < num_saved; i++) {
+  for(const auto i : c10::irange(num_saved)) {
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
