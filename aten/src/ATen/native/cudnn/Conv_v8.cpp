@@ -8,6 +8,8 @@
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
+#include <cudnn_frontend_find_plan.h>
+#include <cudnn_frontend_get_plan.h>
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/Exceptions.h>
@@ -74,7 +76,6 @@ void filterEngineConfigs(
   cudnn_frontend::filter(from, to, filter);
 }
 
-
 struct CacheKey {
   ConvolutionParams params;
   cudnnBackendDescriptorType_t operation;
@@ -110,16 +111,64 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
-void get_configs_from_heuristics(cudnn_frontend::EngineConfigList& filtered_configs, cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+auto get_options_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+   auto op = cudnn_frontend::OperationBuilder(desc)
+      .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
+      .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
+      .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
+      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
+      .build();
+  std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
+  auto opGraph = cudnn_frontend::OperationGraphBuilder()
+      .setHandle(handle)
+      .setOperationGraph(1, ops.data())
+      .build();
+
+  void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
+  int64_t uids[] = {'x', 'y', 'w'};
+  auto variantPack  = cudnn_frontend::VariantPackBuilder().setDataPointers(3, data_ptrs).setUids(3, uids).build();
+  auto sample_predicate_function = [](cudnn_frontend::ExecutionPlan const& plan) -> bool {
+    return false;
+  };
+
+  // Method for engine config generator based on heuristics
+  auto heurgen_method = [&](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
+      auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
+                            .setOperationGraph(opGraph)
+                            .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
+                            .build();
+      auto &engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
+      cudnn_frontend::EngineConfigList filtered_configs;
+      filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, x.scalar_type());
+      return filtered_configs;
+  };
+  // Method for engine config generator based on fallback list
+  auto fallback_method = [&](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
+    auto fallback = cudnn_frontend::EngineFallbackListBuilder()
+                        .setOperationGraph(opGraph)
+                        .setOperation(desc)
+                        .build();
+    auto &fallback_list = fallback.getFallbackList();
+    cudnn_frontend::EngineConfigList filtered_configs;
+    filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, x.scalar_type());
+    return filtered_configs;
+  };
+
+  std::array<cudnn_frontend::GeneratorSource const, 2> sources = {heurgen_method, fallback_method};
+  cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
+  auto options = generator.cudnnFindPlan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(opGraph), variantPack, sample_predicate_function); 
+  return options;
+  //auto tag = options2.front().plan.getTag();
+}
+
+auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
   auto op = cudnn_frontend::OperationBuilder(desc)
       .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
       .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
       .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
       .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
       .build();
-
   std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
-
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
       .setOperationGraph(1, ops.data())
@@ -128,26 +177,65 @@ void get_configs_from_heuristics(cudnn_frontend::EngineConfigList& filtered_conf
       .setOperationGraph(opGraph)
       .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
       .build();
-  auto fallback = cudnn_frontend::EngineFallbackListBuilder()
-                    .setOperationGraph(opGraph)
-                    .setOperation(desc)
-                    .build();
-  auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-  auto& fallback_list = fallback.getFallbackList();
+  void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
+  int64_t uids[] = {'x', 'y', 'w'};
+  auto variantPack  = cudnn_frontend::VariantPackBuilder().setDataPointers(3, data_ptrs).setUids(3, uids).build();
+  auto sample_predicate_function = [](cudnn_frontend::ExecutionPlan const& plan) -> bool {
+    return false;
+  };
 
-  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, x.scalar_type());
-  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, x.scalar_type());
+  // Method for engine config generator based on heuristics
+  auto heurgen_method = [&](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
+      auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
+                            .setOperationGraph(opGraph)
+                            .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
+                            .build();
+      auto &engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
+      cudnn_frontend::EngineConfigList filtered_configs;
+      filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, x.scalar_type());
+      return filtered_configs;
+  };
+  // Method for engine config generator based on fallback list
+  auto fallback_method = [&](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
+    auto fallback = cudnn_frontend::EngineFallbackListBuilder()
+                        .setOperationGraph(opGraph)
+                        .setOperation(desc)
+                        .build();
+    auto &fallback_list = fallback.getFallbackList();
+    cudnn_frontend::EngineConfigList filtered_configs;
+    filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, x.scalar_type());
+    return filtered_configs;
+  };
+
+
+  std::array<cudnn_frontend::GeneratorSource const, 2> sources = {heurgen_method, fallback_method};
+  cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
+  auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), sample_predicate_function);
+  std::cout << plans.size() << std::endl;
+  return plans;
 }
 
-void try_filtered_configs(const cudnn_frontend::EngineConfigList filtered_configs, const CacheKey key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
-  for (auto cfg : filtered_configs) {
+void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
+  for (auto & plan : plans) {
     try {
-      auto plan = cudnn_frontend::ExecutionPlanBuilder()
-          .setHandle(handle)
-          .setEngineConfig(cfg)
-          .build();
       std::unique_ptr<cudnn_frontend::ExecutionPlan> plan_ptr(new cudnn_frontend::ExecutionPlan(std::move(plan)));
 
+      run_conv_plan(handle, x, y, w, *plan_ptr.get());
+      engine_cache[key] = std::move(plan_ptr);
+      return;
+    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
+  }
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+}
+
+void try_options(cudnn_frontend::executionOptions_t & options, const CacheKey key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
+  std::cout << options.size() << std::endl;
+  for (auto& option : options) {
+    std::cout << " option finished in " << option.time_ms << std::endl;
+  }
+  for (auto& option : options) {
+    try {
+      std::unique_ptr<cudnn_frontend::ExecutionPlan> plan_ptr(new cudnn_frontend::ExecutionPlan(std::move(option.plan)));
       run_conv_plan(handle, x, y, w, *plan_ptr.get());
       engine_cache[key] = std::move(plan_ptr);
       return;
@@ -160,7 +248,6 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   const Tensor& x, const Tensor& y, const Tensor& w,
   IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
   bool benchmark, bool deterministic, bool allow_tf32) {
-  TORCH_CHECK(!benchmark, "not supported yet");
 
   cudnnHandle_t handle = getCudnnHandle();
 
@@ -171,11 +258,15 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
     run_conv_plan(handle, x, y, w, *(search->second.get()));
     return;
   }
-
-  cudnn_frontend::EngineConfigList filtered_configs;
-  get_configs_from_heuristics(filtered_configs, handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
-
-  try_filtered_configs(filtered_configs, key, handle, x, y, w);
+ 
+  if (!benchmark) {
+    cudnn_frontend::EngineConfigList filtered_configs;
+    auto plans = get_plans_from_heuristics(handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
+    try_plans(plans, key, handle, x, y, w);
+  } else {
+    cudnn_frontend::executionOptions_t options = get_options_from_find(handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
+    try_options(options, key, handle, x, y, w);
+  }
 }
 
 void raw_cudnn_convolution_forward_out(
