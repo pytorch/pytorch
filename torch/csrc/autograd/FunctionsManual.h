@@ -110,6 +110,7 @@ at::Tensor max_pool_double_backward(const at::Tensor & grad, const at::Tensor & 
 at::Tensor glu_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, int64_t dim);
 at::Tensor glu_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, int64_t dim);
 at::Tensor infinitely_differentiable_silu_backward(const at::Tensor& grad_output, const at::Tensor& input);
+at::Tensor infinitely_differentiable_mish_backward(const at::Tensor& grad_output, const at::Tensor& input);
 Tensor infinitely_differentiable_logit_backward(const Tensor& grad, const Tensor& self, c10::optional<double> eps);
 at::Tensor kl_div_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction, bool log_target);
 at::Tensor binary_cross_entropy_with_logits_target_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& pos_weight, int64_t reduction);
@@ -232,8 +233,16 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
+Tensor i1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor i1e_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
 Tensor lu_unpack_backward(
-  const std::vector<torch::autograd::Variable>& grads,
+  const variable_list& grads,
   const Tensor& LU_data,
   bool unpack_data
 );
