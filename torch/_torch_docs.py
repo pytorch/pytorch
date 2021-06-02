@@ -3415,7 +3415,7 @@ Keyword args:
 Example::
 
     >>> a = array.array('i', [1, 2, 3])
-    >>> t = torch.from_buffer(a, dtype=int)
+    >>> t = torch.from_buffer(a, dtype=torch.int32)
     >>> t
     tensor([ 1,  2,  3])
     >>> t[0] = -1
