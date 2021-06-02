@@ -433,7 +433,7 @@ def register_parametrization(
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
         original = getattr(module, tensor_name)
-        # We create this early to check for possible errors early
+        # We create this early to check for possible errors
         parametrizations = ParametrizationList([parametrization], original)
         # Delete the previous parameter or buffer
         delattr(module, tensor_name)
