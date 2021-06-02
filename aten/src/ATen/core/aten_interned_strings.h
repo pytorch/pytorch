@@ -376,7 +376,6 @@ _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
 _(aten, hypot) \
-_(aten, i0) \
 _(aten, i0_) \
 _(aten, igamma) \
 _(aten, igamma_) \
@@ -529,6 +528,7 @@ _(aten, native_pow) \
 _(aten, native_resize_as) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
+_(aten, special_ndtr) \
 _(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
