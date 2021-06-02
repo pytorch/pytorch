@@ -1754,7 +1754,7 @@ graph(%Ra, %Rb):
 
         for fn in [equation_format, equation_format_varargs, sublist_format]:
             check(fn, torch.jit.script(fn), x, y)
-            check(fn, torch.jit.script(fn), x, y)
+            check(fn, torch.jit.trace(fn, (x, y)), x, y)
 
     def test_python_ivalue(self):
         # Test if pure python object can be hold as IValue and conversion
