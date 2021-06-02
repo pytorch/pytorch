@@ -111,7 +111,7 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
-auto get_options_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
    auto op = cudnn_frontend::OperationBuilder(desc)
       .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
       .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
@@ -157,7 +157,12 @@ auto get_options_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t de
   std::array<cudnn_frontend::GeneratorSource const, 2> sources = {heurgen_method, fallback_method};
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   auto options = generator.cudnnFindPlan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(opGraph), variantPack, sample_predicate_function); 
-  return options;
+
+  cudnn_frontend::executionPlans_t plans;
+  for (auto& option : options) {
+    plans.emplace_back(std::move(option.plan));
+  }
+  return plans; 
   //auto tag = options2.front().plan.getTag();
 }
 
@@ -258,15 +263,14 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
     run_conv_plan(handle, x, y, w, *(search->second.get()));
     return;
   }
- 
+
+  cudnn_frontend::executionPlans_t plans;
   if (!benchmark) {
-    cudnn_frontend::EngineConfigList filtered_configs;
-    auto plans = get_plans_from_heuristics(handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
-    try_plans(plans, key, handle, x, y, w);
+    plans = get_plans_from_heuristics(handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
   } else {
-    cudnn_frontend::executionOptions_t options = get_options_from_find(handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
-    try_options(options, key, handle, x, y, w);
+    plans = get_plans_from_find(handle, operation, x, y, w, key, padding, stride, dilation, deterministic, allow_tf32);
   }
+  try_plans(plans, key, handle, x, y, w);
 }
 
 void raw_cudnn_convolution_forward_out(
