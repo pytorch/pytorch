@@ -1827,6 +1827,23 @@ class TestTEFuser(JitTestCase):
                 zs = [torch.ones(i) for i in range(N)]
                 repro(xs, ys, zs)
 
+    def test_adaptive_avg_pool2d(self):
+        # TODO: once the adaptive_avg_pool2d is available in OpInfo DB, this
+        # test should be moved there
+        with inline_fusion_groups():
+            def foo1(x):
+                return torch.nn.functional.adaptive_avg_pool2d(x, (2, 2))
+
+            def foo2(x):
+                return torch.nn.functional.adaptive_avg_pool2d(x, (2))
+
+            x = torch.randn(4, 4, 4)
+            for foo in [foo1, foo2]:
+                f = torch.jit.trace(foo, (x,))
+                kernel = torch._C._te.TensorExprKernel(f.graph)
+                correct_val = f(x)
+                self.assertEqual(kernel.run((x,)), correct_val)
+
 
 works_list = [
     '__radd__',
@@ -1836,6 +1853,7 @@ works_list = [
     'acos',
     'add',
     'addcmul',
+    'addmm.decomposed'
     'asin',
     'atan',
     'atan2',
@@ -1868,6 +1886,7 @@ works_list = [
     'lt',
     'masked_fill',
     'max.binary',
+    'mean',
     'min.binary',
     'mm',
     'mul',
@@ -1904,9 +1923,9 @@ works_list = [
 ]
 
 known_failures = [
-    'matmul',
-    'frac',
     '__rmatmul__'
+    'frac',
+    'matmul',
 ]
 
 # If your OpInfo test causes this test to fail, add it here

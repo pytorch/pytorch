@@ -1550,6 +1550,66 @@ Tensor* computeConv2d(
   return new Tensor(ResultBuf.node(), s);
 }
 
+Tensor* computeAdaptiveAvgPool2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
+  auto out_size_param = c10::get<IntList>(inputs[1]);
+  return new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_adaptive_avg_pool2d",
+          {c10::get<BufHandle>(inputs[0])},
+          c10::fmap<ExprHandle>(out_size_param)));
+}
+
+Tensor* computeMean(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("mean", outputShape, dtype);
+  auto mean_dims = c10::get<IntList>(inputs[1]);
+  return new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_mean",
+          {c10::get<BufHandle>(inputs[0])},
+          c10::fmap<ExprHandle>(mean_dims)));
+}
+
+Tensor* computeAddMM(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("addmm", outputShape, dtype);
+  return new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_addmm",
+          {c10::get<BufHandle>(inputs[0]),
+           c10::get<BufHandle>(inputs[1]),
+           c10::get<BufHandle>(inputs[2])},
+          {c10::get<int64_t>(inputs[3]),
+           c10::get<int64_t>(
+               inputs[4])})); // TODO: handle other dtypes of alpha and beta
+}
+
 Tensor* tensorexpr::computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
@@ -2604,6 +2664,15 @@ Tensor* tensorexpr::computeOperandValue(
     case aten::conv2d: {
       return computeConv2d(inputs, outputShape, outputType);
     } break;
+    case aten::addmm: {
+      return computeAddMM(inputs, outputShape, outputType);
+    } break;
+    case aten::mean: {
+      return computeMean(inputs, outputShape, outputType);
+    } break;
+    case aten::adaptive_avg_pool2d: {
+      return computeAdaptiveAvgPool2d(inputs, outputShape, outputType);
+    } break;
     default: {
       std::string msg =
           std::string("Unhandled node kind: ") + op.toQualString();
@@ -2710,6 +2779,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::sum:
     case aten::softmax:
     case aten::log_softmax:
+    case aten::addmm:
+    case aten::mean:
+    case aten::adaptive_avg_pool2d:
     case aten::conv2d: {
       std::vector<ArgValue> argInputs;
       for (auto inp : inputs) {

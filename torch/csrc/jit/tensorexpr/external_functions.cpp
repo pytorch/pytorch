@@ -110,7 +110,10 @@ void nnc_aten_adaptive_avg_pool2d(
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
   int64_t H = extra_args[0];
-  int64_t W = extra_args[1];
+  int64_t W = H;
+  if (args_num > 1) {
+    W = extra_args[1];
+  }
   try {
     at::adaptive_avg_pool2d_out(r, x, {H, W});
   } catch (...) {
@@ -131,8 +134,10 @@ void nnc_aten_mean(
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
   int64_t dim = extra_args[0];
+  std::vector<int64_t> mean_dims(args_num);
+  memcpy(mean_dims.data(), extra_args, sizeof(int64_t) * args_num);
   try {
-    at::mean_out(r, x, {dim});
+    at::mean_out(r, x, mean_dims);
   } catch (...) {
   }
 }
@@ -152,8 +157,15 @@ void nnc_aten_addmm(
   const at::Tensor& x = tensors[1];
   const at::Tensor& y = tensors[2];
   const at::Tensor& z = tensors[3];
+  // TODO: handle other alpha and beta dtypes, e.g. alpha=0.6, beta=0.2
+  int64_t alpha = 1, beta = 1;
+  if (args_num >= 2) {
+    alpha = extra_args[0];
+    beta = extra_args[1];
+  }
+
   try {
-    at::addmm_out(r, x, y, z, extra_args[0], extra_args[1]);
+    at::addmm_out(r, x, y, z, alpha, beta);
   } catch (...) {
   }
 }
