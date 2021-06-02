@@ -32,9 +32,9 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
   float inv_scale = 1.0f / scale;
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_borrowed_output(output)
-    .add_borrowed_output(mask)
-    .add_borrowed_input(input)
+    .add_output(output)
+    .add_output(mask)
+    .add_input(input)
     .build();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
     gpu_kernel_multiple_outputs(
