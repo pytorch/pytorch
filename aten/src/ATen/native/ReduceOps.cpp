@@ -1426,7 +1426,14 @@ static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_
   const auto var = [&] () __ubsan_ignore_float_divide_by_zero__ {
     return total_sum / std::max(int64_t{0}, self.numel() - correction);
   }();
-  return take_sqrt ? std::sqrt(var) : var;
+  const auto result = take_sqrt ? std::sqrt(var) : var;
+
+  if (dtype == kFloat) {
+    // Convert to infinity if out of range for a float.
+    // Doing it now prevents checked_convert failing later
+    return static_cast<float>(result);
+  }
+  return result;
 }
 
 static Tensor& std_var_out(
