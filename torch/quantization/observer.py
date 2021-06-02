@@ -878,7 +878,7 @@ class HistogramObserver(_ObserverBase):
         if dst_bin_width == 0.0:
             return 0.0
 
-        src_bin = torch.arange(self.bins).to(self.histogram.device)
+        src_bin = torch.arange(self.bins, device=self.histogram.device)
         # distances from the beginning of first dst_bin to the beginning and
         # end of src_bin
         src_bin_begin = (src_bin - next_start_bin) * bin_width
