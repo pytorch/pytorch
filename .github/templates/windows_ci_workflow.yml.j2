@@ -17,6 +17,7 @@ env:
   BUILD_WHEEL: 1
   CUDA_VERSION: "!{{ cuda_version }}"
   IN_CI: 1
+  INSTALL_WINDOWS_SDK: 1
   JOB_BASE_NAME: test
   PYTHON_VERSION: "3.6"
   SCCACHE_BUCKET: "ossci-compiler-cache"
@@ -38,14 +39,9 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-      - name: Install 7zip if not already installed
-        shell: powershell
-        run: |
-          choco install 7zip.install -y
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
-          choco install vswhere -y
           .\.circleci\scripts\vs_install.ps1
       - name: Install Windows 10 SDK
         shell: powershell
@@ -94,19 +90,10 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-      - name: Install 7zip if not already installed
-        shell: powershell
-        run: |
-          choco install 7zip.install -y
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
-          choco install vswhere -y
           .\.circleci\scripts\vs_install.ps1
-      - name: Install Windows 10 SDK
-        shell: powershell
-        run: |
-          .\.github\scripts\install_windows_sdk.ps1
 {%- if cuda_version != "cpu" %}
       - name: Install Cuda
         env:
