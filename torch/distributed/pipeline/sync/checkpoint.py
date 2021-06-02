@@ -113,7 +113,7 @@ class Checkpointing:
         if isinstance(output, tuple):
             output = tuple([x.detach() if torch.is_tensor(x) and not x.is_floating_point() else x for x in output])
 
-        return Batch(output, self.batch.is_single_sequence)
+        return Batch(output)
 
     def recompute(self, batch: Batch) -> None:
         """Applies :class:`Recompute` to the batch in place."""
