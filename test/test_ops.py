@@ -21,6 +21,7 @@ from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 
 # Get names of all the operators which have entry in `method_tests` (legacy testing infra)
 method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
+only_testing_ops = ['roll']
 
 # Tests that apply to all operators
 
