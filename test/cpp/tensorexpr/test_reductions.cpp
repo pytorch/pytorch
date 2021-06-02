@@ -40,7 +40,6 @@ TEST(Reductions, ReduceSum0D_1) {
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
-  std::cerr << "SS:\n" << *s << "\n";
 
   SimpleIREvaluator cg(s, {b, c});
 
@@ -65,7 +64,6 @@ TEST(Reductions, ReduceSum0D_2) {
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
-  std::cerr << "SS:\n" << *s << "\n";
 
   SimpleIREvaluator cg(s, {b, c});
 
