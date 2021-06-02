@@ -1,14 +1,9 @@
 #pragma once
-#include <ATen/core/function.h>
-#include <c10/util/Exception.h>
+
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/name_mangler.h>
-#include <torch/csrc/jit/frontend/source_range.h>
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
@@ -33,6 +28,7 @@ struct SugaredValue;
 struct Resolver;
 
 using ResolverPtr = std::shared_ptr<Resolver>;
+
 struct Self {
   virtual ~Self() = default;
   virtual std::shared_ptr<SugaredValue> makeSugared(Value* v) const = 0;
