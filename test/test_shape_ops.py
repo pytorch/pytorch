@@ -343,13 +343,17 @@ class TestShapeOps(TestCase):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
 
-        def test_flip_impl(in_t, dims, out_t):
-            # Quantization just implemented for CPU
-            test_quant = (True, False) if device == "cpu" else (False,)
-            for quant in test_quant:
-                if quant:
-                    in_t = torch.quantize_per_tensor(in_t.float(), 0.1, 5, torch.quint8)
-                    out_t = torch.quantize_per_tensor(out_t.float(), 0.1, 5, torch.quint8)
+        def test_flip_impl(input_t, dims, output_t):
+            def all_t():
+                yield input_t, output_t
+                if dtype is torch.float:
+                    # We generate quantized versions as well
+                    for qdtype in (torch.quint8, torch.qint8, torch.qint32):
+                        qinput_t = torch.quantize_per_tensor(input_t, 0.1, 5, qdtype)
+                        qoutput_t = torch.quantize_per_tensor(output_t, 0.1, 5, qdtype)
+                        yield qinput_t, qoutput_t
+
+            for in_t, out_t in all_t():
                 self.assertEqual(in_t.flip(dims), out_t)
                 n = in_t.ndim
                 if not isinstance(dims, tuple):

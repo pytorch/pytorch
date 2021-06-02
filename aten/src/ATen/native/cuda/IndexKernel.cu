@@ -482,13 +482,21 @@ void flip_kernel_impl(TensorIterator& iter) {
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
 }
 
-void flip_kernel(TensorIterator& iter, const bool /*quantized // Not implemented for QuantizedCUDA*/) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-                                         iter.dtype(), "flip_cuda",
-  [&] {
-    using dtype = OpaqueType<sizeof(scalar_t)>;
-    flip_kernel_impl<dtype>(iter);
-  });
+void flip_kernel(TensorIterator& iter, const bool quantized/*quantized // Not implemented for QuantizedCUDA*/) {
+  if (quantized) {
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cuda",
+    [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      flip_kernel_impl<dtype>(iter);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+                                           iter.dtype(), "flip_cuda",
+    [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      flip_kernel_impl<dtype>(iter);
+    });
+  }
 }
 
 

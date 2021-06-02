@@ -4145,7 +4145,7 @@
 - func: flip(Tensor self, int[] dims) -> Tensor
   variants: function, method
   dispatch:
-    CPU, QuantizedCPU, CUDA: flip
+    CPU, QuantizedCPU, CUDA, QuantizedCUDA: flip
 
 - func: fliplr(Tensor self) -> Tensor
   variants: function, method
