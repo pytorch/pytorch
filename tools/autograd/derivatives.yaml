@@ -1853,6 +1853,9 @@
 - name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
 
+- name: mkldnn_prelu(Tensor self, Tensor weight) -> Tensor
+  self, weight: "mkldnn_prelu_backward(grad, self, weight)"
+
 - name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
 

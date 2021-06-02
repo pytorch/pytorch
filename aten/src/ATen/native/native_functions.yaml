@@ -3721,14 +3721,25 @@
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
   dispatch:
+    MkldnnCPU: mkldnn_prelu
     CPU: prelu_cpu
     CUDA: prelu_cuda
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   variants: function, method
   dispatch:
+    MkldnnCPU: mkldnn_prelu_backward
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
+
+- func: mkldnn_prelu(Tensor self, Tensor weight) -> Tensor
+  python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_prelu
+
+- func: mkldnn_prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
+  dispatch:
+    MkldnnCPU: mkldnn_prelu_backward
 
 - func: gelu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
