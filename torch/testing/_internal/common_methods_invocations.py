@@ -128,13 +128,6 @@ class SampleInput(object):
         # friendly format.
         # It formats `Tensor` and `TensorList`
         # in a more condensed representation.
-        def is_iter(arg):
-            try:
-                iter(arg)
-                return True
-            except TypeError as te:
-                return False
-
         def formatter(arg):
             # Format any instance of `Tensor` (standalone, in list, or in dict)
             # by Tensor[TensorShape]
@@ -146,7 +139,7 @@ class SampleInput(object):
                 return {k: formatter(v) for k, v in arg.items()}
             elif is_iterable_of_tensors(arg):
                 return "TensorList[" + ", ".join(map(formatter, arg)) + "]"
-            elif is_iter(arg):  # Handle list, tuple or any iterable type
+            elif isinstance(arg, (list, tuple)):  # Handle list, tuple
                 return "(" + ",".join(map(formatter, arg)) + ")"
 
             return repr(arg)
@@ -739,7 +732,10 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 # specify scalars of floating, integral & complex types as values for "alpha".
 # Keyword argument `rhs_exclude_zero` is used to exclude zero values from rhs tensor argument
 # This is necessary for operations like `true_divide`, where divide by zero throws an exception.
-def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, extra_kwargs=None, **kwargs):
+    if extra_kwargs is None:
+        extra_kwargs = {}
+
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
     tests_list = [
@@ -759,19 +755,21 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     samples = []
     for first_shape, shape_or_scalar, broadcasts_input in test_cases:
         arg = shape_or_scalar
+
         if isinstance(shape_or_scalar, tuple):
             exclude_zero = kwargs.get('rhs_exclude_zero', False)
             arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
                               requires_grad=requires_grad, exclude_zero=exclude_zero)
         samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                requires_grad=requires_grad),
-                                   args=(arg,),
+                                   args=(arg,), kwargs=extra_kwargs,
                                    broadcasts_input=broadcasts_input))
     # Adds an extra sample using "alpha" if it's passed in kwargs
     if 'alpha' in kwargs:
         a = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
         b = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
-        sample = SampleInput(a, args=(b,), kwargs={'alpha': kwargs['alpha']})
+        extra_kwargs['alpha'] = kwargs['alpha']
+        sample = SampleInput(a, args=(b,), kwargs=extra_kwargs)
         samples.append(sample)
     return tuple(samples)
 
@@ -1263,20 +1261,6 @@ def sample_inputs_comparison_ops(self, device, dtype, requires_grad, **kwargs):
     sample_inputs = [*sample_inputs, *more_inputs]
     return tuple(sample_inputs)
 
-def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None, **kwargs):
-    a = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    is_integral = not dtype.is_floating_point and not dtype.is_complex
-    b = make_tensor((S, S, S), device, dtype, low=1 if is_integral else 0.1, high=None,
-                    requires_grad=requires_grad)
-
-    kwargs = None  # type: ignore[assignment]
-    if rounding_mode is not None:
-        kwargs = dict(rounding_mode=rounding_mode)
-
-    return (
-        SampleInput(a, args=(b,), kwargs=kwargs),
-        SampleInput(a, args=(2,)),
-    )
 
 def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
@@ -4701,26 +4685,27 @@ op_db: List[OpInfo] = [
     OpInfo('div',
            variant_test_name='no_rounding_mode',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_div,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
-           assert_autodiffed=True),
-    OpInfo('div',
-           variant_test_name='true_rounding',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_div, rounding_mode=None),
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, rhs_exclude_zero=True),
            assert_autodiffed=True),
     OpInfo('div',
            variant_test_name='trunc_rounding',
            dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_div, rounding_mode='trunc'),
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, extra_kwargs={
+                                      "rounding_mode": 'trunc'}, rhs_exclude_zero=True),
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/59174
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
            assert_autodiffed=True),
     OpInfo('div',
            variant_test_name='floor_rounding',
            dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_div, rounding_mode='floor'),
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, extra_kwargs={
+                                      "rounding_mode": 'floor'}, rhs_exclude_zero=True),
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/59174
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
            assert_autodiffed=True),
     OpInfo('true_divide',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -4914,6 +4899,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
                        scipy.special.i0) if TEST_SCIPY else _NOTHING,
+                   aliases=('special.i0',),
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
                    backward_dtypesIfCPU=floating_types(),
@@ -6864,24 +6850,6 @@ def ident(x):
 def method_tests():
     set_rng_seed(SEED)
     return [
-        ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
-        ('div', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs', (True,)),
-        ('div', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
-        ('div', (S, 1, S), (torch.rand(M, S) + 0.1,), 'broadcast_all', (True,)),
-        ('div', (), (uniform_scalar(0.1),), 'scalar', (True,)),
-        ('div', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
-        ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
-        ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
-        ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
-        ('div', (S, S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex', (True,)),
-        ('div', (S, S, S), (torch.rand(S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_rhs', (True,)),
-        ('div', (S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_lhs', (True,)),
-        ('div', (S, 1, S), (torch.rand(M, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_all', (True,)),
-        ('div', (), (uniform_scalar(0.1j),), 'complex_scalar', (True,)),
-        ('div', (S, S, S), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_rhs', (True,)),
-        ('div', (), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_lhs', (True,)),
-        ('div', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant', (True,)),
-        ('div', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant', (True,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),

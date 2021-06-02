@@ -1415,7 +1415,7 @@ AT_ERROR("inverse: MAGMA library not found in "
 }
 
 template <typename scalar_t>
-static void apply_single_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
+static void apply_single_inverse(Tensor& self, Tensor& info_lu, Tensor& info_getri) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1425,15 +1425,18 @@ AT_ERROR("inverse: MAGMA library not found in "
   magma_int_t lda = std::max<magma_int_t>(1, n);
   magma_int_t lwork = n * magmaGetriOptimalBlocksize<scalar_t>(n);
 
-  // magmaLu and magmaGetri requires infos tensor to live on CPU
-  infos_lu = infos_lu.to(at::kCPU);
-  infos_getri = infos_getri.to(at::kCPU);
+  // magmaLu and magmaGetri requires info argument to live on CPU
+  // but info_lu and info_getri tensors are on the same device as self
+  magma_int_t info_lu_cpu = 0;
+  magma_int_t info_getri_cpu = 0;
 
   Tensor ipiv = at::empty({lda}, at::kInt);
   Tensor dwork = at::empty({lwork}, self.options());
-  magmaLu<scalar_t>(n, n, self_data, lda, ipiv.data_ptr<magma_int_t>(), infos_lu.data_ptr<magma_int_t>());
+  magmaLu<scalar_t>(n, n, self_data, lda, ipiv.data_ptr<magma_int_t>(), &info_lu_cpu);
   magmaGetri<scalar_t>(
-    n, self_data, lda, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, infos_getri.data_ptr<magma_int_t>());
+    n, self_data, lda, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, &info_getri_cpu);
+  info_lu.fill_(info_lu_cpu);
+  info_getri.fill_(info_getri_cpu);
 #endif
 }
 
