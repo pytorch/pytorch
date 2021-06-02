@@ -495,7 +495,7 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
     for (const auto i: c10::irange(dim)) {
       indices.emplace_back();
     }
-    indices.emplace_back(index);
+    indices.emplace_back(index.to(at::kLong));
     return self.index_put_(indices, source * alpha, true);
   }
 
