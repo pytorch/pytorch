@@ -602,7 +602,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
     IValue value,
     TypePtr type) const {
-  auto future = c10::make_intrusive<JitFuture>(std::move(type));
+  auto future = c10::make_intrusive<JitFuture>(
+      std::move(type), RpcAgent::getCurrentRpcAgent()->getDevices());
   future->markCompleted(std::move(value));
   return future;
 }
@@ -610,7 +611,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
     c10::intrusive_ptr<Message> message) const {
   auto future = c10::make_intrusive<JitFuture>(
-      at::getCustomClassType<c10::intrusive_ptr<Message>>());
+      at::getCustomClassType<c10::intrusive_ptr<Message>>(),
+      RpcAgent::getCurrentRpcAgent()->getDevices());
   std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs =
       message->getDataPtrs();
   future->markCompleted(std::move(message), std::move(dataPtrs));
@@ -619,7 +621,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
     std::exception_ptr err) const {
-  auto future = c10::make_intrusive<JitFuture>(at::NoneType::get());
+  auto future = c10::make_intrusive<JitFuture>(
+      at::NoneType::get(), RpcAgent::getCurrentRpcAgent()->getDevices());
   future->setError(err);
   return future;
 }
