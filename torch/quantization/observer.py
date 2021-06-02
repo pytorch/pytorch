@@ -897,7 +897,7 @@ class HistogramObserver(_ObserverBase):
 
         density = self.histogram / bin_width
 
-        norm = torch.zeros(self.bins).to(self.histogram.device)
+        norm = torch.zeros(self.bins, device=self.histogram.device)
 
         delta_begin = src_bin_begin - dst_bin_of_begin_center
         delta_end = dst_bin_width / 2
