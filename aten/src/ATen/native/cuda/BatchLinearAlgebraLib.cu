@@ -71,6 +71,9 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 
 template <typename scalar_t>
 static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
+#else
   cublasOperation_t trans = CUBLAS_OP_N;
 
   auto pivots_data = pivots.data_ptr<int>();
@@ -78,8 +81,7 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
   auto m = cuda_int_cast(lu.size(-2), "m");
   auto nrhs = cuda_int_cast(b.size(-1), "nrhs");
   auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
-  Tensor infos_getrs = at::zeros({std::max<int>(1, batch_size)}, lu.options().dtype(kInt).device(kCPU));
-  auto infos_getrs_data = infos_getrs.data_ptr<int>();
+  int info = 0;
 
   Tensor lu_ptr_array = get_device_pointers<scalar_t>(lu);
   Tensor b_ptr_array = get_device_pointers<scalar_t>(b);
@@ -88,7 +90,9 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
-    lda, pivots_data, b_ptr_array_data, lda, infos_getrs_data, batch_size);
+    lda, pivots_data, b_ptr_array_data, lda, &info, batch_size);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+#endif
 }
 
 void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
@@ -1256,8 +1260,8 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
     int n = cuda_int_cast(lu.size(-2), "n");
     int nrhs = cuda_int_cast(b.size(-1), "nrhs");
     auto batch_size = batchCount(lu);
-    auto infos = at::zeros(batch_size, lu.options().dtype(kInt));
-    auto infos_data = infos.data_ptr<int>();
+    auto info = at::zeros({1}, lu.options().dtype(kInt));
+    auto info_data = info.data_ptr<int>();
     auto b_data = b.data_ptr<scalar_t>();
     auto lu_data = lu.data_ptr<scalar_t>();
     auto pivots_data = pivots.data_ptr<int>();
@@ -1277,7 +1281,9 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
         pivots_data + batch * pivots_stride,
         b_data + batch * b_stride,
         leading_dimension,
-        infos_data + batch);
+        info_data);
+
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
     }
   });
 }

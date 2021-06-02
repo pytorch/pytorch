@@ -2844,18 +2844,28 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 #endif
 }
 
-static void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-auto batch_size = batchCount(lu);
-auto m = lu.size(-2);
+static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_batched_magma", [&]{
+    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots);
+  });
+}
+
+static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_looped_magma", [&]{
+    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots);
+  });
+}
+
+static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  auto batch_size = batchCount(lu);
+  auto m = lu.size(-2);
 #ifdef USE_CUSOLVER
   if (batch_size == 1 && m > 512) {
     lu_solve_looped_cusolver(b, lu, pivots);
   }
 #else
   if (batch_size == 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_magma", [&]{
-      apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots);
-    });
+    lu_solve_looped_magma(b, lu, pivots);
   }
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
@@ -2864,13 +2874,11 @@ auto m = lu.size(-2);
   }
 #endif // ifdef CUDART_VERSION
   else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_magma", [&]{
-      apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots);
-    });
+    lu_solve_batched_magma(b, lu, pivots);
   }
 }
 
-REGISTER_DISPATCH(lu_solve_stub, &apply_lu_solve);
+REGISTER_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
