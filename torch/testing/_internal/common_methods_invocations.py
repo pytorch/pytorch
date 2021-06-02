@@ -3063,7 +3063,7 @@ def sample_inputs_log_softmax(op_info, device, dtype, requires_grad, with_dtype=
     if with_dtype:
         cases = (((S, S, S), (1, torch.float64)),)
     else:
-        cases = (((S, S, S), (1,)),)
+        cases = (((S, S, S), (1,)),)  # type:ignore[assignment]
 
     def generator():
         for shape, args in cases:
