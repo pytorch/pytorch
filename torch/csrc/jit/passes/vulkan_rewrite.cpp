@@ -216,7 +216,10 @@ void vulkanRemoveMutation(script::Module& module) {
 
 void vulkanRunCanonicalOptimizations(script::Module& module) {
   auto graph = module.get_method("forward").graph();
-  runOptimization(graph, false /* no loop unrolling */);
+  for (const auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    runOptimization(graph, false /* no loop unrolling */);
+  }
 }
 
 script::Module vulkanOptimizeForMobile(
