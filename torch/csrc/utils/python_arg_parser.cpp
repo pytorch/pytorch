@@ -8,6 +8,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TracerMode.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -342,7 +343,7 @@ void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* o
   }
   if (class_not_seen_yet) {
     int arg_index = overloaded_args->size();
-    for (int j = 0; j < arg_index; j++) {
+    for(const auto j : c10::irange(arg_index)) {
       if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE((*overloaded_args)[j].ptr())))) {
         // obj is a subclass of another object we've seen already so its
         // __torch_function__ should be called first, therefore we
