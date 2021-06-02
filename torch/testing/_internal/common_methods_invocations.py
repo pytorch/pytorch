@@ -4899,6 +4899,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
                        scipy.special.i0) if TEST_SCIPY else _NOTHING,
+                   aliases=('special.i0',),
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
                    backward_dtypesIfCPU=floating_types(),
