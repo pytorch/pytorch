@@ -8452,6 +8452,7 @@
 
 - func: avg_pool3d.out(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: avg_pool3d_out_cpu
     CUDA: avg_pool3d_out_cuda
@@ -8459,9 +8460,8 @@
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   python_module: nn
+  structured_delegate: avg_pool3d.out
   dispatch:
-    CPU: avg_pool3d_cpu
-    CUDA: avg_pool3d_cuda
     MkldnnCPU: mkldnn_avg_pool3d
     QuantizedCPU: avg_pool3d_quantized_cpu
 
