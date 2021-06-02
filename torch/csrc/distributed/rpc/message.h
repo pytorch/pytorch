@@ -153,6 +153,8 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   int64_t id() const;
   void setId(int64_t id);
 
+  std::vector<std::reference_wrapper<const at::DataPtr>> getDataPtrs() const;
+
  private:
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;
@@ -175,6 +177,14 @@ TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
 TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
     const std::string& exceptionStr,
     int64_t id);
+
+inline std::tuple<
+    c10::intrusive_ptr<Message>,
+    std::vector<std::reference_wrapper<const at::DataPtr>>>
+withDataPtrs(c10::intrusive_ptr<Message> message) {
+  auto dataPtrs = message->getDataPtrs();
+  return std::make_tuple(std::move(message), std::move(dataPtrs));
+}
 
 using JitFuture = c10::ivalue::Future;
 
