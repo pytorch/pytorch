@@ -17,7 +17,7 @@ def optimize_for_mobile(
         script_module: torch.jit.ScriptModule,
         optimization_blocklist: Optional[Set[MobileOptimizerType]] = None,
         preserved_methods: Optional[List[AnyStr]] = None,
-        backend: str = 'CPU'):
+        backend: str = 'CPU') -> torch.jit.RecursiveScriptModule:
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
