@@ -78,7 +78,7 @@ def _check_complex_components_individually(
             relaxed_complex_nan = False
 
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensor_values(actual, expected, **kwargs,)
+            return check_tensor_values(actual, expected, **kwargs)
 
         if relaxed_complex_nan:
             actual, expected = [
@@ -102,17 +102,17 @@ def _check_complex_components_individually(
     return wrapper
 
 
-def _check_sparse_indices_and_values_individually(
+def _check_sparse_coo_members_individually(
     check_tensors: Callable[..., Optional[Exception]]
 ) -> Callable[..., Optional[Exception]]:
-    """Decorates dense tensor check functions to handle indices and values of sparse tensors individually.
+    """Decorates strided tensor check functions to individually handle sparse COO members.
 
-    If the inputs are not sparse, this decorator is a no-op.
+    If the inputs are not sparse COO, this decorator is a no-op.
 
     Args:
-        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Tensor check function for dense
-        tensors.
+        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Tensor check function for strided tensors.
     """
+
     @functools.wraps(check_tensors)
     def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[Exception]:
         if not actual.is_sparse:
@@ -128,6 +128,40 @@ def _check_sparse_indices_and_values_individually(
         exc = check_tensors(actual.values(), expected.values(), **kwargs)
         if exc:
             return _amend_error_message(exc, "{}\n\nThe failure occurred for the values.")
+
+    return wrapper
+
+
+def _check_sparse_csr_members_individually(
+    check_tensors: Callable[..., Optional[Exception]]
+) -> Callable[..., Optional[Exception]]:
+    """Decorates strided tensor check functions to handle sparse COO members, namely XXXX individually tensors.
+
+    If the inputs are not sparse CSR, this decorator is a no-op.
+
+    Args:
+        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Tensor check function for strided
+        tensors.
+    """
+
+    @functools.wraps(check_tensors)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[Exception]:
+        if not actual.is_sparse_csr:
+            return check_tensors(actual, expected, **kwargs)
+
+        exc = check_tensors(actual.crow_indices(), expected.crow_indices(), **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the crow_indices.")
+
+        exc = check_tensors(actual.col_indices(), expected.col_indices(), **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the col_indices.")
+
+        exc = check_tensors(actual.values(), expected.values(), **kwargs)
+        if exc:
+            return _amend_error_message(exc, "{}\n\nThe failure occurred for the values.")
+
+        return None
 
     return wrapper
 
@@ -187,7 +221,9 @@ def _check_attributes_equal(
 
     if actual.is_sparse != expected.is_sparse:
         return AssertionError(msg_fmtstr.format("is_sparse", actual.is_sparse, expected.is_sparse))
-    elif not actual.is_sparse and check_stride and actual.stride() != expected.stride():
+    elif actual.is_sparse_csr != expected.is_sparse_csr:
+        return AssertionError(msg_fmtstr.format("is_sparse_csr", actual.is_sparse_csr, expected.is_sparse_csr))
+    elif not (actual.is_sparse or actual.is_sparse_csr) and check_stride and actual.stride() != expected.stride():
         return AssertionError(msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
 
     return None
@@ -276,7 +312,8 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
 
 
 @_check_complex_components_individually
-@_check_sparse_indices_and_values_individually
+@_check_sparse_coo_members_individually
+@_check_sparse_csr_members_individually
 def _check_values_equal(
     actual: Tensor,
     expected: Tensor,
@@ -314,7 +351,8 @@ def _check_values_equal(
 
 
 @_check_complex_components_individually
-@_check_sparse_indices_and_values_individually
+@_check_sparse_coo_members_individually
+@_check_sparse_csr_members_individually
 def _check_values_close(
     actual: Tensor,
     expected: Tensor,
