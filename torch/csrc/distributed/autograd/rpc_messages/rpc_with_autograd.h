@@ -31,7 +31,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       std::vector<torch::Tensor> tensors,
       std::unordered_map<c10::Device, c10::Device> deviceMap = {});
 
-  rpc::Message toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
 
   static std::unique_ptr<RpcWithAutograd> fromMessage(
       const rpc::Message& message);
