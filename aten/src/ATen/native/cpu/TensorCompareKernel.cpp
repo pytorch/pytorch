@@ -311,9 +311,10 @@ static void isin_default_kernel_cpu(
   // must be done manually.
   ScalarType common_type = promoteTypes(elements.scalar_type(), test_elements.scalar_type());
   Tensor test_elements_flat = test_elements.to(common_type).ravel();
+  Tensor promoted_elements = elements.to(common_type);
   auto iter = TensorIteratorConfig()
     .add_output(out)
-    .add_input(elements.to(common_type))
+    .add_input(promoted_elements)
     .check_all_same_dtype(false)
     .build();
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
