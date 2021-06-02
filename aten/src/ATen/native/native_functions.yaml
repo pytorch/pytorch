@@ -6640,13 +6640,13 @@
 
 - func: histc.out(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_histc_out
+    CPU: histogram_histc_cpu_out
     CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_histc
+    CPU: histogram_histc_cpu
     CUDA: _histc_cuda
 
 - func: histogram.bins_tensor_out(Tensor self, Tensor bins, *, Scalar? min=None, Scalar? max=None, Tensor? weight=None, bool density=False, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)

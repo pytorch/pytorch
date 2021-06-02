@@ -5000,6 +5000,10 @@ else:
             t = make_tensor((0), device, dtype=dtype)
             torch.histogram(t, t)
 
+        with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
+            values = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, -1)
+
         with self.assertRaisesRegex(RuntimeError, 'input tensor and weight tensor should have the same shape'):
             values = make_tensor((2, 2), device, dtype=dtype)
             weight = make_tensor((1), device, dtype=dtype)

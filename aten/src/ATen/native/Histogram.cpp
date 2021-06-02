@@ -75,6 +75,9 @@ void histogram_prepare_out(const Tensor& input, int64_t bin_ct,
     TORCH_CHECK(input.dtype() == bin_edges.dtype(), "torch.histogram: input tensor and bin_edges tensor should",
             " have the same dtype, but got input ", input.dtype(), " and bin_edges ", bin_edges.dtype());
 
+    TORCH_CHECK(bin_ct > 0,
+            "torch.histogram(): bins must be > 0, but got ", bin_ct);
+
     at::native::resize_output(hist, bin_ct);
 
     at::native::resize_output(bin_edges, bin_ct + 1);
@@ -108,6 +111,33 @@ std::pair<double, double> select_outer_bin_edges(const Tensor& input,
         leftmost_edge -= 0.5;
         rightmost_edge += 0.5;
     }
+
+    return std::make_pair(leftmost_edge, rightmost_edge);
+}
+
+/* histc's version of the logic for outermost bin edges.
+ */
+std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
+		const Scalar& min, const Scalar& max) {
+	double leftmost_edge = min.to<double>();
+	double rightmost_edge = max.to<double>();
+
+    if (leftmost_edge == rightmost_edge) {
+        auto extrema = _aminmax(input);
+        leftmost_edge = std::get<0>(extrema).item<double>();
+        rightmost_edge = std::get<1>(extrema).item<double>();
+    }
+
+    if (leftmost_edge == rightmost_edge) {
+        leftmost_edge -= 1;
+        rightmost_edge += 1;
+    }
+
+    TORCH_CHECK(!(std::isinf(leftmost_edge) || std::isinf(rightmost_edge) ||
+            std::isnan(leftmost_edge) || std::isnan(rightmost_edge)),
+            "range of [", leftmost_edge, ", ", rightmost_edge, "] is not fin1te");
+
+    TORCH_CHECK(leftmost_edge < rightmost_edge, "torch.histc: max must be larger than min");
 
     return std::make_pair(leftmost_edge, rightmost_edge);
 }
@@ -157,6 +187,21 @@ histogram_cpu(const Tensor& self, int64_t bin_ct,
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     Tensor bin_edges_out = at::empty({0}, self.options());
     return histogram_out_cpu(self, bin_ct, min, max, weight, density, hist, bin_edges_out);
+}
+
+Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
+        const Scalar& min, const Scalar& max, Tensor& hist) {
+    Tensor bin_edges = at::empty({0}, self.options());
+    Scalar adjusted_min, adjusted_max;
+    std::tie(adjusted_min, adjusted_max) = histc_select_outer_bin_edges(self, min, max);
+	histogram_out_cpu(self, bin_ct, adjusted_min, adjusted_max, {}, false, hist, bin_edges);
+    return hist;
+}
+
+Tensor histogram_histc_cpu(const Tensor& self, int64_t bin_ct,
+        const Scalar& min, const Scalar& max) {
+    Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
+    return histogram_histc_cpu_out(self, bin_ct, min, max, hist);
 }
 
 }} // namespace at::native
