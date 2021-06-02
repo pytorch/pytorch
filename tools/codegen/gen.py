@@ -189,20 +189,6 @@ class RegisterSchema:
             return None
         return f'm.def(at::_ops::{f.func.name.unambiguous_name()}::schema_str);\n'
 
-
-def _num_leading_spaces(line: str) -> int:
-    return len(line) - len(line.lstrip())
-
-
-# Unindents all lines in code. Each line gets unindented the same amount;
-# that amount is equal to the smallest number of leading spaces across all lines
-def deindent(code: str) -> str:
-    lines = code.split('\n')
-    min_leading_spaces = min(map(_num_leading_spaces, lines))
-    lines = [line[min_leading_spaces:] for line in lines]
-    return '\n'.join(lines)
-
-
 # Generates Operators.h and Operators.cpp.
 # These provide macros that, given an operator and overload name, allow users
 # to access an "un-overloaded" function version of the operator. This
@@ -298,6 +284,7 @@ class ComputeFunction:
         def generate_defn(faithful: bool) -> str:
             if faithful:
                 sig = sig_group.faithful_signature
+                assert sig is not None
             else:
                 sig = sig_group.signature
 
@@ -346,6 +333,7 @@ class ComputeTensorMethod:
         def generate_defn(faithful: bool) -> str:
             if faithful:
                 sig = sig_group.faithful_signature
+                assert sig is not None
             else:
                 sig = sig_group.signature
 
@@ -357,14 +345,14 @@ class ComputeTensorMethod:
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}
-TORCH_API inline {sig.decl()} const {{
+inline {sig.decl()} const {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
             else:
                 return f"""
 // aten::{f.func}
-TORCH_API inline {sig.decl()} const {{
+inline {sig.decl()} const {{
     {static_dispatch_block}
 }}
 """
@@ -390,6 +378,7 @@ class ComputeRedispatchFunction:
         def generate_defn(faithful: bool) -> str:
             if faithful:
                 sig = sig_group.faithful_signature
+                assert sig is not None
             else:
                 sig = sig_group.signature
 
