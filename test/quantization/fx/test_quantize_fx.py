@@ -1434,7 +1434,7 @@ class TestQuantizeFx(QuantizationTestCase):
             "dynamic": (default_dynamic_qconfig, DynamicQuantCustomModule, 0)
         }
 
-        for quant_type in [QuantType.DYNAMIC]:
+        for quant_type in [QuantType.STATIC, QuantType.DYNAMIC]:
             key = quant_type_to_str(quant_type)
             qconfig, quantized_module_class, num_observers = test_configs[key]
             qconfig_dict = {"": qconfig}
@@ -2350,6 +2350,34 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = prepare_fx(m, qconfig_dict)
         mc = convert_fx(mp)
+
+    def test_shape_followed_by_quantized_op(self):
+        """ Make sure that shape does not dequantize
+        the Tensor before the next operator
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2)
+                self.conv2 = torch.nn.Conv2d(2, 2, 2)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                s = x.shape
+                torch._assert(s == x.shape, "")
+                x = self.conv2(x)
+                return x
+
+        # make sure quantization runs
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        m(torch.randn(2, 2, 4, 4))
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method("dequantize"): 1
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 
 @skipIfNoFBGEMM
@@ -3343,6 +3371,24 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_silu_reference(self):
         module = torch.nn.SiLU
         functional = torch.nn.functional.silu
+        qconfig = float16_static_qconfig
+        is_reference = True
+        node_list = [
+            ns.call_method("to"),
+            ns.call_method("dequantize"),
+            ns.call_module(module),
+            ns.call_method("to"),
+            ns.call_method('dequantize'),
+            ns.call_function(functional),
+            ns.call_method("to"),
+            ns.call_method('dequantize')
+        ]
+        self._test_default_node_quant_handler_ops(
+            module, functional, qconfig, is_reference, node_list)
+
+    def test_mish_reference(self):
+        module = torch.nn.Mish
+        functional = torch.nn.functional.mish
         qconfig = float16_static_qconfig
         is_reference = True
         node_list = [

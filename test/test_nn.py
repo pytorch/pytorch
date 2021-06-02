@@ -5467,6 +5467,7 @@ class TestNN(NNTestCase):
 
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
+    @skipIfRocm
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
@@ -12873,56 +12874,55 @@ class TestNNDeviceType(NNTestCase):
         inp = torch.randn(0, 7, device=device)
         self._test_module_empty_input(mod, inp)
 
-    @dtypes(torch.uint8, torch.long, torch.bool)
-    def test_one_hot(self, device, dtype):
+    def test_one_hot(self, device):
         if self.device_type != 'cuda':  # cuda throws device assert for invalid data
             with self.assertRaises(RuntimeError):
-                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device, dtype=dtype), -1)
+                torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
             with self.assertRaises(RuntimeError):
-                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device, dtype=dtype), 3)
+                torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), dtype=dtype)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]], device=device, dtype=dtype)
+                                 [1, 0, 0, 0, 0]], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1, dtype=dtype)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1)
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]], device=device, dtype=dtype)
+                                 [1, 0, 0, 0, 0]], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6, dtype=dtype)
+        t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
                                  [0, 1, 0, 0, 0, 0],
-                                 [1, 0, 0, 0, 0, 0]], device=device, dtype=dtype)
+                                 [1, 0, 0, 0, 0, 0]], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor([[3, 4], [1, 0]], device=device), dtype=dtype)
+        t = torch.nn.functional.one_hot(torch.tensor([[3, 4], [1, 0]], device=device))
         expected = torch.tensor([[[0, 0, 0, 1, 0],
                                   [0, 0, 0, 0, 1]],
                                  [[0, 1, 0, 0, 0],
-                                  [1, 0, 0, 0, 0]]], device=device, dtype=dtype)
+                                  [1, 0, 0, 0, 0]]], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.tensor(4, device=device), dtype=dtype)
-        expected = torch.tensor([0, 0, 0, 0, 1], device=device, dtype=dtype)
+        t = torch.nn.functional.one_hot(torch.tensor(4, device=device))
+        expected = torch.tensor([0, 0, 0, 0, 1], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100, dtype=dtype)
-        expected = torch.empty([4, 0, 100], dtype=dtype)
+        t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100)
+        expected = torch.empty([4, 0, 100], dtype=torch.long)
         self.assertEqual(t, expected)
 
         with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), dtype=dtype)
+            torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device))
 
         with self.assertRaises(RuntimeError):
-            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2, dtype=dtype)
+            torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
 
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
@@ -16089,6 +16089,12 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
+
+    @onlyOnCPUAndCUDA
+    def test_mish_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.mish(x, inplace=True)
 
     def test_softplus_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
