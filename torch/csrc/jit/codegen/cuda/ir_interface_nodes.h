@@ -212,6 +212,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return max_producer_pos_;
   }
 
+  //! This is used when we disconnect a tensorview from a reduction
+  //!  operation and connect it to a non-reduction operator. We need
+  //!  to remove the reduction ids on the tv in this case.
+  //! Currently only used in translate welford, and this function may
+  //!  be refactored or extended if any more use cases appear.
+  void clearReductionIterDomains();
+
   //! Compute this TensorView relative to a consumer position, -1 will
   //! compute tensors inline with each other, 0 doesn't share
   //! any loop nests between the tensors. It's an error when the given

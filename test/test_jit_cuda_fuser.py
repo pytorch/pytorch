@@ -1035,7 +1035,7 @@ class TestCudaFuser(JitTestCase):
             o = torch.relu(o)
             return o
 
-        model = {3 : t_wb, 2 : t_w, 1 : t_b, 0: t}
+        model = {3: t_wb, 2: t_w, 1: t_b, 0: t}
 
         for w, b in itertools.product([True, False], repeat=2):
             batch = [4]
@@ -1186,6 +1186,20 @@ class TestCudaFuser(JitTestCase):
                     x = [output_size for idx in range(dims)]
                     x[1] = C
                     self._batch_norm_helper(x, torch.float32, "cuda", 1e-4)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_batch_norm_large(self):
+        output_elements = 262144
+        channel_sizes = 67, 457, 1024
+
+        for dims in range(3, 6):
+            output_size = int(pow(output_elements, 1. / (dims - 1)))
+            for C in channel_sizes:
+                x = [output_size for idx in range(dims)]
+                x[1] = C
+                self._batch_norm_helper(x, torch.float32, "cuda", 1e-4)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -1812,7 +1826,7 @@ class TestCudaFuser(JitTestCase):
 
         t_jit = torch.jit.script(t)
 
-        for prob in [0.0, 0.15, 0.5, 0.85, 1.] :
+        for prob in [0.0, 0.15, 0.5, 0.85, 1.]:
             torch.cuda.manual_seed_all(123)
             jit_o = t_jit(x, prob, True)
             torch.cuda.manual_seed_all(123)
@@ -1892,7 +1906,7 @@ class TestCudaFuser(JitTestCase):
 
         t_jit = torch.jit.script(t)
 
-        for prob in [0.0, 0.15, 0.5, 0.85, 1.] :
+        for prob in [0.0, 0.15, 0.5, 0.85, 1.]:
             torch.cuda.manual_seed_all(123)
             jit_o = t_jit(x, prob, True)
             torch.cuda.manual_seed_all(123)
@@ -2273,6 +2287,7 @@ class TestCudaFuser(JitTestCase):
         assert torch.allclose(jit_grad, aten_grad)
         self.assertGraphContains(jitted.graph_for(inp, 0.693147), FUSION_GROUP, True)
 
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -2319,6 +2334,7 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
+
 
 if __name__ == '__main__':
     run_tests()

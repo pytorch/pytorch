@@ -109,7 +109,6 @@ std::vector<int> normalizeOld2New(
 namespace ValReplacement {
 // Create New Expr given producer - [an input for the expression]
 // Creates a new Expr substituting current with producer
-// TODO: Support Welford operation
 struct SubstituteInExpr : public OptInDispatch {
  public:
   static Expr* subsitute(Expr* expr, Val* reference, Val* substitute) {
@@ -211,6 +210,49 @@ struct SubstituteInExpr : public OptInDispatch {
         reference_->sameAs(shift_expr->in()) ? substitute_ : shift_expr->in();
 
     expr_ = new ShiftOp(out, in, shift_expr->offsets());
+  }
+
+  void handle(WelfordOp* welford_expr) final {
+    auto out_var = reference_->sameAs(welford_expr->outVar())
+        ? substitute_->as<TensorView>()
+        : welford_expr->outVar();
+    auto out_avg = reference_->sameAs(welford_expr->outAvg())
+        ? substitute_->as<TensorView>()
+        : welford_expr->outAvg();
+    auto out_N = reference_->sameAs(welford_expr->outN())
+        ? substitute_->as<TensorView>()
+        : welford_expr->outN();
+    auto in_var =
+        welford_expr->inVar() && reference_->sameAs(welford_expr->inVar())
+        ? substitute_->as<TensorView>()
+        : welford_expr->inVar();
+    auto in_avg = reference_->sameAs(welford_expr->inAvg())
+        ? substitute_->as<TensorView>()
+        : welford_expr->inAvg();
+    auto in_N = reference_->sameAs(welford_expr->inN()) ? substitute_
+                                                        : welford_expr->inN();
+    auto init_var =
+        welford_expr->initVar() && reference_->sameAs(welford_expr->initVar())
+        ? substitute_->as<TensorView>()
+        : welford_expr->initVar();
+    auto init_avg =
+        welford_expr->initAvg() && reference_->sameAs(welford_expr->initAvg())
+        ? substitute_->as<TensorView>()
+        : welford_expr->initAvg();
+    auto init_N =
+        welford_expr->initN() && reference_->sameAs(welford_expr->initN())
+        ? substitute_
+        : welford_expr->initN();
+    expr_ = new WelfordOp(
+        out_var,
+        out_avg,
+        out_N,
+        init_var,
+        init_avg,
+        init_N,
+        in_var,
+        in_avg,
+        in_N);
   }
 
  private:

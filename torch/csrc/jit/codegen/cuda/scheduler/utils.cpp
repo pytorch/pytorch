@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -318,6 +319,93 @@ void computeAtBetween(
       }
     }
   }
+}
+
+bool registerPersistentBufferCheck(
+    Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info) {
+  auto persistent_buffers = scheduler_utils::persistentBuffers(fusion);
+  bool fits_register_persistence = true;
+
+  if (persistent_buffers.buffers.empty()) {
+    return true;
+  }
+
+  int64_t persistent_buffer_size = 0;
+
+  // Measure at each output how much persistent memory is being used
+  std::unordered_map<Val*, int64_t> scoped_persistence;
+
+  for (auto tv : persistent_buffers.buffers) {
+    int64_t tv_persistent_numel = -1;
+    for (auto id : tv->getMaybeRFactorDomain()) {
+      if (id->isReduction()) {
+        continue;
+      }
+      // Unmappable dimensions are those that we cannot inline into other
+      // tensor views. So they're the ones that need to be persistent.
+      if (!persistent_buffers.unmappable_dims.count(id)) {
+        continue;
+      }
+
+      auto id_size = runtime_info.expressionEvaluator().evaluate(id->extent());
+      TORCH_INTERNAL_ASSERT(
+          id_size.has_value(),
+          "Cannot generate heuristics if we don't have input information.");
+      if (tv_persistent_numel == -1) {
+        tv_persistent_numel = id_size.value();
+      } else {
+        tv_persistent_numel *= id_size.value();
+      }
+    }
+    persistent_buffer_size =
+        tv_persistent_numel * dataTypeSize(tv->getDataType().value());
+
+    // All expressions between tv and its consumers must have tv's persistent
+    // buffer allocated. This is an optimistic view on how many registers we
+    // need allocated in the kernel, since if we ordered two persistent
+    // buffers that are completely independent to somehow overlap with
+    // eachother we would assume we wouldn't need those two buffers active at
+    // the same time, even though they would be.
+    //
+    // Unfortunately this limitation is hard to work around as we would have
+    // to actually generate the kernel before we know if it would fit
+    // persistently in registers. In practice, though, this should not happen
+    // as inlining loop structures where the persistent buffer is used should
+    // prevent muiltiple persistent buffers from being merged togther if not
+    // necessary.
+    auto consumers_of_tv = scheduler_utils::consumerTvsOf(tv);
+    for (auto val : DependencyCheck::getAllValsBetween(
+             {tv}, {consumers_of_tv.begin(), consumers_of_tv.end()})) {
+      // Persistent normalization kernels imply that all persistent buffers
+      // have the same dimensionality. Assume if a persistent buffer is
+      // consumed by another we can alias and reuse the memory.
+      if (val == tv) {
+        continue;
+      }
+
+      if (scoped_persistence.find(val) != scoped_persistence.end()) {
+        scoped_persistence.at(val) += persistent_buffer_size;
+      } else {
+        scoped_persistence[val] = persistent_buffer_size;
+      }
+    }
+  }
+
+  // Find the maximum persistent buffer use
+  int64_t max_persistence_size = 0;
+  for (auto persistent_entry : scoped_persistence) {
+    max_persistence_size =
+        std::max(max_persistence_size, persistent_entry.second);
+  }
+
+  constexpr int64_t register_file_size = 256 * 1024;
+  // Don't use more than 75% of register file for persistent buffers
+  if (max_persistence_size * 4 > register_file_size * 3) {
+    fits_register_persistence = false;
+  }
+
+  return fits_register_persistence;
 }
 
 } // namespace scheduler_utils

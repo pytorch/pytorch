@@ -199,7 +199,8 @@ namespace {
 //! Find all domains that a given domain is depeendent on
 class FindInputDomains : BackwardVisitor {
  private:
-  FindInputDomains(TensorView* tv, const IterDomain* id) : tv_(tv) {
+  FindInputDomains(TensorView* tv, const IterDomain* id)
+      : BackwardVisitor(false), tv_(tv) {
     input_keys.insert(DomainKey(tv_->domain(), id));
   }
 
@@ -251,9 +252,7 @@ class FindInputDomains : BackwardVisitor {
 
 } // namespace
 
-void UnmappableReductionDomains::handle(ReductionOp* op) {
-  // Builds a map from reduction domains to consumer domains.
-  TensorView* out_tv = op->out()->as<TensorView>();
+void UnmappableReductionDomains::handleReductionOutput(TensorView* out_tv) {
   std::vector<DomainKey> reduction_keys;
   for (const auto id : out_tv->getRootDomain()) {
     if (id->isReduction()) {
@@ -278,6 +277,19 @@ void UnmappableReductionDomains::handle(ReductionOp* op) {
     reduction_domain_inputs_.insert(
         {reduction_key, FindInputDomains::find(out_tv, reduction_key.id())});
   }
+}
+
+void UnmappableReductionDomains::handle(ReductionOp* op) {
+  // Builds a map from reduction domains to consumer domains.
+  TensorView* out_tv = op->out()->as<TensorView>();
+  handleReductionOutput(out_tv);
+}
+
+void UnmappableReductionDomains::handle(WelfordOp* op) {
+  // Builds a map from reduction domains to consumer domains.
+  handleReductionOutput(op->outVar()->as<TensorView>());
+  handleReductionOutput(op->outAvg()->as<TensorView>());
+  handleReductionOutput(op->outN()->as<TensorView>());
 }
 
 bool UnmappableReductionDomains::isReductionOutputMapped(
@@ -590,7 +602,9 @@ std::string toString(const ComputeAtRootDomainMap& root_map) {
 ComputeAtRootDomainMapBuilder::ComputeAtRootDomainMapBuilder(
     ComputeAtRootDomainMap& root_map,
     bool map_through_reduction)
-    : root_map_(root_map), map_through_reduction_(map_through_reduction) {
+    : BackwardVisitor(false),
+      root_map_(root_map),
+      map_through_reduction_(map_through_reduction) {
   Fusion* fusion = FusionGuard::getCurFusion();
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
   // Set concrete domains for broadcast domains that never get joined

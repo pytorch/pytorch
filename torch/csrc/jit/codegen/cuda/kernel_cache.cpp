@@ -375,8 +375,6 @@ FusionKernelRuntime::FusionKernelRuntime(
   // Run segmentation on the copied fusion
   SchedulerRuntimeInfo runtime_info(fusion_copy.get(), inputs, true);
 
-  // This is where pre-segment passes such as translateWelford will go
-
   //! Try to schedule the complete fusion
   const auto maybe_complete_fusion_heuristic =
       SchedulerEntry::proposeHeuristics(fusion_copy.get(), runtime_info);
@@ -395,10 +393,20 @@ FusionKernelRuntime::FusionKernelRuntime(
       segmented_fusion_->print();
     }
   } else {
+    auto complete_fusion_heuristic = maybe_complete_fusion_heuristic.value();
+
+    // Translate welfords if apply
+    if (fusion_copy->hasWelford()) {
+      bool translated = SegmentCandidateFinder::TranslateWelfordInFusion(
+          fusion_copy.get(), inputs);
+      if (translated) {
+        complete_fusion_heuristic = ScheduleHeuristic::Normalization;
+      }
+    }
     // Take ownership of the transformed fusion
     single_kernel_fusion_ = std::move(fusion_copy);
     heuristics_ = std::make_unique<FusionHeuristics>(
-        maybe_complete_fusion_heuristic.value(), runtime_info);
+        complete_fusion_heuristic, runtime_info);
     executors_ = std::vector<FusionExecutor>(1);
     // In the case that the fusion isn't segmented but user
     //  wants segmented fusion in the debug print. Will

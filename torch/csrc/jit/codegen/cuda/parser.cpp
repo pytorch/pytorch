@@ -713,8 +713,10 @@ class IrParser {
               TensorView* invstd = nullptr;
               if (kTraining || running_mean == nullptr) {
                 // Algorithm
-                auto x_sum = sum(input, reduction_axes);
-                x_mean = div(x_sum, num_features);
+                auto welford_out = Welford(input, reduction_axes);
+                x_mean = welford_out.avg;
+                auto var_sum = welford_out.var;
+
                 auto x_mean_bcast = broadcast(x_mean, broadcast_mask);
 
                 // updating running mean
@@ -725,10 +727,6 @@ class IrParser {
                   fusion->addOutput(new_mean_hat);
                   fusion->aliasOutputToInput(new_mean_hat, running_mean);
                 }
-
-                auto x_mean_sub = sub(input, x_mean_bcast);
-                auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-                auto var_sum = sum(x_mean_sub_pow, reduction_axes);
 
                 // updating running var
                 if (running_var != nullptr) {
@@ -741,6 +739,7 @@ class IrParser {
                   fusion->aliasOutputToInput(new_var_hat, running_var);
                 }
 
+                auto x_mean_sub = sub(input, x_mean_bcast);
                 auto var = div(var_sum, num_features);
                 auto var_eps = add(var, eps_ptr);
                 invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);

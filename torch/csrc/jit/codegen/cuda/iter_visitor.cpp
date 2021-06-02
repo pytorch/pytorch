@@ -307,12 +307,14 @@ void BackwardVisitor::traverseFrom(
   // All stmts we've called handle on
   std::unordered_set<Statement*> visited_stmts_;
 
-  for (auto traversal_pair : traversal_exprs_) {
-    for (auto out : traversal_pair.first->outputs()) {
-      TORCH_INTERNAL_ASSERT(
-          vals.find(out) != vals.end(),
-          "Invalid backward traversal found. Some output paths were not provided:",
-          out);
+  if (must_cover_all_expr_outputs_) {
+    for (auto traversal_pair : traversal_exprs_) {
+      for (auto out : traversal_pair.first->outputs()) {
+        TORCH_INTERNAL_ASSERT(
+            vals.find(out) != vals.end(),
+            "Invalid backward traversal found. Some output paths were not provided:",
+            out);
+      }
     }
   }
 
@@ -438,6 +440,17 @@ struct Dependencies : public IterVisitor {
 
     Dependencies deps(dependencies, of);
     return deps.vals_;
+  }
+
+  static std::unordered_set<Expr*> getAllExprs(
+      const std::unordered_set<Val*>& dependencies,
+      const std::vector<Val*>& of) {
+    if (of.empty()) {
+      return {};
+    }
+
+    Dependencies deps(dependencies, of);
+    return deps.dependent_exprs_;
   }
 };
 
@@ -646,6 +659,12 @@ std::vector<Val*> DependencyCheck::getAllValsBetween(
     const std::unordered_set<Val*>& dependencies,
     const std::vector<Val*>& of) {
   return Dependencies::getAllVals(dependencies, of);
+}
+
+std::unordered_set<Expr*> DependencyCheck::getAllExprsBetween(
+    const std::unordered_set<Val*>& dependencies,
+    const std::vector<Val*>& of) {
+  return Dependencies::getAllExprs(dependencies, of);
 }
 
 std::unordered_set<Val*> DependencyCheck::getAllOutputsOf(

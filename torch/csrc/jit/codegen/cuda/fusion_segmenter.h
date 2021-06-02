@@ -118,6 +118,7 @@ class TORCH_CUDA_CU_API SegmentedGroup {
   friend class SegmentCandidateFinder;
   friend class SegmentedFusion;
   friend class FusionKernelRuntime;
+  friend class TranslateApplicableWelford;
 
   //! unique identifier of group in the segmented fusion
   int group_id_ = -1;
@@ -227,7 +228,7 @@ class TORCH_CUDA_CU_API FusionHeuristics {
   }
 
   //! Returns the single scheduler for a complete fusion.
-  SchedulerEntry* singleHeuristics() {
+  SchedulerEntry* singleKernelHeuristics() {
     TORCH_INTERNAL_ASSERT(!is_segmented_);
     return heuristics_.begin()->get();
   }
@@ -365,6 +366,7 @@ class CombineReductions;
 
 //! Options to configure/debug candidate finder
 struct TORCH_CUDA_CU_API SegmentCandidateFinderOptions {
+  bool run_translate_welford = true;
   bool run_combine_reductions = true;
   bool run_herrmann_merge = true;
   bool run_final_merge = true;
@@ -413,6 +415,10 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
     SegmentCandidateFinder scf(std::move(fusion), inputs, options);
     return std::move(scf.segmented_fusion_);
   }
+
+  static bool TranslateWelfordInFusion(
+      Fusion* fusion,
+      const at::ArrayRef<IValue>& runtime_inputs);
 
  private:
   // Perform segmentation on and take ownership of the given fusion
@@ -518,6 +524,24 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   std::unique_ptr<SegmenterAnalysis> group_dependency_;
 
   SchedulerRuntimeInfo runtime_info_;
+
+  //! Note:
+  //!  Segmenter should eventually rely only on runtime_info_ for
+  //!  safe caching. runtime_inputs_ is only used in translateWelford
+  //!  to initialize expression evaluators on copies of the original
+  //!  fusion, which doesn't use any un-cached info and is safe.
+  //!
+  //!  Directly using runtime_inputs_ in other cases is in general
+  //!   risky.
+  //!
+  //!  To get rid of runtime_inputs_ we need mechanisms
+  //!  to copy expression evaluator values from fusion
+  //!  to a copy, or even better to a copy of a
+  //!  sub-graph of original fusion.
+  //! TODO:
+  //!  implement the expression evaluator transfer and
+  //!  remove runtime_inputs_ in a follow up.
+  const at::ArrayRef<IValue>& runtime_inputs_;
 };
 
 TORCH_CUDA_CU_API std::string toString(const SegmentedGroup* group);

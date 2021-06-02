@@ -858,6 +858,27 @@ void TensorView::setMemoryType(MemoryType mt) {
   }
 }
 
+void TensorView::clearReductionIterDomains() {
+  TORCH_INTERNAL_ASSERT(
+      !domain()->hasRFactor(),
+      "should not call clearReductionIterDomains on rfactor tv");
+
+  TORCH_INTERNAL_ASSERT(
+      domain()->domain() == getRootDomain(),
+      "should not call clearReductionIterDomains on already transformed TensorDomains");
+
+  std::vector<IterDomain*> new_root;
+  std::vector<bool> new_contig;
+  for (size_t i = 0; i < getRootDomain().size(); i++) {
+    if (!getRootDomain()[i]->isReduction()) {
+      new_root.push_back(getRootDomain()[i]);
+      new_contig.push_back(domain()->contiguity()[i]);
+    }
+  }
+
+  setDomain(new TensorDomain(new_root, new_contig));
+}
+
 TensorViewBuilder& TensorViewBuilder::ndims(size_t ndims) {
   TORCH_CHECK(shape_.empty() || shape_.size() == ndims);
   TORCH_CHECK(contiguity_.empty() || contiguity_.size() == ndims);

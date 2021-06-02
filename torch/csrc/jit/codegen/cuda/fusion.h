@@ -197,6 +197,9 @@ class TORCH_CUDA_CU_API Fusion final {
   //! Indicate that the fusion contains reduction operations
   bool hasReduction();
 
+  //! Indicate that the fusion contains welford operations
+  bool hasWelford();
+
   //! Run fusion segmentation algorithm to create a segmented fusion
   std::unique_ptr<SegmentedFusion> segment(
       const at::ArrayRef<at::IValue>& inputs);
@@ -228,6 +231,7 @@ class TORCH_CUDA_CU_API Fusion final {
  protected:
   friend SegmentCandidateFinder;
   friend SegmentedFusion;
+  friend class TranslateApplicableWelford;
 
   static IrCloner copy(const Fusion* from, Fusion* to);
 

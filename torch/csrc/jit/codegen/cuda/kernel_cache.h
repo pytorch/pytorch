@@ -78,10 +78,21 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
     return is_segmented_;
   }
 
-  //! Returns the fusion segments if apply
+  //! Returns the fusion segments if applicable
   SegmentedFusion* fusionSegments() {
     TORCH_INTERNAL_ASSERT(is_segmented_);
     return segmented_fusion_.get();
+  }
+
+  //! Returns the single kernel fusion if applicable
+  Fusion* singleKernelFusion() {
+    TORCH_INTERNAL_ASSERT(!is_segmented_);
+    return single_kernel_fusion_.get();
+  }
+
+  //! Returns the list of heuristics in this runtime
+  FusionHeuristics* schedulerHeuristics() {
+    return heuristics_.get();
   }
 
   //! Return the most recently used executor, corresponding to the

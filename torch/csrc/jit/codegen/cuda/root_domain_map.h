@@ -186,6 +186,9 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
  private:
   using IterVisitor::handle;
   void handle(ReductionOp* op) override;
+  void handle(WelfordOp* op) override;
+
+  void handleReductionOutput(TensorView* out_tv);
 
  private:
   //! Map from Reduction output DomainKeys to consumer DomainKeys

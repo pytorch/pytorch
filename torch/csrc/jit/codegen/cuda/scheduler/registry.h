@@ -33,7 +33,7 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo {
   //!  additional encoding for kernel cache lookup.
   SchedulerRuntimeInfo(
       Fusion* complete_fusion,
-      const at::ArrayRef<IValue>& inputs,
+      const at::ArrayRef<at::IValue>& inputs,
       bool create_expr_evaluator = false);
 
   //! Create runtime info by copying all the global
@@ -72,10 +72,10 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo {
 
  private:
   // Bind full fusion inputs to the internal expression evaluator
-  void initializeExpressionEvaluator(const at::ArrayRef<IValue>& inputs);
+  void initializeExpressionEvaluator(const at::ArrayRef<at::IValue>& inputs);
 
   // Compute alignment data for all input tensors of full fusion
-  void collectVectorizationInfo(const at::ArrayRef<IValue>& inputs);
+  void collectVectorizationInfo(const at::ArrayRef<at::IValue>& inputs);
 
   // Compute alignment data for given tensor
   size_t collectAlignmentSize(const at::Tensor& tensor) const;

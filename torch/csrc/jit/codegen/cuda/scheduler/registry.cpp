@@ -489,8 +489,9 @@ bool SchedulerEntry::sameAs(const SchedulerEntry* other) {
 }
 
 namespace {
-inline bool isTrivialReduction(ReductionOp* red) {
-  auto o_tv = red->out()->as<TensorView>();
+template <typename REDUCTION_OP = ReductionOp>
+inline bool isTrivialReduction(REDUCTION_OP* red) {
+  auto o_tv = red->out()->template as<TensorView>();
   // Assuming graph unscheduled at this point.
   for (auto id : o_tv->getRootDomain()) {
     if (id->isReduction() && !id->extent()->isOneInt()) {
@@ -500,10 +501,11 @@ inline bool isTrivialReduction(ReductionOp* red) {
   return true;
 }
 
-std::vector<ReductionOp*> findReductionOps(Fusion* fusion) {
-  std::vector<ReductionOp*> red_ops;
+template <typename REDUCTION_OP = ReductionOp>
+std::vector<REDUCTION_OP*> findReductionOps(Fusion* fusion) {
+  std::vector<REDUCTION_OP*> red_ops;
   for (auto expr : fusion->exprs()) {
-    if (auto red = dynamic_cast<ReductionOp*>(expr)) {
+    if (auto red = dynamic_cast<REDUCTION_OP*>(expr)) {
       if (!isTrivialReduction(red)) {
         red_ops.push_back(red);
       }
@@ -524,15 +526,19 @@ class SingleReductionScheduler : public SchedulerEntry {
   //! Check if the reduction heuristics apply in given fusion
   static bool canSchedule(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
     auto red_ops = findReductionOps(fusion);
-    if (red_ops.size() != 1) {
+    auto welford_ops = findReductionOps<WelfordOp>(fusion);
+    if (red_ops.size() + welford_ops.size() != 1) {
       return false;
     }
+
+    bool is_welford = welford_ops.size() > 0;
 
     if (SchedulerTopologyChecker::hasPostReductionBCast(fusion)) {
       return false;
     }
 
-    auto red_tv = red_ops[0]->out()->as<TensorView>();
+    auto red_tv = is_welford ? welford_ops[0]->out()->as<TensorView>()
+                             : red_ops[0]->out()->as<TensorView>();
 
     // Not allowing broadcasting reduction result to support
     //  grid reduction. This is an overkill might want to consider
@@ -576,7 +582,8 @@ class PointWiseScheduler : public SchedulerEntry {
 
   static bool canSchedule(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
     auto red_ops = findReductionOps(fusion);
-    return red_ops.empty();
+    auto welford_ops = findReductionOps<WelfordOp>(fusion);
+    return red_ops.empty() && welford_ops.empty();
   }
 
   void schedule(Fusion* fusion) override {
@@ -660,6 +667,11 @@ class NormalizationScheduler : public SchedulerEntry {
         return false;
       }
     }
+
+    if (!scheduler_utils::registerPersistentBufferCheck(fusion, runtime_info)) {
+      return false;
+    }
+
     return true;
   }
 

@@ -15272,6 +15272,187 @@ TEST(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
       lparams);
 }
 
+TEST(NVFuserTest, FusionWelford1Output_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tvs = Welford(tv0, {1});
+  fusion->addOutput(tvs.var);
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({128, 65}, options);
+  auto outputs = executor_cache.runFusionWithInputs({t0});
+
+  auto t1 = t0.var({1}, false) * 65;
+  testValidate(fusion, outputs, {t0}, {t1}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionTranslate1Welford_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tvs = Welford(tv0, {1});
+  fusion->addOutput(tvs.var);
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+
+  auto run_test = [&executor_cache,
+                   fusion](auto inner_size) -> FusionKernelRuntime* {
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor t0 = at::randn({128, inner_size}, options);
+    auto outputs = executor_cache.runFusionWithInputs({t0});
+
+    // Square sums does not fit well in the testValidate assumptions,
+    //  so we just compare the divided output here.
+    outputs[0] /= inner_size;
+    auto t1 = t0.var({1}, false);
+    testValidate(fusion, outputs, {t0}, {t1}, __LINE__, __FILE__);
+
+    return executor_cache.getMostRecentKernelRuntime();
+  };
+
+  // Run a translated welford
+  auto runtime1 = run_test(64);
+  // Check it was translated
+  TORCH_CHECK(runtime1->singleKernelFusion()->unordered_exprs().size() > 2);
+  TORCH_CHECK(
+      runtime1->schedulerHeuristics()->singleKernelHeuristics()->heuristc() ==
+      ScheduleHeuristic::Normalization);
+
+  // Run an un-translated welford
+  auto runtime2 = run_test(65536);
+  // Check it was not translated
+  TORCH_CHECK(runtime2->singleKernelFusion()->unordered_exprs().size() == 1);
+  TORCH_CHECK(
+      runtime2->schedulerHeuristics()->singleKernelHeuristics()->heuristc() ==
+      ScheduleHeuristic::Reduction);
+}
+
+TEST(NVFuserTest, FusionTranslate2Welford_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tvs1 = Welford(tv0, {1});
+  auto tvs2 = Welford(tv0, {1});
+
+  fusion->addOutput(tvs1.var);
+  fusion->addOutput(tvs2.var);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+
+  auto run_test = [&executor_cache,
+                   fusion](auto inner_size) -> FusionKernelRuntime* {
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor t0 = at::randn({128, inner_size}, options);
+    auto outputs = executor_cache.runFusionWithInputs({t0});
+
+    // Square sums does not fit well in the testValidate assumptions,
+    //  so we just compare the divided output here.
+    outputs[0] /= inner_size;
+    outputs[1] /= inner_size;
+    auto t1 = t0.var({1}, false);
+    testValidate(fusion, outputs, {t0}, {t1, t1}, __LINE__, __FILE__);
+
+    return executor_cache.getMostRecentKernelRuntime();
+  };
+
+  // Run a translated welford
+  auto runtime1 = run_test(64);
+  // Check it was translated
+  TORCH_CHECK(runtime1->singleKernelFusion()->unordered_exprs().size() > 4);
+  TORCH_CHECK(
+      runtime1->schedulerHeuristics()->singleKernelHeuristics()->heuristc() ==
+      ScheduleHeuristic::Normalization);
+
+  // Run an un-translated welford
+  auto runtime2 = run_test(65536);
+  // // Check it was not translated
+  TORCH_CHECK(runtime2->singleKernelFusion()->unordered_exprs().size() == 2);
+}
+
+TEST(NVFuserTest, FusionLargeWelfordNormalization_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tvs1 = Welford(tv0, {1});
+  auto sum_of_tv0 = sum(tv0, {1});
+  auto sum_plus_avg = add(tvs1.avg, sum_of_tv0);
+
+  fusion->addOutput(sum_plus_avg);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+
+  auto run_test = [&executor_cache,
+                   fusion](auto inner_size) -> FusionKernelRuntime* {
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor t0 = at::randn({128, inner_size}, options);
+    auto outputs = executor_cache.runFusionWithInputs({t0});
+
+    auto t1 = t0.mean({1}) + t0.sum({1});
+    testValidate(fusion, outputs, {t0}, {t1}, __LINE__, __FILE__);
+
+    return executor_cache.getMostRecentKernelRuntime();
+  };
+
+  auto runtime = run_test(65536);
+  TORCH_CHECK(!runtime->isSegmented());
+}
+
+TEST(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tvs1 = Welford(tv0, {1});
+  auto sum_of_tv0 = sum(tv0, {1});
+  auto sum_bcasted = broadcast(sum_of_tv0, {false, true});
+  auto avg_bcasted = broadcast(tvs1.avg, {false, true});
+  auto tv0_plus_sum = add(tv0, sum_bcasted);
+  auto tv0_plus_avg = add(tv0, avg_bcasted);
+
+  fusion->addOutput(tv0_plus_sum);
+  fusion->addOutput(tv0_plus_avg);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+
+  auto run_test = [&executor_cache,
+                   fusion](auto inner_size) -> FusionKernelRuntime* {
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor t0 = at::randn({128, inner_size}, options);
+    auto outputs = executor_cache.runFusionWithInputs({t0});
+
+    auto t1 = t0.mean({1}).unsqueeze(1) + t0;
+    auto t2 = t0.sum({1}).unsqueeze(1) + t0;
+    testValidate(fusion, outputs, {t0}, {t2, t1}, __LINE__, __FILE__);
+
+    return executor_cache.getMostRecentKernelRuntime();
+  };
+
+  for (auto inner_size : {4096, 8192, 32768}) {
+    auto runtime = run_test(4096);
+    TORCH_CHECK(!runtime->isSegmented());
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

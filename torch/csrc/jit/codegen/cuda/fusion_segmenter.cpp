@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -5,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
 #include <sstream>
 
@@ -1455,16 +1457,6 @@ void deDuplicateScalarExprs(std::vector<Expr*>& exprs) {
   }
 }
 
-// Helper function to get a reduction operation from group
-ReductionOp* firstReductionFromGroup(SegmentedGroup* group) {
-  for (auto expr : group->exprs()) {
-    if (auto rop = dynamic_cast<ReductionOp*>(expr)) {
-      return rop;
-    }
-  }
-  return nullptr;
-}
-
 } // namespace
 
 c10::optional<std::unique_ptr<SchedulerEntry>> SegmentedGroup::
@@ -1486,6 +1478,309 @@ c10::optional<std::unique_ptr<SchedulerEntry>> SegmentedGroup::
 //  Should consider generalization and make a proper interface
 //   if we have more merge node heuristics like this
 
+//! Translate Welford
+//!
+//! This pass can be inserted at any stages of segmentation,
+//!  and it tries to replace welford ops with persistent
+//!  mean and var ops.
+//!
+//! The checking of feasibility of persistent kernels
+//!  is through normalization schedulers. The general idea
+//!  is to first try to translate on a copy, and see if
+//!  normalization scheduler is willing to produce a
+//!  persistent kernel.
+//!
+//! For complete fusion this pass checks if all the
+//!  welford ops can be translated simultaneously to
+//!  produce a persistent normalization kernel and
+//!  will perform translation if checks pass.
+//!
+//! For segmented fusion, same check is performed within
+//!  each segmented group to collect applicable welford ops,
+//!  and actual translations are performed on the complete
+//!  fusion after all the checks are done.
+class TranslateApplicableWelford {
+ public:
+  //! Try translation on each segmented group of
+  //!  given segmented fusion
+  //!  returns true if any welford has been translated
+  static bool run(
+      SegmentedFusion* segmented_fusion,
+      const at::ArrayRef<IValue>& runtime_inputs) {
+    TranslateApplicableWelford translate_welford(
+        segmented_fusion, runtime_inputs);
+    return translate_welford.translated_any_welford_;
+  }
+
+  //! Try translation on complete fusion,
+  //!  returns true if any welford has been translated
+  static bool run(Fusion* fusion, const at::ArrayRef<IValue>& runtime_inputs) {
+    TranslateApplicableWelford translate_welford(fusion, runtime_inputs);
+    return translate_welford.translated_any_welford_;
+  }
+
+ private:
+  explicit TranslateApplicableWelford(
+      SegmentedFusion* segmented_fusion,
+      const at::ArrayRef<IValue>& runtime_inputs);
+
+  explicit TranslateApplicableWelford(
+      Fusion* fusion,
+      const at::ArrayRef<IValue>& runtime_inputs);
+
+  //! Given vector of welford ops from the same fusion,
+  //!  checks if translating all of them result in a
+  //!  persistent normalization kernel by try-runs on
+  //!  a test copy of the original fusion.
+  //!
+  //! Supported use cases are either un-segmented fusion,
+  //!  or all the given welfords are within the same
+  //!  segmented group. In the latter case, the segmented
+  //!  group containing all the welford ops needs to be
+  //!  provided.
+  bool wouldTranslateToPersistent(
+      const std::vector<WelfordOp*>& orignal_welfords,
+      SegmentedGroup* group = nullptr);
+
+  //! Translate the given welford op into separate
+  //! average and standard deviation calculation.
+  void translateSingleWelford(WelfordOp* welford);
+
+  //! Utility to test if a translated fusion
+  //!  gives a persistent kernel. Uses normalization
+  //!  scheduler to do the test.
+  bool isValidPersistentFusion(
+      Fusion* translated_fusion,
+      SchedulerRuntimeInfo& runtime_info);
+
+  //! Update expression list of groups containing
+  //!  welford ops that have been translated.
+  void updateGroupExprs(SegmentedGroup* group);
+
+ private:
+  //! Indicates any translation happened.
+  bool translated_any_welford_ = false;
+
+  //! a reference to global fusion runtime inputs
+  const at::ArrayRef<IValue>& runtime_inputs_;
+
+  //! For translation within group only,
+  //!  group boundary at test copy
+  //! (see wouldTranslateToPersistent implementation )
+  std::vector<Val*> test_group_inputs_;
+  std::vector<Val*> test_group_outputs_;
+};
+
+TranslateApplicableWelford::TranslateApplicableWelford(
+    Fusion* fusion,
+    const at::ArrayRef<IValue>& runtime_inputs)
+    : runtime_inputs_(runtime_inputs) {
+  std::vector<WelfordOp*> orignal_welfords(
+      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).begin(),
+      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).end());
+
+  if (wouldTranslateToPersistent(orignal_welfords)) {
+    for (auto welford : orignal_welfords) {
+      translateSingleWelford(welford);
+    }
+    translated_any_welford_ = true;
+  }
+}
+
+TranslateApplicableWelford::TranslateApplicableWelford(
+    SegmentedFusion* segmented_fusion,
+    const at::ArrayRef<IValue>& runtime_inputs)
+    : runtime_inputs_(runtime_inputs) {
+  std::vector<SegmentedGroup*> translated_groups;
+  std::vector<WelfordOp*> welford_to_translate;
+  // Find welfords that can be translated in each group
+  for (auto group : segmented_fusion->groups()) {
+    std::vector<WelfordOp*> welford_in_group(
+        ir_utils::filterByType<WelfordOp>(group->exprs()).begin(),
+        ir_utils::filterByType<WelfordOp>(group->exprs()).end());
+
+    if (wouldTranslateToPersistent(welford_in_group, group)) {
+      translated_groups.push_back(group);
+      welford_to_translate.insert(
+          welford_to_translate.end(),
+          welford_in_group.begin(),
+          welford_in_group.end());
+    }
+  }
+
+  // Actually translate the welford ops
+  // and record all the vals that have been
+  // replaced by the translation.
+  for (auto welford : welford_to_translate) {
+    translateSingleWelford(welford);
+  }
+
+  for (auto translated_group : translated_groups) {
+    // Update heuristics and expr list of translated groups
+    translated_group->heuristic_ = ScheduleHeuristic::Normalization;
+    updateGroupExprs(translated_group);
+  }
+}
+
+bool TranslateApplicableWelford::isValidPersistentFusion(
+    Fusion* translated_fusion,
+    SchedulerRuntimeInfo& runtime_info) {
+  if (!SchedulerEntry::canSchedule(
+          ScheduleHeuristic::Normalization, translated_fusion, runtime_info)) {
+    return false;
+  }
+
+  auto scheduler = SchedulerEntry::makeEntry(
+      ScheduleHeuristic::Normalization, translated_fusion, runtime_info);
+
+  return scheduler->reductionParams().persistent_kernel;
+}
+
+bool TranslateApplicableWelford::wouldTranslateToPersistent(
+    const std::vector<WelfordOp*>& orignal_welfords,
+    SegmentedGroup* group) {
+  if (orignal_welfords.empty()) {
+    return false;
+  }
+
+  // Make sure all welford ops come from the same complete fusion
+  auto fusion = orignal_welfords[0]->fusion();
+  TORCH_INTERNAL_ASSERT(
+      std::all_of(
+          orignal_welfords.begin(),
+          orignal_welfords.end(),
+          [fusion](WelfordOp* welford) { return welford->fusion() == fusion; }),
+      "Welfords in given vector not in the same fusion");
+
+  // Make initial `in-progress copy`
+  auto test_copy = std::make_unique<Fusion>();
+  auto original_to_test_map = Fusion::copy(fusion, test_copy.get());
+
+  std::vector<WelfordOp*> copied_welfords;
+  std::transform(
+      orignal_welfords.begin(),
+      orignal_welfords.end(),
+      std::back_inserter(copied_welfords),
+      [&original_to_test_map](auto welford) {
+        return original_to_test_map.clone(welford);
+      });
+
+  // Translate the welford ops
+  for (auto welford_to_translate : copied_welfords) {
+    translateSingleWelford(welford_to_translate);
+  }
+
+  SchedulerRuntimeInfo runtime_info(test_copy.get(), runtime_inputs_, true);
+  // If we are looking at a segment of fusion,
+  //  we maintain the segmented group boundary,
+  //  one set for in_progress copy and one set
+  //  for `test copy`
+  if (group != nullptr) {
+    auto original_inputs = getAllInputs(group);
+    auto original_outputs = getAllOutputs(group);
+    test_group_inputs_.clear();
+    test_group_outputs_.clear();
+    std::transform(
+        original_inputs.begin(),
+        original_inputs.end(),
+        std::back_inserter(test_group_inputs_),
+        [&original_to_test_map](Val* in) {
+          return original_to_test_map.clone(in);
+        });
+    std::transform(
+        original_outputs.begin(),
+        original_outputs.end(),
+        std::back_inserter(test_group_outputs_),
+        [&original_to_test_map](Val* out) {
+          return original_to_test_map.clone(out);
+        });
+
+    // Temporarily localize test copy around
+    //  the group boundary
+    FusionSegmentGuard fsg(
+        test_copy.get(), test_group_inputs_, test_group_outputs_);
+
+    // Test if the translated copy is persistent
+    return isValidPersistentFusion(test_copy.get(), runtime_info);
+  }
+  // In the case where we work on un-segmented
+  //  fusion, no group boundary logic, just
+  //  translate and test.
+  return isValidPersistentFusion(test_copy.get(), runtime_info);
+}
+
+void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
+  auto fusion = welford->fusion();
+  FusionGuard fg(fusion);
+  // Only support translation of welford ops that
+  // doesn't take inputs that are already statistics,
+  // i.e. an r-factor product.
+  // This translation works on un-scheduled fusions so
+  //  shouldn't expect to see this.
+  TORCH_INTERNAL_ASSERT(welford->inN()->isOneInt());
+
+  // Grab the inputs and outputs of the welford
+  auto in_val = welford->in()->as<TensorView>();
+  auto out_var = welford->outVar()->as<TensorView>();
+  auto out_avg = welford->outAvg()->as<TensorView>();
+  auto out_N = welford->outN()->as<TensorView>();
+
+  fusion->removeExpr(welford);
+
+  // Create normalization based welford graph
+  //  largely taken from batchnorm cpp benchmark
+  auto& in_root = in_val->getRootDomain();
+  auto& out_root = out_avg->getRootDomain();
+  std::vector<int> red_axes;
+
+  // Create scalar version of the feature element
+  //  counting.
+  Val* num_features = new Double(1);
+  std::vector<bool> broadcast_mask(in_root.size(), false);
+  for (size_t i = 0; i < in_root.size(); i++) {
+    if (out_root[i]->isReduction()) {
+      red_axes.push_back(i);
+      broadcast_mask[i] = true;
+      num_features = mul(num_features, out_root[i]->extent());
+    }
+  }
+
+  // Build a normalization expression group that is
+  //  equivalent to a welford operation.
+  auto x_sum = sum(in_val, red_axes);
+  new BinaryOp(BinaryOpType::Div, out_avg, x_sum, num_features);
+  auto x_avg_bcast = broadcast(out_avg, broadcast_mask);
+  auto x_mean_sub = sub(in_val, x_avg_bcast);
+  auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
+  new ReductionOp(BinaryOpType::Add, new Double(0.0), out_var, x_mean_sub_pow);
+  new UnaryOp(UnaryOpType::Set, out_N, num_features);
+
+  // out_avg, out_N are now outputs of a pointwise ops and we
+  //  need to clear out its reduction domains.
+  out_avg->clearReductionIterDomains();
+  out_N->clearReductionIterDomains();
+}
+
+void TranslateApplicableWelford::updateGroupExprs(SegmentedGroup* group) {
+  // Re-evaluate expression list of the translated group
+  auto input_vec = getAllInputs(group);
+  auto output_vec = getAllOutputs(group);
+
+  if (input_vec.empty() || output_vec.empty()) {
+    return;
+  }
+
+  std::unordered_set<Val*> input_set(input_vec.begin(), input_vec.end());
+  auto expr_set = DependencyCheck::getAllExprsBetween(input_set, output_vec);
+  group->exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
+}
+
+bool SegmentCandidateFinder::TranslateWelfordInFusion(
+    Fusion* fusion,
+    const at::ArrayRef<IValue>& runtime_inputs) {
+  return TranslateApplicableWelford::run(fusion, runtime_inputs);
+}
+
 //! CombineReductions:
 //!  This pass works before the main merge node process
 //!    It identifies reduction operations that can be combined
@@ -1497,7 +1792,7 @@ c10::optional<std::unique_ptr<SchedulerEntry>> SegmentedGroup::
 class CombineReductions {
   using GroupSet = std::unordered_set<SegmentedGroup*>;
   using GroupVec = std::vector<SegmentedGroup*>;
-  struct ReductionSignature;
+  class ReductionSignature;
 
  public:
   static void run(SegmentCandidateFinder* segment_candidate_finder) {
@@ -1514,40 +1809,29 @@ class CombineReductions {
     //  Assuming running before any merge happened, so
     //  should see exactly one non-trivial reduction in each group
     for (auto group : segment_candidate_finder_->groups()) {
-      ReductionOp* rop = nullptr;
-      for (auto expr : group->exprs()) {
-        if (auto rop_in_group = dynamic_cast<ReductionOp*>(expr)) {
-          auto rop_signature =
-              std::make_unique<ReductionSignature>(rop_in_group);
-          // Ignore pure squeeze operations in this analysis
-          if (!rop_signature->has_nontrivial_reduction) {
-            continue;
-          }
-          // We should have only one nontrivial reduction in each group since no
-          // merging
-          //  has happened yet
-          TORCH_INTERNAL_ASSERT(
-              rop == nullptr,
-              "CombineReductions, two reductions found in group some incompatible transform happened before doing this pass");
-          rop = rop_in_group;
+      if (auto rop_signature =
+              ReductionSignature::makeReductionSignature(group)) {
+        // Ignore pure squeeze operations in this analysis
+        if (!rop_signature->hasNonTrivialReduction()) {
+          continue;
+        }
 
-          groups_with_reductions_.push_back(group);
-          // Check if this reduction signature is one that we have seen before
-          auto signature_match_it = std::find_if(
-              known_reduction_signatures_.begin(),
-              known_reduction_signatures_.end(),
-              [&rop_signature](auto& know_signature) {
-                return know_signature->sameAs(rop_signature.get());
-              });
-          // Unmatched: Create a new signature entry if not known
-          if (signature_match_it == known_reduction_signatures_.end()) {
-            group_reduction_signature_map_[group] = rop_signature.get();
-            known_reduction_signatures_.emplace_back(std::move(rop_signature));
-          } else {
-            // Matched known signature: Mark that this groups belongs to know
-            // signature
-            group_reduction_signature_map_[group] = signature_match_it->get();
-          }
+        groups_with_reductions_.push_back(group);
+        // Check if this reduction signature is one that we have seen before
+        auto signature_match_it = std::find_if(
+            known_reduction_signatures_.begin(),
+            known_reduction_signatures_.end(),
+            [&rop_signature](auto& know_signature) {
+              return know_signature->sameAs(rop_signature.get());
+            });
+        // Unmatched: Create a new signature entry if not known
+        if (signature_match_it == known_reduction_signatures_.end()) {
+          group_reduction_signature_map_[group] = rop_signature.get();
+          known_reduction_signatures_.emplace_back(std::move(rop_signature));
+        } else {
+          // Matched known signature: Mark that this groups belongs to know
+          // signature
+          group_reduction_signature_map_[group] = signature_match_it->get();
         }
       }
     }
@@ -1932,17 +2216,71 @@ class CombineReductions {
   // TODO:
   //   Want to reconsider this for transpose operations,
   //   need refactoring to handle reduction fusions across a transpose operation
-  struct ReductionSignature {
-    size_t root_domain_size = 0;
-    std::vector<int> reduction_axes;
-    bool has_nontrivial_reduction = false;
+  class ReductionSignature {
+   public:
+    bool sameAs(const ReductionSignature* reduction_signature) {
+      if (reduction_signature == this) {
+        return true;
+      }
 
-    ReductionSignature(ReductionOp* rop) {
-      auto out_tv = rop->out()->as<TensorView>();
-      has_nontrivial_reduction = out_tv->hasReduction();
+      if (root_domain_size_ != reduction_signature->root_domain_size_ ||
+          has_nontrivial_reduction_ !=
+              reduction_signature->has_nontrivial_reduction_ ||
+          reduction_axes_.size() !=
+              reduction_signature->reduction_axes_.size()) {
+        return false;
+      }
+
+      for (size_t i = 0; i < reduction_axes_.size(); i++) {
+        if (reduction_axes_[i] != reduction_signature->reduction_axes_[i]) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    bool sameAs(const ReductionSignature& reduction_signature) {
+      return sameAs(&reduction_signature);
+    }
+
+    bool hasNonTrivialReduction() const {
+      return has_nontrivial_reduction_;
+    }
+
+    static std::unique_ptr<ReductionSignature> makeReductionSignature(
+        SegmentedGroup* group) {
+      std::unique_ptr<ReductionSignature> signature = nullptr;
+
+      for (auto expr : group->exprs()) {
+        std::unique_ptr<ReductionSignature> new_signature = nullptr;
+
+        if (auto rop = dynamic_cast<ReductionOp*>(expr)) {
+          new_signature = std::make_unique<ReductionSignature>(rop);
+        }
+        if (auto wop = dynamic_cast<WelfordOp*>(expr)) {
+          new_signature = std::make_unique<ReductionSignature>(wop);
+        }
+
+        if (new_signature != nullptr) {
+          TORCH_INTERNAL_ASSERT(
+              signature == nullptr || !signature->has_nontrivial_reduction_ ||
+                  !new_signature->has_nontrivial_reduction_ ||
+                  signature->sameAs(new_signature.get()),
+              "Conflicting signature found in this group");
+          signature = std::move(new_signature);
+        }
+      }
+      return signature;
+    }
+
+    template <typename REDUCTION = ReductionOp>
+    ReductionSignature(REDUCTION* rop) {
+      auto out_tv = rop->out()->template as<TensorView>();
+      has_nontrivial_reduction_ = out_tv->hasReduction();
       TORCH_INTERNAL_ASSERT(out_tv != nullptr);
       auto& root_domain = out_tv->getRootDomain();
-      root_domain_size = root_domain.size();
+      root_domain_size_ = root_domain.size();
 
       // Trivial reduction i.e. squeeze is tricky here:
       //  this pass doesn't want to touch any pure squeeze, i.e.:
@@ -1956,40 +2294,20 @@ class CombineReductions {
       //  but T2 and T3 below are not
       //    T0 [R(1), R(1), R(i0), I(i1)]
       //    T1 [R(1), R(i0), I(i1)]
-      for (size_t i = 0; i < root_domain_size; i++) {
+      for (size_t i = 0; i < root_domain_size_; i++) {
         if (root_domain[i]->isReduction()) {
-          reduction_axes.push_back(i);
+          reduction_axes_.push_back(i);
         }
         if (!root_domain[i]->isTrivialReduction()) {
-          has_nontrivial_reduction = true;
+          has_nontrivial_reduction_ = true;
         }
       }
     }
 
-    bool sameAs(const ReductionSignature* reduction_signature) {
-      if (reduction_signature == this) {
-        return true;
-      }
-
-      if (root_domain_size != reduction_signature->root_domain_size ||
-          has_nontrivial_reduction !=
-              reduction_signature->has_nontrivial_reduction ||
-          reduction_axes.size() != reduction_signature->reduction_axes.size()) {
-        return false;
-      }
-
-      for (size_t i = 0; i < reduction_axes.size(); i++) {
-        if (reduction_axes[i] != reduction_signature->reduction_axes[i]) {
-          return false;
-        }
-      }
-
-      return true;
-    }
-
-    bool sameAs(const ReductionSignature& reduction_signature) {
-      return sameAs(&reduction_signature);
-    }
+   private:
+    size_t root_domain_size_ = 0;
+    std::vector<int> reduction_axes_;
+    bool has_nontrivial_reduction_ = false;
   };
 
   //! Keeps track of groups with reduction expressions,
@@ -2011,9 +2329,9 @@ bool CombineReductions::shouldRun(
   // Iterate over group segments we have before segment candidate finder
   //  tries to merge any groups
   for (auto group : segment_candidate_finder->groups()) {
-    if (auto rop = firstReductionFromGroup(group)) {
-      auto reduction_signature = std::make_unique<ReductionSignature>(rop);
-      if (reduction_signature->has_nontrivial_reduction &&
+    if (auto reduction_signature =
+            ReductionSignature::makeReductionSignature(group)) {
+      if (reduction_signature->hasNonTrivialReduction() &&
           std::any_of(
               known_reductions.begin(),
               known_reductions.end(),
@@ -2049,7 +2367,9 @@ SegmentCandidateFinder::SegmentCandidateFinder(
     std::unique_ptr<Fusion> fusion,
     const at::ArrayRef<IValue>& inputs,
     SegmentCandidateFinderOptions options)
-    : options_(options), runtime_info_(fusion.get(), inputs, true) {
+    : options_(options),
+      runtime_info_(fusion.get(), inputs, true),
+      runtime_inputs_(inputs) {
   segmented_fusion_ = std::make_unique<SegmentedFusion>(std::move(fusion));
   findSegments();
 }
@@ -2057,9 +2377,6 @@ SegmentCandidateFinder::SegmentCandidateFinder(
 void SegmentCandidateFinder::findSegments() {
   FUSER_PERF_SCOPE("Finding valid fusion segment solutions");
   // TODO: Make traversal items local to this function.
-  if (isDebugDumpEnabled(DebugDumpOption::FusionSegmentsDrawing)) {
-    segmented_fusion_->draw();
-  }
 
   // Need this for initialization of the DAG that is process
   std::unordered_map<Expr*, SegmentedGroup*> expr2group;
@@ -2129,6 +2446,11 @@ void SegmentCandidateFinder::findSegments() {
         expr_group->output_vals.push_back(out);
       }
     }
+  }
+
+  if (options_.run_translate_welford &&
+      segmented_fusion_->completeFusion()->hasWelford()) {
+    TranslateApplicableWelford::run(segmented_fusion_.get(), runtime_inputs_);
   }
 
   for (auto group : groups()) {
@@ -2207,6 +2529,9 @@ void SegmentCandidateFinder::findSegments() {
   }
 
   finalize();
+  if (isDebugDumpEnabled(DebugDumpOption::FusionSegmentsDrawing)) {
+    segmented_fusion_->draw();
+  }
 }
 
 void SegmentCandidateFinder::finalMerge() {
@@ -2329,6 +2654,28 @@ void SegmentCandidateFinder::resolveScalarsInGroup(SegmentedGroup* group) {
   // Add all the defining expr to the group
   for (auto expr : exprs_to_add) {
     group->exprs_.push_back(expr);
+  }
+
+  // Remove all scalar edges between groups
+  //  They may have been created by welford
+  //   translation.
+  //  we will not need them after scalar
+  //  resolution
+  auto remove_scalar_edges_from_vec = [](std::vector<SegmentedEdge*>& edges) {
+    edges.erase(
+        std::remove_if(
+            edges.begin(),
+            edges.end(),
+            [](SegmentedEdge* segmented_edge) {
+              return segmented_edge->val->isScalar();
+            }),
+        edges.end());
+  };
+
+  remove_scalar_edges_from_vec(edges());
+  for (auto group : groups()) {
+    remove_scalar_edges_from_vec(group->producer_edges);
+    remove_scalar_edges_from_vec(group->consumer_edges);
   }
 }
 

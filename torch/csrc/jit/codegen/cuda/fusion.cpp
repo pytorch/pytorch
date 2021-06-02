@@ -505,6 +505,9 @@ std::vector<Val*> Fusion::usedMathVals() {
   // used, the rest aren't included in used_math_vals as they are not
   // used. However, we want them to be included as they must show up
   // in the fusion.
+  std::vector<Val*> vals_to_add;
+  std::unordered_set<Val*> added_vals;
+
   for (auto val : used_math_vals) {
     auto def = val->definition();
     if (def == nullptr || def->outputs().size() < 2) {
@@ -513,10 +516,17 @@ std::vector<Val*> Fusion::usedMathVals() {
     for (auto out : def->outputs()) {
       if (std::find(used_math_vals.begin(), used_math_vals.end(), out) ==
           used_math_vals.end()) {
-        used_math_vals.push_back(out);
+        if (!added_vals.count(out)) {
+          vals_to_add.push_back(out);
+          added_vals.insert(out);
+        }
       }
     }
   }
+
+  used_math_vals.insert(
+      used_math_vals.end(), vals_to_add.begin(), vals_to_add.end());
+
   return used_math_vals;
 }
 
@@ -569,6 +579,16 @@ bool Fusion::hasReduction() {
         if (out->as<TensorView>()->hasReduction())
           return true;
 
+  return false;
+}
+
+bool Fusion::hasWelford() {
+  FUSER_PERF_SCOPE("Fusion::hasWelford");
+  for (auto expr : exprs()) {
+    if (expr->isA<WelfordOp>()) {
+      return true;
+    }
+  }
   return false;
 }
 

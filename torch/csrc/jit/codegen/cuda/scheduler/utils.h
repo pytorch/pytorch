@@ -8,6 +8,7 @@ namespace fuser {
 namespace cuda {
 
 class ExpressionEvaluator;
+class SchedulerRuntimeInfo;
 
 namespace scheduler_utils {
 
@@ -105,6 +106,10 @@ void computeAtBetween(
     const std::vector<TensorView*>& consumers,
     int pos,
     ComputeAtMode mode);
+
+bool registerPersistentBufferCheck(
+    Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info);
 
 } // namespace scheduler_utils
 } // namespace cuda

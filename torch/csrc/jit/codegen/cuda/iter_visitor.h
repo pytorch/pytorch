@@ -121,14 +121,26 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  *
  * The first step of BackwardVisitor is to make sure we've specified enough
  * outputs to guarentee that we will traverse all outputs of all exprs during
- * the backward traversal.
+ * the backward traversal. In the case where we don't require visiting all
+ * outputs of some exprs, example being the `N` output of welford ops.
+ * `must_cover_all_expr_outputs` is added to disable the check, and in
+ * this case the visitor pass need be aware
+ *  1. Exprs with any output that has a use chain that ends with a final
+ * consumer in the `from` list `will be` visited.
+ *  2. Vals that doesn't have a use chain that ends with a final
+ * consumer in the `from` list `will not be` visited, even though its
+ * definition expr might be visited. An example is if the `N` output
+ * of an welford op is unused, but other outputs are, the welford op
+ * will be visited but the `N` output will not.
+ *
  */
 class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
  protected:
   // NOLINTNEXTLINE(modernize-use-override)
   virtual ~BackwardVisitor() = default;
 
-  BackwardVisitor() = default;
+  BackwardVisitor(bool must_cover_all_expr_outputs = true)
+      : must_cover_all_expr_outputs_(must_cover_all_expr_outputs) {}
 
   BackwardVisitor(const BackwardVisitor& other) = default;
   BackwardVisitor& operator=(const BackwardVisitor& other) = default;
@@ -181,6 +193,8 @@ class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
       Fusion* fusion,
       const std::vector<Val*>& from,
       bool traverseAllPaths = false);
+
+  bool must_cover_all_expr_outputs_ = true;
 };
 
 class TORCH_CUDA_CU_API DependencyCheck {
@@ -207,6 +221,12 @@ class TORCH_CUDA_CU_API DependencyCheck {
   // Grab all values that exist between and including provided
   // vals. Returned values are topologicaly ordered.
   static std::vector<Val*> getAllValsBetween(
+      const std::unordered_set<Val*>& dependencies,
+      const std::vector<Val*>& of);
+
+  // Returns all dependent exprs that exist between
+  //  the provided vals
+  static std::unordered_set<Expr*> getAllExprsBetween(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of);
 
