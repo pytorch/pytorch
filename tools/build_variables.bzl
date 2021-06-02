@@ -548,6 +548,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
+    "torch/csrc/utils/crash_handler.cpp",
 ]
 
 libtorch_python_cuda_core_sources = [
@@ -643,7 +644,6 @@ libtorch_python_core_sources = [
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
-    "torch/csrc/utils/crash_handler.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
     "torch/csrc/utils/python_dispatch.cpp",
@@ -825,7 +825,6 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
     "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
-    "aten/src/ATen/native/cpu/RenormKernel.cpp",
     "aten/src/ATen/native/cpu/ReduceAllOpsKernel.cpp",
     "aten/src/ATen/native/cpu/ReduceOpsKernel.cpp",
     "aten/src/ATen/native/cpu/ScatterGatherKernel.cpp",
@@ -1033,9 +1032,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/TH/THLapack.cpp",
     "aten/src/TH/THStorageFunctions.cpp",
     "aten/src/TH/THTensor.cpp",
-    "aten/src/TH/THTensorEvenMoreMath.cpp",
     "aten/src/TH/THTensorLapack.cpp",
-    "aten/src/TH/THTensorMath.cpp",
     "aten/src/TH/THTensorMoreMath.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
