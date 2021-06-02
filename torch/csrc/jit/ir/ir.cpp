@@ -1795,7 +1795,7 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
-  n->output()->setDebugName(field);
+  n->output()->setDebugName("attr_" + field);
   return n;
 }
 
