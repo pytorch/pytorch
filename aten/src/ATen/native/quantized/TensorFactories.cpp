@@ -94,13 +94,31 @@ Tensor empty_per_channel_affine_quantized_other_backends_stub(
 
 // Create an empty quantized Tensor with size, based on the options
 // and quantization parameters of the input quantized Tensor
-Tensor empty_quantized(IntArrayRef size, const Tensor& qtensor, c10::optional<ScalarType> dtype_opt,
-                         c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  TensorOptions specified_options = TensorOptions().dtype(dtype_opt).layout(layout_opt).device(device_opt).pinned_memory(pin_memory_opt);
+Tensor empty_quantized(
+  IntArrayRef size, 
+  const Tensor& qtensor, 
+  c10::optional<ScalarType> dtype,
+  c10::optional<Layout> layout, 
+  c10::optional<Device> device,
+  c10::optional<bool> pin_memory,
+  c10::optional<c10::MemoryFormat> memory_format) {
+  
+  TensorOptions specified_options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+    TORCH_CHECK(
+    !(specified_options.has_memory_format() && memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+
+  TensorOptions options =
+    qtensor.options()
+        .merge_in(specified_options)
+        .merge_memory_format(memory_format);
+  
   Tensor output;
 
   if (qtensor.qscheme() == kPerTensorAffine) {
-    output = at::_empty_affine_quantized(size, qtensor.options().merge_in(specified_options),
+    output = at::_empty_affine_quantized(size, options,
                                          qtensor.q_scale(),
                                          qtensor.q_zero_point());
   } else if (qtensor.qscheme() == kPerChannelAffine || qtensor.qscheme() == kPerChannelAffineFloatQParams) {
@@ -109,7 +127,7 @@ Tensor empty_quantized(IntArrayRef size, const Tensor& qtensor, c10::optional<Sc
         qtensor.q_per_channel_scales(),
         qtensor.q_per_channel_zero_points(),
         qtensor.q_per_channel_axis(),
-        qtensor.options().merge_in(specified_options));
+        options);
   } else {
     TORCH_CHECK(false,
                 "QScheme not supported by empty_quantized:",

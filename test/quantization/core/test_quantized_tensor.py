@@ -402,9 +402,9 @@ class TestQuantizedTensor(TestCase):
                 dqr.to(device)
                 dqr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
                     device), zero_points.to(device), axis, dtype)
-                dqr_cuda=dqr_cuda.to('cpu')
-                #self.assertEqual(device,dqr.device)
-                #self.assertEqual(dqr_cuda.device,'cpu')
+                dqr_cuda = dqr_cuda.to('cpu')
+                # self.assertEqual(device,dqr.device)
+                # self.assertEqual(dqr_cuda.device,'cpu')
 
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
     def test_compare_quantize_per_channel_device_numerics(self):

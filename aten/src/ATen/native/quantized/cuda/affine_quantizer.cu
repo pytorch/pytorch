@@ -3,10 +3,11 @@
 #include <math.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 
 namespace at {
 namespace native {
-namespace {
 
 void quantize_tensor_per_tensor_affine_cuda(
     const Tensor& rtensor,
@@ -56,8 +57,8 @@ void dequantize_tensor_per_tensor_affine_cuda(
 }
 
 void quantize_tensor_per_channel_affine_cuda(
-  Tensor rtensor,
-  Tensor qtensor,
+  const Tensor& rtensor,
+  Tensor& qtensor,
   Tensor scales,
   Tensor zero_points,
   int64_t axis) {
@@ -96,8 +97,8 @@ void quantize_tensor_per_channel_affine_cuda(
 }
 
 void dequantize_tensor_per_channel_affine_cuda(
-  Tensor qtensor,
-  Tensor rtensor,
+  const Tensor& qtensor,
+  Tensor& rtensor,
   Tensor scales,
   Tensor zero_points,
   int64_t axis) {
@@ -122,8 +123,8 @@ void dequantize_tensor_per_channel_affine_cuda(
 }
 
 void quantize_tensor_per_channel_float_qparams_cuda(
-  Tensor rtensor,
-  Tensor qtensor,
+  const Tensor& rtensor,
+  Tensor& qtensor,
   Tensor scales,
   Tensor zero_points,
   int64_t axis) {
@@ -161,8 +162,8 @@ void quantize_tensor_per_channel_float_qparams_cuda(
 }
 
 void dequantize_tensor_per_channel_float_qparams_cuda(
-  Tensor qtensor,
-  Tensor rtensor,
+  const Tensor& qtensor,
+  Tensor& rtensor,
   Tensor scales,
   Tensor zero_points,
   int64_t axis) {
@@ -185,8 +186,6 @@ void dequantize_tensor_per_channel_float_qparams_cuda(
       });
     });
 }
-
-} // anonymous namespace
 
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
