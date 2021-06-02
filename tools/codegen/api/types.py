@@ -338,7 +338,7 @@ class CppSignature:
         return n
 
     # Render the C++ declaration for this signature
-    def decl(self, *, name: str = None, prefix: str = "", is_redispatching_fn: bool = False) -> str:
+    def decl(self, *, name: Optional[str] = None, prefix: str = "", is_redispatching_fn: bool = False) -> str:
         returns_type = cpp.returns_type(self.func.returns).cpp_type()
         cpp_args = [a.decl() for a in self.arguments()]
         if is_redispatching_fn:
@@ -350,7 +350,7 @@ class CppSignature:
 
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
-    def defn(self, *, name: str = None, prefix: str = "", is_redispatching_fn: bool = False) -> str:
+    def defn(self, *, name: Optional[str] = None, prefix: str = "", is_redispatching_fn: bool = False) -> str:
         returns_type = cpp.returns_type(self.func.returns).cpp_type()
         cpp_args = [a.defn() for a in self.arguments()]
         if is_redispatching_fn:

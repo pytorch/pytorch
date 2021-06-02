@@ -27,7 +27,7 @@ def get_filenames(self, subname):
     munged_id = remove_prefix(self.id(), module_id + ".")
     test_file = os.path.realpath(sys.modules[module_id].__file__)
     base_name = os.path.join(os.path.dirname(test_file),
-                             "serialized",
+                             "../serialized",
                              munged_id)
 
     subname_output = ""
