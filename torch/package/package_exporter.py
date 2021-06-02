@@ -201,6 +201,8 @@ class PackageExporter:
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
         self.verbose = verbose
+        self._implicitly_externed = []
+
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
         # These are OrderedDicts for compatibility with RemovableHandle.
@@ -382,11 +384,7 @@ node [shape=box];
             return
 
         if self._can_implicitly_extern(module_name):
-            if self.verbose:
-                print(
-                    f"implicitly adding {module_name} to external modules "
-                    f"since it is part of the standard library and is a dependency."
-                )
+            self._implicitly_externed.append(module_name)
             self.dependency_graph.add_node(
                 module_name, action=_ModuleProviderAction.EXTERN, provided=True
             )
@@ -838,6 +836,45 @@ node [shape=box];
                 ...
         """
         if self.verbose:
+
+            def print_pretty(category: str, entries: List[str]):
+                print(f"- {category}:")
+                for item in sorted(entries):
+                    print(f"    {item}")
+
+            interned_mods = []
+            externed_mods = []
+            mocked_mods = []
+            pickled_objs = []
+            invalid_nodes = []
+
+            for module_name, attrs in self.dependency_graph.nodes.items():
+                if "action" in attrs.keys():
+                    action = attrs["action"]
+                else:
+                    action = None
+
+                if action == _ModuleProviderAction.EXTERN:
+                    if module_name not in self._implicitly_externed:
+                        externed_mods.append(module_name)
+
+                elif action == _ModuleProviderAction.MOCK:
+                    mocked_mods.append(module_name)
+
+                elif action == _ModuleProviderAction.INTERN:
+                    if attrs.get("is_pickle") is True:
+                        pickled_objs.append(module_name)
+                    else:
+                        interned_mods.append(module_name)
+                else:
+                    invalid_nodes.append(module_name)
+            print("Package Contents:")
+            print_pretty("interned modules", interned_mods)
+            print_pretty("explicitly externed modules", externed_mods)
+            print_pretty("implicitly externed modules", self._implicitly_externed)
+            print_pretty("mocked modules", mocked_mods)
+            print_pretty("pickles", pickled_objs)
+            print_pretty("invalid objects", invalid_nodes)
             print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
 
         self._execute_dependency_graph()
