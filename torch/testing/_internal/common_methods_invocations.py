@@ -669,13 +669,8 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         return inputs
 
 
-def sample_inputs_norm(op_info, device, dtype, requires_grad, sample_types='default', **kwargs):
+def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    cases_nuc = (
-        ((S, S), ('nuc',), 'nuc'),
-        ((S, S, S), ('nuc', [1, 2]), 'nuc_batched'),
-    )
 
     cases = (
         ((S, S), (2,), '2'),
@@ -695,19 +690,6 @@ def sample_inputs_norm(op_info, device, dtype, requires_grad, sample_types='defa
         ((S, S, S), (1.5, -1), '1_5_neg_dim'),
         ((S, S, S), (1.5, 1, True), 'keepdim_1_5_dim'),
         ((S, S, S), (1.5, -1, True), 'keepdim_1_5_neg_dim'),
-    )
-
-    cases_jit_failing_cases = (
-        ((S, S), (), 'default'),
-        ((S, S), ('fro',), 'fro_default'),
-        ((S, S), ('fro', [0, 1],), 'fro'),
-    )
-
-    cases_inf = (
-        ((S, S), (-inf,), '-inf'),
-        ((S, S), (inf,), 'inf'),
-        ((S, S), (inf, 1,), 'inf_2_dim'),
-        ((S, S), (inf, -1,), 'inf_2_neg_dim'),
     )
 
     cases_negdim_base = (
@@ -736,23 +718,59 @@ def sample_inputs_norm(op_info, device, dtype, requires_grad, sample_types='defa
         cases_negdim.append((shape, tuple(new_args), name.replace("_dim", "_neg_dim")))
 
     def generator():
-        if sample_types == 'default':
-            for shape, args, name in itertools.chain(cases, cases_negdim):
-                yield SampleInput(make_arg(shape), args=args, name=name)
+        for shape, args, name in itertools.chain(cases, cases_negdim):
+            yield SampleInput(make_arg(shape), args=args, name=name)
 
-            for shape, args, name in cases_nonzero_input:
-                yield SampleInput(make_arg(shape, exclude_zero=True), args=args, name=name)
-        elif sample_types == 'nuc':
-            for shape, args, name in cases_nuc:  # type: ignore[assignment]
-                yield SampleInput(make_arg(shape), args=args, name=name)
-        elif sample_types == 'jit':
-            for shape, args, name in cases_jit_failing_cases:  # type: ignore[assignment]
-                yield SampleInput(make_arg(shape), args=args, name=name)
-        elif sample_types == 'inf':
-            for shape, args, name in cases_inf:
-                yield SampleInput(make_arg(shape), args=args, name=name)
-        else:
-            raise ValueError("Invalid value for `sample_types`")
+        for shape, args, name in cases_nonzero_input:
+            yield SampleInput(make_arg(shape, exclude_zero=True), args=args, name=name)
+
+    return list(generator())
+
+
+def sample_inputs_norm_fro(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        ((S, S), (), 'default'),
+        ((S, S), ('fro',), 'fro_default'),
+        ((S, S), ('fro', [0, 1],), 'fro'),
+    )
+
+    def generator():
+        for shape, args, name in cases:
+            yield SampleInput(make_arg(shape), args=args, name=name)
+
+    return list(generator())
+
+
+def sample_inputs_norm_nuc(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        ((S, S), ('nuc',), 'nuc'),
+        ((S, S, S), ('nuc', [1, 2]), 'nuc_batched'),
+    )
+
+    def generator():
+        for shape, args, name in cases:
+            yield SampleInput(make_arg(shape), args=args, name=name)
+
+    return list(generator())
+
+
+def sample_inputs_norm_inf(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        ((S, S), (-inf,), '-inf'),
+        ((S, S), (inf,), 'inf'),
+        ((S, S), (inf, 1,), 'inf_2_dim'),
+        ((S, S), (inf, -1,), 'inf_2_neg_dim'),
+    )
+
+    def generator():
+        for shape, args, name in cases:
+            yield SampleInput(make_arg(shape), args=args, name=name)
 
     return list(generator())
 
@@ -6827,6 +6845,10 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
            ),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
+    # `torch.norm` has multiple code paths depending on the value of `p`.
+    # These paths have different dtype support. Also JIT supports,
+    # most variants but not all of them. So we split the OpInfo entries,
+    # for `norm` based on the code-paths and JIT support.
     OpInfo('norm',
            backward_dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            sample_inputs_func=sample_inputs_norm,
@@ -6839,7 +6861,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('norm',
            variant_test_name='nuc',
-           sample_inputs_func=partial(sample_inputs_norm, sample_types='nuc'),
+           sample_inputs_func=sample_inputs_norm_nuc,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types(),
@@ -6857,8 +6879,8 @@ op_db: List[OpInfo] = [
            )
            ),
     OpInfo('norm',
-           variant_test_name='jit',
-           sample_inputs_func=partial(sample_inputs_norm, sample_types='jit'),
+           variant_test_name='fro',
+           sample_inputs_func=sample_inputs_norm_fro,
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            skips=(
@@ -6880,7 +6902,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('norm',
            variant_test_name='inf',
-           sample_inputs_func=partial(sample_inputs_norm, sample_types='inf'),
+           sample_inputs_func=sample_inputs_norm_inf,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            # Reason for disabling gradcheck:
            # At p=inf, norm is max element. But since complex field is not ordered
