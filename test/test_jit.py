@@ -15967,7 +15967,7 @@ class TestProducerVersion(unittest.TestCase):
 
     def test_version(self):
         # issue gh-32561
-        self.assertEqual(torch.onnx.producer_version, torch.__version__[:3])
+        self.assertTrue(torch.__version__.startswith(torch.onnx.producer_version))
 
 
 for test in autograd_method_tests():
