@@ -516,6 +516,13 @@ class DistributedTest:
         def _barrier(self, *args, **kwargs):
             Barrier.sync(*args, **kwargs)
 
+        def _verify_ddp_error_logged(self, model_DDP, err_substr):
+            # Verify error was logged in ddp_logging_data.
+            ddp_logging_data = model_DDP._get_ddp_logging_data()
+            self.assertTrue("has_error" in ddp_logging_data)
+            self.assertTrue("error" in ddp_logging_data)
+            self.assertTrue(err_substr in ddp_logging_data["error"])
+
         def _init_group_test(self, **kwargs):
             group = [1, 2]
             group_id = dist.new_group(group, **kwargs)
@@ -4282,7 +4289,8 @@ class DistributedTest:
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
             model_DDP._set_static_graph()
             self.assertEqual(model_DDP._get_ddp_logging_data().get("static_graph"), True)
-            with self.assertRaisesRegex(RuntimeError, 'should be called before training loop starts'):
+            expected_err = 'should be called before training loop starts'
+            with self.assertRaisesRegex(RuntimeError, expected_err):
                 local_bs = 2
                 batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
                 offset = dist.get_rank() * local_bs
@@ -4296,6 +4304,9 @@ class DistributedTest:
                     1,
                 )
                 model_DDP._set_static_graph()
+
+            # Verify error was logged in ddp_logging_data.
+            self._verify_ddp_error_logged(model_DDP, expected_err)
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
@@ -5376,6 +5387,7 @@ class DistributedTest:
                         ddp(inp).sum().backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        self._verify_ddp_error_logged(ddp, msg)
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
@@ -5630,6 +5642,7 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        self._verify_ddp_error_logged(model, msg)
                         # 2nd linear layer is unused
                         unused_param_index = 1
                         expected_strs = [
@@ -5673,10 +5686,8 @@ class DistributedTest:
             ones_input = torch.ones(20, 10, device=self.rank)
             # unused parameter in the first iteration got used
             # in second iteration.
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Your training graph has changed in this iteration",
-            ):
+            expected_err = "Your training graph has changed in this iteration"
+            with self.assertRaisesRegex(RuntimeError, expected_err):
                 for i in range(2):
                     if i % 2 == 0:
                         out = model(random_input)
@@ -5684,6 +5695,9 @@ class DistributedTest:
                         out = model(ones_input)
                     loss = out.sum()
                     loss.backward()
+
+            self._verify_ddp_error_logged(model, expected_err)
+
             # used parameter in the first iteration got unused
             # in second iteration.
             with self.assertRaisesRegex(
@@ -5699,6 +5713,8 @@ class DistributedTest:
                         out = model(ones_input)
                     loss = out.sum()
                     loss.backward()
+
+            self._verify_ddp_error_logged(model, "Expected to have finished reduction")
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
@@ -5776,6 +5792,7 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        self._verify_ddp_error_logged(model, msg)
                         unused_param_index = 1
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,

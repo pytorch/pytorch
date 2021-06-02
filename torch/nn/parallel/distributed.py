@@ -569,6 +569,9 @@ class DistributedDataParallel(Module):
         )
 
         self.logger = dist.Logger(self.reducer)
+        # Set as a weak reference to avoid reference cycle between
+        # logger and reducer.
+        self.reducer.set_logger(self.logger)
 
         # Set logging data that can be got during construction time.
         self.logger.set_construction_data_and_log(
