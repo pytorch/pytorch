@@ -82,20 +82,18 @@ def basis(A):
     """
     if A.is_cuda:
         # torch.orgqr is not available in CUDA
-        Q, _ = torch.qr(A, some=True)
+        Q = torch.linalg.qr(A).Q
     else:
         Q = torch.orgqr(*torch.geqrf(A))
     return Q
 
 
-def symeig(A: Tensor, largest: Optional[bool] = False, eigenvectors: Optional[bool] = True) -> Tuple[Tensor, Tensor]:
+def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
     """Return eigenpairs of A with specified ordering.
     """
     if largest is None:
         largest = False
-    if eigenvectors is None:
-        eigenvectors = True
-    E, Z = torch.symeig(A, eigenvectors, True)
+    E, Z = torch.linalg.eigh(A, UPLO='U')
     # assuming that E is ordered
     if largest:
         E = torch.flip(E, dims=(-1,))

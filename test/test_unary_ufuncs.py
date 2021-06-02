@@ -291,6 +291,10 @@ class TestUnaryUfuncs(TestCase):
                 # while NumPy computes in float16
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype,
                                        exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
+            elif dtype is torch.bfloat16:
+                # Ref: https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_utils.py#L1149
+                self.assertEqualHelper(actual, expected, msg, dtype=dtype,
+                                       exact_dtype=exact_dtype, rtol=16e-3, atol=1e-5)
             else:
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
 
@@ -882,13 +886,6 @@ class TestUnaryUfuncs(TestCase):
             self.check_internal_mem_overlap(in_fn, 1, dtype, dev,
                                             expected_failure=not has_internal_mem_overlap_check)
 
-    # TODO: review with ceil opinfo
-    @onlyCUDA
-    def test_ceil_out_mismatch(self, device):
-        a = torch.randn(1)
-        b = torch.randn(1, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
-
     # TODO: opinfo hardshrink
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -1018,6 +1015,35 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.nn.functional.silu(input_noncontig),
                          expected_output_noncontig, atol=atol, rtol=rtol)
         self.assertEqual(torch.nn.functional.silu(
+            input_noncontig, inplace=True), expected_output_noncontig,
+            atol=atol, rtol=rtol)
+
+    @skipIfNoSciPy
+    @dtypes(torch.float, torch.double)
+    def test_mish(self, device, dtype):
+        input_np = np.random.randn(5, 8)
+        special_input = [[-1000, -1, -0.1, 0, 0.5, 1, 2, 1000]]
+        input_np = np.concatenate((input_np, special_input), axis=0).astype(
+            torch_to_numpy_dtype_dict[dtype])
+        expected_output_np = input_np * np.tanh(np.log1p(np.exp(input_np)))
+
+        expected_output = torch.from_numpy(expected_output_np).to(device)
+        expected_output_noncontig = expected_output.transpose(0, 1)
+
+        atol = 1e-6
+        rtol = 1e-6
+
+        input = torch.from_numpy(input_np).clone().contiguous().to(device)
+        self.assertEqual(torch.nn.functional.mish(input), expected_output,
+                         atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.mish(input, inplace=True),
+                         expected_output, atol=atol, rtol=rtol)
+
+        input = torch.from_numpy(input_np).clone().to(device)
+        input_noncontig = input.transpose(0, 1)
+        self.assertEqual(torch.nn.functional.mish(input_noncontig),
+                         expected_output_noncontig, atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.mish(
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
 
@@ -1193,13 +1219,13 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    def test_special_i0e_vs_scipy(self, device, dtype):
-        def check_equal(t):
+    def test_special_i0_i1_vs_scipy(self, device, dtype):
+        def check_equal(t, torch_fn, scipy_fn):
             # Test by comparing to scipy
-            actual = torch.special.i0e(t)
+            actual = torch_fn(t)
             if dtype is torch.bfloat16:
                 t = t.to(torch.float32)
-            expected = scipy.special.i0e(t.cpu().numpy())
+            expected = scipy_fn(t.cpu().numpy())
 
             # Casting down for dtype float16 is required since scipy upcasts to float32
             if dtype is torch.bfloat16 or dtype is torch.float16:
@@ -1207,11 +1233,43 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(actual, expected)
 
         t = torch.tensor([], device=device, dtype=dtype)
-        check_equal(t)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
         range = (-1e7, 1e7)
         if dtype == torch.half:
             range = (-65000, 65000)
+
+        t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
+
+        # NaN, inf, -inf are tested in reference_numerics tests.
+        info = torch.finfo(dtype)
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
+        t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
+
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_special_ndtr_vs_scipy(self, device, dtype):
+        def check_equal(t):
+            # Test by comparing to scipy
+            actual = torch.special.ndtr(t)
+            expected = scipy.special.ndtr(t.cpu().numpy())
+            self.assertEqual(actual, expected)
+
+        range = (-10, 10)
 
         t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
         check_equal(t)
@@ -1240,32 +1298,6 @@ class TestUnaryUfuncs(TestCase):
         inp = inp.abs()
         for v in inp:
             self.assertGreater(math.copysign(1.0, v), 0.0)
-
-    # TODO: rationalize with abs testing and verify absolute is tested as an alias
-    @dtypes(torch.float)
-    def test_absolute(self, device, dtype):
-        # absolute is an alias for abs. Just check to see that results
-        # are the same.
-        t = torch.randn(10, 10, device=device, dtype=dtype)
-        r_abs = t.abs()
-        r_absolute = t.absolute()
-        self.assertEqual(r_abs, r_absolute)
-
-        r_abs = torch.abs(t)
-        r_absolute = torch.absolute(t)
-        self.assertEqual(r_abs, r_absolute)
-
-        r_abs = torch.empty((10, 10), device=device, dtype=dtype)
-        r_absolute = torch.empty((10, 10), device=device, dtype=dtype)
-        torch.abs(t, out=r_abs)
-        torch.absolute(t, out=r_absolute)
-        self.assertEqual(r_abs, r_absolute)
-
-        from copy import deepcopy
-        t_copy = deepcopy(t)
-        t.absolute_()
-        t_copy.abs_()
-        self.assertEqual(t, t_copy)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
@@ -1510,36 +1542,6 @@ class TestUnaryUfuncs(TestCase):
                 self.assertTrue(math.isnan(nan_real_inf_imag_out.imag))
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
-
-    # This function tests that a nan value is returned for input values not in domain
-    @dtypes(torch.float32, torch.float64)
-    def test_acosh_domain_float(self, device, dtype):
-        # Domain of acosh is [1, inf), for values outside the domain - output is mapped
-        # to NaN, except for input value `inf` - output is mapped to `inf`
-        sample = torch.tensor([float('-inf'), 1.00, -1.23, -0.06, 0.98, float('inf')],
-                              device=device, dtype=dtype)
-        nan_mask = torch.tensor([True, False, True, True, True, False], device=device)
-        inf_mask = torch.tensor([False, False, False, False, False, True], device=device)
-        self.assertEqual(torch.isnan(torch.acosh(sample)), nan_mask)
-        self.assertEqual(torch.isnan(sample.acosh()), nan_mask)
-        self.assertEqual(torch.isinf(torch.acosh(sample)), inf_mask)
-        self.assertEqual(torch.isinf(sample.acosh()), inf_mask)
-
-    # This function tests that a nan value is returned for input values not in domain
-    @dtypes(torch.float32, torch.float64)
-    def test_atanh_domain_float(self, device, dtype):
-        # Domain of atanh is (-1, 1), for edge values (-1 and 1) - output is mapped
-        # to inf and for other values outside this range - output is mapped to NaN
-        sample = torch.tensor([float('-inf'), -1.00, 1.00, -1.23, 1.06, float('inf')],
-                              device=device, dtype=dtype)
-        nan_mask = torch.tensor([True, False, False, True, True, True], device=device)
-        inf_mask = torch.tensor([False, True, True, False, False, False], device=device)
-        # For values not in domain (except -1.0 and 1.0), atanh should return nan
-        self.assertEqual(torch.isnan(torch.atanh(sample)), nan_mask)
-        self.assertEqual(torch.isnan(sample.atanh()), nan_mask)
-        # For values -1.0 and 1.0, atanh should return -inf and inf respectively
-        self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
-        self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())

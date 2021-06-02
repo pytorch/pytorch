@@ -4,7 +4,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import codecs
 import copy
 import os
 import pickle
@@ -12,6 +11,7 @@ import socket
 import threading
 import time
 from abc import ABC, abstractmethod
+from base64 import b64encode
 from datetime import datetime, timedelta
 from typing import Callable, Optional, Tuple, cast
 from unittest import TestCase
@@ -153,7 +153,7 @@ class RendezvousStateTest(TestCase):
 
                 bits = pickle.dumps(state)
 
-                base64_bits = codecs.encode(bits, "base64")
+                base64_bits = b64encode(bits)
 
                 self.assertLessEqual(len(base64_bits), max_byte_size)
 

@@ -259,7 +259,6 @@ unique_ptr<OperatorBase> _CreateOperator(
   }
   if (operator_def.engine().size() && !VLOG_IS_ON(1)) {
     static int log_occurrences = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (log_occurrences <= 64) {
       ++log_occurrences;
       LOG(INFO) << "Engine " << operator_def.engine()

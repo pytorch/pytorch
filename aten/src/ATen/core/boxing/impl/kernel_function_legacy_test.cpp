@@ -50,7 +50,6 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
@@ -62,7 +61,6 @@ void expectCallsDecrement(DispatchKey dispatch_key) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(4, result[0].toInt());
@@ -155,7 +153,6 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntOutpu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(DispatchKey::CPU), 3, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(9, result[0].toInt());
@@ -214,7 +211,6 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(DispatchKey::CPU), 2, 4, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toIntVector().size());
@@ -229,7 +225,6 @@ std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<st
   dict.insert("second", dummyTensor(DispatchKey::CUDA));
   return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
     dummyTensor(DispatchKey::CUDA),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5,
     {dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)},
     c10::optional<int64_t>(c10::in_place, 0),
@@ -399,7 +394,6 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
@@ -417,7 +411,6 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
@@ -696,9 +689,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
   ASSERT_TRUE(op.has_value());
 
   c10::Dict<string, c10::List<int64_t>> dict;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert("key1", c10::List<int64_t>({10, 20}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert("key2", c10::List<int64_t>({30, 40}));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
@@ -727,15 +718,11 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
 
   c10::Dict<string, c10::List<c10::Dict<int64_t, string>>> dict;
   c10::Dict<int64_t, string> dict1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict1.insert(10, "10");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict1.insert(20, "20");
   dict.insert("key1", c10::List<c10::Dict<int64_t, string>>({dict1}));
   c10::Dict<int64_t, string> dict2;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict2.insert(30, "30");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict2.insert(40, "40");
   dict.insert("key2", c10::List<c10::Dict<int64_t, string>>({dict2}));
   auto outputs = callOp(*op, dict);
@@ -800,9 +787,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   dict1.insert("1", c10::List<int64_t>({1, 2}));
   dict1.insert("3", c10::List<int64_t>({3, 4}));
   c10::Dict<string, c10::List<int64_t>> dict2;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict2.insert("5", c10::List<int64_t>({5, 6}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict2.insert("7", c10::List<int64_t>({7, 8}));
   c10::List<c10::Dict<string, c10::List<int64_t>>> list({ dict1, dict2 });
   auto outputs = callOp(*op, list);

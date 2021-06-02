@@ -262,7 +262,6 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
       break;
     {
       pybind11::gil_scoped_release no_gil;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::this_thread::sleep_for(std::chrono::microseconds(10));
     }
   }
@@ -449,7 +448,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
     .def("__repr__", [](const cudaDeviceProp &prop) {
       std::ostringstream stream;
       stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
-             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
              << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
       return stream.str();

@@ -102,7 +102,6 @@ using GLUFuncOptions = GLUOptions;
 /// Hardshrink model(HardshrinkOptions().lambda(42.42));
 /// ```
 struct TORCH_API HardshrinkOptions {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   /* implicit */ HardshrinkOptions(double lambda = 0.5);
 
   /// the `lambda` value for the Hardshrink formulation. Default: 0.5
@@ -166,7 +165,6 @@ using HardtanhFuncOptions = HardtanhOptions;
 /// ```
 struct TORCH_API LeakyReLUOptions {
   /// Controls the angle of the negative slope. Default: 1e-2
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, negative_slope) = 1e-2;
 
   /// can optionally do the operation in-place. Default: False
@@ -321,7 +319,6 @@ struct TORCH_API PReLUOptions {
   TORCH_ARG(int64_t, num_parameters) = 1;
 
   /// the initial value of `a`. Default: 0.25
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, init) = 0.25;
 };
 
@@ -393,11 +390,9 @@ using ReLU6FuncOptions = ReLU6Options;
 /// ```
 struct TORCH_API RReLUOptions {
   /// lower bound of the uniform distribution. Default: 1/8
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, lower) = 1.0 / 8.0;
 
   /// upper bound of the uniform distribution. Default: 1/3
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, upper) = 1.0 / 3.0;
 
   /// can optionally do the operation in-place. Default: False
@@ -417,11 +412,9 @@ namespace functional {
 /// ```
 struct TORCH_API RReLUFuncOptions {
   /// lower bound of the uniform distribution. Default: 1/8
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, lower) = 1.0 / 8.0;
 
   /// upper bound of the uniform distribution. Default: 1/3
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, upper) = 1.0 / 3.0;
 
   TORCH_ARG(bool, training) = false;
@@ -475,7 +468,6 @@ struct TORCH_API SoftplusOptions {
   TORCH_ARG(double, beta) = 1.0;
 
   /// values above this revert to a linear function. Default: 20
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, threshold) = 20.0;
 };
 
@@ -502,7 +494,6 @@ using SoftplusFuncOptions = SoftplusOptions;
 /// Softshrink model(SoftshrinkOptions(42.42));
 /// ```
 struct TORCH_API SoftshrinkOptions {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   /* implicit */ SoftshrinkOptions(double lambda = 0.5);
 
   /// the `lambda` value for the Softshrink formulation. Default: 0.5
