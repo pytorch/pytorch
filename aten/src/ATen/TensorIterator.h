@@ -412,6 +412,10 @@ protected:
   /// been called?  This is SOLELY used to check validity of perm_.
   bool has_coalesced_dimensions_ = false;
 
+  /// Whether iteration must be fixed. This disables dimension permuting and also
+  /// changes how for_each divides work among threads.
+  bool enforce_linear_iteration_ = false;
+
   /// The index offsets into the original tensors for each dimension.
   /// This is only non-zero when you narrow() a TensorIterator (e.g.,
   /// when you make sub-TensorIterators).
@@ -569,6 +573,17 @@ public:
     return *this;
   }
 
+  // Sets the enforce_linear_iteration_ flag, which is false by default.
+  // If true, iteration goes in the same order as a C-contiguous tensor
+  // is layed out in memory. i.e. last dimension iterates fastest.
+  //
+  // This iteration order can be less efficient and may even prevent vectorization.
+  // So only use if the correctness of your kernel depends on it.
+  TensorIteratorConfig& enforce_linear_iteration(const bool _enforce_linear_iteration = true) {
+    enforce_linear_iteration_ = _enforce_linear_iteration;
+    return *this;
+  }
+
   // Sets the promote_inputs_to_common_dtype_ flag, which is false by default
   // If true, the iterator's "common dtype" is always computed (see the
   //   [Common Dtype Computation] note) and, on the CPU, temporary copies of
@@ -650,6 +665,7 @@ private:
   bool check_all_same_dtype_ = true;
   bool check_all_same_device_ = true;
   bool enforce_safe_casting_to_output_ = false;
+  bool enforce_linear_iteration_ = false;
   bool promote_inputs_to_common_dtype_ = false;
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
