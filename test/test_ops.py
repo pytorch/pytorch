@@ -45,6 +45,79 @@ class TestOpInfo(TestCase):
             sample = samples[0]
             op(sample.input, *sample.args, **sample.kwargs)
 
+    # Helper for comparing torch tensors and numpy arrays
+    def assertEqualHelper(self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs):
+        assert isinstance(actual, torch.Tensor)
+
+        # Some NumPy functions return scalars, not arrays
+        if isinstance(expected, Number):
+            self.assertEqual(actual.item(), expected, **kwargs)
+        elif isinstance(expected, np.ndarray):
+            # Handles exact dtype comparisons between arrays and tensors
+            if exact_dtype:
+                # Allows array dtype to be float32 when comparing with bfloat16 tensors
+                # since Numpy doesn't support the bfloat16 dtype
+                # Also ops like scipy.special.erf, scipy.special.erfc etc. promote float16
+                # to float32
+                if expected.dtype == np.float32:
+                    assert actual.dtype in (torch.float16, torch.bfloat16, torch.float32)
+                else:
+                    assert expected.dtype == torch_to_numpy_dtype_dict[actual.dtype]
+
+            self.assertEqual(actual,
+                             torch.from_numpy(expected).to(actual.dtype),
+                             msg,
+                             exact_device=False,
+                             **kwargs)
+        else:
+            self.assertEqual(actual, expected, msg, exact_device=False, **kwargs)
+
+    def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
+        def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
+            if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
+                exact_dtype = False
+            
+            if dtype in [torch.uint8, torch.int8, torch.bool]:
+                self.assertEqualHelper(actual, expected, msg, dtype=dtype,
+                                       exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
+
+            elif dtype in torch.bfloat16:
+                self.assertEqualHelper(actual, expected, msg, dtype=dtype,
+                                       exact_dtype=exact_dtype, rtol=16e-3, atol=1e-5)
+
+            else:
+                self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
+
+        for t in tensors:
+            torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
+            if dtype is torch.bfloat16:
+                a = t.cpu().to(torch.float32).numpy()
+            else:
+                a = t.cpu().numpy()
+
+            actual = op(t, **torch_kwargs)
+            expected = op.ref(a, **numpy_kwargs)
+
+            if t.numel() < 10:
+                msg = ("Failed to produce expected results! Input tensor was"
+                        " {0}, torch result is {1}, and reference result is"
+                        " {2}.").format(t, actual, expected)
+            else:
+                msg = None
+
+            exact_dtype = True
+            if isinstance(actual, torch.Tensor):
+                _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan)
+            else:
+                for x, y in zip(expected, actual):
+                    _helper_reference_numerics(x, y, msg, exact_dtype, equal_nan)
+
+    @suppress_warnings
+    @ops(only_testing_ops)
+    def test_reference_testing(self, device, dtype, op):
+        tensors = op.sample_inputs(device, dtype)
+        self._test_reference_numerics(dtype, op, tensors)
+
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
     #   does NOT throw a runtime error
