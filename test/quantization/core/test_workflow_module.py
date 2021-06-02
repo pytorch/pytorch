@@ -227,6 +227,7 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
+
     def test_observer_scriptable(self):
         obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
         for obs in obs_list:
