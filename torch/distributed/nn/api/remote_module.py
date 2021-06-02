@@ -637,7 +637,7 @@ class RemoteModule(_RemoteModule):
     def __init__(
         self,
         remote_device: str,
-        module_cls: Type[nn.Module] = None,
+        module_cls: Type[nn.Module],
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
     ):
