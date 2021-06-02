@@ -751,7 +751,8 @@ class TestCrashHandler(TestCase):
     @unittest.skipIf(not HAS_BREAKPAD, "Crash handler lib was not linked in")
     def test_python_exception_writing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            torch.utils._crash_handler.enable_minidump_collection(temp_dir)
+            torch.utils._crash_handler.enable_minidumps(temp_dir)
+            torch.utils._crash_handler.enable_minidumps_on_exceptions()
 
             files = os.listdir(temp_dir)
             self.assertEqual(len(files), 0)
@@ -768,7 +769,7 @@ class TestCrashHandler(TestCase):
             files = os.listdir(temp_dir)
             self.assertEqual(len(files), 1)
             self.assertTrue(files[0].endswith(".dmp"))
-            torch.utils._crash_handler.disable_minidump_collection()
+            torch.utils._crash_handler.disable_minidumps()
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
