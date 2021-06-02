@@ -142,7 +142,7 @@ class ProcessGroup : public torch::CustomClassHolder {
 
     // Returns a Future object that will be associated with the completion of
     // work. Only NCCL backend is currently supported.
-    virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
     OpType retrieveOpType();
 
@@ -165,6 +165,9 @@ class ProcessGroup : public torch::CustomClassHolder {
 
     // Operation type that this work object refers to.
     OpType opType_;
+
+    std::vector<at::Tensor> outputTensors_;
+    c10::intrusive_ptr<at::ivalue::Future> future_;
 
     // When profiling, the callback to record end of operation event. This
     // callback needs to be called when collective operation is complete.

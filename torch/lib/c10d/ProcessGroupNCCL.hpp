@@ -174,9 +174,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
-    // The future returned by getFuture.
-    c10::intrusive_ptr<at::ivalue::Future> future_;
-
     friend class ProcessGroupNCCL;
   };
 
