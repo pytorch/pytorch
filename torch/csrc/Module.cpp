@@ -931,7 +931,7 @@ PyObject* initModule() {
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
-    if (torch::crash_handler::is_enabled()) {
+    if (torch::crash_handler::is_enabled_on_exceptions()) {
       torch::crash_handler::write_minidump();
     }
 
