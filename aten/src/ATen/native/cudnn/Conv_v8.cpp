@@ -84,7 +84,7 @@ struct CacheKey {
 };
 
 // FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
+std::unordered_map<CacheKey, std::unique_ptr<cudnn_frontend::ExecutionPlan>, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
 
 }
 
@@ -146,9 +146,10 @@ void try_filtered_configs(const cudnn_frontend::EngineConfigList filtered_config
           .setHandle(handle)
           .setEngineConfig(cfg)
           .build();
-      run_conv_plan(handle, x, y, w, plan);
-      engine_cache.emplace(key, std::move(plan));
-      //TORCH_CHECK(engine_cache.count(key), "this never fires");
+      std::unique_ptr<cudnn_frontend::ExecutionPlan> plan_ptr(new cudnn_frontend::ExecutionPlan(std::move(plan)));
+
+      run_conv_plan(handle, x, y, w, *plan_ptr.get());
+      engine_cache[key] = std::move(plan_ptr);
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
   }
@@ -167,7 +168,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   get_cachekey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
   auto search = engine_cache.find(key);
   if (search != engine_cache.end()) {
-    run_conv_plan(handle, x, y, w, search->second);
+    run_conv_plan(handle, x, y, w, *(search->second.get()));
     return;
   }
 
