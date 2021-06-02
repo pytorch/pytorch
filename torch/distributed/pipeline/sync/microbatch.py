@@ -42,11 +42,9 @@ class Batch:
     An abstraction representing a microbatch in the pipeline.
     """
 
-    def __init__(self, values, is_single_sequence=False) -> None:
+    def __init__(self, values) -> None:
         self._values = values
         self.atomic = torch.is_tensor(values)
-        # For backward compatibility.
-        self.is_single_sequence = is_single_sequence
 
         # Verify at least on tensor
         if not self.atomic:
@@ -92,13 +90,9 @@ class Batch:
         the output with :class:`Batch`.
         """
         if self.atomic:
-            return Batch(function(self._values), self.is_single_sequence)
+            return Batch(function(self._values))
         else:
-            if self.is_single_sequence:
-                # Don't unwrap for backward compatibility
-                return Batch(function(self._values), self.is_single_sequence)
-            else:
-                return Batch(function(*self._values), self.is_single_sequence)
+            return Batch(function(*self._values))
 
     def __repr__(self) -> str:
         return f"Batch[atomic={self.atomic!r}]({self._values!r})"
@@ -184,18 +178,6 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
     if len(inputs) == 1 and isinstance(inputs[0], Tensor):
         return [Batch(x) for x in inputs[0].chunk(chunks)]
 
-    is_single_sequence = False
-    # Handle sequences for backward compatibility.
-    if len(inputs) == 1 and isinstance(inputs[0], Sequence):
-        all_tensors = True
-        for x in inputs[0]:
-            if not torch.is_tensor(x):
-                all_tensors = False
-
-        if all_tensors:
-            is_single_sequence = True
-            inputs = inputs[0]  # type: ignore[assignment]
-
     batches: List[Any] = [[] for _ in range(chunks)]
     # Actual number of chunks produced
     num_chunks = -1
@@ -223,7 +205,7 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
     # Truncate to actual number of chunks
     batches = batches[:num_chunks]
 
-    return [Batch(x, is_single_sequence) for x in batches]
+    return [Batch(x) for x in batches]
 
 
 def gather(outputs: List[Batch]):

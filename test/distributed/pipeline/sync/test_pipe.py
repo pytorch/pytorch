@@ -299,8 +299,7 @@ def test_input_pair(setup_rpc):
             self.fc_a = nn.Linear(1, 1)
             self.fc_b = nn.Linear(1, 1)
 
-        def forward(self, a_and_b):
-            a, b = a_and_b
+        def forward(self, a, b):
             return (self.fc_a(a), self.fc_b(b))
 
     model = nn.Sequential(Two())
@@ -309,17 +308,7 @@ def test_input_pair(setup_rpc):
     a = torch.rand(10, 1, requires_grad=True)
     b = torch.rand(10, 1, requires_grad=True)
 
-    a_out, b_out = model((a, b)).local_value()
-    loss = (a_out + b_out).mean()
-    loss.backward()
-
-    assert a.grad is not None
-    assert b.grad is not None
-
-    # Test with list.
-    a.grad = None
-    b.grad = None
-    a_out, b_out = model([a, b]).local_value()
+    a_out, b_out = model(a, b).local_value()
     loss = (a_out + b_out).mean()
     loss.backward()
 
@@ -344,8 +333,7 @@ def test_input_singleton(setup_rpc):
             super().__init__()
             self.fc = nn.Linear(1, 1)
 
-        def forward(self, only_a):
-            (a,) = only_a
+        def forward(self, a):
             return (self.fc(a),)
 
     model = nn.Sequential(One())
@@ -353,19 +341,7 @@ def test_input_singleton(setup_rpc):
 
     a = torch.rand(10, 1, requires_grad=True)
 
-    (a_out,) = model((a,)).local_value()
-    loss = a_out.mean()
-    loss.backward()
-
-    assert all(p.grad is not None for p in model.parameters())
-    assert a.grad is not None
-
-    # Test with list
-    a.grad = None
-    for p in model.parameters():
-        p.grad = None
-
-    (a_out,) = model([a]).local_value()
+    (a_out,) = model(a).local_value()
     loss = a_out.mean()
     loss.backward()
 
