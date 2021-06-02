@@ -129,6 +129,8 @@ def _check_sparse_coo_members_individually(
         if exc:
             return _amend_error_message(exc, "{}\n\nThe failure occurred for the values.")
 
+        return None
+
     return wrapper
 
 
