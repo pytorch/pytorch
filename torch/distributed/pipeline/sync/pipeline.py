@@ -201,11 +201,7 @@ class Pipeline:
                     part_id: int = j,
                 ) -> TensorOrTensors:
                     with use_skip_tracker(skip_tracker), record_function("chunk%d-part%d" % (chunk_id, part_id)):
-                        if batch.is_single_sequence:
-                            # Don't unwrap inputs for single sequence backward compatibility.
-                            return partition(inputs)
-                        else:
-                            return partition(*inputs)
+                        return partition(*inputs)
 
                 chk = Checkpointing(function, batch)  # type: ignore[arg-type]
                 task = Task(streams[j], compute=chk.checkpoint, finalize=chk.recompute)
