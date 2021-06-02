@@ -125,7 +125,6 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
     return node_type, quantize_op, qparams
 
 def quantize_node(
-        quantizer: QuantizerCls,
         in_node: Node,
         obs_module: torch.nn.Module,
         obs_node: Node,
