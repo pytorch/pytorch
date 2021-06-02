@@ -13,7 +13,7 @@ struct DimCounter {
 
   IntArrayRef shape;
   Range range;
-  DimVector values;
+  c10::SmallBuffer<int64_t, 4> values;
   int64_t offset;
 };
 
@@ -33,26 +33,26 @@ inline void get_data_ptrs(
 }
 
 inline void serial_for_each(
-    IntArrayRef shape, IntArrayRef strides, ArrayRef<char*> base_ptrs,
+    IntArrayRef shape, IntArrayRef strides,
+    char** base_ptrs, size_t ntensors,
     typename TensorIteratorBase::loop2d_t loop, Range range) {
-  auto ntensors = base_ptrs.size();
-  c10::SmallBuffer<char*, 4> ptrs(ntensors);
+  const auto ndim = shape.size();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      strides.size() == ntensors * std::max(size_t{2}, ndim));
 
-  if (strides.size() <= ntensors) {  // ndim <= 1
+  if (ndim <= 1) {
     if (range.begin == 0) {
-      std::copy(base_ptrs.begin(), base_ptrs.end(), ptrs.begin());
+      loop(base_ptrs, strides.data(), range.size(), 1);
     } else {
-      get_data_ptrs(ptrs.data(), base_ptrs, strides, {range.begin});
+      c10::SmallBuffer<char*, 4> ptrs(ntensors);
+      get_data_ptrs(ptrs.data(), {base_ptrs, ntensors}, strides, {range.begin});
+      loop(ptrs.data(), strides.data(), range.size(), 1);
     }
-    // Pad strides to 2d
-    c10::SmallBuffer<int64_t, 8> padded_strides(2 * ntensors);
-    std::copy(strides.begin(), strides.end(), padded_strides.begin());
-    std::fill(padded_strides.data() + strides.size(), padded_strides.end(), 0);
-    loop(ptrs.data(), padded_strides.data(), range.size(), 1);
   } else {
+    c10::SmallBuffer<char*, 4> ptrs(ntensors);
     auto counter = DimCounter(shape, range);
     while (!counter.is_done()) {
-      get_data_ptrs(ptrs.data(), base_ptrs, strides, counter.values);
+      get_data_ptrs(ptrs.data(), {base_ptrs, ntensors}, strides, counter.values);
       auto step = counter.max_2d_step();
       loop(ptrs.data(), strides.data(), step[0], step[1]);
       counter.increment(step);

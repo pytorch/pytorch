@@ -751,16 +751,7 @@ bool Value::mustNotBeNone() const {
 }
 
 std::string Value::debugNameBase() const {
-  std::string name = displayName();
-  std::string name_base = name;
-  auto last_dot_pos = name.find_last_of('.');
-  if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
-    if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
-        std::string::npos) {
-      name_base = name.substr(0, last_dot_pos);
-    }
-  }
-  return name_base;
+  return unique_name_;
 }
 
 bool Value::isValidName(const std::string& name) {
@@ -782,64 +773,12 @@ Value* Value::setDebugName(const std::string& name) {
     throw std::runtime_error("Invalid name: '" + name + "'");
   }
 
-  auto& names = node()->owningGraph()->unique_names_;
-
-  // clear any old name from the map
-  if (hasDebugName()) {
-    names.erase(unique_name_);
-    unique_name_ = "";
-  }
-
-  // allow "" to clear the uniquename
-  if (name == "") {
-    return this;
-  }
-
-  // if someone else has this name, then rename the other value
-  auto old_owner_of_name = names.find(name);
-  if (old_owner_of_name != names.end()) {
-    size_t suffix = 1;
-    std::string name_base = name;
-    auto last_dot_pos = name.find_last_of('.');
-    if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
-      if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
-          std::string::npos) {
-        suffix = c10::stoll(name.substr(last_dot_pos + 1));
-        name_base = name.substr(0, last_dot_pos);
-      }
-    }
-
-    auto& names_suffixes = node()->owningGraph()->name_base_suffix_;
-    auto it = names_suffixes.find(name_base);
-    if (it != names_suffixes.end()) {
-      suffix = std::max(suffix, it->second + 1);
-    }
-
-    // Verify that new name is not used and find next usable name in case
-    // suffix is used.
-    std::string replacement_name;
-    do {
-      std::stringstream ss;
-      ss << name_base << "." << suffix++;
-      replacement_name = ss.str();
-    } while (names.count(replacement_name) > 0);
-
-    names_suffixes[name_base] = suffix;
-
-    old_owner_of_name->second->setDebugName(replacement_name);
-  }
-
-  names[name] = this;
   unique_name_ = name;
   return this;
 }
 
 std::string Value::displayName() const {
-  std::string ret = c10::to_string(unique());
-  if (!unique_name_.empty()) {
-    ret += "_" + unique_name_;
-  }
-  return ret;
+  return unique_name_ + "_" + std::to_string(unique());
 }
 
 Value* Value::copyMetadata(Value* from) {
@@ -1803,7 +1742,7 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
-  n->output()->setDebugName(field);
+  n->output()->setDebugName("attr_" + field);
   return n;
 }
 

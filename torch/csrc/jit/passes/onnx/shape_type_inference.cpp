@@ -603,7 +603,8 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
             lc_node->input(i)->type()->cast<TensorType>()) {
       if (ConstantValueMap::HasValue(lc_node->input(i)->displayName())) {
         auto lc_value =
-            ConstantValueMap::GetValue(lc_node->input(i)->displayName()).value();
+            ConstantValueMap::GetValue(lc_node->input(i)->displayName())
+                .value();
         if (lc_value.dim() == 0) {
           auto lc_value_0 = lc_value.item<int64_t>();
           shape_size.emplace_back(static_cast<int64_t>(lc_value_0));
@@ -869,8 +870,8 @@ void ComputeConstant(Node* n, int opset_version) {
 
   switch (n->kind()) {
     case ::c10::onnx::Shape: {
-      auto input_shape =
-          ConstantValueMap::GetShapeInto1DInt64Vector(n->input()->displayName());
+      auto input_shape = ConstantValueMap::GetShapeInto1DInt64Vector(
+          n->input()->displayName());
       if (input_shape.has_value()) {
         auto shape_value = input_shape.value();
         // TODO: getDevice() ?
@@ -939,7 +940,8 @@ void ComputeConstant(Node* n, int opset_version) {
           if (!is_default_perm) {
             only_rank_available = true;
           } else if (ConstantValueMap::HasRank(n->input(0)->displayName())) {
-            rank = ConstantValueMap::GetRank(n->input(0)->displayName()).value();
+            rank =
+                ConstantValueMap::GetRank(n->input(0)->displayName()).value();
             only_rank_available = true;
           }
         }
@@ -988,7 +990,8 @@ void ComputeConstant(Node* n, int opset_version) {
     }
     case ::c10::onnx::NonZero: {
       if (ConstantValueMap::HasRank(n->input()->displayName())) {
-        auto rank = ConstantValueMap::GetRank(n->input()->displayName()).value();
+        auto rank =
+            ConstantValueMap::GetRank(n->input()->displayName()).value();
         std::vector<c10::ShapeSymbol> dims;
         dims.emplace_back(
             c10::ShapeSymbol::fromStaticSize(static_cast<int64_t>(rank)));
@@ -1001,7 +1004,8 @@ void ComputeConstant(Node* n, int opset_version) {
             if (value_a.size(0) == 1 && std::abs(value_a[0]) > 1e-6) {
               if (ConstantValueMap::HasShape(n->input()->displayName())) {
                 auto shape_size_0 =
-                    ConstantValueMap::GetShape(n->input()->displayName()).value();
+                    ConstantValueMap::GetShape(n->input()->displayName())
+                        .value();
                 if (shape_size_0.isComplete()) {
                   auto shape_vector_0 = shape_size_0.sizes().value();
                   int64_t num_elements = 1;

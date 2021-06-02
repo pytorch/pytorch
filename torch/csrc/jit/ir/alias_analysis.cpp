@@ -1716,8 +1716,8 @@ void Lint(const AliasDb* db) {
     auto it = db->elementMap_.find(v);
     if (it == db->elementMap_.end()) {
       failed = true;
-      ss << "Value %" << v->displayName() << " of type " << v->type()->repr_str()
-         << " wasn't found in the element map.\n"
+      ss << "Value %" << v->displayName() << " of type "
+         << v->type()->repr_str() << " wasn't found in the element map.\n"
          << "It was defined in " << *v->node();
     }
   }

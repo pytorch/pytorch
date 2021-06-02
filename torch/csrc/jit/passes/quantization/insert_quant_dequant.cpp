@@ -84,7 +84,8 @@ Node* insertChooseQParams(Graph* graph, Value* original_val) {
       at::Symbol::aten(choose_qparams_func),
       {original_val, reduce_range},
       /* num_outputs = */ 2);
-  choose_qparams->output(0)->setDebugName(original_val->displayName() + ".scale");
+  choose_qparams->output(0)->setDebugName(
+      original_val->displayName() + ".scale");
   choose_qparams->output(0)->setType(FloatType::get());
   choose_qparams->output(1)->setDebugName(
       original_val->displayName() + ".zero_point");
@@ -1173,7 +1174,10 @@ void InsertQuantDeQuantHelper::propagateQParams(
         dtype->output()};
   }
   Node* quant = insertQuant(
-      graph, quant_inputs, quant_kind, original_output->displayName() + ".quant");
+      graph,
+      quant_inputs,
+      quant_kind,
+      original_output->displayName() + ".quant");
   Value* quantized_output = quant->output();
   // replace uses of original output of the general op with quantized
   // output
