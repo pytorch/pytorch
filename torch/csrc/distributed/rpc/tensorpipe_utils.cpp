@@ -38,9 +38,11 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
   }
 }
 
+} // namespace
+
 // As the vector of streams will typically be very small (1-8 items) we expect
 // a linear search to be as fast (or faster?) than if we used a hashmap.
-inline const c10::Stream& getStreamForDevice(
+const c10::Stream& getStreamForDevice(
     const std::vector<c10::Stream>& streams,
     const c10::Device& device) {
   for (const c10::Stream& stream : streams) {
@@ -50,8 +52,6 @@ inline const c10::Stream& getStreamForDevice(
   }
   TORCH_INTERNAL_ASSERT(false, "No stream found for device ", device);
 }
-
-} // namespace
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     c10::intrusive_ptr<Message> rpcMessage,
