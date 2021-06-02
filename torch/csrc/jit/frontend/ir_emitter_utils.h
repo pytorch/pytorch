@@ -1,4 +1,3 @@
-
 namespace torch {
 namespace jit {
 
@@ -23,14 +22,6 @@ NoneStatus canBeNone(Value* v) {
   return NEVER;
 }
 
-// Information for each def being emitted.
-// Defs can be nested to support closures so we need a stack of this information
-// Currently records information about the functions return type.
-struct DefContext {
-  TypePtr declared_return_type_; // nullptr if not annotated
-  TypePtr merged_return_type_; // nullptr if a Return has not been seen yet
-};
-
 enum class LoopStatus { NOT_IN_LOOP, IN_LOOP, IN_UNROLLED_LOOP };
 
 struct WithLoopStatus {
@@ -48,59 +39,24 @@ struct WithLoopStatus {
   LoopStatus prev_value_;
 };
 
-/* ==================================================================== */
-/*                      `__setstate__` Information                      */
-/* ==================================================================== */
 
-// see [setstate type]
-static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
-  TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
-  auto getstate = self->getClassType()->findMethod("__getstate__");
-  if (!getstate) {
-    throw ErrorReport(def.range())
-        << "`__setstate__` defined but not `__getstate__`. "
-        << "You must have both defined on a ScriptModule "
-        << "to customize serialization.\n"
-        << "Did you forget to use `@torch.jit.export`?";
-  }
-  getstate->ensure_defined();
-  return self->getClassType()
-      ->getMethod("__getstate__")
-      .getSchema()
-      .returns()
-      .at(0)
-      .type();
-}
+/* ================================================== */
+/*                   Helper Structs                   */
+/* ================================================== */
 
-// see [setstate type]
-static bool shouldDeriveSetStateType(
-    const Def& def,
-    const FunctionSchema& schema) {
-  const bool noTypeAnnotations = std::all_of(
-      schema.arguments().begin(),
-      schema.arguments().end(),
-      [](const Argument& arg) { return arg.is_inferred_type(); });
+// Information for each def being emitted. Defs can be nested to support
+// closures, so we need a stack of this information. Currently records
+// information about the function's return type.
+struct DefContext {
+  TypePtr declared_return_type_; // nullptr if not annotated
+  TypePtr merged_return_type_; // nullptr if a Return has not been seen yet
+};
 
-  bool shouldInfer = def.name().name() == "__setstate__" && noTypeAnnotations;
-  if (!shouldInfer) {
-    return false;
-  }
 
-  // Do some additional basic validation that the __setstate__ func is
-  // well-formed
-  TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
-  const auto numDeclParams = def.decl().params().size();
-  if (numDeclParams != 2) {
-    throw ErrorReport(def.range())
-        << "Expected 2 arguments for `__setstate__`, got: " << numDeclParams;
-  }
-  return true;
-}
-
-/* ======================================================== */
-/*                      Getters                             */
-/*         (Given X, return the corresponding Y)            */
-/* ======================================================== */
+/* ================================================== */
+/*                      Getters                       */
+/*         (Given X, return the corresponding Y)      */
+/* ================================================== */
 
 NodeKind getNodeKind(int kind, int ninputs) {
   switch (kind) {
@@ -224,19 +180,6 @@ std::string getOperatorOverload(int kind, int ninputs) {
   }
 }
 
-static Value* asSimple(const SugaredValuePtr& value) {
-  if (SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
-    return sv->getValue();
-  }
-  return nullptr;
-}
-
-static std::shared_ptr<MagicMethod> makeMagic(
-    const std::string& name,
-    SugaredValuePtr base) {
-  return std::make_shared<MagicMethod>(name, base);
-}
-
 // Get the appropriate builtin op for this augmented assignment
 // If the RHS is a tensor, return the corresponding ATen in-place op
 // If it's a list of scalars, then return the corresponding list augment op
@@ -271,6 +214,24 @@ Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
       throw ErrorReport(stmt)
           << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
   }
+}
+
+int64_t getAdjTupleIndex(
+    const SourceRange& loc,
+    const TupleTypePtr& tuple_type,
+    int64_t input_index,
+    bool allow_out_of_bounds) {
+  // set index to be positive to simplify logic in runtime
+  int64_t adj_index = input_index;
+  int64_t tuple_len = tuple_type->elements().size();
+  if (input_index < 0) {
+    adj_index = tuple_len + input_index;
+  }
+  if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
+    throw ErrorReport(loc) << "Tuple index out of range. Tuple is length "
+                           << tuple_len << " and index is " << input_index;
+  }
+  return adj_index;
 }
 
 // Get a pair of <in place magic method name, out of place magic method name>
@@ -370,6 +331,75 @@ bool validateAssignLhsExpr(const List<Expr>& lhs, const SourceRange& r) {
   return num_starred;
 }
 
+
+/* ============================================ */
+/*                      Casts                   */
+/* ============================================ */
+
+static Value* asSimple(const SugaredValuePtr& value) {
+  if (SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
+    return sv->getValue();
+  }
+  return nullptr;
+}
+
+static std::shared_ptr<MagicMethod> makeMagic(
+    const std::string& name,
+    SugaredValuePtr base) {
+  return std::make_shared<MagicMethod>(name, base);
+}
+
+
+/* ==================================================================== */
+/*                      `__setstate__` Information                      */
+/* ==================================================================== */
+
+// see [setstate type]
+static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
+  TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
+  auto getstate = self->getClassType()->findMethod("__getstate__");
+  if (!getstate) {
+    throw ErrorReport(def.range())
+        << "`__setstate__` defined but not `__getstate__`. "
+        << "You must have both defined on a ScriptModule "
+        << "to customize serialization.\n"
+        << "Did you forget to use `@torch.jit.export`?";
+  }
+  getstate->ensure_defined();
+  return self->getClassType()
+      ->getMethod("__getstate__")
+      .getSchema()
+      .returns()
+      .at(0)
+      .type();
+}
+
+// see [setstate type]
+static bool shouldDeriveSetStateType(
+    const Def& def,
+    const FunctionSchema& schema) {
+  const bool noTypeAnnotations = std::all_of(
+      schema.arguments().begin(),
+      schema.arguments().end(),
+      [](const Argument& arg) { return arg.is_inferred_type(); });
+
+  bool shouldInfer = def.name().name() == "__setstate__" && noTypeAnnotations;
+  if (!shouldInfer) {
+    return false;
+  }
+
+  // Do some additional basic validation that the __setstate__ func is
+  // well-formed
+  TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
+  const auto numDeclParams = def.decl().params().size();
+  if (numDeclParams != 2) {
+    throw ErrorReport(def.range())
+        << "Expected 2 arguments for `__setstate__`, got: " << numDeclParams;
+  }
+  return true;
+}
+
+
 /* ================================================ */
 /*                      Misc                        */
 /* ================================================ */
@@ -390,24 +420,6 @@ static Value* materializeConstant(
   map[val] = new_constant;
 
   return new_constant;
-}
-
-int64_t getAdjTupleIndex(
-    const SourceRange& loc,
-    const TupleTypePtr& tuple_type,
-    int64_t input_index,
-    bool allow_out_of_bounds) {
-  // set index to be positive to simplify logic in runtime
-  int64_t adj_index = input_index;
-  int64_t tuple_len = tuple_type->elements().size();
-  if (input_index < 0) {
-    adj_index = tuple_len + input_index;
-  }
-  if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
-    throw ErrorReport(loc) << "Tuple index out of range. Tuple is length "
-                           << tuple_len << " and index is " << input_index;
-  }
-  return adj_index;
 }
 
 } // namespace jit

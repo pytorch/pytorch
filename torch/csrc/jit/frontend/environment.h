@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/frontend/ir_emitter_utils.cpp>
+#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 
 namespace torch {
 namespace jit {
