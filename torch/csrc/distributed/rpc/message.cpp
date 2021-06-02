@@ -91,13 +91,17 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-Message createExceptionResponse(const std::exception& e, int64_t id) {
+c10::intrusive_ptr<Message> createExceptionResponse(
+    const std::exception& e,
+    int64_t id) {
   return createExceptionResponse(e.what(), id);
 }
 
-Message createExceptionResponse(const std::string& exceptionStr, int64_t id) {
+c10::intrusive_ptr<Message> createExceptionResponse(
+    const std::string& exceptionStr,
+    int64_t id) {
   std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::vector<torch::Tensor>(),
       MessageType::EXCEPTION,

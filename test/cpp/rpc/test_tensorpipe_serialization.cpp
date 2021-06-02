@@ -21,9 +21,9 @@ TEST(TensorpipeSerialize, Base) {
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
   int64_t mId = 100;
-  torch::distributed::rpc::Message sendingRpcMessage(
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
       std::move(payload), std::move(tensors), mtype);
-  sendingRpcMessage.setId(mId);
+  sendingRpcMessage->setId(mId);
   tensorpipe::Message sendingTpMessage;
   torch::distributed::rpc::TensorpipeWriteBuffers sendingTpBuffers;
   std::tie(sendingTpMessage, sendingTpBuffers) =
@@ -90,17 +90,17 @@ TEST(TensorpipeSerialize, Base) {
 
   // Mimic read() callback:
   // - Unpickle
-  torch::distributed::rpc::Message recvingRpcMessage =
+  c10::intrusive_ptr<torch::distributed::rpc::Message> recvingRpcMessage =
       torch::distributed::rpc::tensorpipeDeserialize(
           std::move(recvingTpDescriptor),
           std::move(recvingTpBuffers));
 
   // Data is ready
-  EXPECT_EQ(mtype, recvingRpcMessage.type());
-  EXPECT_EQ(payloadCopy, recvingRpcMessage.payload());
-  EXPECT_EQ(mId, recvingRpcMessage.id());
-  EXPECT_TRUE(torch::equal(t1, recvingRpcMessage.tensors()[0]));
-  EXPECT_TRUE(torch::equal(t2, recvingRpcMessage.tensors()[1]));
+  EXPECT_EQ(mtype, recvingRpcMessage->type());
+  EXPECT_EQ(payloadCopy, recvingRpcMessage->payload());
+  EXPECT_EQ(mId, recvingRpcMessage->id());
+  EXPECT_TRUE(torch::equal(t1, recvingRpcMessage->tensors()[0]));
+  EXPECT_TRUE(torch::equal(t2, recvingRpcMessage->tensors()[1]));
 }
 
 TEST(TensorpipeSerialize, RecopySparseTensors) {
@@ -117,7 +117,7 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
   std::vector<char> payload = {'1', '2', '3'};
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
-  torch::distributed::rpc::Message sendingRpcMessage(
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
       std::move(payload), std::move(tensors), mtype);
 
   tensorpipe::Message sendingTpMessage;
@@ -151,7 +151,7 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
   std::vector<char> payload = {'1', '2', '3'};
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
-  torch::distributed::rpc::Message sendingRpcMessage(
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
       std::move(payload), std::move(tensors), mtype);
 
   tensorpipe::Message sendingTpMessage;
