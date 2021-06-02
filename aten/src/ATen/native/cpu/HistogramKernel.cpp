@@ -17,7 +17,12 @@ constexpr int64_t HISTOGRAM_GRAIN_SIZE = 200;
 /* The main algorithm. Maps the elements of input into the bins defined by bin_edges.
  * Accumulates the total weight in each bin into the hist tensor.
  */
-template<typename input_t, bool LinearBinEdges>
+enum BIN_SELECTION_ALGORITHM {
+    LINEAR_INTERPOLATION,
+    LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH,
+    BINARY_SEARCH,
+};
+template<typename input_t, BIN_SELECTION_ALGORITHM algorithm>
 void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
         const Tensor& input, const c10::optional<Tensor>& weight) {
     TORCH_INTERNAL_ASSERT(hist.is_contiguous());
@@ -63,19 +68,30 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
             }
 
             int64_t pos = -1;
-            if (LinearBinEdges) {
-                // When bin_edges is known to be a linear progression, maps data_in[i] to
-                // the appropriate bin via simple division.
+
+            if (algorithm == BINARY_SEARCH) {
+                // Handles the general case via binary search on the bin edges.
+                pos = std::upper_bound(data_be, data_be + numel_be, elt) - data_be - 1;
+            } else if (algorithm == LINEAR_INTERPOLATION
+                    || algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+                /* When bin_edges is known to be a linear progression, maps elt to
+                 * the appropriate bin via simple division.
+                 */
                 pos = static_cast<int64_t>((elt - leftmost_bin_edge)
                         / (rightmost_bin_edge - leftmost_bin_edge)
                         * (numel_be - 1));
 
-                int64_t pos_min = std::max(static_cast<int64_t>(0), pos - 1);
-                int64_t pos_max = std::min(pos + 2, numel_be);
-                pos = std::upper_bound(data_be + pos_min, data_be + pos_max, elt) - data_be - 1;
+                /* Ensures consistency with bin_edges by checking the bins to the left and right
+                 * of the selected position. Necessary for cases in which an element very close
+                 * to a bin edge may be misclassified by simple division.
+                 */
+                if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+                    int64_t pos_min = std::max(static_cast<int64_t>(0), pos - 1);
+                    int64_t pos_max = std::min(pos + 2, numel_be);
+                    pos = std::upper_bound(data_be + pos_min, data_be + pos_max, elt) - data_be - 1;
+                }
             } else {
-                // Handles the general case via binary search on the bin edges.
-                pos = std::upper_bound(data_be, data_be + numel_be, elt) - data_be - 1;
+                TORCH_INTERNAL_ASSERT(false);
             }
 
             // Unlike other bins, the rightmost bin includes its right boundary
@@ -99,7 +115,7 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
 /* Some pre- and post- processing steps for the main algorithm.
  * Initializes hist to 0, calls into the main algorithm, and normalizes output if necessary.
  */
-template<bool LinearBinEdges>
+template<BIN_SELECTION_ALGORITHM bin_algorithm>
 void histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, const Tensor& bin_edges) {
     hist.fill_(0);
@@ -113,12 +129,12 @@ void histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>&
 
     switch (self.scalar_type()) {
         case ScalarType::Double: {
-            histogram_cpu_contiguous<double, LinearBinEdges>(
+            histogram_cpu_contiguous<double, bin_algorithm>(
                   hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
             break;
         }
         case ScalarType::Float: {
-            histogram_cpu_contiguous<float, LinearBinEdges>(
+            histogram_cpu_contiguous<float, bin_algorithm>(
                   hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
             break;
         }
@@ -129,20 +145,29 @@ void histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>&
     if (density) {
         auto bin_widths = bin_edges.diff();
         auto hist_sum = hist.sum().item();
+        // Converts the bin totals to a probability density function by dividing by the bin widths
         hist.div_(bin_widths);
+        // Normalizes the PDF so that the integral over the bins is 1
         hist.div_(hist_sum);
     }
 }
 
 static void histogram_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, const Tensor& bin_edges) {
-    histogram_out_cpu_template<false>(self, weight, density, hist, bin_edges);
+    histogram_out_cpu_template<BINARY_SEARCH>(self, weight, density, hist, bin_edges);
 }
 
 static void histogram_linear_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight,
-        bool density, Tensor& hist, const Tensor& bin_edges) {
-    histogram_out_cpu_template<true>(self, weight, density, hist, bin_edges);
+        bool density, Tensor& hist, const Tensor& bin_edges, bool local_search) {
+    if (local_search) {
+        histogram_out_cpu_template<LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH>(
+              self, weight, density, hist, bin_edges);
+    } else {
+        histogram_out_cpu_template<LINEAR_INTERPOLATION>(
+              self, weight, density, hist, bin_edges);
+    }
 }
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

@@ -176,7 +176,7 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct,
     linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
     histogram_check_inputs(self, bin_edges, weight);
 
-    histogram_linear_stub(self.device().type(), self, weight, density, hist, bin_edges);
+    histogram_linear_stub(self.device().type(), self, weight, density, hist, bin_edges, true);
     return std::forward_as_tuple(hist, bin_edges);
 }
 
@@ -192,9 +192,13 @@ histogram_cpu(const Tensor& self, int64_t bin_ct,
 Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
         const Scalar& min, const Scalar& max, Tensor& hist) {
     Tensor bin_edges = at::empty({0}, self.options());
-    Scalar adjusted_min, adjusted_max;
-    std::tie(adjusted_min, adjusted_max) = histc_select_outer_bin_edges(self, min, max);
-	histogram_out_cpu(self, bin_ct, adjusted_min, adjusted_max, {}, false, hist, bin_edges);
+    histogram_prepare_out(self, bin_ct, hist, bin_edges);
+    auto outer_bin_edges = histc_select_outer_bin_edges(self, min, max);
+    linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
+    histogram_check_inputs(self, bin_edges, {});
+
+    histogram_linear_stub(self.device().type(), self,
+            c10::optional<Tensor>(), false, hist, bin_edges, false);
     return hist;
 }
 
