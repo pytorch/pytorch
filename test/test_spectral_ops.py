@@ -8,7 +8,7 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, TEST_SCIPY)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
@@ -24,6 +24,9 @@ if TEST_NUMPY:
 
 if TEST_LIBROSA:
     import librosa
+
+if TEST_SCIPY:
+    import scipy.fft
 
 
 def _complex_stft(x, *args, **kwargs):
@@ -112,7 +115,7 @@ class TestFFT(TestCase):
         op_name = get_op_name(op)
 
         # pick ops that call hipfftExecC2R or hipfftExecZ2D
-        if op_name == "fft.irfft":
+        if op_name in ("fft.irfft", "fft.hfft"):
             n = s
             # figure out fft_size
             if dim is None and n is None:
@@ -138,7 +141,7 @@ class TestFFT(TestCase):
                 valid_input = torch.fft.rfft(input, n=n, dim=dim, norm=norm)
 
             return (valid_input, n, dim, norm)
-        elif op_name == "fft.irfftn":
+        elif op_name in ("fft.irfftn", "fft.hfftn"):
             # figure out fft_size
             if dim is None and s is None:
                 dim = tuple(range(-(input.dim()), 0))
@@ -162,7 +165,7 @@ class TestFFT(TestCase):
             else:
                 valid_input = torch.fft.rfftn(input, s=s, dim=dim, norm=norm)
             return (valid_input, s, dim, norm)
-        elif op_name == "fft_irfft2":
+        elif op_name in ("fft_irfft2", "fft_hfft2"):
             # figure out fft_size
             if dim is None and s is None:
                 dim = tuple(range(-(2), 0))
@@ -184,32 +187,6 @@ class TestFFT(TestCase):
             else:
                 valid_input = torch.fft.rfft2(input, s=s, dim=dim, norm=norm)
             return (valid_input, s, dim, norm)
-        elif op_name == "fft.hfft":
-            n = s
-            # figure out fft_size
-            if dim is None and n is None:
-                dim = tuple(range(-(input.dim()), 0))
-                s = [input.size(d) for d in dim]
-            elif dim is None and n is not None:
-                dim = -1
-                s = [n]
-            elif dim is not None and n is None:
-                s = [input.size(d) for d in [dim]]
-            else:
-                s = [n]
-            fft_size = s[-1]
-
-            # make fft_size even to match rocfft behavior to cuda and numpy
-            if (fft_size % 2) != 0:
-                n = fft_size + 1
-
-            # generate Hermitian symmetric input
-            if torch.is_complex(input):
-                valid_input = torch.fft.ihfft(input.real, n=n, dim=dim, norm=norm)
-            else:
-                valid_input = torch.fft.ihfft(input, n=n, dim=dim, norm=norm)
-
-            return (valid_input, n, dim, norm)
         else:
             return (input, s, dim, norm)
 
@@ -420,7 +397,10 @@ class TestFFT(TestCase):
 
         # Real-only functions
         if not dtype.is_complex:
-            fft_functions += [(torch.fft.rfftn, torch.fft.irfftn)]
+            # NOTE: Using ihfftn as "forward" transform to avoid needing to
+            # generate true half-complex input
+            fft_functions += [(torch.fft.rfftn, torch.fft.irfftn),
+                              (torch.fft.ihfftn, torch.fft.hfftn)]
 
         for input_ndim, dim in transform_desc:
             shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
@@ -459,10 +439,79 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, "tensor only has 3 dimensions"):
             op(a, s=(10, 10, 10, 10))
 
+    @skipCPUIfNoFFT
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_hfftn(self, device, dtype):
+        # input_ndim, dim
+        transform_desc = [
+            *product(range(2, 5), (None, (0,), (0, -1))),
+            *product(range(2, 5), (None,)),
+            (6, None),
+            (5, (1, 3, 4)),
+            (3, (0, -1)),
+            (3, (1,)),
+            (1, (0,)),
+            (4, None),
+            (4, (0, 1))
+        ]
+
+        for input_ndim, dim in transform_desc:
+            actual_dims = list(range(input_ndim)) if dim is None else dim
+
+            shape = tuple(itertools.islice(itertools.cycle(range(4, 9)), input_ndim))
+            expect = torch.randn(*shape, device=device, dtype=dtype)
+            input = torch.fft.ifftn(expect, dim=dim, norm="ortho")
+
+            lastdim = actual_dims[-1]
+            lastdim_size = input.size(lastdim) // 2 + 1
+            idx = [slice(None)] * input_ndim
+            idx[lastdim] = slice(0, lastdim_size)
+            input = input[idx]
+
+            s = [shape[dim] for dim in actual_dims]
+            actual = torch.fft.hfftn(input, s=s, dim=dim, norm="ortho")
+
+            self.assertEqual(expect, actual)
+
+    @skipCPUIfNoFFT
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_ihfftn(self, device, dtype):
+        # input_ndim, dim
+        transform_desc = [
+            *product(range(2, 5), (None, (0,), (0, -1))),
+            *product(range(2, 5), (None,)),
+            (6, None),
+            (5, (1, 3, 4)),
+            (3, (0, -1)),
+            (3, (1,)),
+            (1, (0,)),
+            (4, None),
+            (4, (0, 1))
+        ]
+
+        for input_ndim, dim in transform_desc:
+            shape = tuple(itertools.islice(itertools.cycle(range(4, 9)), input_ndim))
+            input = torch.randn(*shape, device=device, dtype=dtype)
+            expect = torch.fft.ifftn(input, dim=dim, norm="ortho")
+
+            # Slice off the half-symmetric component
+            lastdim = -1 if dim is None else dim[-1]
+            lastdim_size = expect.size(lastdim) // 2 + 1
+            idx = [slice(None)] * input_ndim
+            idx[lastdim] = slice(0, lastdim_size)
+            expect = expect[idx]
+
+            actual = torch.fft.ihfftn(input, dim=dim, norm="ortho")
+            self.assertEqual(expect, actual)
+
+
     # 2d-fft tests
 
     # NOTE: 2d transforms are only thin wrappers over n-dim transforms,
     # so don't require exhaustive testing.
+
 
     @skipCPUIfNoFFT
     @onlyOnCPUAndCUDA
@@ -477,16 +526,21 @@ class TestFFT(TestCase):
             *product(range(2, 5), (None, (4, 10))),
         ]
 
-        fft_functions = ['fft2', 'ifft2', 'irfft2']
+        fft_functions = ['fft2', 'ifft2', 'irfft2', 'hfft2']
         if dtype.is_floating_point:
-            fft_functions += ['rfft2']
+            fft_functions += ['rfft2', 'ihfft2']
 
         for input_ndim, s in transform_desc:
             shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
             input = torch.randn(*shape, device=device, dtype=dtype)
             for fname, norm in product(fft_functions, norm_modes):
                 torch_fn = getattr(torch.fft, fname)
-                numpy_fn = getattr(np.fft, fname)
+                if "hfft" in fname:
+                    if not TEST_SCIPY:
+                        continue  # Requires scipy to compare against
+                    numpy_fn = getattr(scipy.fft, fname)
+                else:
+                    numpy_fn = getattr(np.fft, fname)
 
                 def fn(t: torch.Tensor, s: Optional[List[int]], dim: List[int] = (-2, -1), norm: Optional[str] = None):
                     return torch_fn(t, s, dim, norm)
@@ -511,10 +565,11 @@ class TestFFT(TestCase):
                 if torch.version.hip is not None:
                     valid_input_explicit, s, dim, norm = self._generate_valid_rocfft_input(
                         input, torch_fn, s, dim, norm)
+                    input_np = valid_input_explicit.cpu().numpy()
                 else:
                     valid_input_explicit = input
 
-                expected = numpy_fn(valid_input_explicit.cpu(), s, dim, norm)
+                expected = numpy_fn(input_np, s, dim, norm)
                 for fn in torch_fns:
                     actual = fn(valid_input_explicit, s, dim, norm)
                     self.assertEqual(actual, expected)
@@ -531,10 +586,10 @@ class TestFFT(TestCase):
             (3, None, (0, 2)),
         ]
 
-        fft_functions = ['fft', 'ifft', 'irfft']
+        fft_functions = ['fft', 'ifft', 'irfft', 'hfft']
         # Real-only functions
         if dtype.is_floating_point:
-            fft_functions += ['rfft']
+            fft_functions += ['rfft', 'ihfft']
 
         for input_ndim, s, dim in transform_desc:
             shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
