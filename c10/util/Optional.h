@@ -430,18 +430,16 @@ class arrayref_optional_base {
  public:
   union storage {
     struct raw {
-      const void* p;
-      size_t sz;
-    } uninitialized_;
-    ArrayRefT value_;
-
-    constexpr storage() noexcept : uninitialized_() {
-      setUninitialized();
-    }
-
-    constexpr void setUninitialized() noexcept {
       // ArrayRef has the invariant that if Data is nullptr then
       // Length must be zero, so this is an unused bit pattern.
+      const void* p = nullptr;
+      size_t sz = 1;
+    } uninitialized_{};
+    ArrayRefT value_;
+
+    constexpr storage() noexcept : uninitialized_() {}
+
+    constexpr void setUninitialized() noexcept {
       uninitialized_.p = nullptr;
       uninitialized_.sz = 1;
     }
