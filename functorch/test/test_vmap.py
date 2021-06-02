@@ -19,7 +19,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from common_utils import parameterized, instantiate_parameterized_methods
 import types
 
-from functorch import vmap
+from functorch import vmap, functional_init_with_buffers, make_functional_with_buffers
 from functorch._C import reshape_dim_into, reshape_dim_outof
 
 
@@ -2893,8 +2893,58 @@ class TestVmapOperatorsOpInfo(TestCase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
+    @parameterized('training', {'train': True, 'eval': False})
+    @parameterized('track_running_stats', {'running_stats1': True, 'running_stats0': False})
+    @parameterized('affine', {'affine1': True, 'affine0': False})
+    def test_batch_norm(self, device, affine, track_running_stats, training):
+        if not track_running_stats and not training:
+            return
+
+        test = functools.partial(_vmap_test, check_propagates_grad=False)
+        BN = torch.nn.BatchNorm2d
+        ensemble_size = 10
+        hidden_dim = 3
+
+        weights, buffers, _, _, _ = \
+            functional_init_with_buffers(BN, [ensemble_size])(
+                hidden_dim, affine=affine, track_running_stats=track_running_stats)
+
+        inputs = [torch.randn(ensemble_size, 32, hidden_dim, 16, 16, device=device)]
+        in_dims = [0]
+
+        def append(inp, in_dim):
+            inputs.append(inp)
+            in_dims.append(in_dim)
+
+        if track_running_stats:
+            running_mean, running_var, _ = buffers
+            append(running_mean.to(device), 0)
+            append(running_var.to(device), 0)
+        else:
+            append(None, None)
+            append(None, None)
+
+        if affine:
+            weight, bias = weights
+            append(weight.to(device), 0)
+            append(bias.to(device), 0)
+        else:
+            append(None, None)
+            append(None, None)
+
+        append(training, None)
+
+        def op(inp, running_mean, running_var, weight, bias, training):
+            res = F.batch_norm(inp, running_mean, running_var, weight, bias, training)
+            if track_running_stats:
+                return res, running_mean, running_var
+            return res
+
+        test(self, op, tuple(inputs), in_dims=tuple(in_dims))
+
 
 only_for = ("cpu", "cuda")
+instantiate_parameterized_methods(TestVmapOperatorsOpInfo)
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
 instantiate_parameterized_methods(TestVmapBatchedGradient)
