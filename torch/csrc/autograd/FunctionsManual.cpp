@@ -803,8 +803,15 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
     norm = at::linalg_vector_norm(
         self, p, reduce_dims, /*keepdim=*/true);
   }
-  auto grad_output = (self.conj() * grad).sum(
-      reduce_dims, /*keepdim=*/true, /*dtype=*/c10::toValueType(acc_type));
+
+  const auto real_acc_type = c10::toValueType(acc_type);
+  auto grad_output = (self.conj() * grad);
+  // vector_norm output is real, so grad_output must also be real
+  if (real_acc_type != acc_type) {
+    grad_output = at::real(grad_output);
+  }
+  grad_output = grad_output.sum(
+      reduce_dims, /*keepdim=*/true, /*dtype=*/real_acc_type);
   auto nb = linalg_vector_norm_backward(
       grad_output, self, p, norm, reduce_dims, /*keepdim=*/true);
 
