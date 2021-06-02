@@ -202,6 +202,7 @@ class PackageExporter:
         self.dependency_graph = DiGraph()
         self.verbose = verbose
         self._implicitly_externed: List[str] = []
+        self._failed_dunder_imports: List[str] = []
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
         # These are OrderedDicts for compatibility with RemovableHandle.
@@ -251,7 +252,9 @@ class PackageExporter:
             module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
         )
         try:
-            dep_pairs = find_files_source_depends_on(src, package_name)
+            dep_pairs = find_files_source_depends_on(
+                src, package_name, module_name, self._failed_dunder_imports
+            )
         except Exception as e:
             self.dependency_graph.add_node(
                 module_name,
@@ -874,6 +877,11 @@ node [shape=box];
             print_pretty("mocked modules", mocked_mods)
             print_pretty("pickles", pickled_objs)
             print_pretty("invalid objects", invalid_nodes)
+            if len(self._failed_dunder_imports) > 0:
+                print_pretty(
+                    "location of unresolvable and skipped __import__ statements",
+                    self._failed_dunder_imports,
+                )
             print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
 
         self._execute_dependency_graph()
