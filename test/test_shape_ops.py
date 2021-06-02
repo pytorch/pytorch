@@ -461,10 +461,9 @@ class TestShapeOps(TestCase):
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
     @onlyCUDA  # CPU is too slow
-    @largeTensorTest('30GB')
-    @dtypes(torch.int64, torch.double, torch.cdouble)
-    def test_flip_large_tensor(self, device, dtype):
-        t_in = torch.empty(2**32 + 1, dtype=dtype)
+    @largeTensorTest('9GB') # 4 tensors of 2GB (in, out) x (torch, numpy) + 1GB
+    def test_flip_large_tensor(self, device):
+        t_in = torch.empty(2**31 + 1, dtype=toch.uint8)
         torch_fn = partial(torch.flip, dims=(0,))
         np_fn = partial(np.flip, axis=0)
         self.compare_with_numpy(torch_fn, np_fn, t_in)
