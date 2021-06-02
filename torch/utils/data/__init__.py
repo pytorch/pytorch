@@ -4,7 +4,7 @@ from torch.utils.data.sampler import \
 from torch.utils.data.dataset import \
     (Dataset, IterableDataset, TensorDataset, ConcatDataset, ChainDataset,
      Subset, random_split)
-from torch.utils.data.dataset import (IterableDataset as IterDataPipe, DFIterDataPipe as DFIterDataPipe)
+from torch.utils.data.dataset import (IterableDataset as IterDataPipe, DFIterDataPipe as DFIterDataPipe, DataChunk as DataChunk)
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader, _DatasetKind, get_worker_info
 from torch.utils.data._decorator import \

@@ -1,9 +1,16 @@
-from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe, DataChunk
 from typing import Iterator, Optional, Sized, Tuple, TypeVar
 import pandas
 import random
 
 # TODO(VitalyFedyunin): Add error when two different traces get combined
+
+
+class DataChunkDF(DataChunk):
+    def __iter__(self):
+        for df in self.items:
+            for record in df.to_records(index=False):
+                yield record
 
 
 class DataFrameTracedOps(DFIterDataPipe):
@@ -16,6 +23,15 @@ class DataFrameTracedOps(DFIterDataPipe):
             yield self.output_var.calculate_me(item)
 
 
+@functional_datapipe('dataframes_as_tuples')
+class DataFramesAsTuplesPipe(IterDataPipe):
+    def __init__(self, source_datapipe):
+        self.source_datapipe = source_datapipe
+    
+    def __iter__(self):
+         for df in self.source_datapipe:
+            for record in df.to_records(index=False):
+                yield record
 
 
 @functional_datapipe('dataframes_per_row', is_df = True)
@@ -143,7 +159,7 @@ class ExampleAggregateAsDataFrames(DFIterDataPipe):
         if len(aggregate) > 0:
             yield pandas.DataFrame(aggregate, columns=self.columns)
 
-DATAPIPES_OPS = ['groupby','dataframes_filter','map','to_datapipe','shuffle', 'concat', 'batch', 'dataframes_per_row','dataframes_concat','dataframes_shuffle']
+DATAPIPES_OPS = ['dataframes_as_tuples','groupby','dataframes_filter','map','to_datapipe','shuffle', 'concat', 'batch', 'dataframes_per_row','dataframes_concat','dataframes_shuffle']
 
 class Capture(object):
     # All operations are shared across entire InitialCapture, need to figure out what if we join two captures
@@ -216,12 +232,12 @@ class Capture(object):
 
     def __iter__(self):
         # print('iterator called')
-        return self.dataframes_per_row().as_datapipe().__iter__()
+        return iter(self.dataframes_as_tuples())
 
     def batch(self, batch_size = 10):
         # print('batch called', batch_size)
         dp = self.dataframes_per_row().dataframes_concat(batch_size)
-        dp = dp.as_datapipe().batch(1)
+        dp = dp.as_datapipe().batch(1, wrapper_class = DataChunkDF)
         dp._dp_contains_dataframe = True
         return dp
 

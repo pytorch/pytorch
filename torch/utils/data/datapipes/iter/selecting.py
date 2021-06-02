@@ -1,4 +1,4 @@
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
@@ -38,9 +38,24 @@ class FilterIterDataPipe(MapIterDataPipe):
         # print(mask)
         # print('merging start')
         is_df = False
+        # print(data.__class__)
+        # print(mask.__class__)
+        chunk_type = data.__class__
+        if isinstance(data, DataChunk):
+            # print('using raw iterator')
+            data_iterator = list(data.raw_iterator())
+        else:
+            data_iterator = data
 
-        for i,b in zip(data, mask):
-            if isinstance(b, list):
+        if isinstance(mask, DataChunk):
+            # print('using raw iterator (mask)')
+            mask_iterator = list(mask.raw_iterator())
+        else:
+            mask_iterator = mask
+        
+        # print(data_iterator)
+        for i,b in zip(data_iterator, mask_iterator):
+            if isinstance(b, DataChunk):
                 t = self._merge(i, b)
                 if len(t) > 0 or not self.drop_empty_batches:
                     result.append(t)
@@ -61,10 +76,10 @@ class FilterIterDataPipe(MapIterDataPipe):
 
         if is_df:
             if len(result) > 0:
-                return [pandas.concat(result)]
+                return chunk_type([pandas.concat(result)])
             else:
-                return []
-        return result
+                return chunk_type([])
+        return chunk_type(result)
 
     def __iter__(self) -> Iterator[T_co]:
         res: bool
