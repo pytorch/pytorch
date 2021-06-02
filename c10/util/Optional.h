@@ -438,7 +438,7 @@ class arrayref_optional_base {
     } uninitialized_;
     ArrayRefT value_;
 
-    constexpr storage() : uninitialized_() {
+    constexpr storage() noexcept : uninitialized_() {
       uninitialized_.p = &detail_::RESERVED;
     }
 
