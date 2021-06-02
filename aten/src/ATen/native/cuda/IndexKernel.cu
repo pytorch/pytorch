@@ -482,7 +482,7 @@ void flip_kernel_impl(TensorIterator& iter) {
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
 }
 
-void flip_kernel(TensorIterator& iter, const bool quantized/*quantized // Not implemented for QuantizedCUDA*/) {
+void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cuda",
     [&] {
