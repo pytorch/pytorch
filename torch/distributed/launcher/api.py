@@ -112,7 +112,7 @@ class elastic_launch:
         self._config = config
         self._entrypoint = entrypoint
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args):
         return launch_agent(self._config, self._entrypoint, list(args))
 
 

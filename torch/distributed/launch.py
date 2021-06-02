@@ -160,7 +160,7 @@ def parse_args(args):
 
 
 def main(args=None):
-    logger.warn(
+    logger.warning(
         "The module torch.distributed.launch is deprecated "
         "and going to be removed in future."
         "Migrate to torch.distributed.run"
