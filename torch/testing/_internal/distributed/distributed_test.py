@@ -44,6 +44,7 @@ from torch.testing._internal.common_distributed import (
     captured_output,
     with_nccl_blocking_wait,
     with_dist_debug_levels,
+    verify_ddp_error_logged,
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -515,13 +516,6 @@ class DistributedTest:
     class _DistTestBase:
         def _barrier(self, *args, **kwargs):
             Barrier.sync(*args, **kwargs)
-
-        def _verify_ddp_error_logged(self, model_DDP, err_substr):
-            # Verify error was logged in ddp_logging_data.
-            ddp_logging_data = model_DDP._get_ddp_logging_data()
-            self.assertTrue("has_error" in ddp_logging_data)
-            self.assertTrue("error" in ddp_logging_data)
-            self.assertTrue(err_substr in ddp_logging_data["error"])
 
         def _init_group_test(self, **kwargs):
             group = [1, 2]
@@ -4306,7 +4300,7 @@ class DistributedTest:
                 model_DDP._set_static_graph()
 
             # Verify error was logged in ddp_logging_data.
-            self._verify_ddp_error_logged(model_DDP, expected_err)
+            verify_ddp_error_logged(model_DDP, expected_err)
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
@@ -5387,7 +5381,7 @@ class DistributedTest:
                         ddp(inp).sum().backward()
                     except RuntimeError as e:
                         msg = str(e)
-                        self._verify_ddp_error_logged(ddp, msg)
+                        verify_ddp_error_logged(ddp, msg)
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
@@ -5642,7 +5636,7 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
-                        self._verify_ddp_error_logged(model, msg)
+                        verify_ddp_error_logged(model, msg)
                         # 2nd linear layer is unused
                         unused_param_index = 1
                         expected_strs = [
@@ -5696,7 +5690,7 @@ class DistributedTest:
                     loss = out.sum()
                     loss.backward()
 
-            self._verify_ddp_error_logged(model, expected_err)
+            verify_ddp_error_logged(model, expected_err)
 
             # used parameter in the first iteration got unused
             # in second iteration.
@@ -5714,7 +5708,7 @@ class DistributedTest:
                     loss = out.sum()
                     loss.backward()
 
-            self._verify_ddp_error_logged(model, "Expected to have finished reduction")
+            verify_ddp_error_logged(model, "Expected to have finished reduction")
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
@@ -5792,7 +5786,7 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
-                        self._verify_ddp_error_logged(model, msg)
+                        verify_ddp_error_logged(model, msg)
                         unused_param_index = 1
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
@@ -6532,6 +6526,27 @@ class DistributedTest:
                 else:
                     all_gather_calls = get_profiling_event("all_gather", prof)
                 self.assertEqual([], all_gather_calls)
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_python_error_logged(self):
+            # Most python exceptions in DDP are raised during init before
+            # reducer is constructed, so we don't have a logger in those cases.
+            # However, the below is one example where a python error is thrown
+            # after reducer is constructed.
+            model = TwoLinLayerNet().cuda(self.rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            expected_err = "must be callable"
+            with self.assertRaisesRegex(TypeError, expected_err):
+                model.register_comm_hook({}, {})
+
+            verify_ddp_error_logged(model, expected_err)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(

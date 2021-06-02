@@ -411,24 +411,31 @@ class DistributedDataParallel(Module):
     ):
 
         super(DistributedDataParallel, self).__init__()
-
-        assert any((p.requires_grad for p in module.parameters())), (
-            "DistributedDataParallel is not needed when a module "
-            "doesn't have any parameter that requires a gradient."
-        )
+        self.logger = None
+        if not any((p.requires_grad for p in module.parameters())):
+            self._log_and_throw(
+                RuntimeError,
+                "DistributedDataParallel is not needed when a module "
+                "doesn't have any parameter that requires a gradient."
+            )
 
         if device_ids is not None and len(device_ids) > 1:
-            raise ValueError("device_ids can only be None or contain a single element.")
+            self._log_and_throw(
+                ValueError,
+                "device_ids can only be None or contain a single element."
+            )
 
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
         distinct_device_types = {p.device.type for p in module.parameters()}
         if len(distinct_device_types) != 1:
-            raise ValueError(
+            self._log_and_throw(
+                ValueError,
                 "DistributedDataParallel's input module must be on "
                 "the same type of devices, but input module parameters locate in {}.".format(
                     distinct_device_types
                 )
             )
+
         self.device_type = list(distinct_device_types)[0]
 
         if (
@@ -438,7 +445,8 @@ class DistributedDataParallel(Module):
             or self.is_multi_device_module
         ):
             if device_ids or output_device:
-                raise ValueError(
+                self._log_and_throw(
+                    ValueError,
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     "but got device_ids {}, output_device {}, and module parameters {}.".format(
@@ -494,7 +502,8 @@ class DistributedDataParallel(Module):
         # Check that a module does not have Uninitialized parameters
         for param in module.parameters():
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
-                raise RuntimeError(
+                self._log_and_throw(
+                    RuntimeError,
                     "Modules with uninitialized parameters can't be used with `DistributedDataParallel`. "
                     "Run a dummy forward pass to correctly initialize the modules"
                 )
@@ -532,6 +541,11 @@ class DistributedDataParallel(Module):
             self._distributed_broadcast_coalesced(
                 module_states, self.broadcast_bucket_size, authoritative_rank
             )
+
+    def _log_and_throw(self, err_type, err_msg):
+        if self.logger is not None:
+            self.logger.set_error_and_log(f"{str(err_type)}: {err_msg}")
+        raise err_type(err_msg)
 
     def _ddp_init_helper(self, parameters, expect_sparse_gradient, param_to_name_mapping):
         """
@@ -691,7 +705,8 @@ class DistributedDataParallel(Module):
                 # to begin with.
                 if fqn not in self.parameters_to_ignore and param.requires_grad:
                     if param not in param_set:
-                        raise ValueError(
+                        self._log_and_throw(
+                            ValueError,
                             f"Param with name {fqn} found in module parameters, but not DDP parameters."
                             " This indicates a bug in DDP, please report an issue to PyTorch."
                         )
@@ -700,7 +715,8 @@ class DistributedDataParallel(Module):
 
         # Ensure we covered all parameters
         if len(param_set) != len(param_index_to_param_fqn):
-            raise ValueError(
+            self._log_and_throw(
+                ValueError,
                 (
                     "Expected param to name mapping to cover all parameters, but"
                     f" got conflicting lengths: {len(param_set)} vs "
@@ -738,7 +754,8 @@ class DistributedDataParallel(Module):
             pickle_not_supported = True
 
         if pickle_not_supported:
-            raise RuntimeError(
+            self._log_and_throw(
+                RuntimeError,
                 "DDP Pickling/Unpickling are only supported "
                 "when using DDP with the default process "
                 "group. That is, when you have called "
@@ -789,6 +806,8 @@ class DistributedDataParallel(Module):
                     dist.all_reduce(zeros, group=self.process_group)
                     should_throw_stop_iteration = zeros.item()
                     if should_throw_stop_iteration:
+                        # Don't need to log this error as it is an expected error that
+                        # we are passing back to user training with uneven inputs.
                         raise RuntimeError(
                             "Detected at least one rank that exhausted inputs. Throwing across all ranks."
                         )
@@ -1316,8 +1335,10 @@ class DistributedDataParallel(Module):
         )
         dist.all_reduce(rank_to_use, op=ReduceOp.MAX, group=self.process_group)
         if rank_to_use.item() == -1:
-            raise ValueError(
+            self._log_and_throw(
+                ValueError,
                 "BUG! Expected rank_cond to be true for at least one process."
+                " This indicates a bug in PyTorch, please report an issue."
             )
         return rank_to_use.item()
 
@@ -1345,20 +1366,23 @@ class DistributedDataParallel(Module):
     def _passing_sync_batchnorm_handle(self, module):
         for layer in module.modules():
             if isinstance(layer, torch.nn.modules.SyncBatchNorm):
-                assert (
-                    self.device_type != "cpu"
-                ), "SyncBatchNorm layers only work with GPU modules"
+                if self.device_type == "cpu":
+                    self._log_and_throw(
+                        ValueError,
+                        "SyncBatchNorm layers only work with GPU modules"
+                    )
 
     def _check_comm_hook(self, hook):
         if not callable(hook):
-            raise TypeError("Communication hook must be callable.")
+            self._log_and_throw(TypeError, "Communication hook must be callable.")
 
         sig = inspect.signature(hook)
         if (
             sig.parameters["bucket"].annotation != inspect._empty
             and sig.parameters["bucket"].annotation != dist.GradBucket
         ):
-            raise ValueError(
+            self._log_and_throw(
+                ValueError,
                 "Communication hook: bucket annotation should be dist.GradBucket."
             )
 
@@ -1366,7 +1390,8 @@ class DistributedDataParallel(Module):
             sig.return_annotation != torch.futures.Future
             and sig.return_annotation != torch._C.Future
         ):
-            raise ValueError(
+            self._log_and_throw(
+                ValueError,
                 "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
             )
 
@@ -1425,7 +1450,8 @@ class DistributedDataParallel(Module):
         This is a prototype interface and subject to change in the future.
         """
         if sample_rate < 1:
-            raise ValueError(
+            self._log_and_throw(
+                ValueError,
                 "DDP runtime logging sample rate should be equal or greater than 1"
             )
         self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)
