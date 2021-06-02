@@ -221,7 +221,7 @@ static inline double zeta(double x, double q) {
 }
 
 template <typename T>
-static inline C10_HOST_DEVICE T polevl(T x, T* A, size_t len) {
+static inline C10_HOST_DEVICE T polevl(T x, const T* A, size_t len) {
   T result = 0;
   for (size_t i = 0; i <= len; i++) {
     result = result * x + A[i];
@@ -305,7 +305,7 @@ static inline double calc_digamma(double x) {
   }
 
   // Compute asymptotic digamma
-  static double A[] = {
+  static const double A[] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
       7.57575757575757575758E-3,
@@ -318,7 +318,7 @@ static inline double calc_digamma(double x) {
   double y = 0;
   if (x < 1.0e17) {
     double z = 1.0 / (x * x);
-    y = z * polevl(z, A, 6);
+    y = z * ::polevl(z, A, 6);
   }
   return result + log(x) - (0.5 / x) - y;
 }
@@ -364,7 +364,7 @@ static inline float calc_digamma(float x) {
   }
 
   // Compute asymptotic digamma
-  static float A[] = {
+  static const float A[] = {
       8.33333333333333333333E-2f,
       -2.10927960927960927961E-2f,
       7.57575757575757575758E-3f,
@@ -377,7 +377,7 @@ static inline float calc_digamma(float x) {
   float y = 0;
   if (x < 1.0e17f) {
     float z = 1 / (x * x);
-    y = z * polevl<float>(z, A, 6);
+    y = z * ::polevl<float>(z, A, 6);
   }
   return result + logf(x) - (0.5f / x) - y;
 }
@@ -1455,14 +1455,21 @@ calc_i1e(T _x) {
   return (_x < 0.0) ? -out : out;
 }
 
+/*
+ * This function is derived from the implementation of the i1e function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Computes the argument, x, for which the area under the Gaussian probability density function
+ * (integrated from minus infinity to x) is equal to y.
+ */
 template <typename T>
-static inline C10_HOST_DEVICE T ndtri(T y0) {
+static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
 
   /* sqrt(2pi) */
-  constexpr double s2pi = 2.50662827463100050242E0;
+  constexpr T s2pi = 2.50662827463100050242E0;
 
   /* approximation for 0 <= |y - 0.5| <= 3/8 */
-  static T P0[5] = {
+  static const T P0[5] = {
       -5.99633501014107895267E1,
       9.80010754185999661536E1,
       -5.66762857469070293439E1,
@@ -1470,7 +1477,7 @@ static inline C10_HOST_DEVICE T ndtri(T y0) {
       -1.23916583867381258016E0,
   };
 
-  static T Q0[9] = {
+  static const T Q0[9] = {
       1.00000000000000000000E0,
       1.95448858338141759834E0,
       4.67627912898881538453E0,
@@ -1485,7 +1492,7 @@ static inline C10_HOST_DEVICE T ndtri(T y0) {
   /* Approximation for interval z = sqrt(-2 log y ) between 2 and 8
   * i.e., y between exp(-2) = .135 and exp(-32) = 1.27e-14.
   */
-  static T P1[9] = {
+  static const T P1[9] = {
       4.05544892305962419923E0,
       3.15251094599893866154E1,
       5.71628192246421288162E1,
@@ -1497,7 +1504,7 @@ static inline C10_HOST_DEVICE T ndtri(T y0) {
       -8.57456785154685413611E-4,
   };
 
-  static T Q1[9] = {
+  static const T Q1[9] = {
       1.00000000000000000000E0,
       1.57799883256466749731E1,
       4.53907635128879210584E1,
@@ -1513,7 +1520,7 @@ static inline C10_HOST_DEVICE T ndtri(T y0) {
   * i.e., y between exp(-32) = 1.27e-14 and exp(-2048) = 3.67e-890.
   */
 
-  static T P2[9] = {
+  static const T P2[9] = {
       3.23774891776946035970E0,
       6.91522889068984211695E0,
       3.93881025292474443415E0,
@@ -1525,7 +1532,7 @@ static inline C10_HOST_DEVICE T ndtri(T y0) {
       6.23974539184983293730E-9,
   };
 
-  static T Q2[9] = {
+  static const T Q2[9] = {
       1.00000000000000000000E0,
       6.02427039364742014255E0,
       3.67983563856160859403E0,
@@ -1537,9 +1544,6 @@ static inline C10_HOST_DEVICE T ndtri(T y0) {
       6.79019408009981274425E-9,
   };
 
-  T x, y, z, y2, x0, x1;
-  int code;
-
   if (y0 == 0.0) {
     return -std::numeric_limits<T>::infinity();
   }
@@ -1549,25 +1553,25 @@ static inline C10_HOST_DEVICE T ndtri(T y0) {
   if (y0 < 0.0 || y0 > 1.0) {
     return std::numeric_limits<T>::quiet_NaN();
   }
-  code = 1;
-  y = y0;
+  bool code = true;
+  auto y = y0;
   if (y > (1.0 - 0.13533528323661269189)) { /* 0.135... = exp(-2) */
-    y = 1.0 - y;
-    code = 0;
+    y = static_cast<T>(1.0) - y;
+    code = false;
   }
 
   if (y > 0.13533528323661269189) {
-    y = y - 0.5;
-    y2 = y * y;
-    x = y + y * (y2 * polevl(y2, P0, 4) / polevl(y2, Q0, 8));
-    x = x * s2pi;
-    return (x);
+    y = y - static_cast<T>(0.5);
+    const T y2 = y * y;
+    auto x = y + y * (y2 * polevl(y2, P0, 4) / polevl(y2, Q0, 8));
+    return (x * s2pi);
   }
 
-  x = ::sqrt(-2.0 * ::log(y));
-  x0 = x - ::log(x) / x;
+  T x = ::sqrt(static_cast<T>(-2.0) * ::log(y));
+  const T x0 = x - ::log(x) / x;
 
-  z = 1.0 / x;
+  auto z = static_cast<T>(1.0) / x;
+  T x1;
   if (x < 8.0) /* y > exp(-32) = 1.2664165549e-14 */
   {
     x1 = z * polevl(z, P1, 8) / polevl(z, Q1, 8);
@@ -1575,7 +1579,7 @@ static inline C10_HOST_DEVICE T ndtri(T y0) {
     x1 = z * polevl(z, P2, 8) / polevl(z, Q2, 8);
   }
   x = x0 - x1;
-  if (code != 0) {
+  if (code) {
     x = -x;
   }
   return x;

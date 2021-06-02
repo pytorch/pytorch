@@ -117,7 +117,7 @@ void logit_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scalar) {
 void ndtri_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtri_cuda", [&]() {
     gpu_kernel(
-        iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return ndtri(a); });
+        iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return calc_ndtri(a); });
   });
 }
 

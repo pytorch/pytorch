@@ -599,6 +599,13 @@ static void frexp_kernel(TensorIteratorBase& iter) {
   });
 }
 
+static void ndtri_kernel(TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtri_cpu", [&]() {
+        cpu_kernel(iter, [](scalar_t x) { return calc_ndtri(x); });
+      });
+}
+
 static void i0e_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
   AT_DISPATCH_FLOATING_TYPES_AND(
@@ -607,13 +614,6 @@ static void i0e_kernel(TensorIteratorBase& iter) {
             iter,
             [](scalar_t x) { return calc_i0e(x); },
             [](Vectorized<scalar_t> x) { return x.i0e(); });
-      });
-}
-
-static void ndtri_kernel(TensorIteratorBase& iter) {
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtri_cpu", [&]() {
-        cpu_kernel(iter, [](scalar_t x) { return ndtri(x); });
       });
 }
 
