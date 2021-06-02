@@ -151,15 +151,12 @@ class _InputWeightObserver(nn.Module):
             )
             return torch.tensor([1.0]), torch.tensor([0]), torch.tensor([1.0]), torch.tensor([0])
 
-        (min_inputs, max_inputs) = self.get_input_minmax()
-        min_input_ind = torch.argmin(min_inputs)
-        max_input_ind = torch.argmax(max_inputs)
-
         # Calculate qparams for the scaled min/max inputs
         # Scale the input by the equalization scale located at the same column
         # index
-        min_input_scaled = torch.mul(min_inputs[min_input_ind], self.equalization_scale[min_input_ind])
-        max_input_scaled = torch.mul(max_inputs[max_input_ind], self.equalization_scale[max_input_ind])
+        (min_inputs, max_inputs) = self.get_input_minmax()
+        min_input_scaled = torch.min(torch.mul(min_inputs, self.equalization_scale))
+        max_input_scaled = torch.max(torch.mul(max_inputs, self.equalization_scale))
         (scale_input, zero_point_input) = self.input_obs._calculate_qparams(min_input_scaled, max_input_scaled)
 
         # Calculate the qparams for weights by using the rows

@@ -61,12 +61,9 @@ class TestEqualizeFx(QuantizationTestCase):
         qparams = myobs.calculate_qparams()
 
         # check the input scale/zero-point values
-        ref_min_input_ind = np.argmin(np.array(ref_min_inputs))
-        ref_max_input_ind = np.argmax(np.array(ref_max_inputs))
-
-        min_input_scaled = ref_min_inputs[ref_min_input_ind] * ref_equalization_scale[ref_min_input_ind]
+        min_input_scaled = np.min(ref_min_inputs * ref_equalization_scale)
         min_input_scaled = min(0, min_input_scaled)
-        max_input_scaled = ref_max_inputs[ref_max_input_ind] * ref_equalization_scale[ref_max_input_ind]
+        max_input_scaled = np.max(ref_max_inputs * ref_equalization_scale)
         max_input_scaled = max(0, max_input_scaled)
 
         if input_qscheme == torch.per_tensor_symmetric:
