@@ -18,7 +18,11 @@ namespace detail {
 
 // Note: CPU fusion is currently disabled due to test flakiness
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+#if defined(FBCODE_CAFFE2)
+bool cpu_fuser_enabled = true;
+#else
 bool cpu_fuser_enabled = false;
+#endif
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool gpu_fuser_enabled = true;
