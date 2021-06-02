@@ -40,11 +40,9 @@ class Batch:
 
     """
 
-    def __init__(self, value: TensorOrTensors, is_single_sequence=False) -> None:
+    def __init__(self, value: TensorOrTensors) -> None:
         self.value = value
         self.atomic = torch.is_tensor(value)
-        # For backward compatibility.
-        self.is_single_sequence = is_single_sequence
 
     @property
     def tensor(self) -> Tensor:
@@ -70,13 +68,9 @@ class Batch:
         the output with :class:`Batch`.
         """
         if self.atomic:
-            return Batch(function(self.value), self.is_single_sequence)
+            return Batch(function(self.value))
         else:
-            if self.is_single_sequence:
-                # Don't unwrap for backward compatibility
-                return Batch(function(self.value), self.is_single_sequence)
-            else:
-                return Batch(function(*self.value), self.is_single_sequence)
+            return Batch(function(*self.value))
 
     def __repr__(self) -> str:
         return f"Batch[atomic={self.atomic!r}]({self.value!r})"
@@ -161,16 +155,10 @@ def check(*inputs) -> None:
 
 def scatter(*inputs, chunks: int) -> List[Batch]:
     """Splits an input mini-batch into multiple micro-batches."""
-    is_single_sequence = False
     if len(inputs) == 1 and isinstance(inputs[0], Tensor):
         unwrapped_inputs = inputs[0].chunk(chunks)
     else:
         rotated: List[Tensors] = []
-
-        # Handle sequences for backward compatibility.
-        if len(inputs) == 1 and isinstance(inputs[0], Sequence):
-            is_single_sequence = True
-            inputs = inputs[0]  # type: ignore[assignment]
 
         for tensor in inputs:
             tensors = tensor.chunk(chunks)
@@ -178,7 +166,7 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
 
         unwrapped_inputs = zip(*rotated)  # type: ignore[assignment]
 
-    return [Batch(x, is_single_sequence) for x in unwrapped_inputs]
+    return [Batch(x) for x in unwrapped_inputs]
 
 
 def gather(outputs: List[Batch]) -> TensorOrTensors:
