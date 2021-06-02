@@ -307,8 +307,10 @@ for each element of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
@@ -326,8 +328,10 @@ for each element of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.i1(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.5652, 1.5906, 3.9534, 9.7595])
@@ -346,8 +350,10 @@ for each element of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.i1e(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.2079, 0.2153, 0.1968, 0.1788])
@@ -380,8 +386,11 @@ ndtri(input, *, out=None) -> Tensor
 Computes the argument, x, for which the area under the Gaussian probability density function
 (integrated from minus infinity to x) is equal to :attr:`input`, elementwise.
 
+.. math::
+    \text{ndtri}(p) = \sqrt{2} * \text{erf}^{-1}(2 * p - 1)
+
 .. note::
-    Also known as quantile function for Normal Distribution and probit.
+    Also known as quantile function for Normal Distribution.
 
 """ + r"""
 Args:
