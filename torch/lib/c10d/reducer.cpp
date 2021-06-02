@@ -25,10 +25,12 @@ inline int64_t current_time_in_nanos() {
 
 constexpr int kUnsetDivFactor = -1;
 
-// Macro that logs if invariant is not true and then crashes.
+// Macro that wraps TORCH_CHECK with DDP logging.
 #define REDUCER_CHECK(cond, logger_, ...)  \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {            \
-    logger_.lock()->set_error_and_log(__VA_ARGS__); \
+    if (!logger_.expired()) { \
+        logger_.lock()->set_error_and_log(__VA_ARGS__); \
+    } \
     TORCH_CHECK(false, ##__VA_ARGS__); \
   }
 

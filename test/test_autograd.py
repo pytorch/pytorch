@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
                                                   suppress_warnings, slowTest,
                                                   load_tests,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  TEST_WITH_ROCM,
+                                                  TEST_WITH_ROCM, disable_gc,
                                                   gradcheck, gradgradcheck, make_tensor)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
@@ -5335,6 +5335,49 @@ for shape in [(1,), ()]:
                     res = torch._unique2(inp, sorted=sort, return_inverse=return_inverse,
                                          return_counts=return_counts)
                     assert_only_first_requires_grad(res)
+
+    def test_custom_function_cycle(self):
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, x, metadata):
+                x = x.clone()
+                ctx.meta = metadata
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                self.assertEqual(x, 3.14)
+                self.assertEqual(ctx.meta["foo"], 3.14)
+                return gO * x, None
+
+        def get_refs(with_backward):
+            a = torch.tensor(3.14, requires_grad=True)
+
+            metadata = {}
+            out = MyFn.apply(a, metadata)
+
+            metadata["foo"] = out
+
+            if with_backward:
+                out.sum().backward()
+                self.assertEqual(a.grad, a)
+
+            return torch._C._WeakTensorRef(out)
+
+        with disable_gc():
+            ref = get_refs(False)
+            self.assertFalse(ref.expired())
+        gc.collect()
+        self.assertTrue(ref.expired())
+
+        # The backward clears the saved_variables but not the __dict__
+        with disable_gc():
+            ref = get_refs(True)
+            self.assertFalse(ref.expired())
+        gc.collect()
+        self.assertTrue(ref.expired())
 
 
 def index_perm_variable(shape, max_indices):
