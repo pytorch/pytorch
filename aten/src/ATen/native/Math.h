@@ -221,7 +221,7 @@ static inline double zeta(double x, double q) {
 }
 
 template <typename T>
-static inline C10_HOST_DEVICE T polevl(T x, const T* A, size_t len) {
+C10_HOST_DEVICE static inline T polevl(const T x, const T A[], size_t len) {
   T result = 0;
   for (size_t i = 0; i <= len; i++) {
     result = result * x + A[i];
@@ -318,7 +318,7 @@ static inline double calc_digamma(double x) {
   double y = 0;
   if (x < 1.0e17) {
     double z = 1.0 / (x * x);
-    y = z * ::polevl(z, A, 6);
+    y = z * polevl(z, A, 6);
   }
   return result + log(x) - (0.5 / x) - y;
 }
@@ -377,7 +377,7 @@ static inline float calc_digamma(float x) {
   float y = 0;
   if (x < 1.0e17f) {
     float z = 1 / (x * x);
-    y = z * ::polevl<float>(z, A, 6);
+    y = z * polevl(z, A, 6);
   }
   return result + logf(x) - (0.5f / x) - y;
 }
@@ -1189,7 +1189,7 @@ chbevl(const T x, const T array[], size_t len) {
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
+static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
@@ -1215,7 +1215,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
 };
 
 template <typename T>
-inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
+static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I0(x)
    * in the inverted interval [8,infinity].
    *
@@ -1240,7 +1240,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+static inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -1267,7 +1267,7 @@ chebyshev_coefficients_i1e_A() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+static inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -1296,7 +1296,7 @@ chebyshev_coefficients_i1e_A() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+static inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -1322,7 +1322,7 @@ chebyshev_coefficients_i1e_B() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+static inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -1361,7 +1361,7 @@ calc_i0(T _x) {
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
-inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+static inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i0e function in the Cephes Math Library.
@@ -1393,7 +1393,7 @@ calc_i0e(T _x) {
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
-inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
+static inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i1 function in the Cephes Math Library.
