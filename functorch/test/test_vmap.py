@@ -1427,6 +1427,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(functools.partial(op, reduction='sum'), (y, t), in_dims=(0, None))
         test(functools.partial(op, reduction='none'), (y, t), in_dims=(0, None))
 
+    def test_adaptive_avg_pool2d(self):
+        test = self._vmap_test
+        op = functools.partial(F.adaptive_avg_pool2d, output_size=(3, 3))
+
+        x = torch.randn(3, 5, 7, 9, 11)
+        test(op, (x,))
+        test(op, (x,), in_dims=(1,))
+        test(op, (x,), in_dims=(4,))
 
     def test_bmm(self):
         op = torch.bmm
