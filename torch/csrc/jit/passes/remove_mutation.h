@@ -33,7 +33,7 @@ struct TORCH_API MutationRemover {
 
   bool inplaceOpVariant(Node* n);
 
-  static bool hasNoSideEffectOrAlias(Value* v, AliasDb* aliasDb);
+  static bool hasSideEffectOrAlias(Value* v, AliasDb* aliasDb);
 
  private:
   Node* createSpecialMappedOp(Node* n);

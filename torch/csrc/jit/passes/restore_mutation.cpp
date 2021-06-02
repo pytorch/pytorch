@@ -41,7 +41,7 @@ bool FunctionalToInplaceRewriter::CanBeInplace(Node* node) {
   }
 
   // Skip if input's def node has side effect or input has alias
-  if (!MutationRemover::hasNoSideEffectOrAlias(input, getOrCreateAliasDb())) {
+  if (MutationRemover::hasSideEffectOrAlias(input, getOrCreateAliasDb())) {
     return false;
   }
 
