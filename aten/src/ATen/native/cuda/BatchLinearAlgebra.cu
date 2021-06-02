@@ -1919,10 +1919,11 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
 
 static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   int64_t batch_size = batchCount(input);
-  int m = input.size(-2);
 #ifdef USE_CUSOLVER
   // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
-  if (batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_) {
+  auto m = input.size(-2);
+  // exclude complex128 since nan_to_num_ does not work with it.
+  if (batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_ || !input.is_complex()) {
     lu_cusolver_looped(input, pivots, infos, compute_pivots);
   }
 #else

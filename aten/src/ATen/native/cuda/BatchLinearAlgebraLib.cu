@@ -1227,8 +1227,7 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
 void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+  AT_DISPATCH_FLOATING_TYPES(
     self.scalar_type(),
     "lu_cusolver",
     [&self,
@@ -1269,20 +1268,10 @@ void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& 
   });
 
   // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
+  // See https://github.com/pytorch/pytorch/issues/53879 for more details.
   if (!get_pivots) {
-    if (self.is_complex()) {
-      auto real = at::real(self);
-      auto imag = at::imag(self);
-      // TODO: Make nan_to_num_ work with complex numbers so this if-condition is unneccesary.
-      at::nan_to_num_(real, 0, std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity());
-      at::nan_to_num_(imag, 0, std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity());
-    }
-    else {
-      at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity());
-    }
+    at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
+      -std::numeric_limits<double>::infinity());
 
     // Fill the pivots tensor with indices using 1-based (Fortran) indexing
     auto m = self.size(-2);

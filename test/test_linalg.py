@@ -5462,8 +5462,6 @@ class TestLinalg(TestCase):
                 self.assertGreaterEqual(info_.min(), 0)
                 a_LU, pivots = a.lu(pivot=pivot)
                 self.assertEqual(a_LU, a_LU_info)
-                print("pivots_info: ", pivots_info)
-                print("pivot=", pivot , " pivots: ", pivots)
                 self.assertEqual(pivots_info, pivots)
 
                 P, L, U = torch.lu_unpack(a_LU, pivots)
