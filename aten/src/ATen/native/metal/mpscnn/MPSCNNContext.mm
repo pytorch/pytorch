@@ -44,7 +44,7 @@ using namespace at::native::metal;
   if (!MPSSupportsMTLDevice(_device)) {
     return false;
   }
-  if ([UIDevice currentDevice].systemVersion.floatValue < 10.2) {
+  if ([UIDevice currentDevice].systemVersion.floatValue < 11.0) {
     return false;
   }
   if (![_device supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {

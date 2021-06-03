@@ -3,7 +3,7 @@
 #import "MetalOpTestRunner.h"
 
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
-#import <ATen/native/metal/op_test_runner/MetalOpTestRunner.h>
+#import <ATen/native/metal/mpscnn/tests/MetalOpTestRunner.h>
 
 @implementation MetalOpTestRunner {
   NSMutableDictionary *_tests;
