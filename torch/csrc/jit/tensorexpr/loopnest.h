@@ -409,6 +409,10 @@ class TORCH_API LoopNest {
   // It returns true if vectorization is successful and false otherwise.
   static bool vectorize(For*);
 
+  // This method normalizes the given loop if it is not already normalized,
+  // and then vectorizes it.
+  static bool normalizeAndVectorize(For*);
+
   // Find the inner-most loops and vectorize them. Currently, this only works
   // for the LLVM backend, when no reductions are involved.
   void vectorizeInnerLoops();

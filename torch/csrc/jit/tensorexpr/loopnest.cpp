@@ -462,6 +462,13 @@ bool LoopNest::vectorize(For* f) {
   return false;
 }
 
+bool LoopNest::normalizeAndVectorize(For* f) {
+  if (!isNormalized(f)) {
+    normalize(f);
+  }
+  return vectorize(f);
+}
+
 void LoopNest::initialize(
     const std::vector<Tensor*>& output_tensors,
     const std::vector<Tensor*>& tensors_to_compute) {
@@ -2001,8 +2008,8 @@ bool LoopNest::normalize(For* f) {
   auto for_body_normalized = Substitute(
       f->body(),
       {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
-  f->setBody(for_body_normalized);
-  f->setStop(new Sub(f->stop(), f->start()));
+  f->setBody(IRSimplifier::simplify(for_body_normalized));
+  f->setStop(IRSimplifier::simplify(new Sub(f->stop(), f->start())));
   f->setStart(new IntImm(0));
   return true;
 }
