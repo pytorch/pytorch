@@ -235,7 +235,7 @@ class ComputeOperators:
             return f"""
 struct TORCH_API {name} {{
   using schema = {sig.type()};
-  using ptr_schema = {sig.ptr_type()};
+  using ptr_schema = schema*;
   static constexpr const char* name = "aten::{str(f.func.name.name)}";
   static constexpr const char* overload_name = "{f.func.name.overload_name}";
   static constexpr const char* schema_str = {cpp_string(str(f.func))};
