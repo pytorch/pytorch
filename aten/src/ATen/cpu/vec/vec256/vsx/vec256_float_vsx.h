@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
-#include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/Vectorized/intrinsics.h>
+#include <ATen/cpu/vec/Vectorized/Vectorized_base.h>
+#include <ATen/cpu/vec/Vectorized/vsx/vsx_helpers.h>
 #include <sleef.h>
 namespace at {
 namespace vec {
@@ -128,7 +128,7 @@ class Vectorized<float> {
       const Vectorized<float>& a,
       const Vectorized<float>& b,
       const Vectorized<float>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparision of Vectorized
     // assuming this we can use the same mask directly with vec_sel
     return {
         vec_sel(a._vec0, b._vec0, mask._vecb0),
@@ -286,7 +286,8 @@ class Vectorized<float> {
   }
 
   Vectorized<float> angle() const {
-    return Vectorized<float>{0};
+    auto tmp = blendv(Vectorized<float>(0), Vectorized<float>(c10::pi<float>), *this < Vectorized<float>(0));
+    return blendv(tmp, *this, _isnan());
   }
   Vectorized<float> real() const {
     return *this;

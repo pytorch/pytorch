@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
-#include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/Vectorized/intrinsics.h>
+#include <ATen/cpu/vec/Vectorized/Vectorized_base.h>
+#include <ATen/cpu/vec/Vectorized/vsx/vsx_helpers.h>
 namespace at {
 namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
@@ -110,7 +110,7 @@ class Vectorized<int64_t> {
       const Vectorized<int64_t>& a,
       const Vectorized<int64_t>& b,
       const Vectorized<int64_t>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparision of Vectorized
 
     return {
         vec_sel(a._vec0, b._vec0, mask._vecb0),
@@ -172,7 +172,7 @@ class Vectorized<int64_t> {
   int64_t& operator[](int idx) = delete;
 
   Vectorized<int64_t> angle() const {
-    return Vectorized<int64_t>{0};
+    return blendv(Vectorized<int64_t>(0), Vectorized<int64_t>(c10::pi<int64_t>), *this < Vectorized<int64_t>(0));
   }
   Vectorized<int64_t> real() const {
     return *this;

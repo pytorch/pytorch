@@ -54,6 +54,16 @@ class Vectorized<double> {
     return _vec1;
   }
 
+  Vec256<double> _nor() const {
+    return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
+  }
+
+  Vec256<double> _isnan() const {
+    auto x = *this;
+    auto ret = (x == x);
+    return ret._nor();
+  }
+  
   int zero_mask() const {
     auto cmp = (*this == vd_zero);
     return (cmp._vecb0[0] & 1) | (cmp._vecb0[1] & 2) | (cmp._vecb1[0] & 4) |
@@ -254,7 +264,11 @@ class Vectorized<double> {
   }
 
   Vectorized<double> angle() const {
-    return Vectorized<double>{0};
+    auto tmp = blendv(
+        Vectorized<double>(0),
+        Vectorized<double>(c10::pi<double>),
+        *this < Vectorized<double>(0));
+    return blendv(tmp, *this, _isnan());
   }
   Vectorized<double> real() const {
     return *this;
