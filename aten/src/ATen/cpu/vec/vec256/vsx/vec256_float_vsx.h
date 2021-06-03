@@ -286,7 +286,8 @@ class Vectorized<float> {
   }
 
   Vectorized<float> angle() const {
-    auto tmp = blendv(Vectorized<float>(0), Vectorized<float>(c10::pi<float>), *this < Vectorized<float>(0));
+    auto tmp = blendv(
+      Vectorized<float>(0), Vectorized<float>(c10::pi<float>), *this < Vectorized<float>(0));
     return blendv(tmp, *this, _isnan());
   }
   Vectorized<float> real() const {
