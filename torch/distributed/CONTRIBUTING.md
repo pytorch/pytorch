@@ -73,12 +73,15 @@ A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorc
 All the unit tests can be found under the [test/distributed](../../test/distributed) directory and RPC tests in particular are under [test/distributed/rpc](../../test/distributed/rpc). A few examples on how to run unit tests:
 
 ```
-# Run the c10d unit test.
+# Run the c10d unit tests.
 python test/distributed/test_c10d_common.py
 python test/distributed/test_c10d_gloo.py
 python test/distributed/test_c10d_nccl.py
 
-# Run distributed tests, including tests for Distributed Data Parallel
+# Run the Store tests.
+python test/distributed/test_store.py
+
+# Run distributed tests, including tests for Distributed Data Parallel.
 python test/run_test.py --verbose -i distributed/test_distributed_fork
 python test/run_test.py --verbose -i distributed/test_distributed_spawn
 
