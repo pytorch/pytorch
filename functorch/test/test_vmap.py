@@ -16,7 +16,11 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU
 from torch.testing._internal.common_methods_invocations import op_db
-from common_utils import parameterized, instantiate_parameterized_methods
+from common_utils import (
+    parameterized,
+    instantiate_parameterized_methods,
+    get_fallback_and_vmap_exhaustive,
+)
 import types
 
 from functorch import vmap, functional_init_with_buffers, make_functional_with_buffers
@@ -33,47 +37,6 @@ class EnableVmapFallbackWarnings:
     def __exit__(self, *ignored):
         torch._C._debug_only_display_vmap_fallback_warnings(self.prev_state)
 
-
-def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
-    def add_batch_dim(arg, bdim, batch_size=3):
-        if isinstance(arg, torch.Tensor):
-            shape = [1] * len(arg.shape)
-            shape.insert(bdim, batch_size)
-            return (arg.repeat(shape), bdim)
-        else:
-            return (arg, None)
-
-    batch_size = 3
-    out_dim = 0
-    batch_choices = []
-    for a in arg_values:
-        if isinstance(a, torch.Tensor):
-            batched_val = add_batch_dim(a, 0, batch_size)
-            batch_choices.append((batched_val, (a, None)))
-        else:
-            batch_choices.append(((a, None),))
-
-    for batched_values in itertools.product(*batch_choices):
-        batched_args, in_dims = zip(*batched_values)
-
-        if all([i is None for i in in_dims]):
-            continue
-        outs = []
-        for idx in range(batch_size):
-            idx_args = []
-            idx_kwargs = {}
-            for a, in_dim in zip(batched_args, in_dims):
-                idx_args.append(a.select(in_dim, idx) if in_dim is not None else a)
-            out = op(*idx_args, **kwarg_values)
-            outs.append(out)
-        loop_out = []
-        if isinstance(outs[0], torch.Tensor):
-            loop_out = torch.stack(outs)
-        else:
-            for idx in range(len(outs[0])):
-                loop_out.append(torch.stack([i[idx] for i in outs], out_dim))
-        batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(*batched_args, **kwarg_values)
-        yield (loop_out, batched_out)
 
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
