@@ -1590,14 +1590,14 @@ class TestFrozenOptimizations(JitTestCase):
         conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=True)
         bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
         mod = torch.nn.Sequential(conv, bn)
-        # set optimize to False here, by default freezing runs optimize_frozen_module
+        # set optimize to False here, by default freezing runs run_frozen_optimizations
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize_numerics=False)
         # inspect frozen mod
         FileCheck().check("batch_norm").run(frozen_mod.graph)
-        torch.jit.optimize_frozen_module(frozen_mod)
+        torch.jit.run_frozen_optimizations(frozen_mod)
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
 
-        # optimize_frozen_module should be run
+        # run_frozen_optimizations should be run
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
 
@@ -1849,7 +1849,7 @@ class TestFrozenOptimizations(JitTestCase):
             else:
                 scripted_mod = torch.jit.script(mod_eager)
 
-            frozen_mod = torch.jit.freeze(scripted_mod)
+            frozen_mod = torch.jit.optimize_for_inference(scripted_mod)
             if add_z:
                 FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
             else:
@@ -1992,6 +1992,19 @@ class TestFrozenOptimizations(JitTestCase):
                         # `inplace=False` is intentional, otherwise we modify the input
                         # and we aren't testing aten impls anyways
                         self.assertTrue(torch.allclose(aten_op(x, inplace=False), m(x).to_dense()))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_optimize_for_inference(self):
+        with set_default_dtype(torch.float):
+            mod = nn.Linear(20, 30).eval()
+            scripted_mod = torch.jit.script(mod)
+
+            optimized = torch.jit.optimize_for_inference(scripted_mod)
+            FileCheck().check("to_mkldnn").run(optimized.graph)
+
+            frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+            optimized = torch.jit.optimize_for_inference(scripted_mod)
+            FileCheck().check("to_mkldnn").run(optimized.graph)
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
