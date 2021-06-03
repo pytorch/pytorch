@@ -2,7 +2,7 @@
 import collections
 from datetime import timedelta
 import enum
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -203,9 +203,9 @@ def _tensorpipe_validate_devices(devices, device_count):
 def _tensorpipe_exchange_and_check_all_device_maps(
     my_name, my_device_count, my_device_maps, my_devices, group
 ):
-    gathered: List[
-        Tuple[str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.Device]]
-    ] = [None] * group.size()
+    gathered: List[Optional[Tuple[
+        str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.device]
+    ]]] = [None] * group.size()
     dist.all_gather_object(
         gathered, (my_name, my_device_count, my_device_maps, my_devices), group
     )
@@ -278,7 +278,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
                 )
 
     # passed all checked, construct reverse mapping for return values
-    reverse_device_maps = {}
+    reverse_device_maps: Dict[str, Dict[torch.device, torch.device]] = {}
     for node in all_names:
         if my_name in all_device_maps[node]:
             reverse_device_maps[node] = {
@@ -286,7 +286,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
             }
 
     if not my_devices:
-        devices_set = set()
+        devices_set: Set[torch.device] = set()
         for _, map_ in my_device_maps.items():
             devices_set.update(map_.keys())
         for _, map_ in reverse_device_maps.items():
