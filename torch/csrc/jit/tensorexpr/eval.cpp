@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -559,7 +561,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     int lanes = v->lanes();
 
     std::vector<int> values(lanes);
-    for (int i = 0; i < lanes; i++) {
+    for (const auto i : c10::irange(lanes)) {
       values[i] = base + i * stride;
     }
 
@@ -726,7 +728,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   template <typename TReturn, typename TInput>
   void visit_intrinsics_helper(const Intrinsics* v) {
     std::vector<Value> values(v->nparams());
-    for (int i = 0; i < v->nparams(); i++) {
+    for (const auto i : c10::irange(v->nparams())) {
       v->param(i)->accept(this);
       values[i] = this->value();
     }

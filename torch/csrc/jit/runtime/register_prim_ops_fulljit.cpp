@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <bitset>
 #include <cctype>
