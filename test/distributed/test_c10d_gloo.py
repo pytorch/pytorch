@@ -30,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_win32,
     create_device,
     with_dist_debug_levels,
+    verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -1917,14 +1918,17 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             ModuleForDdpCommHook(), process_group=process_group
         )
 
+        expected_err = "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
         with self.assertRaisesRegex(
                 ValueError,
-                "Communication hook: return annotation should be torch.futures.Future or torch._C.Future.",
+                expected_err,
         ):
             def comm_hook(state: object, bucket: dist.GradBucket) -> int:
                 return torch.futures.Future()
 
             model.register_comm_hook(state=None, hook=comm_hook)
+
+        verify_ddp_error_logged(model, expected_err)
 
         with self.assertRaisesRegex(
                 RuntimeError,

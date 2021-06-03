@@ -1,6 +1,8 @@
 import torch
 from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.quantization.fx._equalize import _InputWeightObserver
+from torch.quantization.fx._equalize import (
+    _InputEqualObserver, _WeightEqualObserver, calculate_equalization_scale
+)
 
 # Standard Libraries
 import numpy as np
@@ -17,10 +19,10 @@ class TestEqualizeFx(QuantizationTestCase):
            weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric,
                                            torch.per_channel_affine_float_qparams)))
     def test_input_weight_observer(self, input_qdtype, input_qscheme, weight_qdtype, weight_qscheme):
-        myobs = _InputWeightObserver(input_dtype=input_qdtype,
-                                     input_qscheme=input_qscheme,
-                                     weight_dtype=weight_qdtype,
-                                     weight_qscheme=weight_qscheme)
+        input_obs = _InputEqualObserver(dtype=input_qdtype,
+                                        qscheme=input_qscheme)
+        weight_obs = _WeightEqualObserver(dtype=weight_qdtype,
+                                          qscheme=weight_qscheme)
 
         width = np.random.randint(10) + 1
         x_height = np.random.randint(10) + 2
@@ -29,38 +31,40 @@ class TestEqualizeFx(QuantizationTestCase):
         x = (np.random.random(size=(x_height, width)) * 10).round(decimals=2).astype(np.float32)
         w = (np.random.random(size=(w_height, width)) * 10).round(decimals=2).astype(np.float32)
 
-        result = myobs(torch.tensor(x), torch.tensor(w))
-        self.assertEqual(result, (x, w))
+        ret_x = input_obs(torch.tensor(x))
+        ret_w = weight_obs(torch.tensor(w))
+        self.assertEqual((ret_x, ret_w), (x, w))
 
         # Check the min/max input columns are correct
         ref_min_inputs = x.min(axis=0)
         ref_max_inputs = x.max(axis=0)
-        self.assertEqual(myobs.get_input_minmax(), (ref_min_inputs, ref_max_inputs))
+        self.assertEqual(input_obs.get_input_minmax(), (ref_min_inputs, ref_max_inputs))
 
         # Check the min/max weight columns are correct
         ref_min_weights_col = w.min(axis=0)
         ref_max_weights_col = w.max(axis=0)
-        self.assertEqual(myobs.get_weight_col_minmax(), (ref_min_weights_col, ref_max_weights_col))
+        self.assertEqual(weight_obs.get_weight_col_minmax(), (ref_min_weights_col, ref_max_weights_col))
 
         # Check the min/max weight rows are correct
         ref_min_weights_row = w.min(axis=1)
         ref_max_weights_row = w.max(axis=1)
-        self.assertEqual(myobs.get_weight_row_minmax(), (ref_min_weights_row, ref_max_weights_row))
+        self.assertEqual(weight_obs.get_weight_row_minmax(), (ref_min_weights_row, ref_max_weights_row))
 
         # Check the column indices of the min/max weight rows are correct
         ref_min_weights_ind = w.argmin(axis=1)
         ref_max_weights_ind = w.argmax(axis=1)
-        self.assertEqual((myobs.min_weights_ind, myobs.max_weights_ind), (ref_min_weights_ind, ref_max_weights_ind))
+        self.assertEqual((weight_obs.min_weights_ind, weight_obs.max_weights_ind),
+                         (ref_min_weights_ind, ref_max_weights_ind))
 
         # Check the equalization scale is correct
-        equalization_scale = myobs.calculate_equalization_scale()
+        equalization_scale = calculate_equalization_scale(input_obs, weight_obs)
         ref_equalization_scale = np.sqrt((ref_max_weights_col - ref_min_weights_col) /
                                          (ref_max_inputs - ref_min_inputs))
         self.assertEqual(equalization_scale, ref_equalization_scale)
 
-        qparams = myobs.calculate_qparams()
-
         # check the input scale/zero-point values
+        input_qparams = input_obs.calculate_qparams()
+
         min_input_scaled = np.min(ref_min_inputs * ref_equalization_scale)
         min_input_scaled = min(0, min_input_scaled)
         max_input_scaled = np.max(ref_max_inputs * ref_equalization_scale)
@@ -73,10 +77,12 @@ class TestEqualizeFx(QuantizationTestCase):
             ref_scale = (max_input_scaled - min_input_scaled) / 255
             ref_zero_point = -128 if input_qdtype is torch.qint8 else 0
 
-        self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
-        self.assertEqual(qparams[1].item(), ref_zero_point)
+        self.assertEqual(input_qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
+        self.assertEqual(input_qparams[1].item(), ref_zero_point)
 
         # check the weight scale/zero-point values
+        weight_qparams = weight_obs.calculate_qparams()
+
         min_weights_scaled = ref_min_weights_row * (1 / ref_equalization_scale[ref_min_weights_ind])
         max_weights_scaled = ref_max_weights_row * (1 / ref_equalization_scale[ref_max_weights_ind])
 
@@ -99,5 +105,7 @@ class TestEqualizeFx(QuantizationTestCase):
             ref_zero_points = -128 if weight_qdtype is torch.qint8 else 0
             ref_zero_points = ref_zero_points - np.round(min_weights_scaled / ref_scales)
 
-        self.assertTrue(torch.allclose(qparams[2], torch.tensor(ref_scales, dtype=qparams[2].dtype), atol=0.0001))
-        self.assertTrue(torch.allclose(qparams[3], torch.tensor(ref_zero_points, dtype=qparams[3].dtype), atol=1))
+        self.assertTrue(torch.allclose(weight_qparams[0], torch.tensor(
+            ref_scales, dtype=weight_qparams[0].dtype), atol=0.0001))
+        self.assertTrue(torch.allclose(weight_qparams[1], torch.tensor(
+            ref_zero_points, dtype=weight_qparams[1].dtype), atol=1))
