@@ -1353,18 +1353,17 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i0(T _x) {
   T x = std::abs(_x);
 
-  if (x <= 8.0) {
+  if (x <= T{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    T y = (x / 2.0) - 2.0;
+    T y = (x / T{2.0}) - T{2.0};
     return static_cast<T>(std::exp(x) * chbevl(y, A, len));
   }
   auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<T>(
-      std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
+  return std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
@@ -1384,19 +1383,18 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i0e(T _x) {
   T x = std::abs(_x);
 
-  if (x <= 8.0) {
+  if (x <= T{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    T y = (x / 2.0) - 2.0;
-    return static_cast<T>(chbevl(y, A, len));
+    T y = (x / T{2.0}) - T{2.0};
+    return chbevl(y, A, len);
   }
 
   auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<T>(
-      chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
+  return chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
@@ -1416,20 +1414,19 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i1(T _x) {
   T x = std::abs(_x);
 
-  if (x <= 8.0) {
+  if (x <= T{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    T y = (x / 2.0) - 2.0;
-    const T out = static_cast<T>(std::exp(x) * x * chbevl(y, A, len));
-    return (_x < 0.0) ? -out : out;
+    T y = (x / T{2.0}) - T{2.0};
+    const T out = std::exp(x) * x * chbevl(y, A, len);
+    return (_x < T{0.0}) ? -out : out;
   }
   auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  const auto out = static_cast<T>(
-      (std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, len)) / std::sqrt(x));
-  return (_x < 0.0) ? -out : out;
+  const T out = (std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len)) / std::sqrt(x);
+  return (_x < T{0.0}) ? -out : out;
 }
 
 /*
@@ -1446,18 +1443,17 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i1e(T _x) {
   T x = std::abs(_x);
 
-  if (x <= 8.0) {
+  if (x <= T{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    T y = (x / 2.0) - 2.0;
-    const auto out = static_cast<T>(chbevl(y, A, len) * x);
-    return (_x < 0.0) ? -out : out;
+    T y = (x / T{2.0}) - T{2.0};
+    const T out = chbevl(y, A, len) * x;
+    return (_x < T{0.0}) ? -out : out;
   }
   auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  const auto out =
-      static_cast<T>(chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
-  return (_x < 0.0) ? -out : out;
+  const auto out = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
+  return (_x < T{0.0}) ? -out : out;
 }
