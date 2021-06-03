@@ -466,12 +466,13 @@
 
 - func: any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: any.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: any
 
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_inherits: TensorIteratorBase
+  structured: True
   dispatch:
     CPU, CUDA: any_out
 
