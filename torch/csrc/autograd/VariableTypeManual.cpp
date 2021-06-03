@@ -224,7 +224,14 @@ at::Tensor _noop_unary_manual(c10::DispatchKeySet ks, const at::Tensor & self) {
 
   auto _tmp = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard { tls };
-    return at::redispatch::_noop_unary(ks & c10::after_autograd_keyset, self_);
+
+    // DO_NOT_SUBMIT: Inline body of redispatch to show perf.
+    // return at::redispatch::_noop_unary_manual(ks & c10::after_autograd_keyset, self_);
+
+    static auto op = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("aten::_noop_unary_manual", "")
+      .typed<at::Tensor (const at::Tensor &)>();
+    return op.redispatch(ks & c10::after_autograd_keyset, self_);
   })();
   auto result = std::move(_tmp);
 
@@ -251,7 +258,13 @@ at::Tensor _noop_binary_manual(c10::DispatchKeySet ks, const at::Tensor & self, 
 
   auto _tmp = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard { tls };
-    return at::redispatch::_noop_binary(ks & c10::after_autograd_keyset, self_, other_);
+    // DO_NOT_SUBMIT: Inline body of redispatch to show perf.
+    // return at::redispatch::_noop_binary_manual(ks & c10::after_autograd_keyset, self_, other_);
+
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::_noop_binary_manual", "")
+        .typed<at::Tensor (const at::Tensor &, const at::Tensor &)>();
+    return op.redispatch(ks & c10::after_autograd_keyset, self_, other_);
   })();
   auto result = std::move(_tmp);
 
