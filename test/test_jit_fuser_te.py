@@ -1810,6 +1810,35 @@ class TestTEFuser(JitTestCase):
         z = 2
         script = self.checkScript(eager, (x, y, z))
 
+    def _test_fwd_bwd(self, fn):
+        x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
+        xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
+        script = torch.jit.script(fn)
+        for i in range(11):
+            y = fn(x)
+            g0 = torch.rand_like(y)
+            y.backward(g0)
+
+            ys = script(xs)
+            ys.backward(g0)
+            
+            with torch.no_grad():
+                x -= 0.1 * x.grad
+                xs -= 0.1 * xs.grad
+                x.grad = None
+                xs.grad = None
+        torch.testing.assert_allclose(y, ys)
+        
+    def test_relu_fwd_bwd(self):
+        def eager(x):
+            return torch.relu(x * 1.01)
+        self._test_fwd_bwd(eager)
+        
+    def test_hardsigmoid_fwd_bwd(self):
+        def eager(x):
+            return F.hardsigmoid(x) * 1.01
+        self._test_fwd_bwd(eager)
+        
     def test_dynamic_cat(self):
         with inline_fusion_groups():
             @torch.jit.script

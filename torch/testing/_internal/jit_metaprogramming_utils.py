@@ -95,7 +95,6 @@ nn_functional_tests = [
     ('rrelu', (S, S), (0.1, 0.3, False),),
     ('rrelu', (S, S), (0.1, 0.3, False, True), 'inplace'),
     ('hardshrink', (S, S, S), (0.4,), '', (True,)),
-    ('hardsigmoid', (S, S, S), (0.4,), '', (True,)),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
     ('softplus', (S, S, S), (),),
