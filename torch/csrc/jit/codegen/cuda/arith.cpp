@@ -808,17 +808,17 @@ WelfordResult Welford(
 }
 
 WelfordResult::WelfordResult(
-    TensorView* in_var,
+    TensorView* in_var_sum,
     TensorView* in_avg,
     TensorView* in_n)
-    : var(in_var), avg(in_avg), n(in_n) {
-  TORCH_INTERNAL_ASSERT(var->definition()->sameAs(avg->definition()));
-  TORCH_INTERNAL_ASSERT(var->definition()->sameAs(n->definition()));
+    : var_sum(in_var_sum), avg(in_avg), n(in_n) {
+  TORCH_INTERNAL_ASSERT(var_sum->definition()->sameAs(avg->definition()));
+  TORCH_INTERNAL_ASSERT(var_sum->definition()->sameAs(n->definition()));
 }
 
 WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
-  auto o_tv = var->definition()->as<WelfordOp>()->out()->as<TensorView>();
-  return o_tv->rFactor(axes, var, avg, n);
+  auto o_tv = var_sum->definition()->as<WelfordOp>()->out()->as<TensorView>();
+  return o_tv->rFactor(axes, var_sum, avg, n);
 }
 
 TensorView* transpose(

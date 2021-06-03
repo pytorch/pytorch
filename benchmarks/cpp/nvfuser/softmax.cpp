@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
@@ -13,26 +14,6 @@
 #include "utils.h"
 
 using namespace torch::jit::fuser::cuda;
-
-static TensorView* setupSoftmax(
-    Fusion* fusion,
-    TensorView* input,
-    const int kNumberOfDims,
-    const int kReductionAxis) {
-  FusionGuard fg(fusion);
-
-  std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  broadcast_mask[kReductionAxis] = true;
-
-  auto max_val = max(input, {kReductionAxis});
-  auto bcast_max = broadcast(max_val, broadcast_mask);
-  auto x_max_sub = sub(input, bcast_max);
-  auto exp = unaryOp(UnaryOpType::Exp, x_max_sub);
-  auto sum_exp = sum(exp, {kReductionAxis});
-  auto bcast_sum = broadcast(sum_exp, broadcast_mask);
-  auto output = div(exp, bcast_sum);
-  return output;
-}
 
 //------------------------------------------------------------------------------
 
@@ -50,8 +31,7 @@ static void MagicScheduler_Softmax(benchmark::State& benchmark_state) {
                    .dtype(DataType::Float)
                    .build();
   fusion.addInput(input);
-  auto output =
-      setupSoftmax(&fusion, input, input_shape.size(), kReductionAxis);
+  auto output = softmax(input, kReductionAxis);
   fusion.addOutput(output);
 
   // inputs
@@ -125,6 +105,7 @@ static void MagicScheduler_Softmax_Dropout(benchmark::State& benchmark_state) {
   constexpr int kNumAttentionHeads = 12;
   constexpr int kAttentionHeadSize = kHiddenSize / kNumAttentionHeads;
   constexpr float kDropoutProbability = 0.9;
+  constexpr float kScale = 1.0f / kDropoutProbability;
 
   // setup fusion
   auto attention_scores = TensorViewBuilder()
@@ -142,19 +123,15 @@ static void MagicScheduler_Softmax_Dropout(benchmark::State& benchmark_state) {
 
   attention_scores = div(attention_scores, divisor);
   attention_scores = add(attention_scores, attention_mask);
-  auto attention_probs = setupSoftmax(
-      &fusion, attention_scores, input_shape.size(), kReductionAxis);
-  auto random = unaryOp(UnaryOpType::RandLike, attention_probs);
-  auto mask =
-      binaryOp(BinaryOpType::LT, random, new Double(kDropoutProbability));
-  auto float_mask = castOp(DataType::Float, mask);
-  auto dropout = mul(attention_probs, float_mask);
-  auto output = mul(dropout, new Double(1.0f / kDropoutProbability));
+  auto attention_probs = softmax(attention_scores, kReductionAxis);
+  auto prob = new Double(kDropoutProbability);
+  auto scale = new Double(kScale);
+  auto dropout_results = dropout(attention_probs, prob, scale);
 
   fusion.addOutput(attention_scores);
   fusion.addOutput(attention_probs);
-  fusion.addOutput(mask);
-  fusion.addOutput(output);
+  fusion.addOutput(dropout_results.output);
+  fusion.addOutput(dropout_results.mask);
 
   // inputs
   at::manual_seed(0);

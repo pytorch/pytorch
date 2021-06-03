@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -14,48 +14,6 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static TensorView* setupBatchNorm(
-    Fusion* fusion,
-    TensorView* input,
-    TensorView* weight,
-    TensorView* bias,
-    const int kNumberOfDims) {
-  FusionGuard fg(fusion);
-
-  const float kEps = 1e-5;
-  std::vector<int> reduction_axes;
-  std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  torch::jit::fuser::cuda::Val* num_features = new Double(1);
-  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
-    if (axis != 1) {
-      reduction_axes.push_back(axis);
-      broadcast_mask[axis] = true;
-      num_features =
-          mul(num_features, input->domain()->domain()[axis]->extent());
-    }
-  }
-
-  auto x_sum = sum(input, reduction_axes);
-  auto x_sum_bcast = broadcast(x_sum, broadcast_mask);
-  auto x_mean = div(x_sum_bcast, num_features);
-
-  auto x_mean_sub = sub(input, x_mean);
-  auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-  auto var_sum = sum(x_mean_sub_pow, reduction_axes);
-  auto var_sum_bcast = broadcast(var_sum, broadcast_mask);
-  auto var = div(var_sum_bcast, num_features);
-
-  auto var_eps = add(var, new Double(kEps));
-  auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
-  auto norm = mul(x_mean_sub, rvar);
-
-  auto weight_bcast = broadcast(weight, broadcast_mask);
-  auto bias_bcast = broadcast(bias, broadcast_mask);
-  auto norm_gamma = mul(norm, weight_bcast);
-  auto norm_gamma_bias = add(norm_gamma, bias_bcast);
-  return norm_gamma_bias;
-}
-
 //------------------------------------------------------------------------------
 
 static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
@@ -68,6 +26,10 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
       benchmark_state.range(1),
       benchmark_state.range(1)};
 
+  const bool kTraining = true;
+  const float kMomentum = 0.1;
+  const float kEps = 1e-5;
+
   // setup fusion
   auto input = TensorViewBuilder()
                    .ndims(input_shape.size())
@@ -75,14 +37,28 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
                    .build();
   auto weight = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
   auto bias = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
+  auto running_mean = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
+  auto running_var = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
   fusion.addInput(input);
   fusion.addInput(weight);
   fusion.addInput(bias);
+  fusion.addInput(running_mean);
+  fusion.addInput(running_var);
 
-  auto output =
-      setupBatchNorm(&fusion, input, weight, bias, input_shape.size());
+  auto momentum_ptr = new Double(kMomentum);
+  auto eps_ptr = new Double(kEps);
 
-  fusion.addOutput(output);
+  auto result = batch_norm(
+      input,
+      weight,
+      bias,
+      running_mean,
+      running_var,
+      kTraining,
+      momentum_ptr,
+      eps_ptr);
+
+  fusion.addOutput(result.output);
 
   // inputs
   at::manual_seed(0);

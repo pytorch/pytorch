@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -14,45 +14,6 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static TensorView* setupLayerNorm(
-    Fusion* fusion,
-    TensorView* input,
-    const int kNumberOfDims,
-    std::vector<int64_t>& norm_shape) {
-  FusionGuard fg(fusion);
-
-  const float kEps = 1e-5;
-  std::vector<int> reduction_axes(norm_shape.size());
-  std::vector<bool> broadcast_mask(input->nDims(), false);
-  torch::jit::fuser::cuda::Val* num_features = new Double(1);
-  for (int idx = 0; idx < norm_shape.size(); ++idx) {
-    const int axis = input->nDims() - 1 - idx;
-    reduction_axes[idx] = axis;
-    broadcast_mask[axis] = true;
-    num_features = mul(num_features, input->domain()->domain()[axis]->extent());
-  }
-
-  // Reduction
-  auto x_sum = sum(input, reduction_axes);
-  // Broadcast
-  auto x_sum_bcast = broadcast(x_sum, broadcast_mask);
-  // Point-wise
-  auto x_mean = div(x_sum_bcast, num_features);
-  auto x_mean_sub = sub(input, x_mean);
-
-  auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-  // Reduction
-  auto var_sum = sum(x_mean_sub_pow, reduction_axes);
-  // Broadcast
-  auto var_sum_bcast = broadcast(var_sum, broadcast_mask);
-  // Point-wise
-  auto var = div(var_sum_bcast, num_features);
-  auto var_eps = add(var, new Double(kEps));
-  auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
-  auto output = mul(x_mean_sub, rvar);
-  return output;
-}
-
 //------------------------------------------------------------------------------
 
 static void MagicScheduler_LayerNorm(benchmark::State& benchmark_state) {
@@ -61,10 +22,13 @@ static void MagicScheduler_LayerNorm(benchmark::State& benchmark_state) {
 
   std::vector<int64_t> input_shape{656, benchmark_state.range(0)};
   const int kReductionAxis = 1;
+  const float kEps = 1e-5;
+
   std::vector<int64_t> norm_shape;
   for (int idx = kReductionAxis; idx < input_shape.size(); ++idx) {
     norm_shape.push_back(input_shape[idx]);
   }
+  Double* eps_ptr = new Double(kEps);
 
   // setup fusion
   auto input = TensorViewBuilder()
@@ -72,8 +36,8 @@ static void MagicScheduler_LayerNorm(benchmark::State& benchmark_state) {
                    .dtype(DataType::Float)
                    .build();
   fusion.addInput(input);
-  auto output = setupLayerNorm(&fusion, input, input_shape.size(), norm_shape);
-  fusion.addOutput(output);
+  auto layer_norm_results = layer_norm(input, norm_shape, nullptr, nullptr, eps_ptr);
+  fusion.addOutput(layer_norm_results.output);
 
   // inputs
   at::manual_seed(0);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -10,9 +10,23 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 
 #include <benchmark/benchmark.h>
+
+#include <torch/torch.h>
+#include <ATen/cuda/CUDAContext.h>
+
 #include <cuda_runtime.h>
 
 using namespace torch::jit::fuser::cuda;
+
+static void clearL2Cache() {
+  torch::NoGradGuard no_grad;
+  auto l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+  auto options = torch::TensorOptions().dtype(torch::kFloat32).device(at::kCUDA, 0);
+
+  auto l2_elems = l2_cache_size / 4;
+  torch::Tensor t0 = torch::empty(l2_elems, options);
+  torch::Tensor t1 = torch::clone(t0);
+};
 
 class CudaKernelTimer {
  public:

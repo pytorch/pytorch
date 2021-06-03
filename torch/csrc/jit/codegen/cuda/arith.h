@@ -56,12 +56,12 @@ TORCH_CUDA_CU_API TensorView* reductionOp(
 //! a single welford op in ternsorview
 class TORCH_CUDA_CU_API WelfordResult {
  public:
-  TensorView* var;
+  TensorView* var_sum;
   TensorView* avg;
   TensorView* n;
 
   explicit WelfordResult(
-      TensorView* in_var,
+      TensorView* in_var_sum,
       TensorView* in_avg,
       TensorView* in_n);
 

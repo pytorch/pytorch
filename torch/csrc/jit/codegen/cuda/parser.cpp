@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -444,11 +445,7 @@ class IrParser {
             auto operand = value_map[node->inputs()[0]->unique()];
             auto beta = value_map[node->inputs()[1]->unique()];
             auto threshold = value_map[node->inputs()[2]->unique()];
-            auto op_beta = mul(operand, beta);
-            auto maybe_result = div(
-                unaryOp(UnaryOpType::Log1p, unaryOp(UnaryOpType::Exp, op_beta)),
-                beta);
-            auto out = where(gt(op_beta, threshold), operand, maybe_result);
+            auto out = softplus(operand, beta, threshold);
             value_map.emplace(node->output()->unique(), out);
           });
     }
@@ -550,7 +547,7 @@ class IrParser {
           ptr_op,
           [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
-            auto input = value_map[node->input(0)->unique()];
+            auto input = value_map[node->input(0)->unique()]->as<TensorView>();
             auto prob = value_map[node->input(1)->unique()];
             auto scale = value_map[node->input(2)->unique()];
             auto train = constant_as<bool>(node->input(3));
@@ -559,13 +556,10 @@ class IrParser {
                 train.has_value() and train.value(),
                 "Train parameter is incorrectly set to false!");
 
-            auto rand_vals = unaryOp(UnaryOpType::RandLike, input);
-            auto mask = lt(rand_vals, prob);
-            auto apply_mask = mul(input, mask);
-            auto out = mul(apply_mask, scale);
+            auto result = dropout(input, prob, scale);
 
-            value_map.emplace(node->output(0)->unique(), out);
-            value_map.emplace(node->output(1)->unique(), mask);
+            value_map.emplace(node->output(0)->unique(), result.output);
+            value_map.emplace(node->output(1)->unique(), result.mask);
           });
     }
 
@@ -576,23 +570,16 @@ class IrParser {
           ptr_op,
           [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
-            auto input = value_map[node->input(0)->unique()];
+            auto input = value_map[node->input(0)->unique()]->as<TensorView>();
             auto train = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 train.has_value(), "dropout needs constant `train` flag");
 
             if (train.value()) {
               auto prob = value_map[node->input(1)->unique()];
-              auto p1m = sub(new Double(1.), prob);
+              auto result = dropout(input, prob);
 
-              auto zero_check = add(eq(p1m, new Double(0.)), p1m);
-              auto scale = div(new Double(1.), zero_check);
-              auto rand_vals = unaryOp(UnaryOpType::RandLike, input);
-              auto mask = lt(rand_vals, p1m);
-              auto apply_mask = mul(input, mask);
-              auto out = mul(apply_mask, scale);
-
-              value_map.emplace(node->output()->unique(), out);
+              value_map.emplace(node->output()->unique(), result.output);
             } else {
               value_map.emplace(node->output()->unique(), input);
             }
@@ -606,13 +593,12 @@ class IrParser {
           ptr_op,
           [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
-            auto grad = value_map[node->input(0)->unique()];
-            auto mask = value_map[node->input(1)->unique()];
+            auto grad = value_map[node->input(0)->unique()]->as<TensorView>();
+            auto mask = value_map[node->input(1)->unique()]->as<TensorView>();
             auto scale = value_map[node->input(2)->unique()];
 
-            auto temp = mul(grad, mask);
-            auto out = mul(temp, scale);
-            value_map.emplace(node->output()->unique(), out);
+            auto output = dropout_backward(grad, mask, scale);
+            value_map.emplace(node->output()->unique(), output);
           });
     }
 
@@ -627,11 +613,10 @@ class IrParser {
             ptr_op,
             [](const Node* node,
                std::unordered_map<size_t, CgValue>& value_map) -> void {
+              auto fusion = FusionGuard::getCurFusion();
+
               auto input =
                   value_map[node->input(0)->unique()]->as<TensorView>();
-
-              // TODO: it feels quite sketchy to modify fusion from parser
-              auto fusion = FusionGuard::getCurFusion();
 
               TensorView* weight = nullptr;
               if (!node->input(1)->type()->isSubtypeOf(
@@ -665,10 +650,6 @@ class IrParser {
                     "IO_tensor `batch_norm::running_var` can only be input tensor to fusion");
               }
 
-              TORCH_INTERNAL_ASSERT(
-                  !((running_var == nullptr) ^ (running_mean == nullptr)),
-                  "running stats should comes in pairs");
-
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               auto training = constant_as<bool>(node->input(5));
               TORCH_INTERNAL_ASSERT(
@@ -684,7 +665,6 @@ class IrParser {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 momentum_ptr = value_map[node->input(6)->unique()];
               }
-              auto rev_momentum = sub(new Double(1.0), momentum_ptr);
 
               Val* eps_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -695,102 +675,35 @@ class IrParser {
                 eps_ptr = value_map[node->input(7)->unique()];
               }
 
-              const size_t kNumberOfDims = input->nDims();
-              std::vector<int> reduction_axes;
-              std::vector<bool> broadcast_mask(kNumberOfDims, false);
-              Val* num_features = new Double(1);
-              for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
-                if (axis != 1) {
-                  reduction_axes.push_back(axis);
-                  broadcast_mask[axis] = true;
-                  num_features = mul(
-                      num_features, input->domain()->domain()[axis]->extent());
-                }
-              }
-
-              Val* output = nullptr;
-              TensorView* x_mean = nullptr;
-              TensorView* invstd = nullptr;
-              if (kTraining || running_mean == nullptr) {
-                // Algorithm
-                auto welford_out = Welford(input, reduction_axes);
-                x_mean = welford_out.avg;
-                auto var_sum = welford_out.var;
-
-                auto x_mean_bcast = broadcast(x_mean, broadcast_mask);
-
-                // updating running mean
-                if (running_mean != nullptr) {
-                  auto current_mean_hat = mul(x_mean, momentum_ptr);
-                  auto mean_hat = mul(running_mean, rev_momentum);
-                  auto new_mean_hat = add(mean_hat, current_mean_hat);
-                  fusion->addOutput(new_mean_hat);
-                  fusion->aliasOutputToInput(new_mean_hat, running_mean);
-                }
-
-                // updating running var
-                if (running_var != nullptr) {
-                  auto num_feature_decrement = sub(num_features, new Int(1));
-                  auto unbiased_var = div(var_sum, num_feature_decrement);
-                  auto current_var_hat = mul(unbiased_var, momentum_ptr);
-                  auto var_hat = mul(running_var, rev_momentum);
-                  auto new_var_hat = add(var_hat, current_var_hat);
-                  fusion->addOutput(new_var_hat);
-                  fusion->aliasOutputToInput(new_var_hat, running_var);
-                }
-
-                auto x_mean_sub = sub(input, x_mean_bcast);
-                auto var = div(var_sum, num_features);
-                auto var_eps = add(var, eps_ptr);
-                invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
-                auto invstd_bcast = broadcast(invstd, broadcast_mask);
-                output = mul(x_mean_sub, invstd_bcast);
-              } else {
-                // This is inference mode with running stats
-                auto r_mean_bcasted = broadcast(running_mean, broadcast_mask);
-                auto x_mean_sub = sub(input, r_mean_bcasted);
-
-                auto var_eps = add(running_var, eps_ptr);
-                auto unbiased_invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
-                auto invstd_bcast = broadcast(unbiased_invstd, broadcast_mask);
-
-                // During inference, x_mean/invstd output are empty tensors
-                x_mean = TensorViewBuilder().shape({0}).build();
-                invstd = TensorViewBuilder().shape({0}).build();
-                output = mul(x_mean_sub, invstd_bcast);
-              }
-
-              // Optional: norm * weight
-              if (weight) {
-                auto weight_bcast = broadcast(weight, broadcast_mask);
-                output = mul(output, weight_bcast);
-              }
-
-              // Optional: norm * weight + bias
-              if (bias) {
-                auto bias_bcast = broadcast(bias, broadcast_mask);
-                output = add(output, bias_bcast);
-              }
+              auto result = batch_norm(
+                  input,
+                  weight,
+                  bias,
+                  running_mean,
+                  running_var,
+                  kTraining,
+                  momentum_ptr,
+                  eps_ptr);
 
               if (node->kind() ==
                   c10::Symbol::fromQualString("aten::native_batch_norm")) {
-                value_map.emplace(node->output(0)->unique(), output);
+                value_map.emplace(node->output(0)->unique(), result.output);
 
-                value_map.emplace(node->output(1)->unique(), x_mean);
+                value_map.emplace(node->output(1)->unique(), result.mean);
 
-                value_map.emplace(node->output(2)->unique(), invstd);
+                value_map.emplace(node->output(2)->unique(), result.invstd);
               } else if (
                   node->kind() ==
                   c10::Symbol::fromQualString("aten::batch_norm")) {
-                value_map.emplace(node->output()->unique(), output);
+                value_map.emplace(node->output()->unique(), result.output);
               } else if (
                   node->kind() ==
                   c10::Symbol::fromQualString("aten::_batch_norm_impl_index")) {
-                value_map.emplace(node->output(0)->unique(), output);
+                value_map.emplace(node->output(0)->unique(), result.output);
 
-                value_map.emplace(node->output(1)->unique(), x_mean);
+                value_map.emplace(node->output(1)->unique(), result.mean);
 
-                value_map.emplace(node->output(2)->unique(), invstd);
+                value_map.emplace(node->output(2)->unique(), result.invstd);
 
                 // TODO: output 3 & 4 are not created
                 //       we are not creating these outputs because codegen
@@ -863,19 +776,23 @@ class IrParser {
             const bool kTraining = training.value();
 
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto eps = constant_as<float>(node->input(9));
-            TORCH_INTERNAL_ASSERT(
-                eps.has_value(), "The EPS parameter is required.");
-            const float kEps = eps.value();
+            Val* eps_ptr = nullptr;
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+            if (auto eps = constant_as<float>(node->input(9))) {
+              eps_ptr = new Double(eps.value());
+            } else {
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              eps_ptr = value_map[node->input(7)->unique()];
+            }
 
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             auto out_mask_list = constant_as<c10::List<bool>>(node->input(10));
             TORCH_INTERNAL_ASSERT(
                 out_mask_list.has_value(),
                 "output mask for batch_norm_backward");
-            std::vector<int> output_mask;
+            std::vector<bool> output_mask;
             for (const auto value : out_mask_list->vec()) {
-              output_mask.emplace_back(static_cast<int>(value));
+              output_mask.emplace_back(static_cast<bool>(value));
             }
 
             // TODO: merge this loop below.
@@ -892,244 +809,41 @@ class IrParser {
                   "When training=False, running_mean and running_invstd are required.");
             }
 
-            const size_t kNumberOfDims = input->nDims();
-            std::vector<int> outer_reduction_axes;
-            std::vector<bool> outer_broadcast_mask(kNumberOfDims, false);
-            Val* N = new Double(1);
-            for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
-              if (axis != 1) {
-                outer_reduction_axes.push_back(axis);
-                outer_broadcast_mask[axis] = true;
-                N = mul(N, input->domain()->domain()[axis]->extent());
-              }
-            }
+            auto grads = batch_norm_backward(
+                input,
+                grad_out,
+                weight,
+                running_mean,
+                running_var,
+                save_mean,
+                save_invstd,
+                kTraining,
+                eps_ptr,
+                output_mask);
 
-            Val* bcast_weight = nullptr;
-            if (weight) {
-              bcast_weight = broadcast(weight, outer_broadcast_mask);
+            if (output_mask[0]) {
+              TORCH_INTERNAL_ASSERT(grads.grad_input != nullptr);
+              value_map.emplace(node->output(0)->unique(), grads.grad_input);
             } else {
-              bcast_weight = new Double(1);
-            }
-
-            if (kTraining) {
-              auto bcast_rstd = broadcast(save_invstd, outer_broadcast_mask);
-              auto bcast_mean = broadcast(save_mean, outer_broadcast_mask);
-              auto x_hat = mul(sub(input, bcast_mean), bcast_rstd);
-              auto grad_x_hat = mul(grad_out, bcast_weight);
-
-              auto a = mul(N, grad_x_hat);
-
-              auto b = sum(grad_x_hat, outer_reduction_axes);
-              auto bcast_b = broadcast(b, outer_broadcast_mask);
-
-              auto c1 = mul(grad_x_hat, x_hat);
-              auto c2 = sum(c1, outer_reduction_axes);
-              auto bcast_c2 = broadcast(c2, outer_broadcast_mask);
-              auto c3 = mul(x_hat, bcast_c2);
-
-              auto inner = sub(sub(a, bcast_b), c3);
-
-              auto reciprocal_size = unaryOp(UnaryOpType::Reciprocal, N);
-              auto grad_in = mul(mul(reciprocal_size, bcast_rstd), inner);
-              value_map.emplace(node->output(0)->unique(), grad_in);
-
-              if (output_mask[1]) {
-                auto grad_weight =
-                    sum(mul(grad_out, x_hat), outer_reduction_axes);
-                value_map.emplace(node->output(1)->unique(), grad_weight);
-              } else {
-                value_map.emplace(
-                    node->output(1)->unique(), TensorViewBuilder().build());
-              }
-            } else {
-              auto bcast_var = broadcast(running_var, outer_broadcast_mask);
-              auto var_eps = add(bcast_var, new Double(kEps));
-              auto bcast_rstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
-              auto bcast_mean = broadcast(running_mean, outer_broadcast_mask);
-
-              auto grad_in = mul(mul(grad_out, bcast_rstd), bcast_weight);
-              value_map.emplace(node->output(0)->unique(), grad_in);
-
-              if (output_mask[1]) {
-                auto x_hat = mul(sub(input, bcast_mean), bcast_rstd);
-                auto grad_weight =
-                    sum(mul(grad_out, x_hat), outer_reduction_axes);
-                value_map.emplace(node->output(1)->unique(), grad_weight);
-              } else {
-                value_map.emplace(
-                    node->output(1)->unique(), TensorViewBuilder().build());
-              }
-            }
-
-            if (output_mask[2]) {
-              auto grad_bias = sum(grad_out, outer_reduction_axes);
-              value_map.emplace(node->output(2)->unique(), grad_bias);
-            } else {
+              TORCH_INTERNAL_ASSERT(grads.grad_input == nullptr);
               value_map.emplace(
-                  node->output(2)->unique(), TensorViewBuilder().build());
-            }
-          },
-          [](const Node* node) -> bool { return true; },
-          [](const Node* node) -> OperatorType {
-            return OperatorType::Normalization;
-          });
-    }
-
-    {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)");
-      registerParseRule(
-          ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
-            auto grad_out =
-                value_map[node->input(0)->unique()]->as<TensorView>();
-
-            auto input = value_map[node->input(1)->unique()]->as<TensorView>();
-
-            TensorView* weight = nullptr;
-            if (!node->input(2)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              weight = value_map[node->input(2)->unique()]->as<TensorView>();
+                  node->output(1)->unique(), TensorViewBuilder().build());
             }
 
-            TensorView* running_mean = nullptr;
-            if (!node->input(3)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              running_mean =
-                  value_map[node->input(3)->unique()]->as<TensorView>();
-            }
-
-            TensorView* running_var = nullptr;
-            if (!node->input(4)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              running_mean =
-                  value_map[node->input(4)->unique()]->as<TensorView>();
-            }
-
-            TensorView* save_mean = nullptr;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            if (!node->input(5)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              save_mean = value_map[node->input(5)->unique()]->as<TensorView>();
-            }
-
-            TensorView* save_invstd = nullptr;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            if (!node->input(6)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              save_invstd =
-                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                  value_map[node->input(6)->unique()]->as<TensorView>();
-            }
-
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto training = constant_as<bool>(node->input(7));
-            TORCH_INTERNAL_ASSERT(
-                training.has_value(),
-                "The training (bool) parameter is required.");
-            const bool kTraining = training.value();
-
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto eps = constant_as<float>(node->input(8));
-            TORCH_INTERNAL_ASSERT(
-                eps.has_value(), "The EPS parameter is required.");
-            const float kEps = eps.value();
-
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto out_mask_list = constant_as<c10::List<bool>>(node->input(9));
-            TORCH_INTERNAL_ASSERT(
-                out_mask_list.has_value(),
-                "output mask for batch_norm_backward");
-            std::vector<int> output_mask;
-            for (const auto value : out_mask_list->vec()) {
-              output_mask.emplace_back(static_cast<int>(value));
-            }
-
-            if (kTraining) {
-              TORCH_INTERNAL_ASSERT(
-                  save_mean != nullptr && save_invstd != nullptr,
-                  "When training=True, save_mean and save_invstd are required.");
+            if (output_mask[1]) {
+              TORCH_INTERNAL_ASSERT(grads.grad_weight != nullptr);
+              value_map.emplace(node->output(1)->unique(), grads.grad_weight);
             } else {
-              TORCH_INTERNAL_ASSERT(
-                  running_mean != nullptr && running_var != nullptr,
-                  "When training=False, running_mean and running_invstd are required.");
-            }
-
-            const size_t kNumberOfDims = input->nDims();
-            std::vector<int> outer_reduction_axes;
-            std::vector<bool> outer_broadcast_mask(kNumberOfDims, false);
-            Val* N = new Double(1);
-            for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
-              if (axis != 1) {
-                outer_reduction_axes.push_back(axis);
-                outer_broadcast_mask[axis] = true;
-                N = mul(N, input->domain()->domain()[axis]->extent());
-              }
-            }
-
-            Val* bcast_weight = nullptr;
-            if (weight) {
-              bcast_weight = broadcast(weight, outer_broadcast_mask);
-            } else {
-              bcast_weight = new Double(1);
-            }
-
-            if (kTraining) {
-              auto bcast_rstd = broadcast(save_invstd, outer_broadcast_mask);
-              auto bcast_mean = broadcast(save_mean, outer_broadcast_mask);
-              auto x_hat = mul(sub(input, bcast_mean), bcast_rstd);
-              auto grad_x_hat = mul(grad_out, bcast_weight);
-
-              auto a = mul(N, grad_x_hat);
-
-              auto b = sum(grad_x_hat, outer_reduction_axes);
-              auto bcast_b = broadcast(b, outer_broadcast_mask);
-
-              auto c1 = mul(grad_x_hat, x_hat);
-              auto c2 = sum(c1, outer_reduction_axes);
-              auto bcast_c2 = broadcast(c2, outer_broadcast_mask);
-              auto c3 = mul(x_hat, bcast_c2);
-
-              auto inner = sub(sub(a, bcast_b), c3);
-
-              auto reciprocal_size = unaryOp(UnaryOpType::Reciprocal, N);
-              auto grad_in = mul(mul(reciprocal_size, bcast_rstd), inner);
-              value_map.emplace(node->output(0)->unique(), grad_in);
-
-              if (output_mask[1]) {
-                auto grad_weight =
-                    sum(mul(grad_out, x_hat), outer_reduction_axes);
-                value_map.emplace(node->output(1)->unique(), grad_weight);
-              } else {
-                value_map.emplace(
-                    node->output(1)->unique(), TensorViewBuilder().build());
-              }
-            } else {
-              auto bcast_var = broadcast(running_var, outer_broadcast_mask);
-              auto var_eps = add(bcast_var, new Double(kEps));
-              auto bcast_rstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
-              auto bcast_mean = broadcast(running_mean, outer_broadcast_mask);
-
-              auto grad_in = mul(mul(grad_out, bcast_rstd), bcast_weight);
-              value_map.emplace(node->output(0)->unique(), grad_in);
-
-              if (output_mask[1]) {
-                auto x_hat = mul(sub(input, bcast_mean), bcast_rstd);
-                auto grad_weight =
-                    sum(mul(grad_out, x_hat), outer_reduction_axes);
-                value_map.emplace(node->output(1)->unique(), grad_weight);
-              } else {
-                value_map.emplace(
-                    node->output(1)->unique(), TensorViewBuilder().build());
-              }
+              TORCH_INTERNAL_ASSERT(grads.grad_weight == nullptr);
+              value_map.emplace(
+                  node->output(1)->unique(), TensorViewBuilder().build());
             }
 
             if (output_mask[2]) {
-              auto grad_bias = sum(grad_out, outer_reduction_axes);
-              value_map.emplace(node->output(2)->unique(), grad_bias);
+              TORCH_INTERNAL_ASSERT(grads.grad_bias != nullptr);
+              value_map.emplace(node->output(2)->unique(), grads.grad_bias);
             } else {
+              TORCH_INTERNAL_ASSERT(grads.grad_bias == nullptr);
               value_map.emplace(
                   node->output(2)->unique(), TensorViewBuilder().build());
             }
@@ -1153,10 +867,12 @@ class IrParser {
               auto input =
                   value_map[node->input(0)->unique()]->as<TensorView>();
 
-              auto norm_shape = constant_as<c10::List<int64_t>>(node->input(1));
+              auto norm_shape_optional =
+                  constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
-                  norm_shape.has_value(),
+                  norm_shape_optional.has_value(),
                   "The Normalized_Shape list is required.");
+              auto norm_shape = norm_shape_optional->vec();
 
               TensorView* weight = nullptr;
               if (!node->input(2)->type()->isSubtypeOf(
@@ -1177,60 +893,18 @@ class IrParser {
                 eps_ptr = value_map[node->input(4)->unique()];
               }
 
-              const size_t kNormShapeNumDims = norm_shape->vec().size();
-              const size_t kOuterNumDims = input->nDims() - kNormShapeNumDims;
+              auto result =
+                  layer_norm(input, norm_shape, weight, bias, eps_ptr);
 
-              std::vector<int> outer_reduction_axes(kOuterNumDims);
-              std::vector<bool> outer_broadcast_mask(input->nDims(), false);
-              for (size_t idx = 0; idx < kOuterNumDims; ++idx) {
-                outer_reduction_axes[idx] = idx;
-                outer_broadcast_mask[idx] = true;
-              }
-
-              std::vector<int> inner_reduction_axes(kNormShapeNumDims);
-              std::vector<bool> inner_broadcast_mask(input->nDims(), false);
-              Val* num_features = new Double(1);
-              for (size_t idx = 0; idx < kNormShapeNumDims; ++idx) {
-                const size_t axis = input->nDims() - 1 - idx;
-                inner_reduction_axes[idx] = axis;
-                inner_broadcast_mask[axis] = true;
-                num_features = mul(
-                    num_features, input->domain()->domain()[axis]->extent());
-              }
-
-              // Algorithm
-              auto x_sum = sum(input, inner_reduction_axes);
-              auto x_sum_bcast = broadcast(x_sum, inner_broadcast_mask);
-              auto x_mean = div(x_sum_bcast, num_features);
-              auto x_mean_sub = sub(input, x_mean);
-              auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-              auto var_sum = sum(x_mean_sub_pow, inner_reduction_axes);
-              auto var_sum_bcast = broadcast(var_sum, inner_broadcast_mask);
-              auto var = div(var_sum_bcast, num_features);
-              auto var_eps = add(var, eps_ptr);
-              auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
-              auto output = mul(x_mean_sub, rvar);
-
-              // Optional: norm * weight
-              if (weight) {
-                auto weight_broadcast = broadcast(weight, outer_broadcast_mask);
-                output = mul(output, weight_broadcast);
-              }
-
-              // Optional: norm * weight + bias
-              if (bias) {
-                auto bias_broadcast = broadcast(bias, outer_broadcast_mask);
-                output = add(output, bias_broadcast);
-              }
               if (node->kind() ==
                   c10::Symbol::fromQualString("aten::native_layer_norm")) {
-                value_map.emplace(node->output(0)->unique(), output);
-                value_map.emplace(node->output(1)->unique(), x_mean);
-                value_map.emplace(node->output(2)->unique(), rvar);
+                value_map.emplace(node->output(0)->unique(), result.output);
+                value_map.emplace(node->output(1)->unique(), result.mean);
+                value_map.emplace(node->output(2)->unique(), result.invstd);
               } else if (
                   node->kind() ==
                   c10::Symbol::fromQualString("aten::layer_norm")) {
-                value_map.emplace(node->output()->unique(), output);
+                value_map.emplace(node->output()->unique(), result.invstd);
               }
             },
             // TODO: #ProfileIValue List should update this
@@ -1253,10 +927,12 @@ class IrParser {
 
             auto input = value_map[node->input(1)->unique()]->as<TensorView>();
 
-            auto norm_shape = constant_as<c10::List<int64_t>>(node->input(2));
+            auto norm_shape_optional =
+                constant_as<c10::List<int64_t>>(node->input(2));
             TORCH_INTERNAL_ASSERT(
-                norm_shape.has_value(),
+                norm_shape_optional.has_value(),
                 "The Normalized_Shape list is required.");
+            auto norm_shape = norm_shape_optional->vec();
 
             auto mean = value_map[node->input(3)->unique()]->as<TensorView>();
             auto rstd = value_map[node->input(4)->unique()]->as<TensorView>();
@@ -1278,82 +954,46 @@ class IrParser {
             }
 
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto out_mask_list = constant_as<c10::List<bool>>(node->input(7));
+            auto output_mask_optional =
+                constant_as<c10::List<bool>>(node->input(7));
             TORCH_INTERNAL_ASSERT(
-                out_mask_list.has_value(),
+                output_mask_optional.has_value(),
                 "output mask for layer_norm_backward");
-            std::vector<int> output_mask;
-            for (const auto value : out_mask_list->vec()) {
-              output_mask.emplace_back(static_cast<int>(value));
-            }
+            std::vector<bool> output_mask = output_mask_optional->vec();
 
-            const size_t kNormShapeNumDims = norm_shape->vec().size();
-            const size_t kOuterNumDims = input->nDims() - kNormShapeNumDims;
-
-            std::vector<int> outer_reduction_axes(kOuterNumDims);
-            std::vector<bool> outer_broadcast_mask(input->nDims(), false);
-            for (size_t idx = 0; idx < kOuterNumDims; ++idx) {
-              outer_reduction_axes[idx] = idx;
-              outer_broadcast_mask[idx] = true;
-            }
-
-            std::vector<int> inner_reduction_axes(kNormShapeNumDims);
-            std::vector<bool> inner_broadcast_mask(input->nDims(), false);
-            Val* num_features = new Double(1);
-            for (size_t idx = 0; idx < kNormShapeNumDims; ++idx) {
-              const size_t axis = input->nDims() - 1 - idx;
-              inner_reduction_axes[idx] = axis;
-              inner_broadcast_mask[axis] = true;
-              num_features =
-                  mul(num_features, input->domain()->domain()[axis]->extent());
-            }
-
-            auto x_hat = mul(sub(input, mean), rstd);
-
-            TensorView* grad_x_hat = nullptr;
-            if (weight != nullptr) {
-              auto* bcast_weight = broadcast(weight, outer_broadcast_mask);
-              grad_x_hat = mul(grad_out, bcast_weight);
-            } else {
-              grad_x_hat = grad_out;
-            }
-
-            auto* a = mul(num_features, grad_x_hat);
-
-            auto* b = sum(grad_x_hat, inner_reduction_axes);
-            auto* bcast_b = broadcast(b, inner_broadcast_mask);
-
-            auto* c1 = mul(grad_x_hat, x_hat);
-            auto* c2 = sum(c1, inner_reduction_axes);
-            auto* bcast_c2 = broadcast(c2, inner_broadcast_mask);
-            auto* c3 = mul(x_hat, bcast_c2);
-
-            auto* inner = sub(sub(a, bcast_b), c3);
-
-            auto reciprocal_size =
-                unaryOp(UnaryOpType::Reciprocal, num_features);
-            auto* grad_in = mul(mul(reciprocal_size, rstd), inner);
+            auto grad = layer_norm_backward(
+                grad_out,
+                input,
+                norm_shape,
+                mean,
+                rstd,
+                weight,
+                bias,
+                output_mask);
 
             if (output_mask[0]) {
-              value_map.emplace(node->output(0)->unique(), grad_in);
+              TORCH_INTERNAL_ASSERT(grad.grad_input != nullptr);
+              value_map.emplace(node->output(0)->unique(), grad.grad_input);
             } else {
+              TORCH_INTERNAL_ASSERT(grad.grad_input == nullptr);
               value_map.emplace(
                   node->output(0)->unique(), TensorViewBuilder().build());
             }
 
             if (output_mask[1] && weight != nullptr) {
-              auto grad_weight =
-                  sum(mul(grad_out, x_hat), outer_reduction_axes);
-              value_map.emplace(node->output(1)->unique(), grad_weight);
+              TORCH_INTERNAL_ASSERT(grad.grad_weight != nullptr);
+              value_map.emplace(node->output(1)->unique(), grad.grad_weight);
             } else {
+              TORCH_INTERNAL_ASSERT(grad.grad_weight == nullptr);
               value_map.emplace(
                   node->output(1)->unique(), TensorViewBuilder().build());
             }
 
             if (output_mask[2] && bias != nullptr) {
-              auto grad_bias = sum(grad_out, outer_reduction_axes);
-              value_map.emplace(node->output(2)->unique(), grad_bias);
+              TORCH_INTERNAL_ASSERT(grad.grad_bias != nullptr);
+              value_map.emplace(node->output(2)->unique(), grad.grad_bias);
             } else {
+              TORCH_INTERNAL_ASSERT(grad.grad_bias == nullptr);
               value_map.emplace(
                   node->output(2)->unique(), TensorViewBuilder().build());
             }
@@ -1378,22 +1018,7 @@ class IrParser {
             TORCH_INTERNAL_ASSERT(
                 dim_value.has_value(), "dim in softmax is not valid");
 
-            const int kNumberOfDims = input->nDims();
-            int kReductionAxis = dim_value.value();
-            if (kReductionAxis < 0) {
-              kReductionAxis += int(input->nDims());
-            }
-
-            std::vector<bool> broadcast_mask(kNumberOfDims, false);
-            broadcast_mask[kReductionAxis] = true;
-
-            auto* max_val = max(input, {kReductionAxis});
-            auto* bcast_max = broadcast(max_val, broadcast_mask);
-            auto* x_max_sub = sub(input, bcast_max);
-            auto* exp = unaryOp(UnaryOpType::Exp, x_max_sub);
-            auto* sum_exp = sum(exp, {kReductionAxis});
-            auto* bcast_sum = broadcast(sum_exp, broadcast_mask);
-            auto* output = div(exp, bcast_sum);
+            auto output = softmax(input, dim_value.value());
             value_map.emplace(node->output()->unique(), output);
           },
           [](const Node* node) -> bool {
@@ -1429,21 +1054,8 @@ class IrParser {
 
             auto input = value_map[node->input(3)->unique()]->as<TensorView>();
 
-            const int kNumberOfDims = input->nDims();
-            int kReductionAxis = dim_value.value();
-            if (kReductionAxis < 0) {
-              kReductionAxis += int(input->nDims());
-            }
-
-            std::vector<bool> broadcast_mask(kNumberOfDims, false);
-            broadcast_mask[kReductionAxis] = true;
-
-            auto* new_grad = mul(grad_output, output);
-            auto* sum_new_grad = sum(new_grad, {kReductionAxis});
-            auto* bcast_sum = broadcast(sum_new_grad, broadcast_mask);
-            auto* output_sum_mul = mul(output, bcast_sum);
-            auto* grad_input = sub(new_grad, output_sum_mul);
-
+            auto grad_input =
+                softmax_backward(grad_output, output, dim_value.value(), input);
             value_map.emplace(node->output()->unique(), grad_input);
           },
           [](const Node* node) -> bool {
@@ -1693,6 +1305,7 @@ class IrParser {
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto grad = value_map[node->inputs()[0]->unique()];
             auto self = value_map[node->inputs()[1]->unique()];
+            // TODO: add gelu backward function to composite operations
 
             constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
             const double kHalf = 0.5;

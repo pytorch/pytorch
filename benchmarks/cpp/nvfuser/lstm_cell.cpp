@@ -10,6 +10,8 @@
 
 using namespace torch::jit::fuser::cuda;
 
+// TODO: add LSTM function to composite operations
+// Function Signature: cy, hy = lstm(x, cx)
 static void setupFusion(Fusion* fusion) {
   FusionGuard fg(fusion);
 
