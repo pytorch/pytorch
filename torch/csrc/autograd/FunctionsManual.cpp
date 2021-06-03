@@ -3483,6 +3483,59 @@ Tensor lu_unpack_backward(
   return res;
 }
 
+Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+    }
+
+    out_fw_grad = at::cat(fw_grads, dim);
+  }
+
+  return out_fw_grad;
+}
+
+Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
+  // Generic formula when no 0. is involved
+  Tensor gradient = (self_t / self_p).cumsum(dim) * result;
+
+  // Note that we have to use at::where below as we are removing nans
+
+  if (self_p.dim() == 0) {
+    gradient.masked_fill_(self_p.eq(0), self_t);
+    return gradient;
+  } else {
+    // For input (a, 0, b, 0, c) with gradients (t0, t1, t2, t3, t4)
+    // The output of cumprod is (a, 0, 0, 0, 0)
+    // The gradient we want to compute is (t0, a*t1, a*b*t1, 0, 0)
+    // We do this by:
+    // Get a mask of all zeros (0, 1, 0, 1, 0)
+    auto mask_zeros = self_p.eq(0);
+    // Get a mask of the first zero for each dim (0, 1, 0, 0, 0)
+    auto mask_first_zero = mask_zeros.logical_and(mask_zeros.cumsum(dim).eq(1));
+
+    // Get the new grad value that should be used after any zero happened:
+    // (X, a*t1, a*b*t1, 0, 0) = cumprod((a, t1, b, 0, c))
+    auto new_grad = at::where(mask_first_zero, self_t, self_p).cumprod(dim);
+
+    // Get a mask of everything after the first zero: (0, 1, 1, 1, 1)
+    auto mask_after_first_zero = mask_first_zero.cumsum(dim);
+
+    // Do the final replacement
+    return at::where(mask_after_first_zero.to(ScalarType::Bool), new_grad, gradient);
+  }
+}
+
+
 } // namespace details
 } // namespace generated
 } // namespace autograd

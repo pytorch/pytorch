@@ -5019,9 +5019,9 @@ class TestLinalg(TestCase):
         if torch.device(device).type == 'cuda' and dtype.is_complex:
             # TODO: Remove this error when cross CUDA supports complex
             with self.assertRaisesRegex(RuntimeError, r'_th_cross_kernel_out not supported on CUDAType for Complex'):
-                gradcheck(torch.cross, [x, y])
+                gradcheck(torch.cross, [x, y], check_forward_ad=True)
         else:
-            gradcheck(torch.cross, [x, y])
+            gradcheck(torch.cross, [x, y], check_forward_ad=True)
             gradgradcheck(torch.cross, [x, y], atol=1e-3, check_batched_grad=False)
 
     @onlyCPU
