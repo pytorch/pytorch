@@ -885,11 +885,11 @@ node [shape=box];
         print_pretty("pickles", pickled_objs)
         print_pretty("invalid objects", invalid_nodes)
         if len(self._failed_dunder_imports) > 0:
-                print_pretty(
-                    "location of unresolvable and skipped __import__ statements",
-                    self._failed_dunder_imports,
-                    recurse=False,
-                )
+            print_pretty(
+                "location of unresolvable and skipped __import__ statements",
+                self._failed_dunder_imports,
+                recurse=False,
+            )
         if self.verbosity_lvl > 0:
             print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
 
