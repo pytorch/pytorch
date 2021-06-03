@@ -1514,6 +1514,7 @@ class TestSparse(TestCase):
             run_tests(S.requires_grad_(True), test_dim)
 
     @coalescedonoff
+    @onlyCPU
     @dtypes(torch.double)
     def test_sparse_max(self, device, dtype, coalesced):
 
