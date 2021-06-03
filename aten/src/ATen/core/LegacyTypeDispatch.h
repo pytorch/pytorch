@@ -94,11 +94,6 @@ struct TORCH_API AutoNonVariableTypeMode {
  *   you never go back to a kernel on same dispatch key until
  *   you finish the current op.
  */
-struct TORCH_API AutoDispatchBelowADInplaceOrView {
-  AutoDispatchBelowADInplaceOrView() :
-    dispatch_key_guard_(c10::autograd_dispatch_keyset_with_ADInplaceOrView) {
-  }
-  // disable Autograd & ADInplaceOrView dispatch keys
-  c10::impl::ExcludeDispatchKeyGuard dispatch_key_guard_;
-};
+using AutoDispatchBelowADInplaceOrView = c10::impl::ExcludeNonDefaultDispatchKeyGuard<
+  c10::autograd_dispatch_keyset_with_ADInplaceOrView.raw_repr()>;
 } // namespace at

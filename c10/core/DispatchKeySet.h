@@ -107,6 +107,9 @@ class DispatchKeySet final {
   uint64_t raw_repr() {
     return repr_;
   }
+  constexpr uint64_t raw_repr() const {
+    return repr_;
+  }
   // Return the type id in this set with the highest priority (i.e.,
   // is the largest in the DispatchKey enum).  Intuitively, this
   // type id is the one that should handle dispatch (assuming there

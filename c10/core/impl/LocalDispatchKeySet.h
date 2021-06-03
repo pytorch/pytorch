@@ -50,6 +50,16 @@ struct C10_API PODLocalDispatchKeySet {
   void set_excluded(DispatchKeySet x) {
     excluded_ = (x ^ c10::default_excluded_set).raw_repr();
   }
+
+  // If our exclude set does not overlap with c10::default_excluded_set, we can
+  // skip some bookkeeping. (And we know at compile time if this is the case.)
+  template<uint64_t exclude>
+  uint64_t exclude_non_overlapping() {
+    static_assert(!(exclude & c10::default_excluded_set.raw_repr()));
+    uint64_t delta = exclude & ~excluded_;
+    excluded_ |= exclude;
+    return delta;
+  }
 };
 static_assert(
     std::is_pod<PODLocalDispatchKeySet>::value,
@@ -115,6 +125,24 @@ class C10_API ExcludeDispatchKeyGuard {
   // on destruction
   PODLocalDispatchKeySet* tls_;
   DispatchKeySet exclude_;
+};
+
+template<uint64_t exclude>
+class C10_API ExcludeNonDefaultDispatchKeyGuard {
+ public:
+  ExcludeNonDefaultDispatchKeyGuard()
+      : tls_(&raw_local_dispatch_key_set),
+      delta_(tls_->exclude_non_overlapping<exclude>()) {}
+
+  ~ExcludeNonDefaultDispatchKeyGuard() {
+    tls_->excluded_ &= ~delta_;
+  };
+
+ private:
+  // A little micro-optimization to save us from tls_get_addr call
+  // on destruction
+  PODLocalDispatchKeySet* tls_;
+  uint64_t delta_;
 };
 
 // Non-RAII API for manipulating the thread-local dispatch state.
