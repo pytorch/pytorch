@@ -76,12 +76,22 @@ inline void throw_error_out_requires_grad(const char* name) {
       "but one of the arguments requires grad.");
 }
 
-inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* name) {
-  if (tensor.requires_grad()) {
-    TORCH_CHECK(!tensor.is_complex(), name,
-                " does not support automatic differentiation for outputs with complex dtype.");
-  }
+inline bool is_complex_autograd(const Tensor& tensor) {
+  return tensor.is_complex() && tensor.requires_grad();
 }
+
+inline bool is_complex_autograd(const TensorList& tensorlist) {
+  for (auto tensor: tensorlist) {
+    if (is_complex_autograd(tensor)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// TODO: Once we have C++17, this can be a template function rather than a macro.
+#define THROW_ERROR_FOR_COMPLEX_AUTOGRAD( t, name ) \
+  TORCH_CHECK( !is_complex_autograd(t), name, " does not support automatic differentiation for outputs with complex dtype." );
 
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
   // NOLINTNEXTLINE(performance-for-range-copy)

@@ -145,7 +145,10 @@ def is_tensor_list_type(t: Type) -> bool:
     return t.is_tensor_like() and t.is_list_like() is not None
 
 UNPACK_TENSOR = CodeTemplate("""\
-auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
+UNPACK_TENSOR(${arg_name}, ${arg_pos});  // auto& ${arg_name}_ = ${arg_name};""")
+
+UNPACK_TENSOR_LIST = CodeTemplate("""\
+auto ${arg_name}_ = unpack_list(${arg_name}, "${arg_name}", ${arg_pos});""")
 
 @with_native_function
 def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
@@ -170,13 +173,10 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
             continue
 
         is_tensor_list = is_tensor_list_type(binding.argument.type)
-        ref = (not is_nullable) and not is_tensor_list
-        suffix = '_opt' if is_nullable and not is_tensor_list else ''
-        body.append(UNPACK_TENSOR.substitute(
+        template = (UNPACK_TENSOR_LIST if is_tensor_list else UNPACK_TENSOR)
+        body.append(template.substitute(
             arg_name=binding.name,
             arg_pos=i,
-            suffix=suffix,
-            ref='&' if ref else '',
         ))
         unpacked_bindings.append(Binding(
             name=binding.name + '_',

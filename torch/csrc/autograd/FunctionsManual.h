@@ -32,6 +32,9 @@ struct IndexRangeGenerator {
     size_t i = 0;
 };
 
+inline bool isFwGradDefined(const Tensor& t) {
+    return t.defined() && t._fw_grad(/*level */ 0).defined();
+}
 bool isFwGradDefined(const c10::optional<Tensor>& t);
 Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t);

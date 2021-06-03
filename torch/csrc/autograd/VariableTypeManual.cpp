@@ -38,38 +38,7 @@ C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
-namespace {
-const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos) {
-  if (!t.defined()) {
-    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
-  }
-  return t;
-}
-
-Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
-  if (!t.defined()) {
-    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
-  }
-  return t;
-}
-}
-
-const Tensor & unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos);
-}
-
-Tensor & unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos);
-}
-
-Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
-  if (!t.defined()) {
-    return Tensor();
-  }
-  return unpack(t, name, pos);
-}
-
-std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
+std::vector<at::Tensor> unpack_list(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
@@ -85,7 +54,7 @@ namespace {
 
 // Taken from codegened version
 Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
-  auto& self_ = unpack(self, "self", 0);
+  UNPACK_TENSOR(self, 0); // auto& self_ = self;
   auto const tls = c10::impl::_get_thread_local_state();
   auto _any_requires_grad = compute_requires_grad_with_tls( tls, self );
   (void)_any_requires_grad;
@@ -117,8 +86,8 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
 Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
-  auto& self_ = unpack(self, "self", 0);
-  auto& src_ = unpack(src, "src", 1);
+  UNPACK_TENSOR(self, 0); // auto& self_ = self;
+  UNPACK_TENSOR(src, 1); // auto& src_ = src;
   auto const tls = c10::impl::_get_thread_local_state();
   auto requires_grad = compute_requires_grad_with_tls( tls, self, src );
   requires_grad &= isDifferentiableType(self.scalar_type());
@@ -162,7 +131,7 @@ const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-  auto& self_ = unpack(self, "self", 0);
+  UNPACK_TENSOR(self, 0); // auto& self_ = self;
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
@@ -183,8 +152,8 @@ const Tensor& resize_as_(
     const Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
-  auto& self_ = unpack(self, "self", 0);
-  auto& the_template_ = unpack(the_template, "the_template", 1);
+  UNPACK_TENSOR(self, 0);          // auto& self_ = self;
+  UNPACK_TENSOR(the_template, 1);  // auto& the_template_ = the_template;
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
@@ -201,7 +170,7 @@ const Tensor& resize_as_(
 }
 
 Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
-  auto& self_ = unpack(self, "self", 0);
+  UNPACK_TENSOR(self, 0); // auto& self_ = self;
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
   auto result = ([&]() {
     at::AutoDispatchBelowAutograd guard;
@@ -242,7 +211,7 @@ Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
 }
 
 at::Tensor _noop_unary_manual(c10::DispatchKeySet ks, const at::Tensor & self) {
-  auto& self_ = unpack(self, "self", 0);
+  UNPACK_TENSOR(self, 0); // auto& self_ = self;
   auto const tls = c10::impl::_get_thread_local_state();
   auto _any_requires_grad = compute_requires_grad_with_tls( tls, self );
   (void)_any_requires_grad;
@@ -263,14 +232,14 @@ at::Tensor _noop_unary_manual(c10::DispatchKeySet ks, const at::Tensor & self) {
       set_history(flatten_tensor_args( result ), grad_fn);
   }
 
-  throw_error_for_complex_autograd(result, "_noop_unary_manual");
+  THROW_ERROR_FOR_COMPLEX_AUTOGRAD(result, "_noop_unary_manual");
   TORCH_CHECK(!(generated::details::isFwGradDefined(self)), "Trying to use forward AD with _noop_unary_manual that does not support it.");
   return result;
 }
 
 at::Tensor _noop_binary_manual(c10::DispatchKeySet ks, const at::Tensor & self, const at::Tensor & other) {
-  auto& self_ = unpack(self, "self", 0);
-  auto& other_ = unpack(other, "other", 1);
+  UNPACK_TENSOR(self, 0);  // auto& self_ = self;
+  UNPACK_TENSOR(other, 1); // auto& other_ = other;
   auto const tls = c10::impl::_get_thread_local_state();
   auto _any_requires_grad = compute_requires_grad_with_tls( tls, self, other );
   (void)_any_requires_grad;
@@ -289,7 +258,7 @@ at::Tensor _noop_binary_manual(c10::DispatchKeySet ks, const at::Tensor & self, 
   if (grad_fn) {
       set_history(flatten_tensor_args( result ), grad_fn);
   }
-  throw_error_for_complex_autograd(result, "_noop_binary_manual");
+  THROW_ERROR_FOR_COMPLEX_AUTOGRAD(result, "_noop_binary_manual");
   TORCH_CHECK(!(generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(other)), "Trying to use forward AD with _noop_binary_manual that does not support it.");
   return result;
 }

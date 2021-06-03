@@ -42,14 +42,16 @@ using at::Quantizer;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 using c10::optional;
 
+// TODO: Once we have C++17, this can be a template function rather than a macro.
+#define UNPACK_TENSOR( t, pos ) \
+  TORCH_CHECK( t.defined(), "Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", #t, "'" ); \
+  auto& t##_ = t;
+
 namespace VariableType {
   TORCH_API std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
   TORCH_API std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
 
-  at::Tensor & unpack(Tensor & t, const char * name, int pos);
-  const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
-  at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
-  std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
+  std::vector<at::Tensor> unpack_list(at::TensorList tl, const char *name, int pos);
 };
 
 }} // namespace torch::autograd

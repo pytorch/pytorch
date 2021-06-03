@@ -559,7 +559,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             name = arg.name
             # TODO: should be `arg.type.is_tensor_like()`?
             if arg.cpp_type in ['at::Tensor', 'at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']:
-                body.append(f'throw_error_for_complex_autograd({name}, "{base_name}");')
+                body.append(f'THROW_ERROR_FOR_COMPLEX_AUTOGRAD({name}, "{base_name}");')
         return body
 
     def emit_check_no_requires_grad(
