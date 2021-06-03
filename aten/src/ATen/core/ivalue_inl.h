@@ -518,20 +518,36 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   template <typename T>
   c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
+    using IValueWithDataPtrs = std::
+        tuple<IValue, std::vector<std::reference_wrapper<const at::DataPtr>>>;
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
-        std::is_invocable_r<IValue, T, Future&>::value,
-        "The callback must have signature IValue(Future&)");
+        guts::disjunction<
+            std::is_invocable_r<IValue, T, Future&>,
+            std::is_invocable_r<IValueWithDataPtrs, T, Future&>>::value,
+        "The callback must have signature IValue(Future&) or "
+        "std::tuple<IValue, std::vector<std::reference_wrapper<const DataPtr>>>(Future&)");
 #endif
     auto childFut = createInstance(std::move(type));
-    addCallback(
-        [childFut, cb = std::move(callback)](Future& parentFut) mutable {
-          try {
-            childFut->markCompleted(cb(parentFut));
-          } catch (std::exception&) {
-            childFut->setError(std::current_exception());
-          }
-        });
+    addCallback([childFut,
+                 cb = std::move(callback)](Future& parentFut) mutable {
+      try {
+        guts::if_constexpr<std::is_convertible<
+            typename std::result_of<T && (Future&)>::type,
+            IValueWithDataPtrs>::value>(
+            [&](auto identity) {
+              IValue value;
+              std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
+              std::tie(value, dataPtrs) = identity(cb)(parentFut);
+              childFut->markCompleted(std::move(value), std::move(dataPtrs));
+            },
+            [&](auto identity) {
+              childFut->markCompleted(identity(cb)(parentFut));
+            });
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
+      }
+    });
     return childFut;
   }
 
