@@ -2185,7 +2185,8 @@ add_docstr(torch.conj_physical,
            r"""
 conj_physical(input, *, out=None) -> Tensor
 
-Computes the element-wise conjugate of the given :attr:`input` tensor. If :attr:`input` has a non-complex dtype, this function just returns :attr:`input`.
+Computes the element-wise conjugate of the given :attr:`input` tensor.
+If :attr:`input` has a non-complex dtype, this function just returns :attr:`input`.
 
 .. note::
    This performs the conjugate operation regardless of the fact conjugate bit is set or not.

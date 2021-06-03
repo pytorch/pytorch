@@ -4340,7 +4340,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients', 'test_method_grad',
                                 device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_forward_mode_AD',
-                                dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                                dtypes=[torch.cdouble]),
                    )),
     OpInfo('add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -4721,6 +4721,7 @@ op_db: List[OpInfo] = [
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool,
                                                     torch.bfloat16, torch.half),
+                   supports_forward_ad=True,
                    skips=(
                        SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
                    )),
@@ -6596,13 +6597,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_movedim_moveaxis),
     OpInfo('renorm',
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
-           sample_inputs_func=sample_inputs_renorm,
-           skips=(
-               # AssertionError: Resized a non-empty tensor but did not warn about it.
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_renorm),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
