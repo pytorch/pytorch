@@ -3,8 +3,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/cpu/ChannelShuffleKernel.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 
 namespace at { namespace native {
 
@@ -27,7 +27,7 @@ void cpu_channel_shuffle(
   // output tensor as shape of [n, oc, g, ...]
   //
   // parallel on dimension of n, oc, g
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   at::parallel_for (0, nbatch * /* oc*g */channels, 0, [&](int64_t begin, int64_t end) {
     int64_t n = 0;
     int64_t oc = 0;
@@ -38,7 +38,7 @@ void cpu_channel_shuffle(
       scalar_t* output_ptr = output_data + i * image_size;
       scalar_t* input_ptr = input_data + n * channels * image_size +
           g * channels_per_group * image_size + oc * image_size;
-      vec256::map(
+      vec::map(
          [](Vec x) { return x; },
          output_ptr,
          input_ptr,
@@ -83,7 +83,7 @@ void cpu_channel_shuffle_cl(
   //
   // add vectorized path for float32 when groups = 2, 4, 8, 16, ...
   // to assure similar perf as NCHW memory format.
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   int64_t inner_size = N - (N % Vec::size());
   if (G == 2 && is_float32) {
     parallel_nd(input_data, output_data, M, channels, [&](scalar_t* in, scalar_t* out) {
@@ -97,7 +97,7 @@ void cpu_channel_shuffle_cl(
         // ab0 = {a0, b0, a1, b1, a2, b2, a3, b3}
         // ab1 = {a4, b4, a5, b5, a6, b6, a7, b7}
         Vec ab0, ab1;
-        std::tie(ab0, ab1) = vec256::interleave2(a, b);
+        std::tie(ab0, ab1) = vec::interleave2(a, b);
 
         ab0.store(out + k * 2);
         ab1.store(out + k * 2 + Vec::size());
@@ -125,16 +125,16 @@ void cpu_channel_shuffle_cl(
         // bd0 = {b0, d0, b1, d1, b2, d2, b3, d3}
         // bd1 = {b4, d4, b5, d5, b6, d6, b7, d7}
         Vec ac0, ac1, bd0, bd1;
-        std::tie(ac0, ac1) = vec256::interleave2(a, c);
-        std::tie(bd0, bd1) = vec256::interleave2(b, d);
+        std::tie(ac0, ac1) = vec::interleave2(a, c);
+        std::tie(bd0, bd1) = vec::interleave2(b, d);
 
         // abcd0 = {a0, b0, c0, d0, a1, b1, c1, d1}
         // abcd1 = {a2, b2, c2, d2, a3, b3, c3, d3}
         // abcd2 = {a4, b4, c4, d4, a5, b5, c5, d5}
         // abcd3 = {a6, b6, c6, d6, a7, b7, c7, d7}
         Vec abcd0, abcd1, abcd2, abcd3;
-        std::tie(abcd0, abcd1) = vec256::interleave2(ac0, bd0);
-        std::tie(abcd2, abcd3) = vec256::interleave2(ac1, bd1);
+        std::tie(abcd0, abcd1) = vec::interleave2(ac0, bd0);
+        std::tie(abcd2, abcd3) = vec::interleave2(ac1, bd1);
 
         abcd0.store(out + k * 4);
         abcd1.store(out + k * 4 + Vec::size());
@@ -176,39 +176,39 @@ void cpu_channel_shuffle_cl(
           // bf0 = {b0, f0, b1, f1, b2, f2, b3, f3}
           // bf1 = {b4, f4, b5, f5, b6, f6, b7, f7}
           Vec ae0, ae1, bf0, bf1;
-          std::tie(ae0, ae1) = vec256::interleave2(a, e);
-          std::tie(bf0, bf1) = vec256::interleave2(b, f);
+          std::tie(ae0, ae1) = vec::interleave2(a, e);
+          std::tie(bf0, bf1) = vec::interleave2(b, f);
 
           // cg0 = {c0, g0, c1, g1, c2, g2, c3, g3}
           // cg1 = {c4, g4, c5, g5, c6, g6, c7, g7}
           // dh0 = {d0, h0, d1, h1, d2, h2, d3, h3}
           // dh1 = {d4, h4, d5, h5, d6, h6, d7, h7}
           Vec cg0, cg1, dh0, dh1;
-          std::tie(cg0, cg1) = vec256::interleave2(c, g);
-          std::tie(dh0, dh1) = vec256::interleave2(d, h);
+          std::tie(cg0, cg1) = vec::interleave2(c, g);
+          std::tie(dh0, dh1) = vec::interleave2(d, h);
 
           // aceg0 = {a0, c0, e0, g0, a1, c1, e1, g1}
           // aceg1 = {a2, c2, e2, g2, a3, c3, e3, g3}
           // aceg2 = {a4, c4, e4, g4, a5, c5, e5, g5}
           // aceg3 = {a6, c6, e6, g6, a7, c7, e7, g7}
           Vec aceg0, aceg1, aceg2, aceg3;
-          std::tie(aceg0, aceg1) = vec256::interleave2(ae0, cg0);
-          std::tie(aceg2, aceg3) = vec256::interleave2(ae1, cg1);
+          std::tie(aceg0, aceg1) = vec::interleave2(ae0, cg0);
+          std::tie(aceg2, aceg3) = vec::interleave2(ae1, cg1);
 
           // bdfh0 = {b0, d0, f0, h0, b1, d1, f1, h1}
           // bdfh1 = {b2, d2, f2, h2, b3, d3, f3, h3}
           // bdfh2 = {b4, d4, f4, h4, b5, d5, f5, h5}
           // bdfh3 = {b6, d6, f6, h6, b7, d7, f7, h7}
           Vec bdfh0, bdfh1, bdfh2, bdfh3;
-          std::tie(bdfh0, bdfh1) = vec256::interleave2(bf0, dh0);
-          std::tie(bdfh2, bdfh3) = vec256::interleave2(bf1, dh1);
+          std::tie(bdfh0, bdfh1) = vec::interleave2(bf0, dh0);
+          std::tie(bdfh2, bdfh3) = vec::interleave2(bf1, dh1);
 
           // y_i = {a_i, b_i, c_i, d_i, e_i, f_i, g_i, h_i} : where i = 0:7
           Vec y0, y1, y2, y3, y4, y5, y6, y7;
-          std::tie(y0, y1) = vec256::interleave2(aceg0, bdfh0);
-          std::tie(y2, y3) = vec256::interleave2(aceg1, bdfh1);
-          std::tie(y4, y5) = vec256::interleave2(aceg2, bdfh2);
-          std::tie(y6, y7) = vec256::interleave2(aceg3, bdfh3);
+          std::tie(y0, y1) = vec::interleave2(aceg0, bdfh0);
+          std::tie(y2, y3) = vec::interleave2(aceg1, bdfh1);
+          std::tie(y4, y5) = vec::interleave2(aceg2, bdfh2);
+          std::tie(y6, y7) = vec::interleave2(aceg3, bdfh3);
 
           y0.store(out + (k + 0) * G + grp);
           y1.store(out + (k + 1) * G + grp);
