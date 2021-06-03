@@ -178,10 +178,6 @@ auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_
       .setHandle(handle)
       .setOperationGraph(1, ops.data())
       .build();
-  auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
-      .setOperationGraph(opGraph)
-      .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-      .build();
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
   auto variantPack  = cudnn_frontend::VariantPackBuilder().setDataPointers(3, data_ptrs).setUids(3, uids).build();
