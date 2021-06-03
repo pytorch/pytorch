@@ -1916,7 +1916,7 @@ std::vector<For*> LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
   if (parent == nullptr) {
     throw malformed_input("parent of the loops must be a Block");
   }
-  if ((x->body()->nstmts() != 1) || (x->body()->front() != y)) {
+  if (!areLoopsPerfectlyNested({x, y})) {
     throw malformed_input("two loops must be perfectly nested");
   }
 
