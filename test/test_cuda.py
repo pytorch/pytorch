@@ -3,7 +3,6 @@ from typing import NamedTuple
 import collections
 import gc
 import io
-import os
 import pickle
 import queue
 import sys
@@ -1473,14 +1472,14 @@ try:
 except RuntimeError as e:
     sys.exit(-2)
 """], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            out,err = p.communicate(timeout=10)
+            out, err = p.communicate(timeout=10)
         except subprocess.TimeoutExpired as e:
             p.kill()
-            out,err = p.communicate()
+            out, err = p.communicate()
         expected_messages = [
-            'device-side assert triggered', # CUDA
-            'HSA_STATUS_ERROR_EXCEPTION', # ROCm
-            'Device-side assertion' # ROCm
+            'device-side assert triggered',  # CUDA
+            'HSA_STATUS_ERROR_EXCEPTION',  # ROCm
+            'Device-side assertion'  # ROCm
         ]
         self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
 
