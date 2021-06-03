@@ -192,6 +192,8 @@ class OpInfo(object):
     def __init__(self,
                  name,  # the string name of the function
                  *,
+                 ref=None,  # Just a reference
+                 sample_kwargs=lambda device, dtype, input: ({}, {}),
                  op=None,  # the function variant of the operation, populated as torch.<name> if None
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
@@ -241,6 +243,8 @@ class OpInfo(object):
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
+        self.ref = ref
+        self.sample_kwargs = sample_kwargs
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
 
@@ -5371,6 +5375,8 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_permute),
     OpInfo('pow',
+           ref=np.power,
+           variant_test_name='test_check_pow',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
            # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
@@ -5431,6 +5437,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
     OpInfo('roll',
+           ref=np.roll,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            sample_inputs_func=sample_inputs_roll),
@@ -5510,6 +5517,8 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
     OpInfo('split',
+           # ref=np.split,
+           # variant_test_name='test_check_split',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=False),
            supports_out=False,
@@ -6505,6 +6514,7 @@ op_db: List[OpInfo] = [
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
+test_funcs = [op for op in op_db if isinstance(op, OpInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
