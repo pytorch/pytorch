@@ -16,7 +16,7 @@ from torch.quantization.quantize_fx import (
 
 from torch.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
 
-from torch.quantization.fx.pattern_utils import (
+from torch.quantization.fx.match_utils import (
     is_match,
     MatchAllNode,
 )
