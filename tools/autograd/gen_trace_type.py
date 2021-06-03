@@ -29,6 +29,7 @@ MANUAL_BACKEND = set([
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
 MANUAL_AUTOGRAD_AND_TRACER = set([
     'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', '_fw_primal',
+    '_noop_unary_manual', '_noop_binary_manual'
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:

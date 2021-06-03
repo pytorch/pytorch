@@ -9905,3 +9905,24 @@
 - func: unflatten_dense_tensors(Tensor flat, Tensor[] tensors) -> Tensor[]
   variants: function
   python_module: nn
+
+# Functions which do no work and simply return `self`. Used to measure overhead.
+- func: _noop_unary(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: _noop_unary
+
+- func: _noop_unary_manual(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _noop_unary_manual
+
+- func: _noop_binary(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: _noop_binary
+
+- func: _noop_binary_manual(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _noop_binary_manual
