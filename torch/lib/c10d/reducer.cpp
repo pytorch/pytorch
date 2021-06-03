@@ -6,6 +6,7 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <c10d/comm.hpp>
 #include <c10d/logger.hpp>
 #include <torch/csrc/autograd/engine.h>
@@ -243,7 +244,7 @@ void Reducer::initialize_local_used_map() {
   local_used_maps_.resize(replica_count);
   local_used_maps_dev_.resize(replica_count);
 
-  for (size_t i = 0; i < replica_count; i++) {
+  for (const auto i : c10::irange(replica_count)) {
     at::TensorOptions options;
     options = options.dtype(at::kInt);
 
@@ -612,7 +613,7 @@ void Reducer::autograd_hook(size_t index) {
 void Reducer::all_reduce_local_used_map() {
   // See Note [Skip allreducing local_used_maps_dev]
   // H2D from local_used_maps_ to local_used_maps_dev_
-  for (size_t i = 0; i < local_used_maps_.size(); i++) {
+  for (const auto i : c10::irange(local_used_maps_.size())) {
     if (local_used_maps_dev_[i].is_cuda()) {
       // Note [local_used_maps_ -> local_used_maps_dev copying]
       // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -900,7 +901,7 @@ void Reducer::initialize_buckets(
   const auto bucket_count = bucket_indices.size();
   const auto replica_count = replicas_.size();
   buckets_.reserve(bucket_count);
-  for (size_t bucket_index = 0; bucket_index < bucket_count; bucket_index++) {
+  for(const auto bucket_index : c10::irange(bucket_count)) {
     Bucket bucket;
 
     // TODO(@pietern): Validate indices.
@@ -1045,7 +1046,7 @@ void Reducer::initialize_buckets(
 void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
     at::Tensor& contents) {
-  for (size_t i = 0; i < replica.variables.size(); i++) {
+  for(const auto i : c10::irange(replica.variables.size())) {
     auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
     const auto length = replica.lengths[i];
@@ -1096,7 +1097,7 @@ void Reducer::populate_bucket_views_out(
     Reducer::BucketReplica& replica,
     at::Tensor& tensor) {
   replica.bucket_views_out.clear();
-  for (size_t i = 0; i < replica.variables.size(); i++) {
+  for(const auto i : c10::irange(replica.variables.size())) {
     const auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
     const auto length = replica.lengths[i];
@@ -1414,7 +1415,7 @@ void Reducer::finalize_backward() {
       auto future_result =
           comm_hook_->parseHookResult(bucket.future_work->value());
 
-      for (size_t i = 0; i < future_result.size(); i++) {
+      for(const auto i : c10::irange(future_result.size())) {
         auto& replica = bucket.replicas[i];
         if (bucket.expect_sparse_gradient) {
           replica.contents.copy_(future_result[i]);
@@ -1492,7 +1493,7 @@ void Reducer::sync_bucket_indices(
   std::vector<size_t> bucket_sizes;
   bucket_sizes.reserve(num_buckets);
   int64_t total_size = 0;
-  for (size_t i = 0; i < num_buckets; i++) {
+  for(const auto i : c10::irange(num_buckets)) {
     auto bucket_size = bucket_indices.at(i).size();
     bucket_sizes.push_back(bucket_size);
     total_size += bucket_size;
@@ -1507,9 +1508,9 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor = at::empty({total_size + 1}, at::kInt);
   auto indices_accessor = indices_tensor.accessor<int, 1>();
   auto indices_accessor_Index = 0;
-  for (size_t i = 0; i < num_buckets; i++) {
+  for(const auto i : c10::irange(num_buckets)) {
     const auto& bucket_size = bucket_indices.at(i).size();
-    for (size_t j = 0; j < bucket_size; j++) {
+    for(const auto j : c10::irange(bucket_size)) {
       indices_accessor[indices_accessor_Index++] = bucket_indices[i][j];
     }
   }
@@ -1529,7 +1530,7 @@ void Reducer::sync_bucket_indices(
   // Broadcast bucket_sizes
   auto bucket_sizes_tensor = at::empty({(int64_t)num_buckets}, at::kInt);
   auto bucket_sizes_accessor = bucket_sizes_tensor.accessor<int, 1>();
-  for (size_t i = 0; i < num_buckets; i++) {
+  for(const auto i : c10::irange(num_buckets)) {
     // For rank != 0, it is possible that local num buckets bucket_sizes.size()
     // is smaller than broadcasted num_buckets
     bucket_sizes_accessor[i] =
@@ -1548,11 +1549,11 @@ void Reducer::sync_bucket_indices(
   bucket_indices.clear();
   bucket_indices.reserve(num_buckets);
   indices_accessor_Index = 0;
-  for (size_t i = 0; i < num_buckets; i++) {
+  for(const auto i : c10::irange(num_buckets)) {
     const auto& bucket_size = bucket_sizes_accessor[i];
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
-    for (size_t j = 0; j < bucket_size; j++) {
+    for(const auto j : c10::irange(bucket_size)) {
       bucket.push_back(indices_accessor[indices_accessor_Index++]);
     }
     bucket_indices.emplace_back(std::move(bucket));
@@ -1899,7 +1900,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
       buckets;
 
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for(const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     // TODO: This is not a reducer method so it does not have access to logger,
     // pass in logger directly here.
@@ -2011,7 +2012,7 @@ void verify_replica0_across_processes(
   control.copy_(metadata_dev, /*non_blocking=*/false);
   auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
-  for (size_t p = 0; p < model_replicas[0].size(); p++) {
+  for(const auto p : c10::irange(model_replicas[0].size())) {
     const auto& t = model_replicas[0][p];
     // I'd like to include which process we are in the message,
     // but ProcessGroup::getRank is not public!

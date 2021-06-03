@@ -15,6 +15,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/Event.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/core/StreamGuard.h>
@@ -602,7 +603,7 @@ void set_device(int device) {
   // Don't use DeviceGuard here because its destructor may be called before the
   // device is reset. This is fine because the device is thread local.
   if (device != CPU_DEVICE) {
-    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+    for(const auto i : c10::irange(static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
         impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
@@ -622,7 +623,7 @@ void validate_outputs(
     ss << edges.size() << ", but got " << grads.size();
     AT_ERROR(format_error(ss.str()));
   }
-  for (size_t i = 0; i < grads.size(); i++) {
+  for(const auto i : c10::irange(grads.size())) {
     const auto& edge = edges[i];
     if (!edge.is_valid()) continue;
 

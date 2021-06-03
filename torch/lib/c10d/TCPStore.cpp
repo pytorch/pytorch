@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <c10d/TCPStore.hpp>
 
 #ifdef _WIN32
@@ -447,7 +448,7 @@ void TCPStoreMasterDaemon::checkHandler(int socket) const {
   SizeType nargs;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
-  for (size_t i = 0; i < nargs; i++) {
+  for(const auto i : c10::irange(nargs)) {
     keys[i] = tcputil::recvString(socket);
   }
   // Now we have received all the keys
@@ -462,7 +463,7 @@ void TCPStoreMasterDaemon::waitHandler(int socket) {
   SizeType nargs;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
-  for (size_t i = 0; i < nargs; i++) {
+  for(const auto i : c10::irange(nargs)) {
     keys[i] = tcputil::recvString(socket);
   }
   if (checkKeys(keys)) {
@@ -507,7 +508,7 @@ void TCPStoreMasterDaemon::run() {
   // receive the queries
   bool finished = false;
   while (!finished) {
-    for (size_t i = 0; i < sockets_.size(); i++) {
+    for(const auto i : c10::irange(sockets_.size())) {
       fds[i].revents = 0;
     }
 
@@ -551,7 +552,7 @@ void TCPStoreMasterDaemon::run() {
   // receive the queries
   bool finished = false;
   while (!finished) {
-    for (size_t i = 0; i < sockets_.size(); i++) {
+    for(const auto i : c10::irange(sockets_.size())) {
       fds[i].revents = 0;
     }
 
@@ -756,7 +757,7 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::CHECK);
   SizeType nkeys = keys.size();
   tcputil::sendBytes<SizeType>(storeSocket_, &nkeys, 1, (nkeys > 0));
-  for (size_t i = 0; i < nkeys; i++) {
+  for(const auto i : c10::irange(nkeys)) {
     std::string regKey = regularPrefix_ + keys[i];
     tcputil::sendString(storeSocket_, regKey, (i != (nkeys - 1)));
   }
@@ -808,7 +809,7 @@ void TCPStore::waitHelper_(
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::WAIT);
   SizeType nkeys = keys.size();
   tcputil::sendBytes<SizeType>(storeSocket_, &nkeys, 1, (nkeys > 0));
-  for (size_t i = 0; i < nkeys; i++) {
+  for(const auto i : c10::irange(nkeys)) {
     tcputil::sendString(storeSocket_, keys[i], (i != (nkeys - 1)));
   }
   auto waitResponse = tcputil::recvValue<WaitResponseType>(storeSocket_);
