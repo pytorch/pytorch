@@ -8,6 +8,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TracerMode.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -39,6 +40,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Device", ParameterType::DEVICE},
   {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
+  {"c10::string_view", ParameterType::STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
@@ -172,7 +174,7 @@ auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
   size_t n = py_args.size();
   auto args_ = py::tuple(n + 1);
   args_[0] = py::handle(self);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     args_[i+1] = py_args[i];
   }
   return args_;
@@ -341,7 +343,7 @@ void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* o
   }
   if (class_not_seen_yet) {
     int arg_index = overloaded_args->size();
-    for (int j = 0; j < arg_index; j++) {
+    for(const auto j : c10::irange(arg_index)) {
       if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE((*overloaded_args)[j].ptr())))) {
         // obj is a subclass of another object we've seen already so its
         // __torch_function__ should be called first, therefore we
@@ -382,8 +384,7 @@ bool is_scalar_list(PyObject* obj) {
   }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t idx = 0; idx < size; idx++) {
+  for (const auto idx : c10::irange(size)) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!THPUtils_checkScalar(iobj)) {
       return false;

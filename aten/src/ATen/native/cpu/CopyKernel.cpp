@@ -33,7 +33,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           cpu_kernel_vec(
               iter,
               [=](scalar_t a) -> scalar_t { return a; },
-              [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
+              [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
         });
       } else if (isComplexType(dtype)) {
         if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
@@ -41,14 +41,14 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
               cpu_kernel_vec(
                 iter,
                 [=](scalar_t a) -> scalar_t { return a; },
-                [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
+                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
             });
         } else {
           AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
               cpu_kernel_vec(
                 iter,
                 [=](scalar_t a) -> scalar_t { return conj_impl(a); },
-                [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a.conj(); });
+                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.conj(); });
             });
         }
       } else {
@@ -57,7 +57,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
               cpu_kernel_vec(
                   iter,
                   [=](scalar_t a) -> scalar_t { return a; },
-                  [=](Vec256<scalar_t> a) { return a; });
+                  [=](Vectorized<scalar_t> a) { return a; });
             });
       }
     } else {
@@ -69,14 +69,14 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
               cpu_kernel_vec(
                 iter,
                 [=](scalar_t a) -> scalar_t { return -a; },
-                [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a.neg(); });
+                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg(); });
             });
         } else {
           AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
               cpu_kernel_vec(
                 iter,
                 [=](scalar_t a) -> scalar_t { return -1 * conj_impl(a); },
-                [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a.neg().conj(); });
+                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg().conj(); });
             });
         }
       } else {
@@ -85,7 +85,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
               cpu_kernel_vec(
                   iter,
                   [=](scalar_t a) -> scalar_t { return -a; },
-                  [=](Vec256<scalar_t> a) { return a.neg(); });
+                  [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg(); });
             });
       }
     }

@@ -175,9 +175,9 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 
-    // propagate the correct conjugate and negative bit
-    dst_contig.set_conj(dst.is_conj());
-    src_contig.set_conj(iter.tensor(1).is_conj());
+    // propagate the correct conjugate bit
+    dst_contig._set_conj(dst.is_conj());
+    src_contig._set_conj(iter.tensor(1).is_conj());
 
     dst_contig.set_neg(dst.is_conj());
     src_contig.set_neg(iter.tensor(1).is_neg());

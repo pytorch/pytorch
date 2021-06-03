@@ -34,7 +34,7 @@ class RendezvousHandler(ABC):
     """Main rendezvous interface.
 
     Note:
-        TorchElastic users normally **do not** need to implement their own
+        Distributed Torch users normally **do not** need to implement their own
         ``RendezvousHandler``. An implementation based on C10d Store is already
         provided, and is recommended for most users.
     """

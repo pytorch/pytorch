@@ -64,13 +64,6 @@ VIEW_FUNCTIONS = {
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'
 
-# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
-# which inplace modification of outputs is being gradually deprecated.
-MULTI_OUTPUT_SAFE_FUNCTIONS = {
-    'split',
-    'split_with_sizes',
-}
-
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
@@ -303,10 +296,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         # If we are in a no grad block, raise a warning
         # See NOTE [ View + Inplace detection ] for more details about this logic
         if is_tensor_list_type(return_info.type):
-            if base_name in MULTI_OUTPUT_SAFE_FUNCTIONS:
-                creation_meta = get_creation_meta_in_mode('CreationMeta::MULTI_OUTPUT_SAFE')
-            else:
-                creation_meta = get_creation_meta_in_mode('CreationMeta::MULTI_OUTPUT_NODE')
+            creation_meta = get_creation_meta_in_mode('CreationMeta::MULTI_OUTPUT_NODE')
             call += (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                      '/* is_fw_differentiable */ true, '
                      f'/* creation_meta */ {creation_meta});')

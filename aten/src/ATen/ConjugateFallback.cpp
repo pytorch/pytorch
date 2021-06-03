@@ -4,10 +4,10 @@ namespace at {
 
 struct ConjFallback : MathOpFallback {
   ConjFallback() : MathOpFallback(DispatchKey::Conjugate, "conjugate") {}
-  bool is_bit_set(c10::TensorImpl& tensor) override {
+  bool is_bit_set(const Tensor& tensor) override {
     return tensor.is_conj();
   }
-  void set_bit(Tensor& tensor, bool value) override {
+  void set_bit(const Tensor& tensor, bool value) override {
     return tensor.set_conj(value);
   }
   Tensor resolve_bit(const Tensor& tensor) override {
@@ -56,7 +56,6 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("real", torch::CppFunction::makeFallthrough());
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
-  // TODO: need to hit the view functions
 }
 
 } // namespace at

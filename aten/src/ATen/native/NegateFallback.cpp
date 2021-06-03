@@ -4,10 +4,10 @@ namespace at {
 
 struct NegFallback : MathOpFallback {
   NegFallback() : MathOpFallback(DispatchKey::Negative, "negation") {}
-  bool is_bit_set(c10::TensorImpl& tensor) override {
+  bool is_bit_set(const Tensor& tensor) override {
     return tensor.is_neg();
   }
-  void set_bit(Tensor& tensor, bool value) override {
+  void set_bit(const Tensor& tensor, bool value) override {
     return tensor.set_neg(value);
   }
   Tensor resolve_bit(const Tensor& tensor) override {

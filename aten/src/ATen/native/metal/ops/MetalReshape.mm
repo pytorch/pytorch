@@ -33,7 +33,7 @@ Tensor view(const Tensor& input, IntArrayRef size) {
   mt.texture()->allocateTemporaryStorage(inferred_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:@"reshape"
+      specializedPipelineState:"reshape"
                      Constants:@[
                        @(Y.height),
                        @(Y.width),

@@ -83,6 +83,7 @@ cc_library(
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
         ":c10_headers",
+        "@fmt",
     ] + if_cuda(
         ["@cuda"],
         [],
@@ -140,6 +141,8 @@ genrule(
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/RedispatchFunctions.h",
         "aten/src/ATen/RedispatchFunctions.cpp",
+        "aten/src/ATen/Operators.h",
+        "aten/src/ATen/Operators.cpp",
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
@@ -328,9 +331,7 @@ filegroup(
         "aten/src/TH/THLapack.cpp",
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
-        "aten/src/TH/THTensorEvenMoreMath.cpp",
         "aten/src/TH/THTensorLapack.cpp",
-        "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
     ],
 )
