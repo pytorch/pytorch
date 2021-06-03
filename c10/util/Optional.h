@@ -418,7 +418,7 @@ struct trivially_copyable_optimization_optional_base {
 };
 
 // HACK: Optimization for ArrayRef<T>. We take advantage of an unused
-// bit pattern in ArrayRef (inspirted by Arthur O'Dwyer's
+// bit pattern in ArrayRef (inspired by Arthur O'Dwyer's
 // tombstone_traits -- see https://youtu.be/MWBfmmg8-Yo?t=2466) to
 // keep the size of c10::optional::ArrayRef<T> down to 16 bytes, which
 // allows it to be passed to functions in registers instead of getting

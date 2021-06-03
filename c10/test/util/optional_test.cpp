@@ -47,6 +47,13 @@ using OptionalTypes = ::testing::Types<
     // Non-trivial destructor.
     std::string>;
 
+// This assert is also in Optional.cpp; including here too to make it
+// more likely that we'll remember to port this optimization over when
+// we move to std::optional.
+static_assert(
+    sizeof(c10::optional<c10::IntArrayRef>) == sizeof(c10::IntArrayRef),
+    "c10::optional<IntArrayRef> should be size-optimized");
+
 TYPED_TEST_CASE(OptionalTest, OptionalTypes);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
