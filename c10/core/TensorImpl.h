@@ -657,11 +657,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_;
   }
 
-  inline StorageImpl* unsafeMaybeGetStorageImpl() const {
-    if (C10_UNLIKELY(storage_access_should_throw_)) {
-      return nullptr;
-    }
-    return storage().unsafeGetStorageImpl();
+  /**
+   * Return the underlying storage, unsafely assuming this is a basic strided
+   * tensor. In cases where `storage` access would throw, this returns a
+   * default-constructed Storage.
+   */
+  inline const Storage& unsafe_storage() const {
+    return storage_;
   }
 
   /**
@@ -2031,6 +2033,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * Compute the number of elements based on the sizes of a
+   * tensor. Catches integer overflow that may occur when a tensor
+   * using a sparse layout has multiple dimensions with large sizes.
+   */
+  int64_t safe_compute_numel() const {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      TORCH_CHECK(
+          s == 0 || n <= std::numeric_limits<int64_t>::max() / s,
+          "numel: integer multiplication overflow");
+      n *= s;
+    }
+    return n;
+  }
+
+  /**
    * Compute whether or not a tensor is contiguous based on the sizes and
    * strides of a tensor.
    */
@@ -2048,10 +2066,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  protected:
   /**
-   * Recompute the cached numel of a tensor.  Call this if you modify sizes.
+   * Recompute the cached numel of a tensor.  Call this if you modify
+   * sizes.
+   *
+   * For tensors with sparse layouts, use safe_refresh_numel() instead
+   * because it will catch integer overflow that may occur for tensors
+   * with sparse layouts and large dimensions.
    */
   void refresh_numel() {
     numel_ = compute_numel();
+  }
+
+  /**
+   * Recompute the cached numel of a tensor.  Call this if you modify
+   * sizes. Use only for tensors with sparse layouts because only
+   * sparse tensor are likely to have sizes that may lead to integer
+   * overflow when computing numel.
+   */
+  void safe_refresh_numel() {
+    numel_ = safe_compute_numel();
   }
 
   /**
