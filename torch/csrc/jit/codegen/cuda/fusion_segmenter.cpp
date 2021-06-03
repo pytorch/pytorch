@@ -657,11 +657,15 @@ class GroupDependencyAnalysis : public NonCopyable, public SegmenterAnalysis {
   }
 
   bool isConsumerOf(SegmentedGroup* a, SegmentedGroup* b) {
-    return known_producers_of_.at(a)->count(b);
+    auto it = known_producers_of_.find(a);
+    if (it == known_producers_of_.end()) {
+      return false;
+    }
+    return it->second->count(b);
   }
 
   bool isProducerOf(SegmentedGroup* a, SegmentedGroup* b) {
-    return known_producers_of_.at(b)->count(a);
+    return isConsumerOf(b, a);
   }
 
   //! Finds the common producers of given set of groups

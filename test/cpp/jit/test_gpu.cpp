@@ -15216,6 +15216,28 @@ TEST(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
   }
 }
 
+TEST(NVFuserTest, TestSegmentIslands_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  auto tv2 = sum(tv0, {0});
+  auto tv3 = sum(tv1, {1});
+  fusion->addOutput(tv2);
+  fusion->addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({16, 16}, options);
+  at::Tensor t1 = at::randn({16, 16}, options);
+
+  FusionExecutorCache fusion_executor_cache(std::move(fusion));
+  fusion_executor_cache.runFusionWithInputs({t0, t1});
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

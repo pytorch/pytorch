@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 
 #include <benchmark/benchmark.h>
@@ -37,8 +37,10 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
                    .build();
   auto weight = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
   auto bias = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
-  auto running_mean = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
-  auto running_var = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
+  auto running_mean =
+      TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
+  auto running_var =
+      TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
   fusion.addInput(input);
   fusion.addInput(weight);
   fusion.addInput(bias);

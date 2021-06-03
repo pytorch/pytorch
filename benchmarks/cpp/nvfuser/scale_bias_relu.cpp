@@ -12,7 +12,8 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static void setupFusion(Fusion* fusion,
+static void setupFusion(
+    Fusion* fusion,
     const size_t kNumberOfDims,
     TensorView* x_half,
     TensorView* scale_half,
@@ -24,7 +25,7 @@ static void setupFusion(Fusion* fusion,
   fusion->addInput(bias_half);
 
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  for (size_t axis = 0; axis < kNumberOfDims-1; ++axis) {
+  for (size_t axis = 0; axis < kNumberOfDims - 1; ++axis) {
     broadcast_mask[axis] = true;
   }
 
@@ -40,7 +41,8 @@ static void setupFusion(Fusion* fusion,
   fusion->addOutput(scale_bias_relu_half);
 }
 
-static void setupFusion(Fusion* fusion,
+static void setupFusion(
+    Fusion* fusion,
     const size_t kNumberOfDims,
     TensorView* x_half,
     TensorView* weight_half,
@@ -56,7 +58,7 @@ static void setupFusion(Fusion* fusion,
   fusion->addInput(var_half);
 
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  for (size_t axis = 0; axis < kNumberOfDims-1; ++axis) {
+  for (size_t axis = 0; axis < kNumberOfDims - 1; ++axis) {
     broadcast_mask[axis] = true;
   }
 
@@ -90,11 +92,7 @@ static void SBR_NvFuser_Multiple(benchmark::State& benchmark_state) {
       benchmark_state.range(1),
       benchmark_state.range(1),
       benchmark_state.range(2)};
-  std::vector<int64_t> bcast_shape{
-      1,
-      1,
-      1,
-      -1};
+  std::vector<int64_t> bcast_shape{1, 1, 1, -1};
 
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -103,25 +101,17 @@ static void SBR_NvFuser_Multiple(benchmark::State& benchmark_state) {
                .ndims(input_shape.size())
                .dtype(DataType::Half)
                .build();
-  auto scale = TensorViewBuilder()
-               .shape(bcast_shape)
-               .dtype(DataType::Half)
-               .build();
-  auto bias = TensorViewBuilder()
-               .shape(bcast_shape)
-               .dtype(DataType::Half)
-               .build();
+  auto scale =
+      TensorViewBuilder().shape(bcast_shape).dtype(DataType::Half).build();
+  auto bias =
+      TensorViewBuilder().shape(bcast_shape).dtype(DataType::Half).build();
 
   // setup fusion
   setupFusion(&fusion, input_shape.size(), x, scale, bias);
 
   // inputs
   at::manual_seed(0);
-  std::vector<int64_t> static_bcast_shape{
-      1,
-      1,
-      1,
-      benchmark_state.range(2)};
+  std::vector<int64_t> static_bcast_shape{1, 1, 1, benchmark_state.range(2)};
   auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_scale = at::ones(static_bcast_shape, options);
@@ -147,11 +137,12 @@ static void SBR_NvFuser_Multiple(benchmark::State& benchmark_state) {
     cudaDeviceSynchronize();
   }
 
-  const size_t size = input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
+  const size_t size =
+      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t channels = input_shape[3];
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) *
-      (channels * 2 + size * 2) * int64_t(dataTypeSize(DataType::Half)));
+      int64_t(benchmark_state.iterations()) * (channels * 2 + size * 2) *
+      int64_t(dataTypeSize(DataType::Half)));
 }
 
 static void SBR_Baseline_Multiple(benchmark::State& benchmark_state) {
@@ -161,8 +152,7 @@ static void SBR_Baseline_Multiple(benchmark::State& benchmark_state) {
       benchmark_state.range(1),
       benchmark_state.range(1),
       benchmark_state.range(2)};
-  std::vector<int64_t> bcast_shape{
-      benchmark_state.range(2)};
+  std::vector<int64_t> bcast_shape{benchmark_state.range(2)};
 
   // inputs
   at::manual_seed(0);
@@ -184,11 +174,12 @@ static void SBR_Baseline_Multiple(benchmark::State& benchmark_state) {
     cudaDeviceSynchronize();
   }
 
-  const size_t size = input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
+  const size_t size =
+      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t channels = input_shape[3];
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) *
-      (channels * 2 + size * 2) * int64_t(dataTypeSize(DataType::Half)));
+      int64_t(benchmark_state.iterations()) * (channels * 2 + size * 2) *
+      int64_t(dataTypeSize(DataType::Half)));
 }
 
 //------------------------------------------------------------------------------
@@ -200,8 +191,7 @@ static void SBR_NvFuser(benchmark::State& benchmark_state) {
       benchmark_state.range(1),
       benchmark_state.range(1),
       benchmark_state.range(2)};
-  std::vector<int64_t> bcast_shape{
-      benchmark_state.range(2)};
+  std::vector<int64_t> bcast_shape{benchmark_state.range(2)};
 
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -211,21 +201,21 @@ static void SBR_NvFuser(benchmark::State& benchmark_state) {
                .dtype(DataType::Half)
                .build();
   auto weight = TensorViewBuilder()
-               .ndims(bcast_shape.size())
-               .dtype(DataType::Half)
-               .build();
+                    .ndims(bcast_shape.size())
+                    .dtype(DataType::Half)
+                    .build();
   auto bias = TensorViewBuilder()
-               .ndims(bcast_shape.size())
-               .dtype(DataType::Half)
-               .build();
+                  .ndims(bcast_shape.size())
+                  .dtype(DataType::Half)
+                  .build();
   auto mean = TensorViewBuilder()
-               .ndims(bcast_shape.size())
-               .dtype(DataType::Half)
-               .build();
+                  .ndims(bcast_shape.size())
+                  .dtype(DataType::Half)
+                  .build();
   auto var = TensorViewBuilder()
-               .ndims(bcast_shape.size())
-               .dtype(DataType::Half)
-               .build();
+                 .ndims(bcast_shape.size())
+                 .dtype(DataType::Half)
+                 .build();
 
   // setup fusion
   setupFusion(&fusion, input_shape.size(), x, weight, bias, mean, var);
@@ -263,11 +253,12 @@ static void SBR_NvFuser(benchmark::State& benchmark_state) {
     cudaDeviceSynchronize();
   }
 
-  const size_t size = input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
+  const size_t size =
+      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t channels = input_shape[3];
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) *
-      (channels * 2 + size * 2) * int64_t(dataTypeSize(DataType::Half)));
+      int64_t(benchmark_state.iterations()) * (channels * 2 + size * 2) *
+      int64_t(dataTypeSize(DataType::Half)));
 }
 
 static void SBR_Baseline(benchmark::State& benchmark_state) {
@@ -277,11 +268,7 @@ static void SBR_Baseline(benchmark::State& benchmark_state) {
       benchmark_state.range(1),
       benchmark_state.range(1),
       benchmark_state.range(2)};
-  std::vector<int64_t> bcast_shape{
-      1,
-      1,
-      1,
-      benchmark_state.range(2)};
+  std::vector<int64_t> bcast_shape{1, 1, 1, benchmark_state.range(2)};
 
   // inputs
   at::manual_seed(0);
@@ -308,11 +295,12 @@ static void SBR_Baseline(benchmark::State& benchmark_state) {
     cudaDeviceSynchronize();
   }
 
-  const size_t size = input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
+  const size_t size =
+      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t channels = input_shape[3];
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) *
-      (channels * 2 + size * 2) * int64_t(dataTypeSize(DataType::Half)));
+      int64_t(benchmark_state.iterations()) * (channels * 2 + size * 2) *
+      int64_t(dataTypeSize(DataType::Half)));
 }
 
 //------------------------------------------------------------------------------
