@@ -6,6 +6,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace autograd {
 
@@ -74,7 +76,7 @@ variable_list run_backward(
   size_t num_tensors = outputs.size();
   edge_list roots;
   roots.reserve(num_tensors);
-  for (size_t i = 0; i < num_tensors; i++) {
+  for(const auto i : c10::irange(num_tensors)) {
     const Variable& output = outputs[i];
     auto gradient_edge = impl::gradient_edge(output);
     TORCH_CHECK(
