@@ -1974,7 +1974,7 @@ add_docstr_all('is_inference',
                r"""
 is_inference() -> bool
 
-Returns True if :attr:`self` is an infernece tensor.
+See :func:`torch.is_inference`
 """)
 
 add_docstr_all('is_signed',
