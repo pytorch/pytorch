@@ -227,6 +227,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.unflatten,
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
+        Tensor._fix_weakref,
     }
 
 
@@ -866,8 +867,12 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.expm1: lambda input: -1,
         torch.special.expit: lambda input: -1,
         torch.special.gammaln: lambda input: -1,
+        torch.special.i0: lambda input: -1,
         torch.special.i0e: lambda input: -1,
+        torch.special.i1: lambda input: -1,
+        torch.special.i1e: lambda input: -1,
         torch.special.logit: lambda input: -1,
+        torch.special.ndtr: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
