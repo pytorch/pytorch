@@ -60,7 +60,7 @@ echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd
 
-# Clone the Builder master repo 1
+# Clone the Builder master repo 12
 retry git clone -q https://github.com/pytorch/builder.git -b pbelevich-patch-1 "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
