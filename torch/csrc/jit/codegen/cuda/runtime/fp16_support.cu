@@ -3,7 +3,7 @@
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short*>(&(var)))
 
 struct __align__(2) __half {
-  __host__ __device__ __half() {}
+  __half() = default;
 
  protected:
   unsigned short __x;
