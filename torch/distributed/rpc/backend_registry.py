@@ -2,7 +2,7 @@
 import collections
 from datetime import timedelta
 import enum
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -203,9 +203,9 @@ def _tensorpipe_validate_devices(devices, device_count):
 def _tensorpipe_exchange_and_check_all_device_maps(
     my_name, my_device_count, my_device_maps, my_devices, group
 ):
-    gathered: List[Optional[Tuple[
+    gathered: List[Tuple[
         str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.device]
-    ]]] = [None] * group.size()
+    ]] = [("", 0, {}, []) for _ in range(group.size())]
     dist.all_gather_object(
         gathered, (my_name, my_device_count, my_device_maps, my_devices), group
     )
