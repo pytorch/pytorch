@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes, dtypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
@@ -58,6 +58,17 @@ class TestOpInfo(TestCase):
             sample_input = sample.input[0] if is_iterable_of_tensors(sample.input) else sample.input
             self.assertTrue(sample_input.dtype == dtype)
             self.assertTrue(sample_input.device.type == self.device_type)
+
+    @onlyOnCPUAndCUDA
+    @ops(op_db, dtypes=OpDTypes.basic, allowed_dtypes=(torch.float32,))
+    def test_device_only_supported_dtypes(self, device, dtypes, op):
+        for dtype in op.supported_dtypes(self.device_type):
+            for sample in op.sample_inputs(device, dtype):
+                op(sample.input, *sample.args, **sample.kwargs)
+                # NOTE: only check the first tensor in the iterable of tensors
+                sample_input = sample.input[0] if is_iterable_of_tensors(sample.input) else sample.input
+                self.assertTrue(sample_input.dtype == dtype)
+                self.assertTrue(sample_input.device.type == self.device_type)
 
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.
