@@ -4088,9 +4088,13 @@ else:
 
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
-        weight = torch.tensor(1.0)
-        with self.assertRaisesRegex(RuntimeError, "'weight' must be at least 1-D"):
-            torch.embedding(weight, indices)
+        weights = [
+            torch.tensor(1.0, device=device),
+            torch.tensor(1.0, device=device).reshape(1, 1, 1),
+        ]
+        for weight in weights:
+            with self.assertRaisesRegex(RuntimeError, "'weight' must be 2-D"):
+                torch.embedding(weight, indices)
 
     def test_dist(self, device):
         def run_test(x, y):
@@ -8243,6 +8247,10 @@ class TestTensorDeviceOps(TestCase):
 
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
+
+    def test_tensor_ctor_scalar(self):
+        x = torch.Tensor(torch.tensor(1.0))
+        self.assertEqual(x, torch.tensor(1.0))
 
     def test_deepcopy_gradient(self):
         from copy import deepcopy
