@@ -71,6 +71,7 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+#include <torch/csrc/jit/passes/tensor_property_propagation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
@@ -510,6 +511,13 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_constant_propagation",
           [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); },
           py::arg("graph"))
+      .def(
+          "_jit_pass_propagate_tensor_property_on_graph",
+          TensorPropertyPropagation)
+      // [](std::shared_ptr<Graph>& g) {
+      //   return TensorPropertyPropagation(g);
+      // },
+      // py::arg("graph"))
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
           "_jit_pass_create_autodiff_subgraphs",

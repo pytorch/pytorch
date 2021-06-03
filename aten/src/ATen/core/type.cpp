@@ -738,6 +738,17 @@ std::ostream& operator<<(std::ostream& os, const Stride& s) {
   return os;
 }
 
+/*
+std::ostream& operator<<(std::ostream& os, const SymbolicTensorProperties& ss) {
+  os << "(scalar_type=" << ss.scalarType();
+  if (!ss.isDTypeConcrete()) {
+    os << "*";
+  }
+  os << ")";
+  return os;
+}
+*/
+
 TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
@@ -1845,6 +1856,27 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
 void SymbolicShape::dump() const {
   std::cout << *this << "\n";
 }
+
+/*
+// merge two shapes only if they are both concrete and the same
+//
+// FIXME (penguin): this may create too many short-lived objects
+// TODO (penguin): use unifyTypes to merge symbolic shapes
+SymbolicTensorProperties SymbolicTensorProperties::merge(
+    const SymbolicTensorProperties& other) const {
+  if (isDTypeConcrete() && other.isDTypeConcrete() &&
+      scalarType() == other.scalarType()) {
+    return SymbolicTensorProperties(scalarType());
+  } else {
+    return SymbolicTensorProperties();
+  }
+  // if (auto unified = unifyTypes(scalar_type_, other.scalarType())) {
+  //   return SymbolicTensorProperties(unified.value());
+  // } else {
+  //   return SymbolicTensorProperties();
+  // }
+}
+*/
 
 bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   return rhs->kind() == TypeKind::AnyType ||

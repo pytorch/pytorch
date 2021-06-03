@@ -217,6 +217,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/create_functional_graphs.cpp",
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
+    "torch/csrc/jit/passes/tensor_property_propagation.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",

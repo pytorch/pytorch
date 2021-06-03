@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/python/python_ir.h>
 
 #include <pybind11/pybind11.h>
@@ -28,6 +29,7 @@ bool global_print_source_ranges = true;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
+using c10::ScalarType;
 using c10::Type;
 
 std::string getPythonName(const PyObject* obj_) {
@@ -797,6 +799,23 @@ void initPythonIRBindings(PyObject* module_) {
             auto scalar_type =
                 t.shared_from_this()->expectRef<TensorType>().scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
+          })
+      .def(
+          "with_scalarType",
+          // FIXME (penguin): need a better way to parse in scalar types
+          [](Type& t, const char* scalar_type) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              c10::ScalarType type = c10::ScalarType::Undefined;
+              if (strcmp(scalar_type, "Int") == 0) {
+                type = c10::ScalarType::Int;
+              } else if (strcmp(scalar_type, "Float") == 0) {
+                type = c10::ScalarType::Float;
+              } else {
+                return py::none();
+              }
+              return py::cast(ptt->withScalarType(type));
+            }
+            return py::none();
           })
       .def(
           "__eq__",
