@@ -358,10 +358,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::unordered_map<size_t, std::string>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "initialize_buckets",
-          &::c10d::Reducer::initialize_buckets,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
           py::call_guard<py::gil_scoped_release>())
@@ -411,7 +407,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_delay_all_reduce",
           &::c10d::Reducer::delay_all_reduce,
-          py::call_guard<py::gil_scoped_release>()) ;
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_logger",
+          [](::c10d::Reducer& reducer,
+             const std::shared_ptr<::c10d::Logger> logger) {
+            std::weak_ptr<::c10d::Logger> logger_weakref = logger;
+            reducer.set_logger(logger_weakref);
+          });
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -429,6 +432,12 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "set_runtime_stats_and_log",
           &::c10d::Logger::set_runtime_stats_and_log,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_error_and_log",
+          [](::c10d::Logger& logger, const std::string& error) {
+              logger.set_error_and_log(error);
+          },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_ddp_logging_data",

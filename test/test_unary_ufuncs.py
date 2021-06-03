@@ -1470,6 +1470,34 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_nonzero_noncontiguous(self, device, dtype):
+        x = make_tensor((10, 10, 10), dtype=dtype, device=device,
+                        low=1, noncontiguous=False)
+        mask = make_tensor((10, 10, 10), dtype=torch.bool, device=device)
+        x[mask] = 0
+
+        def permute_storage(tensor, dims):
+            dest_dims = tuple(range(len(dims)))
+            return tensor.permute(dims).contiguous().movedim(dims, dest_dims)
+
+        # Assume contiguous case is correct
+        expect = x.nonzero()
+
+        # Dense, permuted
+        self.assertEqual(permute_storage(x, [0, 2, 1]).nonzero(), expect)
+        self.assertEqual(permute_storage(x, [2, 1, 0]).nonzero(), expect)
+
+        # Non-dense
+        nondense = torch.empty((40, 10, 20), dtype=dtype, device=device)[::4, :, ::2]
+        nondense[:] = x
+        self.assertEqual(nondense.nonzero(), expect)
+
+        # Non-dense, permuted
+        nondense = nondense.permute([0, 2, 1])
+        nondense[:] = x
+        self.assertEqual(nondense.nonzero(), expect)
+
     # TODO: rationalize with exp OpInfo
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False) +
               torch.testing.get_all_complex_dtypes()))
