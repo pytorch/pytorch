@@ -6,7 +6,7 @@
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/python_print.h>

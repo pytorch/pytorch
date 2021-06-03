@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <cstddef>
 
 namespace torch {

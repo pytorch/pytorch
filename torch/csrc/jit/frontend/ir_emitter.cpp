@@ -11,7 +11,7 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/resolver.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
@@ -2487,7 +2487,7 @@ std::shared_ptr<SugaredValue> to_ir::emitRpcExpr(
     // rpc_op(to, user_callable, arg_0, arg_1, kwarg_0="foo",
     // kwarg_1="bar")
   }
-  matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
+  matchSchemaAndPrepareGraph(functionSchema, loc, *graphPtr, args, kwargs);
 
   // Graph insert the QualifiedName as an constant input IR Value.
   const auto& qualname = callablePtr->qualname();

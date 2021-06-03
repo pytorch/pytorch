@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -674,7 +674,8 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
   auto schema = type_->schema();
   TORCH_INTERNAL_ASSERT(schema);
   auto qualname = type_->name();
-  auto matched_schema = matchSchema(*schema, loc, g, args, kwargs);
+  auto matched_schema =
+      matchSchemaAndPrepareGraph(*schema, loc, g, args, kwargs);
 
   auto self =
       g.insertNode(

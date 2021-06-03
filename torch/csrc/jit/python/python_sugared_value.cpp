@@ -4,7 +4,7 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <climits>
 #include <memory>
@@ -128,7 +128,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   auto inputs = toValues(*m.graph(), argsWithSelf);
 
   MatchedSchema matched_schema =
-      matchSchema(schema, loc, *m.graph(), argsWithSelf, kwargs);
+      matchSchemaAndPrepareGraph(schema, loc, *m.graph(), argsWithSelf, kwargs);
 
   // If if a function is marked as dropped,
   // we throw an exception if it is invoked.

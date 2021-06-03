@@ -1,9 +1,9 @@
 #pragma once
+
+#include <ATen/core/function_schema.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
-
-#include <ATen/core/function_schema.h>
 
 namespace torch {
 namespace jit {
@@ -15,6 +15,8 @@ namespace jit {
 struct MatchedSchema {
   std::vector<Value*> inputs;
   std::vector<TypePtr> return_types;
+  // Holds the extra Nodes that need to be added to the Graph
+  std::shared_ptr<Graph> additions;
   c10::OptNameList return_field_names;
 };
 
@@ -38,14 +40,6 @@ TORCH_API std::pair<size_t, MatchedSchema> matchSchemas(
 TORCH_API bool convertibleToList(
     const TypePtr& type,
     const TypePtr& list_type_);
-
-TORCH_API Value* emitBuiltinCall(
-    const SourceRange& loc,
-    Graph& graph,
-    Symbol name,
-    at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self = c10::nullopt);
 
 TORCH_API c10::optional<size_t> findInputWithName(
     const std::string& name,

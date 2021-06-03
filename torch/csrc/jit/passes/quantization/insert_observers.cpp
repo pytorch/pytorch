@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -982,7 +982,7 @@ void InsertObserversHelper::insertObserverFor(
   {
     WithInsertPoint guard(observer_instance->next());
     // Match arguments to types of observer's arguments
-    MatchedSchema forward_matched_schema = matchSchema(
+    MatchedSchema forward_matched_schema = matchSchemaAndPrepareGraph(
         observer.get_method("forward").function().getSchema(),
         v->node()->sourceRange(),
         *g,

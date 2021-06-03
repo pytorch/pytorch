@@ -7,7 +7,7 @@
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -407,7 +407,8 @@ struct FunctionValue : public SugaredValue {
       }
       schemas.push_back(&callee->getSchema());
     }
-    auto match = matchSchemas(schemas, loc, *f.graph(), args, kwargs);
+    auto match =
+        matchSchemasAndPrepareGraph(schemas, loc, *f.graph(), args, kwargs);
     Value* output =
         f.graph()->insertFunctionCall(callees_[match.first], match.second);
     output->node()->setSourceRange(loc);
@@ -475,7 +476,8 @@ struct MethodValue : public SugaredValue {
             false, "method constructed that is not a class or interface");
       }
     }
-    auto match = matchSchemas(schemas, loc, *f.graph(), argsWithSelf, kwargs);
+    auto match = matchSchemasAndPrepareGraph(
+        schemas, loc, *f.graph(), argsWithSelf, kwargs);
     Value* output =
         f.graph()->insertMethodCall(method_names_[match.first], match.second);
     output->node()->setSourceRange(loc);
