@@ -112,7 +112,7 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
 }
 
 auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
-   auto op = cudnn_frontend::OperationBuilder(desc)
+  auto op = cudnn_frontend::OperationBuilder(desc)
       .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
       .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
       .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
@@ -123,7 +123,6 @@ auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc
       .setHandle(handle)
       .setOperationGraph(1, ops.data())
       .build();
-
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
   auto variantPack  = cudnn_frontend::VariantPackBuilder().setDataPointers(3, data_ptrs).setUids(3, uids).build();
