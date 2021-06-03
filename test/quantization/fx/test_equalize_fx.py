@@ -24,9 +24,9 @@ class TestEqualizeFx(QuantizationTestCase):
         weight_obs = _WeightEqualObserver(dtype=weight_qdtype,
                                           qscheme=weight_qscheme)
 
-        width = np.random.randint(10) + 1
-        x_height = np.random.randint(10) + 2
-        w_height = np.random.randint(10) + 2
+        width = np.random.randint(1, 10)
+        x_height = np.random.randint(2, 10)
+        w_height = np.random.randint(2, 10)
 
         x = (np.random.random(size=(x_height, width)) * 10).round(decimals=2).astype(np.float32)
         w = (np.random.random(size=(w_height, width)) * 10).round(decimals=2).astype(np.float32)
