@@ -5375,6 +5375,8 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_permute),
     OpInfo('pow',
+           ref=np.power,
+           variant_test_name='test_check_pow',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
            # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
@@ -5515,6 +5517,8 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
     OpInfo('split',
+           # ref=np.split,
+           # variant_test_name='test_check_split',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=False),
            supports_out=False,
