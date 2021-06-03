@@ -542,28 +542,20 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cpu",
         [&iter] { cpu_kernel(iter,
-          [](scalar_t a, scalar_t b) -> scalar_t {
+          [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
             return a;
         });
     });
   } else {
-    // UB sanitisers complain when we Vectorize for bools
-    if (iter.dtype() == ScalarType::Bool) {
-      cpu_kernel(iter,
-            [](bool a, bool b) -> bool {
-              return a;
-          });
-    } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "flip_cpu",
-          [&iter] { cpu_kernel_vec(iter,
-            [](scalar_t a, scalar_t b) -> scalar_t {
-              return a;
-          },
-            [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
-              return a;
-          });
-      });
-    }
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
+        [&iter] { cpu_kernel_vec(iter,
+          [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
+            return a;
+        },
+          [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
+            return a;
+        });
+    });
   }
 }
 

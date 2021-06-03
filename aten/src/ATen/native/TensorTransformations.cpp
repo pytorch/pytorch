@@ -38,15 +38,15 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
     return out_tensor;
   }
 
-  //create dummy output with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
-  auto restrided_out = out_tensor.as_strided(out_tensor.sizes(), strides);
+  //create dummy input with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
+  auto restrided_in = self.as_strided(self.sizes(), strides);
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .declare_static_dtype_and_device(self.scalar_type(), self.device())
     .add_output(out_tensor)
     .add_input(self)
-    .add_input(restrided_out)
+    .add_input(restrided_in)
     .build();
 
   auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
