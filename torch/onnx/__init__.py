@@ -62,8 +62,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
                 "args = (x,
                         {
-                        'y': input_y,
-                        'z': input_z
+                        "y": input_y,
+                        "z": input_z
                         })"
 
             The inputs to the model are structured as a tuple consisting of
@@ -87,7 +87,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
                 In the previous iteration, the call to export API would look like
 
-                    torch.onnx.export(model, (k, x), 'test.onnx')
+                    torch.onnx.export(model, (k, x), "test.onnx")
 
                 This would work as intended. However, the export function
                 would now assume that the `x` input is intended to represent the optional
@@ -95,7 +95,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                 an issue a constraint is placed to provide an empty dictionary as the last
                 input in the tuple args in such cases. The new call would look like this.
 
-                    torch.onnx.export(model, (k, x, {}), 'test.onnx')
+                    torch.onnx.export(model, (k, x, {}), "test.onnx")
 
         f: a file-like object (has to implement fileno that returns a file descriptor)
             or a string containing a file name.  A binary Protobuf will be written
@@ -205,34 +205,34 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
             .. code-block:: none
 
-                shape(input_1) = ('b', 3, 'w', 'h')
-                and shape(input_2) = ('b', 4)
-                and shape(output)  = ('b', 'd', 5)
+                shape(input_1) = ("b", 3, "w", "h")
+                and shape(input_2) = ("b", 4)
+                and shape(output)  = ("b", "d", 5)
 
             Then `dynamic axes` can be defined either as:
 
             1. ONLY INDICES::
 
-                ``dynamic_axes = {'input_1':[0, 2, 3],
-                                  'input_2':[0],
-                                  'output':[0, 1]}``
+                ``dynamic_axes = {"input_1":[0, 2, 3],
+                                  "input_2":[0],
+                                  "output":[0, 1]}``
                 where automatic names will be generated for exported dynamic axes
 
             2. INDICES WITH CORRESPONDING NAMES::
 
-                ``dynamic_axes = {'input_1':{0:'batch',
-                                             1:'width',
-                                             2:'height'},
-                                  'input_2':{0:'batch'},
-                                  'output':{0:'batch',
-                                            1:'detections'}}``
+                ``dynamic_axes = {"input_1":{0:"batch",
+                                             1:"width",
+                                             2:"height"},
+                                  "input_2":{0:"batch"},
+                                  "output":{0:"batch",
+                                            1:"detections"}}``
                 where provided names will be applied to exported dynamic axes
 
             3. MIXED MODE OF (1) and (2)::
 
-                ``dynamic_axes = {'input_1':[0, 2, 3],
-                                  'input_2':{0:'batch'},
-                                  'output':[0,1]}``
+                ``dynamic_axes = {"input_1":[0, 2, 3],
+                                  "input_2":{0:"batch"},
+                                  "output":[0,1]}``
 
         keep_initializers_as_inputs (bool, default None): If True, all the
             initializers (typically corresponding to parameters) in the
@@ -264,9 +264,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             in external binary files and not in the ONNX model file itself. See link for format
             details:
             https://github.com/onnx/onnx/blob/8b3f7e2e7a0f2aba0e629e23d89f07c7fc0e6a5e/onnx/onnx.proto#L423
-            Also, in this case,  argument 'f' must be a string specifying the location of the model.
+            Also, in this case,  argument "f" must be a string specifying the location of the model.
             The external binary files will be stored in the same location specified by the model
-            location 'f'. If False, then the model is stored in regular format, i.e. model and
+            location "f". If False, then the model is stored in regular format, i.e. model and
             parameters are all in one file. This argument is ignored for all export types other
             than ONNX.
     """
@@ -297,8 +297,8 @@ def _optimize_trace(graph, operator_export_type):
 
 def select_model_mode_for_export(model, mode):
     r"""
-    A context manager to temporarily set the training mode of 'model'
-    to 'mode', resetting it when we exit the with-block.  A no-op if
+    A context manager to temporarily set the training mode of "model"
+    to "mode", resetting it when we exit the with-block.  A no-op if
     mode is None.
 
     In version 1.6 changed to this from set_training
