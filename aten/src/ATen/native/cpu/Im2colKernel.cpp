@@ -3,7 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/im2col.h>
 #include <ATen/native/cpu/utils.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 
 namespace at { namespace native {
 
@@ -109,7 +109,7 @@ void col2im_channels_last(
   //
   // parallel on dim nbatch and do vectorization on dim output_channels
   int64_t size = output_channels;
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (int64_t n = begin; n < end; n++) {
       scalar_t* col_ptr = col_data + n * input_height * input_width * kH * kW * output_channels;
@@ -174,7 +174,7 @@ void im2col_channels_last(
   int64_t m = col.numel() / output_channels;
 
   int64_t size = output_channels;
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   at::parallel_for(0, m, 0, [&](int64_t begin, int64_t end) {
     int64_t n{0}, ih{0}, iw{0}, kh{0}, kw{0};
     data_index_init(begin, n, nbatch, ih, input_height, iw, input_width, kh, kH, kw, kW);
