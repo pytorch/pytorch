@@ -1559,7 +1559,7 @@ def all_gather_object(object_list, obj, group=None):
     current_device = torch.device("cpu")
     if (
         (is_nccl_available() and isinstance(group, ProcessGroupNCCL))
-        or (is_gloo_available() and isinstance(group, _ProcessGroupWrapper)
+        or (is_gloo_available() and isinstance(group, _ProcessGroupWrapper))
     ):
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
