@@ -530,7 +530,7 @@ static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObj
 
     auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
                       .options(options)
-                      .deleter([obj = obj.release()](void*) mutable {
+                      .deleter([obj = obj.release()](void*) {
                         pybind11::gil_scoped_acquire gil;
                         Py_DECREF(obj);
                       })
