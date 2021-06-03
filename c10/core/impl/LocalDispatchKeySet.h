@@ -65,6 +65,10 @@ inline C10_API LocalDispatchKeySet snapshot_tls_keyset() {
   return LocalDispatchKeySet(LocalDispatchKeySetWrapper());
 }
 
+inline C10_API LocalDispatchKeySet snapshot_tls_keyset(PODLocalState* tls) {
+  return LocalDispatchKeySet(LocalDispatchKeySetWrapper(tls));
+}
+
 // Internal, use ThreadLocalStateGuard
 C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
 

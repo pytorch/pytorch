@@ -34,10 +34,19 @@ static inline DispatchKeySet computeDispatchKeySet(
     // AFTER TLS (since the backend may have been introduced for consideration
     // by the included TLS), which is why you have to pass them in to this
     // function (as opposed to just applying it to the input 'ks').
-    DispatchKeySet key_mask
+    DispatchKeySet key_mask,
+    c10::impl::PODLocalState* tls
 ) {
-  LocalDispatchKeySet local = c10::impl::snapshot_tls_keyset();
+  LocalDispatchKeySet local = c10::impl::snapshot_tls_keyset(tls);
   return (((ks | local.included_) - local.excluded_) & key_mask);
+}
+
+// TODO: should this overload exist?
+static inline DispatchKeySet computeDispatchKeySet(
+  DispatchKeySet ks,
+  DispatchKeySet key_mask
+) {
+  return computeDispatchKeySet(ks, key_mask, c10::impl::_get_thread_local_state());
 }
 
 }
@@ -115,7 +124,7 @@ public:
     dispatch_arg_indices_reverse_ = c10::utils::bitset();
   }
 
-  DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack* stack) const {
+  DispatchKeySet getDispatchKeySetBoxed(c10::impl::PODLocalState* tls, const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
       const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
@@ -130,14 +139,14 @@ public:
       }
     });
     // Keys that are fallthrough should be skipped
-    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_, tls);
   }
 
   template<class... Args>
-  DispatchKeySet getDispatchKeySetUnboxed(const Args&... args) const {
+  DispatchKeySet getDispatchKeySetUnboxed(c10::impl::PODLocalState* tls, const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
     // Keys that are fallthrough should be skipped
-    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_, tls);
   }
 
   void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);

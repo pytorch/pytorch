@@ -26,6 +26,11 @@ struct C10_API PODLocalState {
 
   // GradMode
   bool GradMode_disabled;
+
+  // RecordFunction (cache views)
+  bool record_function_mirror_disabled;
+  bool record_function_mirror_callback_present;
+
 };
 
 static_assert(

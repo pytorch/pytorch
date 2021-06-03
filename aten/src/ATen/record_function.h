@@ -608,6 +608,7 @@ TORCH_API void set_record_function_tls_(const RecordFunctionTLS& tls);
 // Checks whether RecordFunction should be called,
 // sets boolean pointed by the argument to whether pre-sampling was used
 TORCH_API bool shouldRunRecordFunction(bool*);
+TORCH_API bool shouldRunRecordFunction(bool*, c10::impl::PODLocalState*);
 
 // The following functions are used to disable/enable pre-sampling of RecordFunction
 // when high-frequency/non-sampled callbacks are added/removed.

@@ -508,8 +508,9 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
 template<class Return, class... Args>
 C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  auto tls = c10::impl::_get_thread_local_state();
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
-    .template getDispatchKeySetUnboxed<Args...>(args...);
+    .template getDispatchKeySetUnboxed<Args...>(tls, args...);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet.highestPriorityTypeId());
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -520,7 +521,7 @@ C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorH
   // this boolean is passed into RecordFunction to adjust the sampling rates of
   // the callbacks
   bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled, tls))) {
     return callWithDispatchKeySlowPath<Return, Args...>(op, pre_sampled, dispatchKeySet, kernel, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
@@ -539,11 +540,12 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
-  auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
+  auto tls = c10::impl::_get_thread_local_state();
+  auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(tls, stack);
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled, tls))) {
     // using already existing stack to record function execution in observers
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (C10_UNLIKELY(guard.isActive())) {
