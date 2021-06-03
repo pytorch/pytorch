@@ -509,7 +509,7 @@ static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObj
         "offset (", offset, ") must be non-negative and no greater than buffer length "
         "(", len, ") minus 1");
     TORCH_CHECK_VALUE(
-        count > 0 || (len - offset) % elsize != 0,
+        count > 0 || (len - offset) % elsize == 0,
         "buffer length (", len - offset, " bytes) after offset (", offset, " bytes) "
         "must be a multiple of element size (", elsize, ")");
 
