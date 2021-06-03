@@ -3,12 +3,6 @@
 
 #ifdef USE_TENSORPIPE
 
-#ifdef USE_CUDA_NOT_ROCM
-#include <c10/core/DeviceGuard.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
-#endif
-
 #include <tensorpipe/tensorpipe.h>
 
 namespace torch {
@@ -95,61 +89,6 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 };
 
 C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CPU, TensorpipeCpuConverter);
-
-#ifdef USE_CUDA_NOT_ROCM
-class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
- public:
-  c10::optional<std::vector<char>> prepareTensorForSending(
-      const c10::Storage& storage,
-      const std::vector<c10::Stream>& streams,
-      tensorpipe::Message& message) const override {
-    auto stream =
-        at::cuda::CUDAStream(getStreamForDevice(streams, storage.device()));
-    // record tensor data ptrs on TensorPipe streams, so that the tensors
-    // won't be destructed before TensorPipe finishing sending them.
-    c10::cuda::CUDACachingAllocator::recordStream(storage.data_ptr(), stream);
-
-    tensorpipe::CudaBuffer buffer;
-    buffer.ptr = storage.data<char>();
-    buffer.stream = stream.stream();
-
-    tensorpipe::Message::Tensor tensor;
-    tensor.buffer = buffer;
-    tensor.length = storage.nbytes();
-
-    message.tensors.push_back(std::move(tensor));
-
-    return c10::nullopt;
-  }
-
-  at::DataPtr allocateTensorForReceiving(
-      int deviceIndex,
-      size_t length,
-      const std::vector<c10::Stream>& streams,
-      tensorpipe::Allocation& allocation) const override {
-    c10::Device device(c10::kCUDA, deviceIndex);
-    at::cuda::CUDAStream stream(getStreamForDevice(streams, device));
-    // CUDACachingAllocator will call recordStream accordingly on the current
-    // stream.
-    at::cuda::CUDAStreamGuard guard(stream);
-    at::DataPtr dataPtr =
-        c10::cuda::CUDACachingAllocator::get()->allocate(length);
-
-    tensorpipe::CudaBuffer buffer;
-    buffer.ptr = dataPtr.get();
-    buffer.stream = stream.stream();
-
-    tensorpipe::Allocation::Tensor tensor;
-    tensor.buffer = buffer;
-
-    allocation.tensors.push_back(tensor);
-
-    return dataPtr;
-  }
-};
-
-C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter);
-#endif
 
 c10::DeviceType convertDeviceType(const std::string& tpDeviceType) {
   if (tpDeviceType == tensorpipe::kCpuDeviceType) {

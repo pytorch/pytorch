@@ -368,6 +368,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_cuda.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
           )
