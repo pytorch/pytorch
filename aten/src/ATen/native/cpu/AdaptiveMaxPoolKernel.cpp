@@ -84,7 +84,7 @@ void cpu_adaptive_max_pool_channels_last(
     const Tensor& input_,
     IntArrayRef output_size) {
   TORCH_CHECK(input_.ndimension() == 4,
-              "adapative max pooling with channels last format supports tensors with 4 dims");
+              "adaptive max pooling with channels last format supports tensors with 4 dims");
   auto memory_format = at::MemoryFormat::ChannelsLast;
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
@@ -311,11 +311,12 @@ void adaptive_max_pool2d_kernel_impl(
   }
 }
 
-void adapative_max_pool2d_backward_kernel_impl(
+void adaptive_max_pool2d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& indices) {
-  switch (grad_output.suggest_memory_format()) {
+  // can't use grad_output memory format to switch here since grad_output might be NC11
+  switch (grad_input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "adaptive_max_pool2d_backward", [&] {
         cpu_adaptive_max_pool_backward<scalar_t>(grad_input, grad_output, indices);
@@ -336,6 +337,6 @@ void adapative_max_pool2d_backward_kernel_impl(
 } // anonymous namespace
 
 REGISTER_DISPATCH(adaptive_max_pool2d_kernel, &adaptive_max_pool2d_kernel_impl);
-REGISTER_DISPATCH(adaptive_max_pool2d_backward_kernel, &adapative_max_pool2d_backward_kernel_impl);
+REGISTER_DISPATCH(adaptive_max_pool2d_backward_kernel, &adaptive_max_pool2d_backward_kernel_impl);
 
 }} // at::native
