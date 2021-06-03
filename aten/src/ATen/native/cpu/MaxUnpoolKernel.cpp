@@ -2,7 +2,6 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 
