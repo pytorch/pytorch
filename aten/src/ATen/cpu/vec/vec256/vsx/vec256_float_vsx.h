@@ -345,54 +345,16 @@ class Vectorized<float> {
   }
 
   Vectorized<float> C10_ALWAYS_INLINE log() const {
-    auto temp = *this;
-    auto invalid_mask = temp < zero;
-    // cut off denormalized stuff
-    auto x = temp.maximum(min_norm_pos);
-    vint32 imm0 = vec_sr(vint32(x._vec0), vu_23);
-    vint32 imm1 = vec_sr(vint32(x._vec1), vu_23);
-    // keep only the fractional part
-    x = x & inv_mant_mask;
-    x = x | half;
-    imm0 = imm0 - v0x7f;
-    imm1 = imm1 - v0x7f;
-    Vectorized<float> ex;
-    ex._vec0 = vec_float(imm0);
-    ex._vec1 = vec_float(imm1);
-    ex = ex + one;
-    auto mask = x < cephes_SQRTHF;
-    auto t = x & mask;
-    x = x - one;
-    ex = ex - (mask & one);
-    x = x + t;
-    auto z = x * x;
-    auto y = x.madd(log_p0, log_p1);
-    y = y.madd(x, log_p2);
-    y = y.madd(x, log_p3);
-    y = y.madd(x, log_p4);
-    y = y.madd(x, log_p5);
-    y = y.madd(x, log_p6);
-    y = y.madd(x, log_p7);
-    y = y.madd(x, log_p8);
-    y = y * x * z;
-    y = ex.madd(log_q1, y);
-    y = y - z * half;
-    x = x + y;
-    x = ex.madd(log_q2, x);
-    // negative arg will be NAN
-    x = blendv(x, v_nan, invalid_mask);
-    // zero is -inf
-    x = blendv(x, min_inf, (temp == zero));
-    return x;
+    return {Sleef_logf4_u10vsx(_vec0), Sleef_logf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log10() const {
-    return log() * log10e_inv;
+     return {Sleef_log10f4_u10vsx(_vec0), Sleef_log10f4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log1p() const {
-    return ((*this) + one).log();
+     return {Sleef_log1pf4_u10vsx(_vec0), Sleef_log1pf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log2() const {
-    return log() * log2e_inv;
+     return {Sleef_log2f4_u10vsx(_vec0), Sleef_log2f4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE ceil() const {
     return {vec_ceil(_vec0), vec_ceil(_vec1)};
