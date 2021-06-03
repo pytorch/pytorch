@@ -2741,9 +2741,6 @@ const static RegisterNNCExternalFunction nnc_angle(
     "nnc_aten_angle",
     nnc_aten_angle);
 const static RegisterNNCExternalFunction nnc_sgn("nnc_aten_sgn", nnc_aten_sgn);
-const static RegisterNNCExternalFunction nnc_conj(
-    "nnc_aten_conj",
-    nnc_aten_conj);
 const static RegisterNNCExternalFunction nnc_acos(
     "nnc_aten_acos",
     nnc_aten_acos);
