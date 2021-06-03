@@ -409,7 +409,7 @@ bool ConstantPropagation(
   return made_change;
 }
 
-bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
+bool constantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
   bool made_change = cp.run();
   if (made_change) {

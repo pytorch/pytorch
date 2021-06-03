@@ -3,6 +3,9 @@
 namespace torch {
 namespace jit {
 
+using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
+using TypeTable = std::unordered_map<std::string, TypePtr>;
+
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down nested control structures in
 // the frontend (which themselves don't introduce scopes)

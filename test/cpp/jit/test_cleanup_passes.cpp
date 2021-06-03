@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/csrc/jit/frontend/run_cleanup_passes.cpp>
 
 namespace torch {
 namespace jit {
@@ -33,7 +34,7 @@ graph(%cond.1 : Tensor,
   return (%25)
   )IR",
       &*graph);
-  RunCleanupPasses(graph);
+  runCleanupPasses(graph);
   testing::FileCheck()
       .check_count(
           "prim::Constant[value=\"same string with a twist\"]",
@@ -42,7 +43,7 @@ graph(%cond.1 : Tensor,
       ->run(*graph);
 
   auto graph_after_pass_once = graph->toString();
-  RunCleanupPasses(graph);
+  runCleanupPasses(graph);
   auto graph_after_pass_twice = graph->toString();
   ASSERT_EQ(graph_after_pass_once, graph_after_pass_twice);
 }

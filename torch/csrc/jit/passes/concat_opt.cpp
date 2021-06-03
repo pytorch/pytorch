@@ -505,7 +505,7 @@ void OptimizeConcat(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before ConcatOpt", graph);
   EliminateConcatCommonInputs(graph);
   ExpandConcatAndEliminateRedundancy(graph);
-  ConstantPooling(graph);
+  constantPooling(graph);
   EliminateDeadCode(graph);
   GRAPH_DUMP("After ConcatOpt", graph);
 }

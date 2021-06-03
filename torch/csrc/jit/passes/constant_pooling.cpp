@@ -13,7 +13,7 @@ namespace {
 
 // Very similar to the common subexpression elimination pass
 // Move all constants to the beginning of the graph, and deduplicate
-void ConstantPooling(
+void constantPooling(
     Block* block,
     std::unordered_set<Node*, HashNode, EqualNode>& constants,
     const AliasDb& aliasDb) {
@@ -24,7 +24,7 @@ void ConstantPooling(
     if (!node->blocks().empty()) {
       // Traverse sub-blocks.
       for (auto block : node->blocks()) {
-        ConstantPooling(block, constants, aliasDb);
+        constantPooling(block, constants, aliasDb);
       }
       continue;
     }
@@ -66,10 +66,10 @@ void ConstantPooling(
 }
 } // anonymous namespace
 
-void ConstantPooling(const std::shared_ptr<Graph>& graph) {
+void constantPooling(const std::shared_ptr<Graph>& graph) {
   AliasDb aliasDb(graph);
   std::unordered_set<Node*, HashNode, EqualNode> constants;
-  ConstantPooling(graph->block(), constants, aliasDb);
+  constantPooling(graph->block(), constants, aliasDb);
 }
 } // namespace jit
 } // namespace torch

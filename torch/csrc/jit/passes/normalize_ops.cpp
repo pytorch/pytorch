@@ -40,11 +40,11 @@ bool normalizeIsBool(graph_node_list_iterator& iter) {
   return false;
 }
 
-void NormalizeOps(Block* block) {
+void normalizeOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     for (auto sub : it->blocks()) {
-      NormalizeOps(sub);
+      normalizeOps(sub);
     }
 
     if (normalizeOpAliases(it)) {
@@ -122,8 +122,8 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
   return alias_map;
 }
 
-void NormalizeOps(const std::shared_ptr<Graph>& graph) {
-  NormalizeOps(graph->block());
+void normalizeOps(const std::shared_ptr<Graph>& graph) {
+  normalizeOps(graph->block());
 }
 
 } // namespace jit

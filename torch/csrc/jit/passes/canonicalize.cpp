@@ -203,7 +203,7 @@ void CanonicalizeIfOutputs(Node* n) {
   IfView(n).permuteOutputs(new_indices);
 }
 
-void CanonicalizeOutputs(Block* block) {
+void canonicalizeOutputs(Block* block) {
   // We iterate in reverse since ordering of a node's outputs is dependent on
   // the value use following it in the graph
   for (Node* n : block->nodes().reverse()) {
@@ -219,7 +219,7 @@ void CanonicalizeOutputs(Block* block) {
     // the values outputted within its blocks, first canonicalize
     // the nodes outputs and then recurse on its blocks
     for (Block* b : n->blocks()) {
-      CanonicalizeOutputs(b);
+      canonicalizeOutputs(b);
     }
   }
 }
@@ -227,8 +227,8 @@ void CanonicalizeOutputs(Block* block) {
 // Canonicalize a graph's control flow node outputs. We do this to solve jitter
 // issues with outputs added to control flow nodes after the first pass of
 // compilation in ir_emitter.cpp
-void CanonicalizeOutputs(std::shared_ptr<Graph>& graph) {
-  CanonicalizeOutputs(graph->block());
+void canonicalizeOutputs(std::shared_ptr<Graph>& graph) {
+  canonicalizeOutputs(graph->block());
 }
 } // namespace jit
 } // namespace torch

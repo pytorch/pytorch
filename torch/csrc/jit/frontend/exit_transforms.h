@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void TransformExits(std::shared_ptr<Graph>& graph);
+TORCH_API void transformExits(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch
