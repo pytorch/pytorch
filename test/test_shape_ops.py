@@ -443,8 +443,7 @@ class TestShapeOps(TestCase):
     def _rand_shape(self, dim, min_size, max_size):
         return tuple(torch.randint(min_size, max_size + 1, (dim,)))
 
-    # Do not include bool as address sanitiser complains
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_flip_numpy(self, device, dtype):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
@@ -461,7 +460,7 @@ class TestShapeOps(TestCase):
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
     @onlyCUDA  # CPU is too slow
-    @largeTensorTest('17GB') # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
+    @largeTensorTest('17GB')  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     def test_flip_large_tensor(self, device):
         t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
         torch_fn = partial(torch.flip, dims=(0,))
