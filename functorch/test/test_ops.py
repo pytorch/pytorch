@@ -17,10 +17,15 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU
 from torch.testing._internal.common_methods_invocations import op_db
-from common_utils import parameterized, instantiate_parameterized_methods
+from common_utils import (
+    parameterized,
+    instantiate_parameterized_methods,
+    get_fallback_and_vmap_exhaustive,
+    get_exhaustive_batched_inputs,
+)
 import types
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
-from functorch import grad, vjp
+from functorch import grad, vjp, vmap
 from functorch._src.eager_transforms import _as_tuple
 
 # Version of autograd.grad that handles outputs that don't depend on inputs
@@ -124,7 +129,13 @@ def normalize_op_for_vjp_vjp(f, sample):
     return wrapped, args
 
 
-class TestGradOpInfo(TestCase):
+def is_inplace(op, variant):
+    if hasattr(variant, "__wrapped__"):
+        return variant.__wrapped__ is op.get_inplace()
+    return variant is op.get_inplace()
+
+
+class TestOperators(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_grad(self, device, dtype, op):
         op_skip = {
@@ -149,17 +160,12 @@ class TestGradOpInfo(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        def is_inplace(variant):
-            if hasattr(variant, "__wrapped__"):
-                return variant.__wrapped__ is op.get_inplace()
-            return variant is op.get_inplace()
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
 
         for sample in samples:
-            # TODO: test in-place
-            if is_inplace(op.get_op()):
-                self.skipTest("Skipped! NYI: inplace-testing not supported.")
-                continue
-
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
@@ -207,17 +213,12 @@ class TestGradOpInfo(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        def is_inplace(variant):
-            if hasattr(variant, "__wrapped__"):
-                return variant.__wrapped__ is op.get_inplace()
-            return variant is op.get_inplace()
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
 
         for sample in samples:
-            # TODO: test in-place
-            if is_inplace(op.get_op()):
-                self.skipTest("Skipped! NYI: inplace-testing not supported.")
-                continue
-
             fn, primals = normalize_op_for_vjp(op, sample)
             result = fn(*primals)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
@@ -257,17 +258,12 @@ class TestGradOpInfo(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        def is_inplace(variant):
-            if hasattr(variant, "__wrapped__"):
-                return variant.__wrapped__ is op.get_inplace()
-            return variant is op.get_inplace()
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
 
         for sample in samples:
-            # TODO: test in-place
-            if is_inplace(op.get_op()):
-                self.skipTest("Skipped! NYI: inplace-testing not supported.")
-                continue
-
             fn, args = normalize_op_for_vjp_vjp(op, sample)
             result = fn(*args)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
@@ -284,9 +280,115 @@ class TestGradOpInfo(TestCase):
 
             self.assertEqual(result_vjps, expected_vjps)
 
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_vmapvjp(self, device, dtype, op):
+        op_skip = {
+            '__getitem__',
+            '__rpow__',
+            'linalg.cholesky',
+            'linalg.inv',
+            'linalg.matrix_norm',
+            'linalg.matrix_power',
+            'linalg.norm',
+            'nanquantile',
+            'quantile',
+            'tensor_split',
+            'broadcast_to',
+            'dsplit',
+            'dstack',
+            'einsum',
+            'gradient',
+            'hsplit',
+            'hstack',
+            'linalg.multi_dot',
+            'lu',
+            'moveaxis',
+            'positive',
+            'ravel',
+            'squeeze',
+            'unfold',
+            'vsplit',
+            'vstack',
+        }
+        if op.name in op_skip:
+            self.skipTest("Skipped; Expected failures")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        for sample in samples:
+            fn, args = normalize_op_for_vjp(op, sample)
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
+                self.assertEqual(loop_out, batched_out)
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_vjpvmap(self, device, dtype, op):
+        op_skip = {
+            '__getitem__',
+            '__rpow__',
+            'broadcast_to',
+            'dsplit',
+            'gradient',
+            'hsplit',
+            'linalg.cholesky',
+            'linalg.inv',
+            'linalg.matrix_norm',
+            'linalg.matrix_power',
+            'linalg.norm',
+            'lu',
+            'moveaxis',
+            'nanquantile',
+            'positive',
+            'quantile',
+            'ravel',
+            'squeeze',
+            'tensor_split',
+            'unfold',
+            'vsplit',
+        }
+        if op.name in op_skip:
+            self.skipTest("Skipped; Expected failures")
+            return
+
+        if not op.supports_autograd:
+            # If the op doesn't support autograd, vmap(op) won't either
+            self.skipTest("Skipped! Autograd not supported.")
+            return
+
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+
+            for batched_args, in_dims, kwargs in get_exhaustive_batched_inputs(args, kwargs):
+                vmapped_op = vmap(op, in_dims)
+                fn, primals = normalize_op_for_vjp2(vmapped_op, batched_args, kwargs,
+                                                    sample.output_process_fn_grad)
+                result = fn(*primals)
+                cotangents = tree_map(lambda x: torch.randn_like(x), result)
+
+                _, vjp_fn = vjp(fn, *primals)
+                result_vjps = vjp_fn(cotangents)
+
+                _, vjp_fn = ref_vjp(fn, *primals)
+                expected_vjps = vjp_fn(cotangents)
+
+                self.assertEqual(result_vjps, expected_vjps)
+
 
 only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestGradOpInfo, globals(), only_for=only_for)
+instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()

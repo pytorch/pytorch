@@ -5,9 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
-import types
-import functools
-from collections import namedtuple
+import torch
+from functorch import vmap
 
 """
 Usage:
@@ -122,3 +121,57 @@ def instantiate_parameterized_methods(test_base):
             _set_parameterized_method(test_base, attr, instantiated_cases, extension_name)
         # Remove the base fn from the testcase
         delattr(test_base, attr_name)
+
+
+def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
+    outs = []
+    for idx in range(batch_size):
+        idx_args = []
+        idx_kwargs = {}
+        for a, in_dim in zip(batched_args, in_dims):
+            idx_args.append(a.select(in_dim, idx) if in_dim is not None else a)
+        out = op(*idx_args, **kwarg_values)
+        outs.append(out)
+    loop_out = []
+    if isinstance(outs[0], torch.Tensor):
+        loop_out = torch.stack(outs)
+    else:
+        for idx in range(len(outs[0])):
+            loop_out.append(torch.stack([i[idx] for i in outs], out_dim))
+    return loop_out
+
+
+def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
+    def add_batch_dim(arg, bdim, batch_size=3):
+        if isinstance(arg, torch.Tensor):
+            shape = [1] * len(arg.shape)
+            shape.insert(bdim, batch_size)
+            return (arg.repeat(shape), bdim)
+        else:
+            return (arg, None)
+
+    batch_choices = []
+    for a in arg_values:
+        if isinstance(a, torch.Tensor):
+            batched_val = add_batch_dim(a, 0, batch_size)
+            batch_choices.append((batched_val, (a, None)))
+        else:
+            batch_choices.append(((a, None),))
+
+    for batched_values in itertools.product(*batch_choices):
+        batched_args, in_dims = zip(*batched_values)
+
+        if all([i is None for i in in_dims]):
+            continue
+
+        yield batched_args, in_dims, kwarg_values
+
+
+def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
+    out_dim = 0
+    batch_size = 3
+    generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size)
+    for batched_args, in_dims, kwarg_values in generator:
+        loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
+        batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(*batched_args, **kwarg_values)
+        yield (loop_out, batched_out)
