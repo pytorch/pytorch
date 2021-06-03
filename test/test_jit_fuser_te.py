@@ -18,7 +18,6 @@ torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, TestCase
-from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
 
@@ -1822,29 +1821,29 @@ class TestTEFuser(JitTestCase):
 
             ys = script(xs)
             ys.backward(g0)
-            
+
             with torch.no_grad():
                 x -= 0.1 * x.grad
                 xs -= 0.1 * xs.grad
                 x.grad = None
                 xs.grad = None
         torch.testing.assert_allclose(y, ys)
-        
+
     def test_relu_fwd_bwd(self):
         def eager(x):
             return torch.relu(x * 1.01)
         self._test_fwd_bwd(eager)
-        
+
     def test_hardswish_fwd_bwd(self):
         def eager(x):
             return F.hardswish(x) * 1.01
         self._test_fwd_bwd(eager)
-        
+
     def test_hardsigmoid_fwd_bwd(self):
         def eager(x):
             return F.hardsigmoid(x) * 1.01
         self._test_fwd_bwd(eager)
-        
+
     def test_dynamic_cat(self):
         with inline_fusion_groups():
             @torch.jit.script
