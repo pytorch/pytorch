@@ -59,28 +59,6 @@ TORCH_API inline std::tuple<Tensor, Tensor> std_mean(const Tensor& self, int dim
   return at::std_mean(self, IntArrayRef{dim});
 }
 
-
-// Special C++ only overloads for convnd functions (See gh-45667)
-// These are needed because {1, 2} is ambiguous between string and IntArrayRef overloads
-TORCH_API inline at::Tensor conv1d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
-    std::initializer_list<int64_t> padding_, IntArrayRef dilation = 1, int64_t groups = 1) {
-  auto padding = IntArrayRef(padding_);
-  return at::conv1d(input, weight, bias, stride, padding, dilation, groups);
-}
-TORCH_API inline at::Tensor conv2d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
-    std::initializer_list<int64_t> padding_, IntArrayRef dilation = 1, int64_t groups = 1) {
-  auto padding = IntArrayRef(padding_);
-  return at::conv2d(input, weight, bias, stride, padding, dilation, groups);
-}
-TORCH_API inline at::Tensor conv3d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
-    std::initializer_list<int64_t> padding_, IntArrayRef dilation = 1, int64_t groups = 1) {
-  auto padding = IntArrayRef(padding_);
-  return at::conv3d(input, weight, bias, stride, padding, dilation, groups);
-}
-
 namespace detail {
 
 TORCH_API inline void noopDelete(void*) {}
