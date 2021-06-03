@@ -113,7 +113,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
           c10::intrusive_ptr<Message> message =
               future.value().toCustomClass<Message>();
           message->setId(id);
-          return message;
+          return withDataPtrs(message);
         },
         c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 
@@ -137,23 +137,25 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpcWithErrors(
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
 
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
-  auto future = runJitOperator(*scriptCall.op(), scriptCall.stackRef());
+  auto future =
+      runJitOperator(*scriptCall.op(), scriptCall.stackRef(), std::move(lsctx));
 
   return future->then(
       [](JitFuture& future) {
-        return c10::make_intrusive<Message>(
-            ScriptResp(future.value()).toMessage());
+        return withDataPtrs(ScriptResp(future.value()).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -198,20 +200,20 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
           ownerRRef->recordAllStreams(lsctx);
           ownerRRef->setValue(future.value());
         }
-        return c10::make_intrusive<Message>(
-            RemoteRet(rrefId, forkId).toMessage());
+        return withDataPtrs(RemoteRet(rrefId, forkId).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
 
   TORCH_CHECK(
       scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
-  auto future =
-      runJitOperator(*scriptRemoteCall.op(), scriptRemoteCall.stackRef());
+  auto future = runJitOperator(
+      *scriptRemoteCall.op(), scriptRemoteCall.stackRef(), std::move(lsctx));
 
   return assignOwnerRRef(
       scriptRemoteCall.retRRefId(),
@@ -255,8 +257,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 
   return future->then(
       [](JitFuture& future) {
-        return c10::make_intrusive<Message>(
-            ScriptRRefFetchRet({future.value()}).toMessage());
+        return withDataPtrs(ScriptRRefFetchRet({future.value()}).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -359,10 +360,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
         } else {
           auto msg = getMessageWithAutograd(
               fromWorkerId,
-              std::move(
-                  *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
+              wrappedRpcResponseFuture.value().toCustomClass<Message>(),
               MessageType::FORWARD_AUTOGRAD_RESP);
-          return c10::make_intrusive<Message>(std::move(msg));
+          return withDataPtrs(std::move(msg));
         }
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -396,8 +396,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
         if (execFuture.hasError()) {
           std::rethrow_exception(execFuture.exception_ptr());
         } else {
-          return c10::make_intrusive<Message>(
-              PropagateGradientsResp().toMessage());
+          return withDataPtrs(PropagateGradientsResp().toMessage());
         }
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -484,12 +483,10 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
                 profiledEvents, profilingConfig, event_lists);
             auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
                 MessageType::RUN_WITH_PROFILING_RESP,
-                std::move(
-                    *wrappedRpcResponseFuture.value().toCustomClass<Message>()),
+                wrappedRpcResponseFuture.value().toCustomClass<Message>(),
                 profiledEvents,
                 profilingKeyId);
-            return c10::make_intrusive<Message>(
-                std::move(*rpcWithProfilingResp).toMessage());
+            return withDataPtrs(std::move(*rpcWithProfilingResp).toMessage());
           }
         }),
         c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -517,13 +514,13 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
   // to a python object.
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
-      return processScriptCall(rpc);
+      return processScriptCall(rpc, std::move(ctx));
     }
     case MessageType::PYTHON_CALL: {
-      return processPythonCall(rpc);
+      return processPythonCall(rpc, std::move(ctx));
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
-      return processScriptRemoteCall(rpc);
+      return processScriptRemoteCall(rpc, std::move(ctx));
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       return processPythonRemoteCall(rpc, std::move(ctx));
@@ -578,8 +575,7 @@ c10::intrusive_ptr<Message> RequestCallbackNoPython::handleError(
       DistAutogradContainer::getInstance().getWorkerId(),
       ": ",
       e.what());
-  return c10::make_intrusive<Message>(
-      createExceptionResponse(errorMsg, messageId));
+  return createExceptionResponse(errorMsg, messageId);
 }
 
 bool RequestCallbackNoPython::cudaAvailable() const {
@@ -592,7 +588,10 @@ bool RequestCallbackNoPython::cudaAvailable() const {
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
     const jit::Operator& op,
-    std::vector<at::IValue>& stack) const {
+    std::vector<at::IValue>& stack,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
+  c10::MultiStreamGuard guard(
+      lsctx ? lsctx->getReservedStreams() : ArrayRef<Stream>({}));
   try {
     op.getOperation()(&stack);
   } catch (const std::exception&) {
@@ -610,26 +609,27 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
     IValue value,
     TypePtr type) const {
-  auto future = c10::make_intrusive<JitFuture>(std::move(type));
+  auto future = c10::make_intrusive<JitFuture>(
+      std::move(type), RpcAgent::getCurrentRpcAgent()->getDevices());
   future->markCompleted(std::move(value));
   return future;
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
     c10::intrusive_ptr<Message> message) const {
-  return asFuture(
-      std::move(message),
-      at::getCustomClassType<c10::intrusive_ptr<Message>>());
-}
-
-c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
-    Message message) const {
-  return asFuture(c10::make_intrusive<Message>(std::move(message)));
+  auto future = c10::make_intrusive<JitFuture>(
+      at::getCustomClassType<c10::intrusive_ptr<Message>>(),
+      RpcAgent::getCurrentRpcAgent()->getDevices());
+  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs =
+      message->getDataPtrs();
+  future->markCompleted(std::move(message), std::move(dataPtrs));
+  return future;
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
     std::exception_ptr err) const {
-  auto future = c10::make_intrusive<JitFuture>(at::NoneType::get());
+  auto future = c10::make_intrusive<JitFuture>(
+      at::NoneType::get(), RpcAgent::getCurrentRpcAgent()->getDevices());
   future->setError(err);
   return future;
 }
