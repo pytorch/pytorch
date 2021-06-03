@@ -364,7 +364,6 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("reflection_pad1d_backward_out_cuda");
-  grad_input.resize_as_(input);
   grad_input.zero_();
 
   if (grad_input.numel() == 0) {

@@ -75,9 +75,20 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
   /* sizes */
   auto pad_l = padding[0];
   auto pad_r = padding[1];
-  // int64_t nplane = input.size(dim_plane);
   int64_t input_w = input.size(dim_w);
   int64_t output_w  = input_w + pad_l + pad_r;
+
+  TORCH_CHECK(
+      pad_l < input_w && pad_r < input_w,
+      "Argument #4: Padding size "
+      "should be less than the corresponding input dimension, but got: padding (",
+      pad_l,
+      ", ",
+      pad_r,
+      ") at dimension ",
+      dim_w,
+      " of input ",
+      input.sizes());
 
   TORCH_CHECK(output_w == grad_output.size(dim_w), "grad_output width unexpected."
     " Expected: ", output_w, ", Got: ", grad_output.size(dim_w));
@@ -584,7 +595,6 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cpu)(const Tensor& grad_output_,
     const Tensor& input,
     IntArrayRef padding,
     const Tensor& grad_input) {
-  grad_input.resize_as_(input);
   grad_input.zero_();
 
   int64_t dim_plane = 0;
