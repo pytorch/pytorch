@@ -13,7 +13,6 @@ import unittest
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
-from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
