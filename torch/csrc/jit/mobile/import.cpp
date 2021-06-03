@@ -663,6 +663,7 @@ mobile::Module _load_for_mobile_impl(
   const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
+  
   std::string error_message;
   auto guard = c10::make_scope_exit([&]() {
     if (!observer) {
