@@ -29,8 +29,7 @@ jobs:
     needs: generate-build-matrix
     runs-on: linux.2xlarge
     strategy:
-      matrix:
-        ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
       fail-fast: false
     container:
       image: ${{ matrix.container_image }}
@@ -92,3 +91,7 @@ jobs:
           name: pytorch-libtorch-${{ matrix.libtorch_variant }}-${{ matrix.devtoolset }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
           path: /remote/**/*.zip
       # TODO: Add a step here for uploading binaries
+
+concurrency:
+  group: build-linux-libtorch-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
