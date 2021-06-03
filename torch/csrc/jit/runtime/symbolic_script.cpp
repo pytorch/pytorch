@@ -883,6 +883,19 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def relu6(self):
+            result = torch.relu6(self)
+            def backward(grad_output):
+                return grad_output * ((result > 0) & (result < 6.0))
+
+            return result, backward
+
+        def leaky_relu(self, negative_slope: number):
+            result = torch.leaky_relu(self, negative_slope)
+            def backward(grad_output):
+                return grad_output * torch.where(self > 0, 1.0, negative_slope).type_as(result), None
+            return result, backward
+
         def gelu(self):
             result = torch.gelu(self)
             def backward(grad_output):
