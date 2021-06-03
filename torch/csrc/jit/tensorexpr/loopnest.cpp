@@ -428,6 +428,10 @@ bool LoopNest::vectorize(For* f) {
     return false;
   }
 
+  if (!isNormalized(f)) {
+    return false;
+  }
+
   // Can't vectorize reduction axes.
   auto reductions = NodeFinder<ReduceOp>::find(f);
   for (auto* r : reductions) {

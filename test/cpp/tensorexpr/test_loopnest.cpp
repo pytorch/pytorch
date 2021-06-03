@@ -2682,6 +2682,33 @@ TEST(LoopNest, OuterLoopVectorization) {
   ASSERT_EQ(dynamic_cast<For*>(for_body->front()), nullptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, VectorizeLoopNotNormalized) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     for (int j = 1; j < 5; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto inner_for = For::make(j, 1, 5, for_body);
+  auto outer_for = For::make(i, 0, 10, inner_for);
+  auto block = Block::make({outer_for});
+  LoopNest l(block, {a_buf.node()});
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(l.root_stmt());
+
+  ASSERT_FALSE(LoopNest::vectorize(inner_for));
+  auto hash_after = hasher.hash(l.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
+}
+
 namespace {
 
 std::string constantUpperBoundLoopIR(int upper_bound_val) {
