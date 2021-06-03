@@ -162,8 +162,8 @@ auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc
   for (auto& option : options) {
     plans.emplace_back(std::move(option.plan));
   }
+  std::cout << "find plans: " << plans.size() << std::endl;
   return plans; 
-  //auto tag = options2.front().plan.getTag();
 }
 
 auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
@@ -216,7 +216,7 @@ auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_
   std::array<cudnn_frontend::GeneratorSource const, 2> sources = {heurgen_method, fallback_method};
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), sample_predicate_function);
-  std::cout << plans.size() << std::endl;
+  std::cout << "get plans: " << plans.size() << std::endl;
   return plans;
 }
 
