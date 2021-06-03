@@ -361,7 +361,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
             scalar_t grad_mean = sum_a[f] / n;
             {
-              auto iter = TensorIterator::binary_op(grad_in, grad_in, grad_out);
+              auto iter = TensorIterator::borrowing_binary_op(grad_in, grad_in, grad_out);
               cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
                 return (go - grad_mean - gi) * invstd * w;
               });

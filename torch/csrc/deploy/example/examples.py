@@ -11,6 +11,8 @@ class Simple(torch.nn.Module):
 
 import torch.nn as nn
 
+def load_library():
+    torch.ops.load_library("my_so.so")
 
 def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
@@ -110,3 +112,130 @@ class ResNet(nn.Module):
 
 def resnet18():
     return ResNet(BasicBlock, [2, 2, 2, 2])
+
+
+class MultiReturn(torch.nn.Module):
+    def __init__(self):
+        super(MultiReturn, self).__init__()
+
+    def forward(self, t):
+        # type: (Tuple[Tensor, Tensor]) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]
+        a, b = t
+        result = ((a.masked_fill_(b, 0.1), b), (torch.ones_like(a), b))
+        return result
+
+
+multi_return_metadata = r"""
+{
+ "metadata_container": {
+  "forward": {
+   "named_input_metadata": {
+    "t": {
+     "argument_type": {
+      "tuple": {
+       "tuple_elements": [
+        {
+         "tensor": 1
+        },
+        {
+         "tensor": 6
+        }
+       ]
+      }
+     },
+     "optional_argument": false,
+     "metadata": {
+      "dense_features": {
+       "feature_desc": [
+        {
+          "feature_name": "test_feature_1",
+          "feature_id": 1
+        }
+       ],
+       "expected_shape": {
+        "dims": [
+         -1,
+         1
+        ],
+        "unknown_rank": false
+       },
+       "data_type": 1,
+       "feature_store_feature_type": 0
+      }
+     }
+    }
+   },
+   "positional_output_metadata": [
+    {
+     "argument_type": {
+      "tuple": {
+       "tuple_elements": [
+        {
+         "tensor": 1
+        },
+        {
+         "tensor": 6
+        }
+       ]
+      }
+     },
+     "optional_argument": false,
+     "metadata": {
+      "dense_features": {
+       "feature_desc": [
+        {
+          "feature_name": "test_feature_1",
+          "feature_id": 1
+        }
+       ],
+       "expected_shape": {
+        "dims": [
+         -1,
+         1
+        ],
+        "unknown_rank": false
+       },
+       "data_type": 1,
+       "feature_store_feature_type": 0
+      }
+     }
+    },
+    {
+     "argument_type": {
+      "tuple": {
+       "tuple_elements": [
+        {
+         "tensor": 1
+        },
+        {
+         "tensor": 6
+        }
+       ]
+      }
+     },
+     "optional_argument": false,
+     "metadata": {
+      "dense_features": {
+       "feature_desc": [
+        {
+          "feature_name": "test_feature_3",
+          "feature_id": 3
+        }
+       ],
+       "expected_shape": {
+        "dims": [
+         -1,
+         1
+        ],
+        "unknown_rank": false
+       },
+       "data_type": 1,
+       "feature_store_feature_type": 0
+      }
+     }
+    }
+   ]
+  }
+ }
+}
+"""
