@@ -734,7 +734,16 @@ class TORCH_API Tensor {
   /// The attribute will then contain the gradients computed and future calls
   /// to `backward()` will accumulate (add) gradients into it.
   const Tensor& grad() const {
-    return impl_->grad();
+    const Tensor& maybe_grad = impl_->grad();
+    if (!is_leaf() && !_is_retain_grad() && !maybe_grad.defined()) {
+      TORCH_WARN(
+        "The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
+        "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
+        "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
+        "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
+        "github.com/pytorch/pytorch/pull/30531 for more informations.");
+    }
+    return maybe_grad;
   }
 
   // The Forward AD API functions below are low level and are not to be used by end
@@ -890,6 +899,8 @@ public:
   int64_t _version() const;
 
   void retain_grad() const;
+
+  bool _is_retain_grad() const;
 
   void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
 

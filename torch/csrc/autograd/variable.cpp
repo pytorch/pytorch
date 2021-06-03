@@ -344,10 +344,11 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   const std::string& name(const Tensor&) const override;
   bool is_leaf(const Tensor&) const override;
   int64_t output_nr(const Tensor&) const override;
-  void set_data(const Tensor & self, const Tensor & new_data) const override;
-  Tensor data(const Tensor & self) const override;
-  int64_t _version(const Tensor & self) const override;
-  void retain_grad(const Tensor & self) const override;
+  void set_data(const Tensor& self, const Tensor & new_data) const override;
+  Tensor data(const Tensor& self) const override;
+  int64_t _version(const Tensor& self) const override;
+  void retain_grad(const Tensor& self) const override;
+  bool _is_retain_grad(const Tensor& self) const override;
   void _backward(const Tensor& self, at::TensorList inputs,
     const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
     bool create_graph) const override;
@@ -376,7 +377,7 @@ Tensor VariableHooks::tensor_data(const Tensor& self) const {
   return at::Tensor(self_impl_copy);
 }
 
-bool VariableHooks::is_leaf(const Tensor & self) const {
+bool VariableHooks::is_leaf(const Tensor& self) const {
   if (impl::get_autograd_meta(self)) {
     return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
   } else {
@@ -384,7 +385,7 @@ bool VariableHooks::is_leaf(const Tensor & self) const {
   }
 }
 
-int64_t VariableHooks::output_nr(const Tensor & self) const {
+int64_t VariableHooks::output_nr(const Tensor& self) const {
   if (impl::get_autograd_meta(self)) {
     return impl::get_autograd_meta(self)->output_nr_;
   } else {
@@ -392,7 +393,7 @@ int64_t VariableHooks::output_nr(const Tensor & self) const {
   }
 }
 
-void VariableHooks::set_data(const Tensor & self, const Tensor & new_data) const {
+void VariableHooks::set_data(const Tensor& self, const Tensor& new_data) const {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
   // tensor type.
@@ -426,15 +427,15 @@ void VariableHooks::set_data(const Tensor & self, const Tensor & new_data) const
   self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
-Tensor VariableHooks::data(const Tensor & self) const {
+Tensor VariableHooks::data(const Tensor& self) const {
   return self.variable_data();
 }
 
-int64_t VariableHooks::_version(const Tensor & self) const {
+int64_t VariableHooks::_version(const Tensor& self) const {
   return self.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
-void VariableHooks::retain_grad(const Tensor & self) const {
+void VariableHooks::retain_grad(const Tensor& self) const {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
   if (self.is_leaf()) {  // no-op for leaves
     return;
@@ -463,6 +464,15 @@ void VariableHooks::retain_grad(const Tensor & self) const {
 
   self.register_hook(retain_grad_hook);
   impl::get_autograd_meta(self)->retains_grad_ = true;
+}
+
+// For now, used only to produce warning when .grad is accessed on non-leaf
+bool VariableHooks::_is_retain_grad(const Tensor& self) const {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->retains_grad_;
+  } else {
+    return false;
+  }
 }
 
 void VariableHooks::_backward(
