@@ -38,7 +38,8 @@ def addmm(mat: Tensor, mat1: Tensor, mat2: Tensor,
         mat1 (Tensor): a sparse matrix to be multiplied
         mat2 (Tensor): a dense matrix to be multiplied
         beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
-        alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`) """
+        alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+    """
     return torch._sparse_addmm(mat, mat1, mat2, beta=beta, alpha=alpha)
 
 
