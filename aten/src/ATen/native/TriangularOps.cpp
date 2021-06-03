@@ -2,6 +2,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 
 #include <ATen/Parallel.h>
 #include <ATen/native/TriangularOpsUtils.h>
@@ -106,9 +107,7 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
 }
 
 Tensor& tril_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
@@ -143,9 +142,7 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
 }
 
 Tensor& triu_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }

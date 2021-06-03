@@ -141,6 +141,8 @@ genrule(
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/RedispatchFunctions.h",
         "aten/src/ATen/RedispatchFunctions.cpp",
+        "aten/src/ATen/Operators.h",
+        "aten/src/ATen/Operators.cpp",
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
