@@ -434,6 +434,12 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_runtime_stats_and_log,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "set_error_and_log",
+          [](::c10d::Logger& logger, const std::string& error) {
+              logger.set_error_and_log(error);
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>())
