@@ -1477,6 +1477,7 @@ except RuntimeError as e:
             out, err = p.communicate()
         expected_messages = [
             'device-side assert triggered',  # CUDA
+            'Assertion',  # CUDA
             'HSA_STATUS_ERROR_EXCEPTION',  # ROCm
             'Device-side assertion'  # ROCm
         ]
