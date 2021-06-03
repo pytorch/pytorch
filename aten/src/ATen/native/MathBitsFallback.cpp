@@ -13,6 +13,54 @@ struct MathOpFallback {
   virtual void set_bit(const Tensor&, bool) = 0;
   virtual Tensor resolve_bit(const Tensor&) = 0;
   virtual Tensor& math_op_(Tensor&) = 0;
+  void linalg_fallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+    std::cout<<"Entering linalg_fallback";
+    const auto& arguments = op.schema().arguments();
+    const auto num_arguments = arguments.size();
+    const auto stack_start = stack->size() - num_arguments;
+
+    // Mutable inputs to be tracked separately
+    std::vector<Tensor> mutable_inputs;
+
+    for (int64_t i = 0; i < num_arguments; ++i) {
+      auto& ivalue = (*stack)[stack_start + i];
+      if (!ivalue.isTensor() || !ivalue.isTensorList()) {
+        continue;
+      }
+      const auto& argument = arguments[i];
+      bool mut_arg = false;
+      if (argument.alias_info()) {
+        // Was already tested by is_write loop above
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(argument.alias_info()->isWrite());
+        mut_arg = true;
+      } else {
+        continue;
+      }
+
+      if (ivalue.isTensor()) {
+        if (!is_bit_set(ivalue.toTensor())) {
+          continue;
+        }
+
+        auto tensor = std::move(ivalue).toTensor();
+        TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
+        if (mut_arg) {
+          // TODO: This is a waste if the argument is write only
+          set_bit(tensor, false);
+          math_op_(tensor);
+          mutable_inputs.emplace_back(tensor);
+        }
+        (*stack)[stack_start + i] = std::move(tensor);
+      }
+    }
+
+    op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
+
+    for (auto& mutable_input : mutable_inputs) {
+      math_op_(mutable_input);
+      set_bit(mutable_input, true);
+    }
+  }
   void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
     // This fallback can be used for lazy math operations for which tensors maintain a corresponding dispatch key.
     // At the time of writing, there are two bits that can be set on a tensor: conj and neg. The explanation below uses
@@ -34,7 +82,6 @@ struct MathOpFallback {
     //  std::cerr << "conj fallback " << op.schema().name() << "\n";
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
-    const auto stack_start = stack->size() - num_arguments;
 
     c10::optional<bool> is_write;
     for (int64_t i = 0; i < num_arguments; ++i) {

@@ -78,7 +78,7 @@ char to_blas(TransposeType trans) {
   switch (trans) {
   case Transpose: return 't';
   case NoTranspose: return 'n';
-  // case ConjTranspose: return 'c';
+  case ConjTranspose: return 'c';
   }
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
@@ -89,7 +89,7 @@ fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
   switch (trans) {
   case Transpose: return fbgemm::matrix_op_t::Transpose;
   case NoTranspose: return fbgemm::matrix_op_t::NoTranspose;
-  // case ConjTranspose: return fbgemm::matrix_op_t::Transpose;
+  case ConjTranspose: return fbgemm::matrix_op_t::Transpose;
   }
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
