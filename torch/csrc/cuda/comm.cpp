@@ -11,6 +11,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -73,7 +74,7 @@ static inline std::vector<Tensor>& _broadcast_out_impl(
 std::vector<Tensor>& broadcast_out(
     const Tensor& tensor,
     std::vector<Tensor>& out_tensors) {
-  for (size_t i = 0; i < out_tensors.size(); i++) {
+  for(const auto i : c10::irange(out_tensors.size())) {
     TORCH_CHECK(
         out_tensors[i].is_cuda(),
         "Expected all output tensors to be CUDA tensors, but output tensor at index ",
@@ -240,7 +241,7 @@ std::vector<at::Tensor>& scatter_out(
   int64_t total_size = 0;
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(out_tensors.size());
-  for (size_t i = 0; i < out_tensors.size(); i++) {
+  for(const auto i : c10::irange(out_tensors.size())) {
     TORCH_CHECK(
         out_tensors[i].is_cuda(),
         "Expected all output tensors to be CUDA tensors, but output tensor at index ",
@@ -283,7 +284,7 @@ std::vector<at::Tensor>& scatter_out(
   auto chunks =
       tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
-  for (size_t i = 0; i < chunks.size(); i++) {
+  for(const auto i : c10::irange(chunks.size())) {
     if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
       const auto device_index =
           static_cast<int16_t>(out_tensors[i].get_device());
@@ -379,7 +380,7 @@ static inline at::Tensor& _gather_out_impl(
   }
   auto chunks =
       out_tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for(const auto i : c10::irange(tensors.size())) {
     chunks[i].copy_(tensors[i], /*non_blocking=*/out_tensor.is_cuda());
   }
   return out_tensor;
@@ -395,7 +396,7 @@ at::Tensor& gather_out(
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for(const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(
         tensor.is_cuda(),
@@ -450,7 +451,7 @@ at::Tensor gather(
   dim = at::maybe_wrap_dim(dim, first);
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   auto memory_format = first.suggest_memory_format();
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for(const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(
         tensor.is_cuda(),
