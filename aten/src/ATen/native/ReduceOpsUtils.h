@@ -301,5 +301,66 @@ static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
   at::native::resize_output(result, sizes);
   at::native::resize_output(result_indices, sizes);
 }
+} // native
 
-}}  // at::native
+namespace meta {
+
+static void make_reduction(
+    TensorIteratorBase& iter,
+    const char* name,
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<IntArrayRef> dim_opt,
+    bool keepdim,
+    ScalarType in_dtype,
+    ScalarType out_dtype) {
+  // check that result type and dtype match if provided
+  if (result.defined()) {
+    TORCH_CHECK(
+        result.scalar_type() == out_dtype,
+        name,
+        ": provided dtype must match dtype of result. Got ",
+        toString(result.scalar_type()),
+        " and ",
+        toString(out_dtype),
+        ".");
+  }
+  // dim={} performs an all-reduce, same as dim=None
+
+  IntArrayRef dim = dim_opt.value_or(IntArrayRef{});
+  int64_t ndim = self.dim();
+  auto mask = at::native::make_dim_mask(dim, ndim);
+  auto shape = at::native::shape_from_dim_mask(self, mask, keepdim);
+  iter.impl::MetaBase::set_output(shape, self.options());
+  result = iter.maybe_get_output();
+  auto viewed_result =
+      at::native::review_reduce_result(result, ndim, mask, keepdim);
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
+  if (self.scalar_type() == in_dtype) {
+    iter.build_reduce_op(viewed_result, self);
+  }
+  iter.build_reduce_op(viewed_result, self.to(in_dtype));
+}
+
+static void make_reduction(
+    TensorIteratorBase& iter,
+    const char* name,
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<IntArrayRef> dim,
+    bool keepdim,
+    ScalarType out_dtype) {
+  // special case for type promotion in mixed precision, improves computational
+  // efficiency.
+  // not generalize this to common mismatched input/output types to avoid cross
+  // product of templated kernel launches.
+  const bool gpu_lowp_to_f32 =
+      (self.is_cuda() &&
+       (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
+       out_dtype == kFloat);
+  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
+  return make_reduction(
+      iter, name, result, self, dim, keepdim, in_dtype, out_dtype);
+}
+} // namespace meta
+} // namespace at

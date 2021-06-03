@@ -837,6 +837,19 @@ void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
       .check_all_same_dtype(true));
 }
 
+void TensorIteratorBase::build_reduce_op(const Tensor& out, const Tensor& a) {
+  TORCH_INTERNAL_ASSERT(out.defined());
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_owned_output(out)
+      .add_owned_input(a)
+      .resize_outputs(false)
+      .is_reduction(true)
+      // TODO: not supporting casting to outputs is only really necessary
+      // for arg{min,max}
+      .promote_inputs_to_common_dtype(true));
+}
+
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_binary_op(out, a, b);
@@ -918,16 +931,9 @@ TensorIterator TensorIterator::borrowing_nullary_op(const Tensor& out) {
 }
 
 TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
-  TORCH_INTERNAL_ASSERT(out.defined());
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(false)
-    .add_owned_output(out)
-    .add_owned_input(a)
-    .resize_outputs(false)
-    .is_reduction(true)
-    // TODO: not supporting casting to outputs is only really necessary for arg{min,max}
-    .promote_inputs_to_common_dtype(true)
-    .build();
+  TensorIterator iter;
+  iter.build_reduce_op(out, a);
+  return iter;
 }
 
 TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
