@@ -49,8 +49,8 @@ class DirectoryReader(object):
         return _HasStorage(storage.from_file(filename=filename, size=numel))
 
     def has_record(self, path):
-        full_path = self.directory + "/" + path
-        return os.path.exists(full_path) and not os.path.isdir(full_path)
+        full_path = os.path.join(self.directory, path)
+        return os.path.isfile(full_path)
 
     def get_all_records(
         self,
