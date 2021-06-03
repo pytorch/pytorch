@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/impl/ThreadLocalState.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Flags.h>
@@ -24,67 +25,45 @@
 namespace c10 {
 namespace impl {
 
-// POD version of LocalDispatchKeySet.  Declared here just so that
-// we can put it in the guards.
-// This struct encapsulates special handling for TLS initialization
-// in set_included()/included() API so that they reflect the truth.
-// If you want to create PODLocalDispatchKeySet with non-zero state,
-// use set_included() instead of default constructor.
-struct C10_API PODLocalDispatchKeySet {
-  uint64_t included_;
-  uint64_t excluded_;
+// Helper class to handle conversion between the TLS zero initialized
+// convention and the "normal" in memory layout.
+class C10_API LocalDispatchKeySetWrapper {
+ public:
+  LocalDispatchKeySetWrapper(PODLocalState* tls) : tls_(tls) {}
+  LocalDispatchKeySetWrapper() : tls_(_get_thread_local_state()) {}
 
   // See Note [TLS Initialization]
   DispatchKeySet included() const {
-    return DispatchKeySet(DispatchKeySet::RAW, included_) ^
+    return DispatchKeySet(DispatchKeySet::RAW, tls_->included_) ^
         c10::default_included_set;
   }
   DispatchKeySet excluded() const {
-    return DispatchKeySet(DispatchKeySet::RAW, excluded_) ^
+    return DispatchKeySet(DispatchKeySet::RAW, tls_->excluded_) ^
         c10::default_excluded_set;
   }
 
-  void set_included(DispatchKeySet x) {
-    included_ = (x ^ c10::default_included_set).raw_repr();
+  void unsafe_set_included(DispatchKeySet x) {
+    tls_->included_ = (x ^ c10::default_included_set).raw_repr();
   }
-  void set_excluded(DispatchKeySet x) {
-    excluded_ = (x ^ c10::default_excluded_set).raw_repr();
+  void unsafe_set_excluded(DispatchKeySet x) {
+    tls_->excluded_ = (x ^ c10::default_excluded_set).raw_repr();
   }
 
-  // If our exclude set does not overlap with c10::default_excluded_set, we can
-  // skip some bookkeeping. (And we know at compile time if this is the case.)
-  template<uint64_t exclude>
-  uint64_t exclude_non_overlapping() {
-    static_assert(!(exclude & c10::default_excluded_set.raw_repr()));
-    uint64_t delta = exclude & ~excluded_;
-    excluded_ |= exclude;
-    return delta;
-  }
+ private:
+  PODLocalState* tls_;
 };
-static_assert(
-    std::is_pod<PODLocalDispatchKeySet>::value,
-    "PODLocalDispatchKeySet must be a POD type.");
 
 struct C10_API LocalDispatchKeySet {
-  /* implicit */ LocalDispatchKeySet(PODLocalDispatchKeySet x)
-      : included_(x.included()), excluded_(x.excluded()) {}
+  LocalDispatchKeySet(LocalDispatchKeySetWrapper x) :
+    included_(x.included()),
+    excluded_(x.excluded()) {}
   DispatchKeySet included_;
   DispatchKeySet excluded_;
 };
 
-// thread_local variables cannot be C10_API on Windows.
-// Inlining this seems to break AutoDispatchBelowAutograd on Android.
-#if defined(_MSC_VER) || defined(C10_ANDROID)
-C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
-#else // defined(_MSC_VER) || defined(C10_ANDROID)
-extern C10_API thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
-
-inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
-  // Don't let people fiddle with the thread_local directly just
-  // because they include this header.
-  return raw_local_dispatch_key_set;
+inline C10_API LocalDispatchKeySet snapshot_tls_keyset() {
+  return LocalDispatchKeySet(LocalDispatchKeySetWrapper());
 }
-#endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
 // Internal, use ThreadLocalStateGuard
 C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
@@ -105,7 +84,7 @@ class C10_API IncludeDispatchKeyGuard {
  private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
-  PODLocalDispatchKeySet* tls_;
+  LocalDispatchKeySetWrapper tls_wrapper_;
   DispatchKeySet include_;
 };
 
@@ -123,27 +102,50 @@ class C10_API ExcludeDispatchKeyGuard {
  private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
-  PODLocalDispatchKeySet* tls_;
+  LocalDispatchKeySetWrapper tls_wrapper_;
   DispatchKeySet exclude_;
 };
 
 template<uint64_t exclude>
-class C10_API ExcludeNonDefaultDispatchKeyGuard {
+class C10_API ExcludeDispatchKeyGuard_NoOverlap {
  public:
-  ExcludeNonDefaultDispatchKeyGuard()
-      : tls_(&raw_local_dispatch_key_set),
-      delta_(tls_->exclude_non_overlapping<exclude>()) {}
+  // If our exclude set does not overlap with c10::default_excluded_set, we can
+  // skip some bookkeeping. (And we know at compile time if this is the case.)
+  // Key exclusion tends to be on the hot path, so it's worth it to bypass the
+  // unnecessary XORs if possible.
+  static_assert(
+    !(exclude & c10::default_excluded_set.raw_repr()),
+    "Fast path was requested, but `exclude` overlaps with `c10::default_excluded_set`."
+  );
 
-  ~ExcludeNonDefaultDispatchKeyGuard() {
+  ExcludeDispatchKeyGuard_NoOverlap(const ExcludeDispatchKeyGuard_NoOverlap&) = delete;
+  ExcludeDispatchKeyGuard_NoOverlap operator=(const ExcludeDispatchKeyGuard_NoOverlap&) = delete;
+  ExcludeDispatchKeyGuard_NoOverlap(ExcludeDispatchKeyGuard_NoOverlap&&) = delete;
+  ExcludeDispatchKeyGuard_NoOverlap operator=(ExcludeDispatchKeyGuard_NoOverlap&&) = delete;
+
+  ExcludeDispatchKeyGuard_NoOverlap()
+      : tls_(_get_thread_local_state()){
+    delta_ = exclude & ~(tls_->excluded_);
+    tls_->excluded_ |= exclude;
+  }
+
+  ~ExcludeDispatchKeyGuard_NoOverlap() {
     tls_->excluded_ &= ~delta_;
   };
 
  private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
-  PODLocalDispatchKeySet* tls_;
+  PODLocalState* tls_;
   uint64_t delta_;
 };
+
+template<DispatchKey k>
+class C10_API ExcludeSingleDispatchKeyGuard_NoOverlap {
+  static constexpr auto k_set = DispatchKeySet(k);
+  ExcludeDispatchKeyGuard_NoOverlap<k_set.raw_repr()> guard_;
+};
+
 
 // Non-RAII API for manipulating the thread-local dispatch state.
 // Please prefer the RAII API.  The non-RAII API may be useful when

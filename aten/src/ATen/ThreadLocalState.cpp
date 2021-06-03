@@ -9,7 +9,7 @@
 namespace at {
 
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
-    : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
+    : dispatch_key_(c10::impl::snapshot_tls_keyset()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
       inference_mode_enabled_(c10::InferenceMode::is_enabled()) {
   rf_tls_ = at::get_record_function_tls_();

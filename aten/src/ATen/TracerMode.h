@@ -125,9 +125,7 @@ static inline void set_dispatch_enabled(bool enabled) {
   c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Tracer, enabled);
 }
 
-struct NoTracerDispatchMode {
-  c10::impl::ExcludeDispatchKeyGuard guard_{at::DispatchKey::Tracer};
-};
+using NoTracerDispatchMode = c10::impl::ExcludeSingleDispatchKeyGuard_NoOverlap<at::DispatchKey::Tracer>;
 
 } // namespace impl
 } // namespace tracer

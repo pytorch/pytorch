@@ -51,7 +51,7 @@ struct TORCH_API InferenceMode {
   //    `tensorTypeInCurrentExecutionContext` in interpreter.cpp.
   InferenceMode(bool enabled = true)
       : prev_mode(InferenceMode::is_enabled()),
-        prev_keyset(c10::impl::tls_local_dispatch_key_set()),
+        prev_keyset(c10::impl::snapshot_tls_keyset()),
         grad_mode(at::AutoGradMode(!enabled)) {
     _set_enabled(enabled);
     DispatchKeySet included = enabled
@@ -60,9 +60,9 @@ struct TORCH_API InferenceMode {
     DispatchKeySet excluded = enabled
         ? (prev_keyset.excluded_ | c10::autograd_dispatch_keyset)
         : (prev_keyset.excluded_ - c10::autograd_dispatch_keyset);
-    c10::impl::PODLocalDispatchKeySet cur_keyset;
-    cur_keyset.set_included(included);
-    cur_keyset.set_excluded(excluded);
+    auto cur_keyset = prev_keyset;
+    cur_keyset.included_ = included;
+    cur_keyset.excluded_ = excluded;
     c10::impl::_force_tls_local_dispatch_key_set(cur_keyset);
   }
 

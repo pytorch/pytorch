@@ -36,12 +36,7 @@ static inline DispatchKeySet computeDispatchKeySet(
     // function (as opposed to just applying it to the input 'ks').
     DispatchKeySet key_mask
 ) {
-  c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_dispatch_key_set();
-  // TODO: It's a bit irritating that we have to do logical ORs here, it would
-  // be nice to only do one.  Can always_included be folded into the TLS?  Well,
-  // it's a bit troublesome, because fastpath TLS access requires the type of
-  // the TLS in question to be zero-initialized, so you don't actually win
-  // anyting in that case.
+  LocalDispatchKeySet local = c10::impl::snapshot_tls_keyset();
   return (((ks | local.included_) - local.excluded_) & key_mask);
 }
 
