@@ -409,7 +409,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
-      .def("_jit_pass_constant_pooling", ConstantPooling)
+      .def("_jit_pass_constant_pooling", constantPooling)
       .def(
           "_jit_pass_create_functional_graphs",
           [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
@@ -504,7 +504,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_constant_propagation_immutable_types",
           [](std::shared_ptr<Graph>& g) {
-            return ConstantPropagationImmutableTypes(g);
+            return constantPropagationImmutableTypes(g);
           })
       .def(
           "_jit_pass_constant_propagation",

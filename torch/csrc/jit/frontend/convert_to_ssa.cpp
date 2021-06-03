@@ -336,15 +336,15 @@ struct LoopContinuations {
 // end of the block (LoopContinuation). Then we inline the loop condition into
 // the graph. Then, we erase Loads & Stores. Finally, we remove
 // LoopContinuations from the graph.
-void ConvertToSSA(std::shared_ptr<Graph>& graph) {
+void convertToSSA(std::shared_ptr<Graph>& graph) {
   ControlFlowLoadStores ctrl;
   ctrl.run(graph);
   LoopContinuations exit_vars;
   exit_vars.run(graph);
-  InlineLoopCondition(graph);
+  inlineLoopCondition(graph);
   EraseLoadStores erase_loads_stores;
   erase_loads_stores.run(graph);
-  TransformExits(graph);
+  transformExits(graph);
 }
 
 } // namespace jit

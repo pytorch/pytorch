@@ -89,7 +89,7 @@ class AttributePropagator {
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
       runOptimization(
           subgraph, /* unroll? */ false, /* const_prop_user_classes? */ false);
-      LowerSimpleTuples(subgraph);
+      lowerSimpleTuples(subgraph);
     };
 
     for (auto function : preservedMethods_) {

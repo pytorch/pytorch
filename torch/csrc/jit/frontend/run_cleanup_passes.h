@@ -12,7 +12,7 @@
 namespace torch {
 namespace jit {
 
-void RunCleanupPasses(std::shared_ptr<Graph>& graph) {
+void runCleanupPasses(std::shared_ptr<Graph>& graph) {
   liftClosures(graph);
   inlineForkedClosures(graph);
   if (getInlineEverythingMode()) {
@@ -20,7 +20,7 @@ void RunCleanupPasses(std::shared_ptr<Graph>& graph) {
   }
 
   // remove any uses of tuples that we inserted that are not needed
-  LowerSimpleTuples(graph);
+  lowerSimpleTuples(graph);
 
   // full constant propagation runs ops with mutable inputs if it can
   // prove that the inputs are not mutated anywhere in the graph.
@@ -29,18 +29,18 @@ void RunCleanupPasses(std::shared_ptr<Graph>& graph) {
   // to run nodes it was not able to previously, and the graph may change
   // (jitter) So we run only constant prop w immutable types here bc
   // successive runs of immutable constant prop does not change the graph
-  ConstantPropagationImmutableTypes(graph);
+  constantPropagationImmutableTypes(graph);
 
   // Constant Pooling pass must be after ConstantPropogation, which can create
   // new constants that needs to be pooled.
-  ConstantPooling(graph);
+  constantPooling(graph);
 
   // For jitter
-  CanonicalizeOutputs(graph);
+  canonicalizeOutputs(graph);
 
   // Annotate aten::warns so that each has its unique ID. This enables us to
   // mimic Python behavior of only emitting each warning only once.
-  AnnotateWarns(graph);
+  annotateWarns(graph);
 }
 
 } // namespace jit

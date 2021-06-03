@@ -823,7 +823,7 @@ struct CudaGraphFuser {
       auto subgraph = node->g(attr::Subgraph);
       EliminateDeadCode(subgraph);
       EliminateCommonSubexpression(subgraph);
-      ConstantPooling(subgraph);
+      constantPooling(subgraph);
     }
   }
 

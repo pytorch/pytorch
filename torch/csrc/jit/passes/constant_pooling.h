@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void ConstantPooling(const std::shared_ptr<Graph>& graph);
+TORCH_API void constantPooling(const std::shared_ptr<Graph>& graph);
 
 }
 } // namespace torch

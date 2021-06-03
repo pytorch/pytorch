@@ -123,7 +123,7 @@ struct FunctionalGraphSlicer {
 
     for (Node* functional_node : functional_graph_nodes) {
       if (!inlineIfTooSmall(functional_node)) {
-        ConstantPooling(functional_node->g(attr::Subgraph));
+        constantPooling(functional_node->g(attr::Subgraph));
       }
     }
     return changed;
@@ -213,11 +213,11 @@ void InlineFunctionalGraphs(Block* block) {
 
 void CreateFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   // Run Constant Pooling so constants get hoisted
-  ConstantPooling(graph);
+  constantPooling(graph);
   FunctionalGraphSlicer func(graph);
   func.run();
   // Creation of Functional Subgraphs & Deinlining creates excess constants
-  ConstantPooling(graph);
+  constantPooling(graph);
 }
 
 void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {

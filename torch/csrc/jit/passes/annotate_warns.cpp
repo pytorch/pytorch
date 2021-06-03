@@ -5,11 +5,11 @@
 namespace torch {
 namespace jit {
 
-void AnnotateWarns(Block* b) {
+void annotateWarns(Block* b) {
   static std::atomic<int64_t> idx(0);
   for (Node* n : b->nodes()) {
     for (Block* child_b : n->blocks()) {
-      AnnotateWarns(child_b);
+      annotateWarns(child_b);
     }
 
     if (n->kind() != aten::warn) {
@@ -21,8 +21,8 @@ void AnnotateWarns(Block* b) {
   }
 }
 
-void AnnotateWarns(const std::shared_ptr<Graph>& graph) {
-  AnnotateWarns(graph->block());
+void annotateWarns(const std::shared_ptr<Graph>& graph) {
+  annotateWarns(graph->block());
 }
 
 } // namespace jit

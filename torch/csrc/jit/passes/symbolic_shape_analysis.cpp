@@ -127,7 +127,7 @@ struct SymbolicShapeAnalyzer {
       // propagation, or we might inadvertently use them in arithmetic or
       // other operators
       substituteInputTensorProperties(/*substitute_symbolic_dims*/ false);
-      LowerSimpleTuples(graph_);
+      lowerSimpleTuples(graph_);
       RemoveListMutation(graph_);
       UnrollConstantLoops(graph_);
       ConstantPropagation(graph_);
