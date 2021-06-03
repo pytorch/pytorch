@@ -4915,7 +4915,7 @@ class MyConvNetForMNIST(nn.Module):
 
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
-    def _test_device_maps(self, options, errMsg="Invalid device_map"):
+    def _test_device_maps(self, options, errMsg):
         with self.assertRaisesRegex(ValueError, errMsg):
             rpc.init_rpc(
                 name=worker_name(self.rank),
@@ -4931,7 +4931,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def test_device_maps_wrong_worker_name(self):
         options = self.rpc_backend_options
         options.set_device_map("none_exist", {0: 1})
-        self._test_device_maps(options, "Wrong worker names")
+
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has invalid target node names in its device maps"
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_invalid_max_local_device(self):
@@ -4941,7 +4945,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         self._test_device_maps(
             options,
-            errMsg="Invalid device in TensorPipe options"
+            errMsg="Node worker0 has source devices with invalid indices in its device map for worker1"
         )
 
     @skip_if_lt_x_gpu(1)
@@ -4950,7 +4954,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {0: torch.cuda.device_count()})
 
-        self._test_device_maps(options)
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has target devices with invalid indices in its device map for worker1"
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_many_to_one(self):
@@ -4959,7 +4966,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         options.set_device_map(dst, {1: 0})
         options.set_device_map(dst, {0: 0})
 
-        self._test_device_maps(options)
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has duplicated target devices in its device map for worker1"
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_one_to_many(self):
@@ -5954,11 +5964,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     def test_devices_option_mismatch(self):
         with self.assertRaisesRegex(
-            RuntimeError,
-            "but not included the devices field"
+            ValueError,
+            "Node worker0 has unexpected source devices in its device map for worker1"
         ):
             dst = worker_name((self.rank + 1) % self.world_size)
             options = self.rpc_backend_options
@@ -5975,11 +5985,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
             rpc.shutdown()
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     def test_devices_option_mismatch_reverse(self):
         with self.assertRaisesRegex(
-            RuntimeError,
-            "but not included the devices field"
+            ValueError,
+            "Node worker0 has unexpected target devices in its device map for worker1"
         ):
             dst = worker_name((self.rank + 1) % self.world_size)
 
