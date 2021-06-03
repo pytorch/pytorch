@@ -20,7 +20,11 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   const int64_t total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  Tensor out_tensor = at::empty_like(self, MemoryFormat::Preserve);
+  // We initialize it to zeros when it's bool to silence asan, who thinks that we are
+  // incurring into UB after reading an undefined value in TI (although we do not use it)
+  Tensor out_tensor = self.scalar_type() == ScalarType::Bool ?
+    at::zeros_like(self, MemoryFormat::Preserve) :
+    at::empty_like(self, MemoryFormat::Preserve);
 
   // Count dimensions in which we need to do work
   int n = 0;
@@ -38,15 +42,15 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
     return out_tensor;
   }
 
-  //create dummy input with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
-  auto restrided_in = self.as_strided(self.sizes(), strides);
+  //create dummy output with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
+  auto restrided_out = out_tensor.as_strided(out_tensor.sizes(), strides);
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .declare_static_dtype_and_device(self.scalar_type(), self.device())
     .add_output(out_tensor)
     .add_input(self)
-    .add_input(restrided_in)
+    .add_input(restrided_out)
     .build();
 
   auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
