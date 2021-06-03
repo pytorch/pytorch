@@ -5,11 +5,11 @@ torch.package
 
 .. warning::
 
-    This module is experimental and has not yet been publically released.
+    This module is experimental and has not yet been publicly released.
 
 API Reference
 -------------
-.. autoclass:: torch.package.DeniedModuleError
+.. autoclass:: torch.package.PackagingError
 
 .. autoclass:: torch.package.EmptyMatchError
 
@@ -22,3 +22,6 @@ API Reference
   :members:
 
   .. automethod:: __init__
+
+.. autoclass:: torch.package.Directory
+  :members:

@@ -3,7 +3,7 @@ import re
 from typing import Optional, Sequence, List, Tuple, Match
 
 from tools.codegen.api import cpp
-from tools.codegen.api.types import Binding
+from tools.codegen.api.types import Binding, NamedCType
 from tools.codegen.model import NativeFunction, Type, SchemaKind
 from tools.codegen.utils import IDENT_REGEX
 
@@ -12,13 +12,9 @@ from tools.codegen.utils import IDENT_REGEX
 # we could save `other.scalar_type()` instead of the entire `other` tensor.
 @dataclass(frozen=True)
 class SavedAttribute:
-    # Name of the saved attribute.
-    # Suffix is appended if it's derived property, e.g.: `other_scalar_type`
-    name: str
-
-    # The cpp type string.
-    # TODO: change from raw string to model.Type
-    type: str
+    # The NamedCType holds the updated name and cpp type of the attribute
+    # for the name, Suffix is appended if it's derived property, e.g.: `other_scalar_type`
+    nctype: NamedCType
 
     # The expression to read the derived property at save time, e.g.:
     # `other.scalar_type()`.
@@ -257,7 +253,7 @@ def match_differentiability_info(
                             f"in-place function is not supported: {f.func}")
 
         # For functions that have a single def for out-of-place and inplace (like abs())
-        if info and info.forward_derivatives and is_exact_match:
+        if info and info.forward_derivatives:
             forward_derivatives = info.forward_derivatives
 
             if f.func.kind() == SchemaKind.inplace:
@@ -272,9 +268,14 @@ def match_differentiability_info(
                 # replace "result" from the formula by self
                 def repl(m: Match[str]) -> str:
                     return f'{m.group(1)}self{m.group(2)}'
+                formula = re.sub(IDENT_REGEX.format("result"), repl, fw_info.formula)
+
+                if not is_exact_match:
+                    # Make sure that the forward grad is modified inplace
+                    formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
 
                 forward_derivatives = [ForwardDerivative(
-                    formula=re.sub(IDENT_REGEX.format("result"), repl, fw_info.formula),
+                    formula=formula,
                     var_name="self",
                     var_type=fw_info.var_type,
                     required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
@@ -297,7 +298,7 @@ def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> L
     f = fn.func
     info = fn.info
     outputs: List[DifferentiableOutput] = [
-        DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret))
+        DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret).cpp_type())
         for name, ret in zip(cpp.return_names(f), f.func.returns)]
     output_differentiability = info.output_differentiability if info else None
     if output_differentiability is not None:

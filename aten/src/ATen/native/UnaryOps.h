@@ -24,8 +24,6 @@ DECLARE_DISPATCH(unary_fn, atan_stub);
 DECLARE_DISPATCH(unary_fn, bitwise_not_stub);
 DECLARE_DISPATCH(unary_fn, logical_not_stub);
 DECLARE_DISPATCH(unary_fn, ceil_stub);
-DECLARE_DISPATCH(unary_fn_with_scalar, clamp_max_stub);
-DECLARE_DISPATCH(unary_fn_with_scalar, clamp_min_stub);
 DECLARE_DISPATCH(unary_fn, cos_stub);
 DECLARE_DISPATCH(unary_fn, cosh_stub);
 DECLARE_DISPATCH(unary_fn, digamma_stub);
@@ -41,6 +39,8 @@ DECLARE_DISPATCH(unary_fn, frac_stub);
 DECLARE_DISPATCH(unary_fn, frexp_stub);
 DECLARE_DISPATCH(unary_fn, i0_stub);
 DECLARE_DISPATCH(unary_fn, special_i0e_stub);
+DECLARE_DISPATCH(unary_fn, special_i1_stub);
+DECLARE_DISPATCH(unary_fn, special_i1e_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
@@ -98,6 +98,5 @@ DECLARE_DISPATCH(
 // erfinv
 // clone
 // contiguous
-// clamp/_min/_max
 // zero
 }} // namespace at::native

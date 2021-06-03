@@ -70,17 +70,17 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
     case CompareSelectOperation::kNE:
       return llvm::ICmpInst::ICMP_NE;
     case CompareSelectOperation::kGT:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SGT
-                             : llvm::ICmpInst::ICMP_UGT;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SGT
+                                     : llvm::ICmpInst::ICMP_UGT;
     case CompareSelectOperation::kGE:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SGE
-                             : llvm::ICmpInst::ICMP_UGE;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SGE
+                                     : llvm::ICmpInst::ICMP_UGE;
     case CompareSelectOperation::kLT:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SLT
-                             : llvm::ICmpInst::ICMP_ULT;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SLT
+                                     : llvm::ICmpInst::ICMP_ULT;
     case CompareSelectOperation::kLE:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SLE
-                             : llvm::ICmpInst::ICMP_ULE;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SLE
+                                     : llvm::ICmpInst::ICMP_ULE;
     default:
       // TODO: change to a proper error report
       throw std::runtime_error("invalid operator type");
@@ -212,7 +212,10 @@ class LLVMCodeGenImpl : public IRVisitor {
       Stmt* stmt,
       const std::vector<CodeGen::BufferArg>& args,
       at::Device device,
-      Dtype dtype);
+      Dtype dtype,
+      c10::optional<std::string> triple,
+      c10::optional<std::string> cpu,
+      c10::optional<std::string> attrs);
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
@@ -301,30 +304,17 @@ LLVMCodeGen::LLVMCodeGen(
     const std::vector<BufferArg>& args,
     at::Device device,
     const std::string& kernel_func_name,
-    Dtype dtype)
+    Dtype dtype,
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
     : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
+      impl_(std::make_unique<
+            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
 
-static void* argToPtr(
-    const CodeGen::BufferArg& bufferArg,
-    const CodeGen::CallArg& callArg) {
-  if (!bufferArg.isVar()) {
-    return callArg.data();
-  }
-
-  switch (bufferArg.dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-  case ScalarType::Name:    \
-    return callArg.Name##Ptr();
-    break;
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    default:
-      throw unsupported_dtype();
-  }
-  return nullptr;
+void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
+  value<float>(const_cast<void**>(args.data()));
+  USE_TRIGGER(llvm_codegen_executed);
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
@@ -376,7 +366,10 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& args,
     at::Device device,
-    Dtype dtype)
+    Dtype dtype,
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
@@ -391,10 +384,11 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
 
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
 
-  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
+  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
   module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
@@ -407,7 +401,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
   std::vector<llvm::Type*> params;
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     auto const& arg = args[i];
     if (arg.isVar()) {
       params.push_back(dtypeToLLVM(arg.dtype()));
@@ -422,7 +416,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   fn_->addAttribute(
       llvm::AttributeList::AttrIndex::FunctionIndex,
       llvm::Attribute::AlwaysInline);
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
     }
@@ -471,7 +465,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
-  for (size_t i = 0; i < params.size(); i++) {
+  for (const auto i : c10::irange(params.size())) {
     auto argp = irb_.CreateGEP(
         wrapper->arg_begin(), llvm::ConstantInt::getSigned(IntTy_, i));
     if (params[i]->isPointerTy()) {
@@ -803,10 +797,10 @@ void LLVMCodeGenImpl::visit(const CompareSelect* v) {
     llvm::Value* cmp_;
     CompareSelectOperation cmp_op_ = v->compare_select_op();
 
-    if (is_integral(type_used)) {
+    if (c10::isIntegralType(type_used, true)) {
       cmp_ = irb_.CreateICmp(
           llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
-    } else if (is_floating_point(type_used)) {
+    } else if (c10::isFloatingType(type_used)) {
       cmp_ = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op_), lhs, rhs);
     } else {
       throw std::runtime_error("invalid type for CompareSelect");
@@ -825,10 +819,10 @@ void LLVMCodeGenImpl::visit(const CompareSelect* v) {
     auto cmp_op = v->compare_select_op();
     llvm::Value* cmp;
 
-    if (is_integral(cmp_type)) {
+    if (c10::isIntegralType(cmp_type, true)) {
       cmp = irb_.CreateICmp(
           llvm_comparison_predicate(cmp_op, cmp_type), lhs, rhs);
-    } else if (is_floating_point(cmp_type)) {
+    } else if (c10::isFloatingType(cmp_type)) {
       cmp = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op), lhs, rhs);
     } else {
       throw std::runtime_error("invalid type for CompareSelect");
@@ -944,9 +938,9 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
       if (v->dtype().scalar_type() == ScalarType::Bool) {
         llvm::Value* zero =
             toVec(llvm::ConstantFP::get(srcType, 0.), v->dtype().lanes());
-        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNO, value_, zero);
+        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNE, value_, zero);
         value_ = irb_.CreateICmpEQ(
-            value_, llvm::ConstantInt::get(value_->getType(), 0));
+            value_, llvm::ConstantInt::get(value_->getType(), 1));
         value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
         return;
       }
@@ -2010,7 +2004,6 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
     FPM.run(FF);
   }
   FPM.doFinalization();
-  PM.run(M);
 }
 
 RegisterCodeGen<LLVMCodeGen> llvm_codegen_reg("llvm_codegen");

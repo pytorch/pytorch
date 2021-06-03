@@ -15,6 +15,9 @@ from textwrap import dedent
 import torch
 import sys
 import builtins
+import io
+import pickle
+import functools
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -57,6 +60,11 @@ def createResolutionCallbackFromEnv(lookup_base):
         i = 0
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
+
+        # Special case logic for the empty Tuple as a subscript (used
+        # in the type annotation `Tuple[()]`)
+        if expr[:i] == '()':
+            return (), i
 
         base = lookupInModule(expr[:i].strip(), module)
         assert base is not None, f"Unresolvable type {expr[:i]}"
@@ -280,7 +288,7 @@ def get_annotation_str(annotation):
         return '.'.join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
-        subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore
+        subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore[attr-defined]
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ','.join([get_annotation_str(elt) for elt in annotation.elts])
@@ -537,6 +545,14 @@ def unused(fn):
 
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
+
+# No op context manager from python side
+class _IgnoreContextManager(contextlib.AbstractContextManager):
+    def __init__(self, **kwargs):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
 
 def ignore(drop=False, **kwargs):
     """
@@ -959,7 +975,11 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
+        self.filename = filename
 
+@functools.lru_cache(maxsize=None)
+def make_source_context(*args):
+    return SourceContext(*args)
 
 def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
@@ -987,7 +1007,7 @@ def _get_named_tuple_properties(obj):
 
 def _create_named_tuple(t, unqual_name: str, field_names: List[str]):
     # mypy: namedtuple() expects a string literal as the first argument
-    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore
+    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[misc]
     return TupleType(*t)
 
 
@@ -1119,3 +1139,29 @@ def _isinstance(obj, target_type) -> bool:
 
     # handle non-containers
     return isinstance(obj, target_type)
+
+
+class _TensorExtractor(pickle.Pickler):
+    def __init__(self, *args, tensors: List[torch.Tensor], **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tensors = tensors
+
+    def persistent_id(self, obj):
+        if isinstance(obj, torch.Tensor):
+            self.tensors.append(obj)
+            return ""
+        else:
+            return None
+
+
+def _extract_tensors(obj):
+    r"""
+    This function is exclusively called from C++.
+    See ``torch/csrc/jit/python/python_ivalue.h``.
+
+    It extracts the tensors contained in the given object, through pickling.
+    """
+    tensors: List[torch.Tensor] = []
+    extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
+    extractor.dump(obj)
+    return tensors

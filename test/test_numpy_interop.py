@@ -273,10 +273,10 @@ class TestNumPyInterop(TestCase):
             if np.dtype(dtype).kind == 'u':  # type: ignore[misc]
                 # .type expects a XxxTensor, which have no type hints on
                 # purpose, so ignore during mypy type checking
-                x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore
+                x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
                 array = np.array([1, 2, 3, 4], dtype=dtype)
             else:
-                x = torch.tensor([1, -2, 3, -4]).type(tp)  # type: ignore
+                x = torch.tensor([1, -2, 3, -4]).type(tp)  # type: ignore[call-overload]
                 array = np.array([1, -2, 3, -4], dtype=dtype)
 
             # Test __array__ w/o dtype argument
@@ -311,7 +311,7 @@ class TestNumPyInterop(TestCase):
         float_types = [torch.DoubleTensor, torch.FloatTensor]
         float_dtypes = [np.float64, np.float32]
         for tp, dtype in zip(float_types, float_dtypes):
-            x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore
+            x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
             array = np.array([1, 2, 3, 4], dtype=dtype)
             for func in ['sin', 'sqrt', 'ceil']:
                 ufunc = getattr(np, func)
@@ -323,7 +323,7 @@ class TestNumPyInterop(TestCase):
 
         # Test functions with boolean return value
         for tp, dtype in zip(types, dtypes):
-            x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore
+            x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
             array = np.array([1, 2, 3, 4], dtype=dtype)
             geq2_x = np.greater_equal(x, 2)
             geq2_array = np.greater_equal(array, 2).astype('uint8')
@@ -337,7 +337,7 @@ class TestNumPyInterop(TestCase):
             for t_dtype in [torch.float, torch.double]:
                 # mypy raises an error when np.floatXY(2.0) is called
                 # even though this is valid code
-                np_sc = np_dtype(2.0)  # type: ignore
+                np_sc = np_dtype(2.0)  # type: ignore[abstract, arg-type]
                 t = torch.ones(2, requires_grad=True, dtype=t_dtype)
                 r1 = t * np_sc
                 self.assertIsInstance(r1, torch.Tensor)
@@ -365,7 +365,7 @@ class TestNumPyInterop(TestCase):
             self.assertEqual(torch.ones([2, 2, 2, 2]).mean(scalar), torch.ones([2, 2, 2, 2]).mean(np_val))
 
             # numpy integral type parses like a python int in custom python bindings:
-            self.assertEqual(torch.Storage(np_val).size(), scalar)  # type: ignore
+            self.assertEqual(torch.Storage(np_val).size(), scalar)  # type: ignore[attr-defined]
 
             tensor = torch.tensor([2], dtype=torch.int)
             tensor[0] = np_val

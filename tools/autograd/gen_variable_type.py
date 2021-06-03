@@ -22,6 +22,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
+from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, declare_returned_variables,
     tie_return_values, get_return_value, type_wrapper_name,
@@ -32,14 +33,16 @@ from .gen_inplace_or_view_type import (
     ASSIGN_RETURN_VALUE, gen_formals,
 )
 
-from tools.codegen.api.types import Binding, DispatcherSignature
+from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
+                                     tensorT, tensorListT, MutRefCType, OptionalCType,
+                                     ListCType, SpecialArgName, scalarT, stringT)
 from tools.codegen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
     is_differentiable)
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.context import with_native_function
+from tools.codegen.context import native_function_manager, with_native_function
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
@@ -89,16 +92,23 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
-    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
+    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
-    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d',
+    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'linalg_cholesky_ex', 'linalg_eig',
     'reflection_pad1d_backward', 'reflection_pad2d_backward', 'symeig',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross'
+    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm',
 }
+
+GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
+    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    'sparse_mask_helper_cuda', '_sparse_addmm',
+}
+
+GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
 RESET_GRAD_ACCUMULATOR = {
@@ -229,7 +239,7 @@ CALL_REDISPATCH = CodeTemplate("""\
 at::redispatch::${api_name}(${unpacked_args})""")
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
-# `at::AutoNonVariableTypeMode` guard block.
+# `at::AutoDispatchBelowAutograd` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
 auto ${tmp_var} = ([&]() {
   ${guard}
@@ -361,16 +371,17 @@ def gen_variable_type_shard(
     filtered_fns_with_diff_infos = list(filter(use_derived, fns_with_diff_infos))
     for fn in filtered_fns_with_diff_infos:
         f = fn.func
-        name = cpp.name(f.func)
-        formals = gen_formals(f)
+        with native_function_manager(f):
+            name = cpp.name(f.func)
+            formals = gen_formals(f)
 
-        type_definitions.append(METHOD_DEFINITION.substitute(
-            return_type=cpp.returns_type(f.func.returns),
-            type_wrapper_name=type_wrapper_name(f),
-            type_definition_body=emit_body(fn),
-            formals=formals,
-        ))
-        wrapper_registrations.append(gen_wrapper_registration(f))
+            type_definitions.append(METHOD_DEFINITION.substitute(
+                return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                type_wrapper_name=type_wrapper_name(f),
+                type_definition_body=emit_body(fn),
+                formals=formals,
+            ))
+            wrapper_registrations.append(gen_wrapper_registration(f))
 
         # See Note [Manual Backend kernels]
         assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
@@ -385,11 +396,12 @@ def gen_variable_type_shard(
             assert f.is_abstract, msg
 
     fm.write_with_template(output_name, template_name, lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/{template_name}',
+        'generated_comment': '@' f'generated from {fm.template_dir}/{template_name}',
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
     })
 
+@with_native_function_with_differentiability_info
 def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     assert dispatch_strategy(fn) == 'use_derived'
     f = fn.func
@@ -482,7 +494,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 return None
 
             # We really only care about trimming down the amount of tensors we save
-            if arg.type != 'Tensor':
+            if arg.nctype.type != BaseCType(tensorT):
                 return None
 
             # We want to emit simple guards, so we only allow that if checking one
@@ -546,7 +558,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for arg in differentiable_outputs:
             name = arg.name
             # TODO: should be `arg.type.is_tensor_like()`?
-            if arg.cpp_type in ['Tensor', 'TensorList', 'const c10::List<c10::optional<Tensor>> &']:
+            if arg.cpp_type in ['at::Tensor', 'at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']:
                 body.append(f'throw_error_for_complex_autograd({name}, "{base_name}");')
         return body
 
@@ -577,12 +589,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # assign the saved variables to the generated grad_fn
         stmts: List[str] = []
         for arg in saved_variables:
-            name = arg.name
+            name = arg.nctype.name.name if isinstance(arg.nctype.name, SpecialArgName) else arg.nctype.name
+            type = arg.nctype.type
             expr = arg.expr
-            if arg.type == 'Tensor' or arg.type == 'c10::optional<Tensor>' or \
-                    arg.type == 'c10::optional<Tensor>&' or (is_output and arg.type == 'Scalar'):
+            if type == BaseCType(tensorT) or type == OptionalCType(BaseCType(tensorT)) or \
+                    type == MutRefCType(OptionalCType(BaseCType(tensorT))) or (is_output and type == BaseCType(scalarT)):
+                var = name
                 name += '_'
-                var = arg.name
                 if var == 'self' and inplace:
                     var = 'self.clone()'
                     assert not is_output
@@ -592,11 +605,15 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     expr = f'SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})'
                 else:
                     expr = f'SavedVariable({var}, {str(is_output).lower()})'
-            elif arg.type in ['TensorList', 'c10::List<c10::optional<Tensor>>']:
+            elif type == BaseCType(tensorListT) or type == ListCType(OptionalCType(BaseCType(tensorT))):
+                expr = f'make_saved_variable_list({name})'
                 name += '_'
-                expr = f'make_saved_variable_list({arg.name})'
-            elif arg.type == 'IntArrayRef':
+            elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
+            elif type == BaseCType(stringT):
+                expr = f'std::string({expr})'
+            elif type == OptionalCType(BaseCType(stringT)):
+                expr = f'{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt'
             guard = guard_for(arg)
             if guard is None:
                 stmts.append(f'grad_fn->{name} = {expr};')
@@ -645,18 +662,18 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         if cpp.name(f.func) not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
             for unpacked_binding in unpacked_bindings:
                 arg = unpacked_binding.name
-                noref_cpp_type = unpacked_binding.ctype.cpp_type(strip_ref=True)
-                if noref_cpp_type == 'TensorList':
+                noref_cpp_type = unpacked_binding.nctype.type.remove_const_ref()
+                if noref_cpp_type == BaseCType(tensorListT):
                     save_ptrs_stmts += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                         SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                     enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                                 ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
-                elif noref_cpp_type == 'c10::List<c10::optional<Tensor>>':
+                elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))):
                     save_ptrs_stmts += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                         SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                     enforce_same_ptrs_stmts += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                                 ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
-                elif noref_cpp_type == 'Tensor':
+                elif noref_cpp_type == BaseCType(tensorT):
                     save_ptrs_stmts += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
                                         SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
                     enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg),
@@ -669,7 +686,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return call
 
     def emit_call(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
-        # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
+        # We only care about adding `at::AutoDispatchBelowAutograd` guard for non-variable dispatch
         # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
         # the baseType operations still dispatch to non-Variable type, even if the arguments passed
         # in are now Variables.
@@ -678,9 +695,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
         if get_view_info(fn) is not None or modifies_arguments(f):
-            guard = 'at::AutoNonVariableTypeMode guard;'
+            guard = 'at::AutoDispatchBelowAutograd guard;'
         else:
-            guard = 'at::AutoDispatchBelowInplaceOrView guard;'
+            guard = 'at::AutoDispatchBelowADInplaceOrView guard;'
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
@@ -735,10 +752,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 # Handle functions like stack
                 # For these, we don't unpack anything and always call the user function
                 if not (len(differentiable_inputs) == 1 and is_tensor_list_type(differentiable_inputs[0].type)):
-                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor even though a '
-                                       'forward gradient formula has been defined for it. This case should only happen '
-                                       'for function that take a single TensorList as input. All other cases are not '
-                                       'supported right now.')
+                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor (as the provided'
+                                       'forward AD formula does not use any input tangent) even though a forward gradient '
+                                       'formula has been defined for it. This case should only happen for function that '
+                                       'take a single TensorList as input. All other cases are not supported right now.')
                 requires_fw_grad = "true"
             unpacked_arguments = ""
             for inp in differentiable_inputs:

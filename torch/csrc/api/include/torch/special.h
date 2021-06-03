@@ -149,6 +149,72 @@ inline Tensor& expm1_out(Tensor& result, const Tensor& self) {
   return torch::special_expm1_out(result, self);
 }
 
+/// Computes x * log1p(y) for inputs, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.xlog1py.
+///
+/// Example:
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto y = torch::randn(128, dtype=kDouble);
+/// torch::special::xlog1py(x, y);
+/// ```
+inline Tensor xlog1py(const Tensor& self, const Tensor& other) {
+  return torch::special_xlog1py(self, other);
+}
+
+inline Tensor xlog1py(const Scalar& self, const Tensor& other) {
+  return torch::special_xlog1py(self, other);
+}
+
+inline Tensor xlog1py(const Tensor& self, const Scalar& other) {
+  return torch::special_xlog1py(self, other);
+}
+
+inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_xlog1py_out(result, self, other);
+}
+
+inline Tensor& xlog1py_out(Tensor& result, const Scalar& self, const Tensor& other) {
+  return torch::special_xlog1py_out(result, self, other);
+}
+
+inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& other) {
+  return torch::special_xlog1py_out(result, self, other);
+}
+
+/// Computes the zeroth order modified Bessel function of the first kind of input, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.i0
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::i0(t);
+/// ```
+inline Tensor i0(const Tensor& self) {
+  return torch::special_i0(self);
+}
+
+inline Tensor& i0_out(Tensor& result, const Tensor& self) {
+  return torch::special_i0_out(result, self);
+}
+
+/// Computes the area under the standard Gaussian probability density function,
+/// integrated from minus infinity to :attr:`input`, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.ndtr
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::ndtr(t);
+/// ```
+inline Tensor ndtr(const Tensor& self) {
+  return torch::special_ndtr(self);
+}
+
+inline Tensor& ndtr_out(Tensor& result, const Tensor& self) {
+  return torch::special_ndtr_out(result, self);
+}
+
 /// Computes the exponentially scaled zeroth order modified Bessel function of the first kind
 /// See https://pytorch.org/docs/master/special.html#torch.special.i0e.
 ///
@@ -161,8 +227,40 @@ inline Tensor i0e(const Tensor& self) {
   return torch::special_i0e(self);
 }
 
-inline Tensor i0e_out(const Tensor& self) {
-  return torch::special_i0e(self);
+inline Tensor& i0e_out(Tensor& result, const Tensor& self) {
+  return torch::special_i0e_out(result, self);
+}
+
+/// Computes the first order modified Bessel function of the first kind
+/// See https://pytorch.org/docs/master/special.html#torch.special.i1.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::i1(t);
+/// ```
+inline Tensor i1(const Tensor& self) {
+  return torch::special_i1(self);
+}
+
+inline Tensor& i1_out(Tensor& result, const Tensor& self) {
+  return torch::special_i1_out(result, self);
+}
+
+/// Computes the exponentially scaled first order modified Bessel function of the first kind
+/// See https://pytorch.org/docs/master/special.html#torch.special.i1e.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::i1e(t);
+/// ```
+inline Tensor i1e(const Tensor& self) {
+  return torch::special_i1e(self);
+}
+
+inline Tensor& i1e_out(Tensor& result, const Tensor& self) {
+  return torch::special_i1e_out(result, self);
 }
 
 }} // torch::special

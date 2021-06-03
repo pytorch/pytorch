@@ -35,7 +35,7 @@ __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
-    'no_grad', 'enable_grad', 'rand', 'randn',
+    'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
@@ -171,10 +171,10 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
         try:
             # next try if DLFCN exists
-            import DLFCN as _dl_flags  # type: ignore
+            import DLFCN as _dl_flags  # type: ignore[import, no-redef]
         except ImportError:
             # as a last attempt, use compile-time constants
-            import torch._dl as _dl_flags  # type: ignore
+            import torch._dl as _dl_flags  # type: ignore[import, no-redef]
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
     from torch._C import *  # noqa: F403
@@ -359,10 +359,6 @@ def use_deterministic_algorithms(mode):
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
-    .. warning::
-        This feature is in beta, and its design and implementation may change
-        in the future.
-
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
 
@@ -375,12 +371,19 @@ def use_deterministic_algorithms(mode):
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
+        * :func:`torch.Tensor.index_put` with ``accumulate=False``
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
+        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is one and called
+          on a CUDA tensor
         * :func:`torch.gather` when ``input`` dimension is one and called
           on a CUDA tensor that requires grad
+        * :func:`torch.index_add` when called on CUDA tensor
+        * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
+        * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -405,24 +408,21 @@ def use_deterministic_algorithms(mode):
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.NLLLoss` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
-        * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.Tensor.index_add_` when called on a CUDA tensor
-        * :func:`torch.Tensor.index_copy`
-        * :func:`torch.Tensor.index_put_` when ``accumulate=False``
+        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is larger than one
+          and called on a CUDA tensor
+        * :func:`torch.gather` when ``input`` dimension is larger than one
+          and called on a CUDA tensor that requires grad
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
-        * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
-        * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
-        * :func:`torch.gather` when ``input`` dimension is larger than one
-          and called on a CUDA tensor that requires grad
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -616,7 +616,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore # noqa: F403
+    from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
@@ -673,11 +673,13 @@ def _assert(condition, message):
 # side effect of adding to the imported module's members for other users.
 
 from torch import cuda as cuda
+from torch import cpu as cpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
     enable_grad as enable_grad,
     set_grad_enabled as set_grad_enabled,
+    inference_mode as inference_mode,
 )
 from torch import fft as fft
 from torch import futures as futures

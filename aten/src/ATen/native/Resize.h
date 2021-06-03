@@ -17,7 +17,7 @@ namespace at { namespace native {
 //   needs resizing
 // NOTE: In the future the warning will become an error
 // Returns a bool saying whether or not the resize actually happened or not
-TORCH_API bool resize_output(Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
 
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier

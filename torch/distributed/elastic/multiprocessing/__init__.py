@@ -19,7 +19,7 @@ Usage 1: Launching two trainers as a function
 
 ::
 
- from torch.distributed.elastic.multiprocessing import Redirect, start_processes
+ from torch.distributed.elastic.multiprocessing import Std, start_processes
 
  def trainer(a, b, c):
      pass # train
@@ -66,7 +66,7 @@ implementations of the parent :class:`api.PContext` class.
 import os
 from typing import Callable, Dict, Tuple, Union
 
-from torch.distributed.elastic.multiprocessing.api import (  # noqa F401
+from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     MultiprocessContext,
     PContext,
     ProcessFailure,
@@ -76,6 +76,9 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa F401
     _validate_full_rank,
     to_map,
 )
+from torch.distributed.elastic.utils.logging import get_logger
+
+log = get_logger()
 
 
 def start_processes(
@@ -111,7 +114,7 @@ def start_processes(
     to a log file in the ``log_dir``. Valid mask values are defined in ``Std``.
     To redirect/tee only certain local ranks, pass ``redirects`` as a map with the key as
     the local rank to specify the redirect behavior for.
-    Any missing local ranks will default to ``Redirect.NONE``.
+    Any missing local ranks will default to ``Std.NONE``.
 
     ``tee`` acts like the unix "tee" command in that it redirects + prints to console.
     To avoid worker stdout/stderr from printing to console, use the ``redirects`` parameter.
@@ -233,6 +236,7 @@ def start_processes(
 
         error_file = os.path.join(clogdir, "error.json")
         error_files[local_rank] = error_file
+        log.info(f"Setting worker{local_rank} reply file to: {error_file}")
         envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
     context: PContext

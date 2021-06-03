@@ -23,6 +23,8 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#include <c10/util/irange.h>
+
 using namespace torch::autograd::profiler;
 
 namespace torch {
@@ -175,7 +177,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
 
       // Need to reverse the device map for the backward pass of distributed
       // autograd.
-      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+      std::unordered_map<c10::Device, c10::Device> reverseDeviceMap;
       for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
         reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
       }
@@ -377,7 +379,7 @@ std::string wireSerialize(
     pickler.stop();
     tensorData = pickler.tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
-    for (size_t i = 0; i < tensorData.size(); i++) {
+    for (const auto i : c10::irange(tensorData.size())) {
       // Construct WritableTensorData for each tensor in the pickler tensorData
       // Since tensorData is in function scope, and getWritableTensorData just
       // record the tensors, the data() pointers stay valid for CPU tensors
@@ -488,6 +490,7 @@ std::vector<at::IValue> readWrappedPayload(
     std::vector<char>& payload,
     const rpc::Message& message) {
   // Read the additional payload remove it from the payload.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t additionalPayloadSize;
   size_t indexToRead = payload.size() - sizeof(int64_t);
   TORCH_INTERNAL_ASSERT(indexToRead >= 0);
@@ -499,6 +502,7 @@ std::vector<at::IValue> readWrappedPayload(
   payload.resize(indexToRead);
 
   TORCH_INTERNAL_ASSERT(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       payload.size() > additionalPayloadSize,
       "Wrong payload sizes: payload.size() is ",
       payload.size(),

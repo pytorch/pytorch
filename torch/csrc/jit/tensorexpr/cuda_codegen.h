@@ -190,6 +190,7 @@ class CudaPrinter : public IRPrinter {
 class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaCodeGen(Stmt* stmt, Ts... ts)
       : CodeGen(
             stmt,
@@ -198,6 +199,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
     Initialize();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
@@ -209,6 +211,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
 
   ~CudaCodeGen() override;
 
+  void call_raw(const std::vector<void*>& args) override;
   void call(const std::vector<CallArg>& args) override;
 
   template <typename... Ts>

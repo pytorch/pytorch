@@ -20,15 +20,18 @@ namespace at {
 namespace native {
 
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "exp2_cuda", [&]() {
-    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::exp2(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "exp2_cuda",
+      [&]() {
+        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::exp2(a);
+        });
+      });
 }
 
 void i0_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "i0_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return calc_i0(a);
     });
@@ -43,27 +46,45 @@ void i0e_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "sigmoid_cuda", [&]() {
+void i1_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      scalar_t one = scalar_t(1);
-      return  one / (one + std::exp(- a));
+      return calc_i1(a);
+    });
+  });
+}
+
+void i1e_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1e_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return calc_i1e(a);
+    });
+  });
+}
+
+void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "sigmoid_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp(-a));
     });
   });
 }
 
 void sinc_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "sinc_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      if (a == scalar_t(0)) {
-        return scalar_t(1);
-      } else {
-        // NVCC says constexpr var is not accessible from device
-        scalar_t product = c10::detail::pi<scalar_t>() * a;
-        return std::sin(product) / product;
-      }
-    });
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "sinc_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          if (a == scalar_t(0)) {
+            return scalar_t(1);
+          } else {
+            // NVCC says constexpr var is not accessible from device
+            scalar_t product = c10::detail::pi<scalar_t>() * a;
+            return std::sin(product) / product;
+          }
+        });
+      });
 }
 
 void logit_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scalar) {
@@ -102,11 +123,14 @@ void erf_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void erfc_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfc_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::erfc(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "erfc_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::erfc(a);
+        });
+      });
 }
 
 void erfinv_kernel_cuda(TensorIteratorBase& iter) {
@@ -154,6 +178,8 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
+REGISTER_DISPATCH(special_i1_stub, &i1_kernel_cuda);
+REGISTER_DISPATCH(special_i1e_stub, &i1e_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
 REGISTER_DISPATCH(sinc_stub, &sinc_kernel_cuda);
 REGISTER_DISPATCH(logit_stub, &logit_kernel_cuda);

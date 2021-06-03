@@ -264,7 +264,7 @@ static void upsample_bilinear2d_out_cuda_template(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
-  checkAllSameGPU("upsample_bilinear2d_out_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   int output_height = output_size[0];
   int output_width = output_size[1];
@@ -360,9 +360,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     c10::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
-  checkAllSameGPU(
-      "upsample_bilinear2d_backward_out_cuda",
-      {grad_output_arg, grad_input_arg});
+  checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
 
   int output_height = output_size[0];
   int output_width = output_size[1];

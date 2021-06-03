@@ -308,10 +308,16 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   std::vector<Value*> prepack_inputs = {observer_out};
   if (op_name == "embedding_bag_4bit") {
     bool optimized_qparams = false;
+    constexpr int NBINS = 200;
+    constexpr float RATIO = 0.16;
     Value* optimized_qparams_false = g->insertConstant(optimized_qparams);
+    Value* nbins_200 = g->insertConstant(NBINS);
+    Value* ratio_0_16 = g->insertConstant(RATIO);
     prepack_fn = "quantized::embedding_bag_4bit_prepack";
     quant_fn = "quantized::embedding_bag_4bit_rowwise_offsets";
     prepack_inputs.push_back(optimized_qparams_false);
+    prepack_inputs.push_back(nbins_200);
+    prepack_inputs.push_back(ratio_0_16);
   } else if (op_name == "embedding_bag_byte") {
     prepack_fn = "quantized::embedding_bag_byte_prepack";
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
@@ -321,6 +327,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   }
 
   std::vector<Use> uses = observer_out->uses();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node* embedding_bag_float_op;
   // We expect that the output of the weight observer will be consumed by the
   // embedding_bag operator.
@@ -336,6 +343,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   g->insertNode(prepack);
 
   std::vector<Value*> embedding_bag_inputs =
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       embedding_bag_float_op->inputs().vec();
   std::vector<Value*> qembedding_bag_inputs = {prepack->output()};
   const auto inputs_size = embedding_bag_float_op->inputs().size();
@@ -387,6 +395,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     WithInsertPoint ins(embedding_bag_float_op);
     g->insertNode(qembedding_bag);
     // Verify that the outputs (apart from index 0) have no uses in the graph.
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 1; i < embedding_bag_float_op->outputs().size(); ++i) {
       TORCH_CHECK(
           !embedding_bag_float_op->output(i)->hasUses(),
@@ -423,6 +432,7 @@ void insertQuantizationOps(
     quantize_func = "quantize_per_tensor";
   }
   Value* original_val = observer->input(1);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node *quant, *choose_qparams, *dequant;
   // Temporary solution to quantize embedding_bag operators. Will be re-written
   // once we support quantization of embedding_bag weights.
@@ -527,6 +537,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
       user->replaceInputWith(dequant_out, std::get<2>(quant_ops)->output());
     }
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node *choose_qparams, *quant, *dequant;
   for (const auto& n : nodes_to_rewrite) {
     std::tie(choose_qparams, quant, dequant) = n;
@@ -1509,6 +1520,7 @@ void ReplicateQuant(std::shared_ptr<Graph>& graph) {
     Node* if_node = n->input(0)->node();
     // move the nodes that produces the quantization parameters before
     // prim::If
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 1; i < n->inputs().size(); ++i) {
       n->input(i)->node()->moveBefore(if_node);
     }

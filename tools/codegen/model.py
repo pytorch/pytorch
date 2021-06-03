@@ -138,6 +138,7 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.CUDA,
         DispatchKey.QuantizedCUDA,
         DispatchKey.SparseCUDA,
+        DispatchKey.SparseCsrCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
     }
@@ -146,6 +147,10 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
     return dk in STRUCTURED_DISPATCH_KEYS
+
+class DeviceCheckType(Enum):
+    NoCheck = 0
+    ExactSame = 1
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -168,8 +173,15 @@ class NativeFunction:
     # classes for expository clarity.)
     func: 'FunctionSchema'
 
+    # Whether or not to generate mutable tensor arguments like regular
+    # ones
+    use_const_ref_for_mutable_tensors: bool
+
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
+
+    # How to emit automatic generation of device check
+    device_check: DeviceCheckType
 
     # What python module to put the function in
     python_module: Optional[str]
@@ -191,14 +203,6 @@ class NativeFunction:
     # the binding; instead, the binding gets generated to __dispatch_{funcname}
     # so you can make use of the normal binding if you need it.
     manual_cpp_binding: bool
-
-    # A mapping of dispatch keys to names of functions implementing
-    # them.  In native_functions.yaml, the dispatch entry is optional; in that
-    # case, that is equivalent to having written:
-    #
-    #   dispatch:
-    #       CompositeImplicitAutograd: $operator_name
-    dispatch: Dict[DispatchKey, str]
 
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
@@ -235,20 +239,22 @@ class NativeFunction:
     # method is one which has the same dispatch for all types;
     # we just implement it in the base Type.  This is exposed
     # in Declarations.yaml via a field named 'abstract'.
-    @property
-    def is_abstract(self) -> bool:
-        if self.structured_delegate:
-            # Structured functions MUST have a dispatch table
-            return True
-        else:
-            return self.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+    is_abstract: bool
+
+    # Whether or not the NativeFunction contains a backend-agnostic kernel
+    has_composite_implicit_autograd_kernel: bool
+    has_composite_explicit_autograd_kernel: bool
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
 
+    # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
-    def from_yaml(ei: Dict[str, object], loc: 'Location') -> 'NativeFunction':
+    def from_yaml(
+            ei: Dict[str, object],
+            loc: 'Location'
+    ) -> Tuple['NativeFunction', Dict[DispatchKey, Dict['OperatorName', 'BackendMetadata']]]:
         """
         Parse a NativeFunction from a dictionary as directly parsed
         from native_functions.yaml
@@ -262,6 +268,9 @@ class NativeFunction:
         cpp_no_default_args_list = e.pop('cpp_no_default_args', [])
         assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
+
+        use_const_ref_for_mutable_tensors = e.pop('use_const_ref_for_mutable_tensors', False)
+        assert isinstance(use_const_ref_for_mutable_tensors, bool)
 
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
@@ -282,6 +291,14 @@ class NativeFunction:
 
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
+
+        device_check_s = e.pop('device_check', None)
+        assert device_check_s is None or isinstance(device_check_s, str), f'not a str: {device_check_s}'
+        device_check: DeviceCheckType
+        if device_check_s is None:
+            device_check = DeviceCheckType.ExactSame
+        else:
+            device_check = DeviceCheckType[device_check_s]
 
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
@@ -333,13 +350,37 @@ class NativeFunction:
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
+        if structured_delegate:
+            # Structured functions MUST have a dispatch table
+            is_abstract = True
+        else:
+            is_abstract = dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+
+        has_composite_implicit_autograd_kernel = DispatchKey.CompositeImplicitAutograd in dispatch.keys()
+        has_composite_explicit_autograd_kernel = DispatchKey.CompositeExplicitAutograd in dispatch.keys()
+
+        # BackendMetadata is used to store any information about a NativeFunction that is backend dependent.
+        # The most obvious information is the kernel name, which usually contains the name of the backend in it for cpu/cuda.
+        # Why is 'structured' included? External backends (e.g. XLA) opt into which ops are structured
+        # independently of which in-tree ops are structured
+        backend_metadata = {k: {func.name: BackendMetadata(
+            kernel=v, structured=structured and is_structured_dispatch_key(k))} for k, v in dispatch.items()}
+
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
         e.pop('__line__', None)
         assert not e, f"leftover entries: {e}"
 
+        # Asserts that we can't do in post_init, because they rely on backend-specific info
+        if structured_delegate is not None:
+            for key in STRUCTURED_DISPATCH_KEYS:
+                assert key not in dispatch, \
+                    f"if structured_delegate, then must not have {key} in dispatch dictionary " \
+                    "(it is delegated!)"
+
         return NativeFunction(
             func=func,
+            use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
@@ -348,11 +389,15 @@ class NativeFunction:
             manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
             category_override=category_override,
-            dispatch=dispatch,
             device_guard=device_guard,
+            device_check=device_check,
             loc=loc,
             cpp_no_default_args=cpp_no_default_args,
-        )
+            is_abstract=is_abstract,
+            has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
+            has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
+        ), backend_metadata
+
 
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
@@ -393,11 +438,14 @@ class NativeFunction:
         assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
         if self.structured_inherits is not None:
             assert self.structured, "structured_inherits must also imply structured: True"
-        if self.structured_delegate is not None:
-            for k in STRUCTURED_DISPATCH_KEYS:
-                assert k not in self.dispatch, \
-                    f"if structured_delegate, then must not have {k} in dispatch dictionary " \
-                    "(it is delegated!)"
+        if str(self.func.name).startswith('_foreach'):
+            assert self.device_check == DeviceCheckType.NoCheck, \
+                "foreach kernels fall back to slow path when tensor are on different devices, " \
+                "device_check not allowed to be enabled"
+
+    @property
+    def has_composite_kernel(self) -> bool:
+        return self.has_composite_implicit_autograd_kernel or self.has_composite_explicit_autograd_kernel
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
@@ -415,6 +463,7 @@ class NativeFunctionsGroup:
 
     @property
     def structured(self) -> bool:
+        # Whether or not the operator has a meta() function. This information is backend-agnostic.
         return self.out.structured
 
     def __post_init__(self) -> None:
@@ -433,7 +482,7 @@ class NativeFunctionsGroup:
         if self.structured:
             # For now, structured composite kernels are not supported (need some
             # design work to figure out how to make the composite case work)
-            assert self.out.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+            assert not self.out.has_composite_implicit_autograd_kernel
 
             assert self.functional.structured_delegate == self.out.func.name, \
                 f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
@@ -445,8 +494,8 @@ class NativeFunctionsGroup:
         return self.out.func.signature()
 
     def functions(self) -> Iterator[NativeFunction]:
-        yield self.out
         yield self.functional
+        yield self.out
         if self.inplace is not None:
             yield self.inplace
 
@@ -465,6 +514,7 @@ class NativeFunctionsGroup:
         # these don't count as structured for our purposes here
         if out is None:
             return None
+
         return NativeFunctionsGroup(
             functional=functional,
             inplace=inplace,
@@ -519,6 +569,75 @@ def is_foreach_op(name: str) -> bool:
         '_foreach_addcmul_.ScalarList',
         '_foreach_addcdiv_.ScalarList',
         '_foreach_zero_'])
+
+@dataclass(frozen=True)
+class BackendMetadata:
+    # The name of the backend kernel, for a given operator
+    # for in-tree backends. These names come directly from the 'dispatch" field
+    # in native_functions.yaml. The dispatch entry is optional; in that
+    # case, that is equivalent to having written:
+    #
+    #   dispatch:
+    #       CompositeImplicitAutograd: $operator_name
+    kernel: str
+    # Whether or not the operator has a structured kernel implemented, for this particular backend.
+    # For in-tree backends, they all have the same value for structured- this is listed
+    # in native_functions.yaml.
+    # However, external backends like XLA can indendently toggle which ops are structured.
+    structured: bool
+    #
+
+
+# BackendIndex represents a backend.
+# The BackendIndex encodes per-operator information that is potentially different
+# for each backend. The most obvious example is the name of the kernel
+# (the 'dispatch' entry in native_functions.yaml).
+# However, there can be other examples of different backends having different information.
+# External backends can choose to opt their kernels to be structured independently from in-tree backends,
+# which means that this information isn't inherentely tied to a NativeFunction- it's different per backend.
+@dataclass(frozen=True)
+class BackendIndex:
+    dispatch_key: DispatchKey
+    # Mainly important for structured kernels, this determines which variant in the operator group is used to implement the others.
+    # All in-tree ops use out kernels, while XLA uses functional kernels.
+    use_out_as_primary: bool
+    # Whether the backend is in-tree (CPU/CUDA) or out-of-tree (XLA)
+    external: bool
+    # Other backend-specific information that is on a per-operator basis
+    index: Dict['OperatorName', BackendMetadata]
+
+    @staticmethod
+    def grow_index(
+            parent_index: Dict[DispatchKey, Dict['OperatorName', BackendMetadata]],
+            child_index: Dict[DispatchKey, Dict['OperatorName', BackendMetadata]]
+    ) -> None:
+        for k, v in child_index.items():
+            for op_name, metadata in v.items():
+                assert op_name not in parent_index[k], f'duplicate operator {op_name} for dispatch key {k}'
+                parent_index[k][op_name] = metadata
+
+    def primary(self, g: NativeFunctionsGroup) -> NativeFunction:
+        if self.use_out_as_primary:
+            return g.out
+        else:
+            return g.functional
+
+    def has_kernel(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> bool:
+        m = self.get_kernel(g)
+        return m is not None
+
+
+    def get_kernel(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[BackendMetadata]:
+        if isinstance(g, NativeFunction):
+            f = g
+        elif isinstance(g, NativeFunctionsGroup):
+            f = self.primary(g)
+        else:
+            assert_never(f)
+        if f.func.name not in self.index:
+            return None
+        return self.index[f.func.name]
+
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
@@ -741,7 +860,7 @@ class Annotation:
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        m = re.match(r'^([a-z])(!?)$', ann)
+        m = re.match(r'^([a-z])(!?)(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
@@ -1334,6 +1453,11 @@ class OperatorName:
             return f"{self.name}.{self.overload_name}"
         else:
             return f"{self.name}"
+
+def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGroup, b: BackendIndex) -> bool:
+    return f.func.kind() is not SchemaKind.functional and \
+        not b.has_kernel(f) and \
+        b.has_kernel(g.functional)
 
 # Helper functions for parsing argument lists (both inputs and returns)
 

@@ -9,7 +9,10 @@ import yaml
 
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
-from tools.codegen.api.types import Binding, CppSignatureGroup
+from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT,
+                                     tensorGeometryT, scalarTypeT, SpecialArgName,
+                                     OptionalCType, stringT)
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
@@ -20,13 +23,13 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     with open(derivatives_yaml_path, 'r') as f:
         definitions = yaml.load(f, Loader=Loader)
 
-    functions = parse_native_yaml(native_yaml_path)
+    functions = parse_native_yaml(native_yaml_path).native_functions
 
     # What's the difference between function schema v.s. signature?
     # function schema is the complete declaration including mutability annotation / default value and etc.
@@ -69,15 +72,15 @@ def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
     original_formula = formula
-    arguments = cpp_arguments(f)
-    argument_names = tuple(a.name for a in arguments)
-    argument_types = tuple(a.type for a in arguments)
+    arguments: List[NamedCType] = [a.nctype.remove_const_ref() for a in cpp_arguments(f)]
 
     return_names = tuple(n if n != 'self' else 'result' for n in cpp.return_names(f))
-    return_types = tuple(cpp.return_type(r) for r in f.func.returns)
+    return_types = tuple(cpp.return_type(r).remove_const_ref() for r in f.func.returns)
 
-    formula, saved_inputs = saved_variables(formula, argument_names, argument_types, var_names)
-    formula, saved_outputs = saved_variables(formula, return_names, return_types, var_names)
+    named_returns = [NamedCType(name, type) for name, type in zip(return_names, return_types)]
+
+    formula, saved_inputs = saved_variables(formula, arguments, var_names)
+    formula, saved_outputs = saved_variables(formula, named_returns, var_names)
 
     # Check that the referenced derivatives in the formula are in bounds
     for i in used_gradient_indices(formula):
@@ -134,7 +137,7 @@ def postprocess_forward_derivatives(
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type == 'TensorList':
+            if arg.type == 'at::TensorList':
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -167,21 +170,23 @@ def postprocess_forward_derivatives(
                                    "forward definition of gradient as element_wise but it does not "
                                    "defines the gradient formula for its argument which is required.")
             # This transformation is based on the observation that for element-wise functions, the Jacobian
-            # matrix is diagonal and thus doing J * v or v * J gives the same result.
+            # matrix is diagonal and thus doing J * v is the same as (v^T J)^T (in practice, we ignore the transpositions)
+            # For the complex case, we use hermitian transpose and get (v.conj() J).conj()
             # So here we are going to re-use the backward formula and replace two things:
-            # 1) all occurrences of "grad" with "foo_t", where foo is the name of the unique differentiable input.
+            # 1) all occurrences of "grad" with "foo_t.conj()", where foo is the name of the unique differentiable input.
             # 2) all usage of an original input "foo" with its primal value "foo_p".
+            # 3) conjugate the final result
             # For example, for abs, the backward formula is:
             #   grad * self.sgn()
             # And this function generates a forward formula that is:
-            #   self_t * self_p.sgn()
+            #   (self_t.conj() * self_p.sgn()).conj()
 
             backward_formula = derivatives[0].original_formula
             input_name = args_with_derivatives[0].name
 
             # Do replacement 1) of the grad
             def repl(m: Any) -> str:
-                return f"{m.group(1)}{input_name}_t{m.group(2)}"
+                return f"{m.group(1)}{input_name}_t.conj(){m.group(2)}"
             fw_formula = re.sub(IDENT_REGEX.format("grad"), repl, backward_formula)
 
             # Do replacement 2) of the input variables
@@ -191,6 +196,9 @@ def postprocess_forward_derivatives(
                 def repl(m: Any) -> str:
                     return f"{m.group(1)}{arg_name}_p{m.group(2)}"
                 fw_formula = re.sub(IDENT_REGEX.format(arg_name), repl, fw_formula)
+
+            # Do the final conjugate 3)
+            fw_formula = f"({fw_formula}).conj()"
 
             # Since there is a single differentiable inputs and we necessarily need its tangent we can
             # simply require all differentiable input's tangent.
@@ -422,8 +430,7 @@ def used_gradient_indices(formula: str) -> List[int]:
 
 def saved_variables(
     formula: str,
-    arg_names: Tuple[str, ...],
-    arg_types: Tuple[str, ...],
+    nctypes: List[NamedCType],
     var_names: Tuple[str, ...],
 ) -> Tuple[str, Tuple[SavedAttribute, ...]]:
 
@@ -437,58 +444,58 @@ def saved_variables(
         # replace self.sizes() with self_sizes
         (r'{}.sizes\(\)', {
             'suffix': '_sizes',
-            'type': 'IntArrayRef',
+            'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
         }),
         # replace self.options() with self_options
         (r'{}.options\(\)', {
             'suffix': '_options',
-            'type': 'at::TensorOptions',
+            'nctype': lambda name: NamedCType(name, BaseCType(tensorOptionsT)),
         }),
         # replace zeros_like(self) with self_info
         (r'zeros_like\({}\)', {
             'suffix': '_info',
-            'type': 'TypeAndSize',
+            'nctype': lambda name: NamedCType(name, BaseCType(typeAndSizeT)),
             'expr': lambda name: name,  # at save-time
             'res': lambda name: name + '_info.zeros()',  # at eval-time
         }),
         # replace self.size(2) with self_size_2
         (r'{}.size\((\w+)\)', {
             'suffix': lambda m: '_argsize_{}'.format(*m.groups()),
-            'type': 'int64_t',
+            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
         }),
         # replace self.numel() with self_numel
         (r'{}.numel\(\)', {
             'suffix': '_numel',
-            'type': 'int64_t',
+            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
         }),
         # replace to_args_sizes(self) with self_args_sizes
         (r'to_args_sizes\({}\)', {
             'suffix': '_args_sizes',
-            'type': 'std::vector<std::vector<int64_t>>',
+            'nctype': lambda name: NamedCType(name, VectorCType(VectorCType(BaseCType(intT)))),
         }),
         # replace to_args_scalartypes(self) with self_args_scalartypes
         (r'to_args_scalartypes\({}\)', {
             'suffix': '_args_scalartypes',
-            'type': 'std::vector<ScalarType>',
+            'nctype': lambda name: NamedCType(name, VectorCType(BaseCType(scalarTypeT))),
         }),
         # replace TensorGeometry(self) with self_geometry
         (r'TensorGeometry\({}\)', {
             'suffix': '_geometry',
-            'type': 'TensorGeometry',
+            'nctype': lambda name: NamedCType(name, BaseCType(tensorGeometryT)),
         }),
         (r'{}.scalar_type\(\)', {
             'suffix': '_scalar_type',
-            'type': 'ScalarType',
+            'nctype': lambda name: NamedCType(name, BaseCType(scalarTypeT)),
         }),
         # replace self.dim() with self_dim
         (r'{}.dim\(\)', {
             'suffix': '_dim',
-            'type': 'int64_t',
+            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
         }),
         # replace self.strides() with self_strides
         (r'{}.strides\(\)', {
             'suffix': '_strides',
-            'type': 'IntArrayRef',
+            'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
             'expr': stride_expr,
         }),
     ]
@@ -496,7 +503,8 @@ def saved_variables(
     # find which arguments need to be saved
     saved: List[SavedAttribute] = []
 
-    for name, type in zip(arg_names, arg_types):
+    for nctype in nctypes:
+        name = nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name
         # First search the formula for expressions which can be evaluated
         # when the autograd Function is created to avoid saving variables
         for regex, info in REPLACEMENTS:
@@ -504,8 +512,7 @@ def saved_variables(
                 suffix: str = info['suffix'](m) if callable(info['suffix']) else info['suffix']
                 expr: str = info['expr'](name) if 'expr' in info else m.group(0)
                 saved.append(SavedAttribute(
-                    name=name + suffix,
-                    type=info['type'],
+                    nctype=info['nctype'](name + suffix),
                     expr=expr,
                 ))
                 if 'res' in info:
@@ -515,12 +522,19 @@ def saved_variables(
 
             formula = re.sub(regex.format(name), repl, formula)
 
+        # c10::optional<std::string> types stored in Backward nodes must be
+        # converted to c10::optional<c10::string_view> before being passed into
+        # the backward function
+        if nctype.type == OptionalCType(BaseCType(stringT)):
+            formula = re.sub(
+                rf'\b{name}\b',
+                f'{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : c10::nullopt',
+                formula)
+
         # Find any variables which remain in the formula and save them
         if re.search(IDENT_REGEX.format(name), formula):
             saved.append(SavedAttribute(
-                name=name,
-                # TODO: change from string to type data model
-                type=type.replace('const ', '').replace(' &', ''),
+                nctype=nctype,
                 expr=name,
             ))
 
@@ -560,8 +574,9 @@ def dedup_vars(vars: Sequence[SavedAttribute]) -> Sequence[SavedAttribute]:
     seen: Set[str] = set()
     saved: List[SavedAttribute] = []
     for var in vars:
-        if var.name in seen:
+        name = var.nctype.name.name if isinstance(var.nctype.name, SpecialArgName) else var.nctype.name
+        if name in seen:
             continue
-        seen.add(var.name)
+        seen.add(name)
         saved.append(var)
     return saved

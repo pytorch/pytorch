@@ -8,6 +8,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TracerMode.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -17,6 +18,7 @@
 
 namespace torch {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<std::string, ParameterType> type_map = {
   {"Tensor", ParameterType::TENSOR},
   {"Scalar", ParameterType::SCALAR},
@@ -38,6 +40,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Device", ParameterType::DEVICE},
   {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
+  {"c10::string_view", ParameterType::STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
@@ -171,7 +174,7 @@ auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
   size_t n = py_args.size();
   auto args_ = py::tuple(n + 1);
   args_[0] = py::handle(self);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     args_[i+1] = py_args[i];
   }
   return args_;
@@ -182,6 +185,7 @@ auto handle_torch_function(PyObject* self, const std::string& func_name, PyObjec
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
   py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(self)));
+  // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
   py::object torch_function = PyObject_FastGetAttrString(self, "__torch_function__");
   py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), kwargs));
   if (ret.ptr() == nullptr) {
@@ -207,6 +211,7 @@ auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &o
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
   for (auto &arg : overloaded_args) {
+    // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
     ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function, py_types.ptr(), args, kwargs, NULL));
     if (ret.ptr() != Py_NotImplemented) {
@@ -338,7 +343,7 @@ void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* o
   }
   if (class_not_seen_yet) {
     int arg_index = overloaded_args->size();
-    for (int j = 0; j < arg_index; j++) {
+    for(const auto j : c10::irange(arg_index)) {
       if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE((*overloaded_args)[j].ptr())))) {
         // obj is a subclass of another object we've seen already so its
         // __torch_function__ should be called first, therefore we
@@ -377,8 +382,9 @@ bool is_scalar_list(PyObject* obj) {
   if (!(tuple || PyList_Check(obj))) {
     return false;
   }
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  for (size_t idx = 0; idx < size; idx++) {
+  for (const auto idx : c10::irange(size)) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!THPUtils_checkScalar(iobj)) {
       return false;
@@ -392,6 +398,7 @@ bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>
   if (!(tuple || PyList_Check(obj))) {
     return false;
   }
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   for (long idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
@@ -412,6 +419,7 @@ bool is_float_or_complex_list(PyObject* obj) {
     return false;
   }
 
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   if (size > 0) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
@@ -537,6 +545,7 @@ std::string FunctionParameter::type_name() const {
 static inline c10::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
     return c10::nullopt;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   char *str_end;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
@@ -696,6 +705,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   : min_args(0)
   , max_args(0)
@@ -713,6 +723,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   bool allow_numbers_as_tensors = should_allow_numbers_as_tensors(name);
 
   auto last_offset = open_paren + 1;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto next_offset = last_offset;
   bool keyword_only = false;
   bool done = false;
@@ -843,6 +854,7 @@ static ssize_t find_param(FunctionSignature& signature, PyObject* name) {
 
 [[noreturn]]
 static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t num_pos_args) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *key, *value;
   ssize_t pos = 0;
 
@@ -1035,6 +1047,7 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
 
 
 void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
+  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
   auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
   std::vector<int> plausible_idxs;
   ssize_t i = 0;
@@ -1092,7 +1105,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
-  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);
