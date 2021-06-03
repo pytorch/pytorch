@@ -47,6 +47,7 @@ TESTS = [
     'distributed/test_jit_c10d',
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
+    'distributed/test_store',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
@@ -81,6 +82,7 @@ TESTS = [
     'test_xnnpack_integration',
     'test_vulkan',
     'test_sparse',
+    'test_sparse_csr',
     'test_quantization',
     'test_pruning_op',
     'test_spectral_ops',
@@ -160,6 +162,7 @@ TESTS = [
     'distributed/elastic/utils/util_test',
     'distributed/elastic/utils/distributed_test',
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/_sharding_spec/test_sharding_spec',
 ]
 
 # Tests need to be run with pytest.
@@ -307,6 +310,7 @@ TARGET_DET_LIST = [
     'distributed/test_jit_c10d',
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
+    'distributed/test_store',
     'test_quantization',
     'test_pruning_op',
     'test_determination',

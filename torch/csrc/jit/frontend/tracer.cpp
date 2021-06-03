@@ -5,6 +5,7 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -381,7 +382,7 @@ static IValue addInput(
 
     if (input.isTensorList()) {
       auto elems = input.toTensorList();
-      for (size_t i = 0; i < num_elems; i++) {
+      for (const auto i : c10::irange(num_elems)) {
         elems[i] = addInput(
                        state,
                        elems.get(i),
@@ -392,7 +393,7 @@ static IValue addInput(
       return elems;
     } else {
       auto elems = input.toList();
-      for (size_t i = 0; i < num_elems; i++) {
+      for (const auto i : c10::irange(num_elems)) {
         elems[i] = addInput(
             state,
             elems.get(i),
@@ -630,13 +631,13 @@ void addInputs(
     const c10::optional<at::Scalar>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-void addInputs(Node* n, const char* name, const std::string& value) {
-  detail::genericAddInput(n, value);
+void addInputs(Node* n, const char* name, const c10::string_view value) {
+  detail::genericAddInput(n, std::string(value));
 }
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<std::string>& value) {
+    const c10::optional<c10::string_view>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Tensor& value) {

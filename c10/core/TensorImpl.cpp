@@ -21,6 +21,23 @@ C10_DEFINE_int64(
 
 namespace c10 {
 
+namespace impl {
+
+static std::string noop_name_fn(const PyInterpreter*) {
+  return "<unloaded interpreter>";
+}
+
+static void noop_decref_fn(const PyInterpreter*, PyObject*) {
+  // no-op
+}
+
+void PyInterpreter::disarm() noexcept {
+  name_fn_ = &noop_name_fn;
+  decref_fn_ = &noop_decref_fn;
+}
+
+} // namespace impl
+
 const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "is not allowed on a Tensor created from .data or .detach().\n"
     "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
@@ -85,6 +102,8 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
+      pyobj_interpreter_(nullptr),
+      pyobj_(nullptr),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -111,6 +130,8 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
+      pyobj_interpreter_(nullptr),
+      pyobj_(nullptr),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -305,6 +326,18 @@ void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
     storage_ = {};
+  }
+  if (owns_pyobj_) {
+    TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
+    TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
+    pyobj_interpreter_.load(std::memory_order_acquire)->decref(pyobj_);
+    // NB: this destructor can only be entered when there are no
+    // references to this C++ object (obviously), NOR any references
+    // to the PyObject (if there are references to the PyObject,
+    // then the PyObject holds an owning reference to the tensor).
+    // So it is OK to clear pyobj_ here as it is impossible for it to
+    // be used again (modulo weak reference races)
+    pyobj_ = nullptr; // for safety
   }
 }
 

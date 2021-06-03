@@ -210,7 +210,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void remainder_kernel(TensorIterator& iter) {
+void remainder_kernel(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {

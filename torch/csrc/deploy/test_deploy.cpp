@@ -1,7 +1,11 @@
+#include <ATen/Parallel.h>
 #include <gtest/gtest.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
+
 #include <future>
 #include <iostream>
 #include <string>
@@ -41,6 +45,14 @@ const char* path(const char* envname, const char* path) {
   return e ? e : path;
 }
 
+TEST(TorchpyTest, LoadLibrary) {
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(
+      path("LOAD_LIBRARY", "torch/csrc/deploy/example/generated/load_library"));
+  auto model = p.load_pickle("fn", "fn.pkl");
+  model({});
+}
+
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
@@ -73,15 +85,15 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  for (size_t i = 0; i < ninterp; i++) {
-    outputs.push_back(model({input}).toTensor());
+  for (const auto i : c10::irange(ninterp)) {
+    outputs.push_back(model({input.alias()}).toTensor());
   }
 
   // Generate reference
-  auto ref_output = ref_model.forward({input}).toTensor();
+  auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (size_t i = 0; i < ninterp; i++) {
+  for (const auto i : c10::irange(ninterp)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 
@@ -112,25 +124,25 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
-  for (size_t i = 0; i < nthreads; i++) {
+  for (const auto i : c10::irange(nthreads)) {
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
       for (int i = 0; i < 100; ++i) {
-        model({input}).toTensor();
+        model({input.alias()}).toTensor();
       }
-      auto result = model({input}).toTensor();
+      auto result = model({input.alias()}).toTensor();
       return result;
     }));
   }
-  for (size_t i = 0; i < nthreads; i++) {
+  for (const auto i : c10::irange(nthreads)) {
     outputs.push_back(futures[i].get());
   }
 
   // Generate reference
-  auto ref_output = ref_model.forward({input}).toTensor();
+  auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (size_t i = 0; i < nthreads; i++) {
+  for (const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
@@ -165,4 +177,55 @@ TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
   torch::deploy::Package p1 = m.load_package(
       path("RESNET", "torch/csrc/deploy/example/generated/resnet"));
   auto I1 = p1.acquire_session();
+}
+
+TEST(TorchpyTest, TensorSharingNotAllowed) {
+  size_t nthreads = 2;
+  torch::deploy::InterpreterManager m(nthreads);
+  // generate a tensor from one interpreter
+  auto I0 = m.all_instances()[0].acquire_session();
+  auto I1 = m.all_instances()[1].acquire_session();
+  auto obj = I0.global("torch", "empty")({I0.from_ivalue(2)});
+  auto t = obj.toIValue().toTensor();
+  // try to feed it to the other interpreter, should error
+  ASSERT_THROW(I1.global("torch", "sigmoid")({t}), c10::Error);
+}
+
+TEST(TorchpyTest, TaggingRace) {
+  // At time of writing, this takes about 7s to run on DEBUG=1.  I think
+  // this is OK, but feel free to fiddle with the knobs here to reduce the
+  // runtime
+  constexpr int64_t trials = 4;
+  constexpr int64_t nthreads = 16;
+  torch::deploy::InterpreterManager m(nthreads);
+  for (int64_t n = 0; n < trials; n++) {
+    at::Tensor t = torch::empty(2);
+    std::atomic<int64_t> success(0);
+    std::atomic<int64_t> failed(0);
+    at::parallel_for(0, nthreads, 1, [&](int64_t begin, int64_t end) {
+      for (int64_t i = begin; i < end; i++) {
+        auto I = m.all_instances()[i].acquire_session();
+        try {
+          I.from_ivalue(t);
+          success++;
+        } catch (const c10::Error& e) {
+          failed++;
+        }
+      }
+    });
+    ASSERT_EQ(success, 1);
+    ASSERT_EQ(failed, nthreads - 1);
+  }
+}
+
+TEST(TorchpyTest, DisarmHook) {
+  at::Tensor t = torch::empty(2);
+  {
+    torch::deploy::InterpreterManager m(1);
+    auto I = m.acquire_one();
+    I.from_ivalue(t);
+  } // unload the old interpreter
+  torch::deploy::InterpreterManager m(1);
+  auto I = m.acquire_one();
+  ASSERT_THROW(I.from_ivalue(t), c10::Error); // NOT a segfault
 }

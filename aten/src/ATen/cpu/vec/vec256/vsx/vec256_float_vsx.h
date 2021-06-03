@@ -135,7 +135,8 @@ class Vectorized<float> {
         vec_sel(a._vec1, b._vec1, mask._vecb1)};
   }
 
-  static Vectorized<float> arange(float base = 0.f, float step = 1.f) {
+  template <typename step_t>
+  static Vectorized<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
     return Vectorized<float>(
         base,
         base + step,
