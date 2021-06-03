@@ -48,11 +48,13 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
 };
 
 template <typename... Args>
+inline bool compute_requires_grad_with_tls(const c10::impl::PODLocalState* const tls, Args&&... args) {
+  return GradMode::is_enabled(tls) && ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+}
+
+template <typename... Args>
 inline bool compute_requires_grad(Args&&... args) {
-  if (!GradMode::is_enabled()) {
-    return false;
-  }
-  return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+  return compute_requires_grad_with_tls(c10::impl::_get_thread_local_state(), args...);
 }
 
 inline void set_history(

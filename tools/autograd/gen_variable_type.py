@@ -214,7 +214,7 @@ std::shared_ptr<${op}> grad_fn;
 """)
 
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
-auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+auto _any_requires_grad = compute_requires_grad_with_tls( tls, ${args_with_derivatives} );
 (void)_any_requires_grad;
 """)
 
@@ -225,7 +225,7 @@ if (_any_requires_grad) {
 """)
 
 SETUP_NONE_REQUIRES_GRAD = CodeTemplate("""\
-if (compute_requires_grad( ${args_to_check} )) {
+if (compute_requires_grad_with_tls( tls, ${args_to_check} )) {
   throw_error_out_requires_grad("${base_name}");
 }
 """)
@@ -695,9 +695,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
         if get_view_info(fn) is not None or modifies_arguments(f):
-            guard = 'at::AutoDispatchBelowAutograd guard;'
+            guard = 'at::AutoDispatchBelowAutograd guard { tls };'
         else:
-            guard = 'at::AutoDispatchBelowADInplaceOrView guard;'
+            guard = 'at::AutoDispatchBelowADInplaceOrView guard { tls };'
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
@@ -808,6 +808,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     unpack_args_stats, unpacked_bindings = unpack_args(f)
 
     body.extend(unpack_args_stats)
+    body.append("auto const tls = c10::impl::_get_thread_local_state();")
     if requires_derivative:
         body.extend(emit_any_requires_grad())
         body.extend(emit_check_inplace())

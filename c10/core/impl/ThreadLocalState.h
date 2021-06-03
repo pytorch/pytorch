@@ -20,8 +20,12 @@ namespace impl {
 // on a PODLocalState* pointer.
 struct C10_API PODLocalState {
  public:
+  // DispatchKeySet
   uint64_t included_;
   uint64_t excluded_;
+
+  // GradMode
+  bool GradMode_disabled;
 };
 
 static_assert(

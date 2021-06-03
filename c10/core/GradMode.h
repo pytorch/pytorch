@@ -1,10 +1,16 @@
 #pragma once
 
+#include <c10/core/impl/ThreadLocalState.h>
 #include <c10/macros/Macros.h>
 
 namespace c10 {
 
 struct TORCH_API GradMode {
+  // NB: We inline this overload because it allows us to fully inline hot paths.
+  static inline bool is_enabled(const impl::PODLocalState* const tls) {
+    return !(tls->GradMode_disabled);
+  }
+
   static bool is_enabled();
   static void set_enabled(bool enabled);
 };

@@ -123,11 +123,13 @@ class C10_API ExcludeDispatchKeyGuard_NoOverlap {
   ExcludeDispatchKeyGuard_NoOverlap(ExcludeDispatchKeyGuard_NoOverlap&&) = delete;
   ExcludeDispatchKeyGuard_NoOverlap operator=(ExcludeDispatchKeyGuard_NoOverlap&&) = delete;
 
-  ExcludeDispatchKeyGuard_NoOverlap()
-      : tls_(_get_thread_local_state()){
+  ExcludeDispatchKeyGuard_NoOverlap(PODLocalState* tls) : tls_(tls) {
     delta_ = exclude & ~(tls_->excluded_);
     tls_->excluded_ |= exclude;
   }
+
+  ExcludeDispatchKeyGuard_NoOverlap()
+  : ExcludeDispatchKeyGuard_NoOverlap(_get_thread_local_state()) {}
 
   ~ExcludeDispatchKeyGuard_NoOverlap() {
     tls_->excluded_ &= ~delta_;

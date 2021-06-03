@@ -3,15 +3,11 @@
 #include <stdexcept>
 
 namespace c10 {
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local bool GradMode_enabled = true;
-
 bool GradMode::is_enabled() {
-  return GradMode_enabled;
+  return is_enabled(impl::_get_thread_local_state());
 }
 
 void GradMode::set_enabled(bool enabled) {
-  GradMode_enabled = enabled;
+  impl::_get_thread_local_state()->GradMode_disabled = !enabled;
 }
 } // namespace c10
