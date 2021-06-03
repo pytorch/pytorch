@@ -238,14 +238,29 @@ struct C10_API AutogradMetaFactoryRegisterer {
 struct PyInterpreter;
 struct C10_API PyInterpreter {
   using name_sig = std::string(const PyInterpreter*);
+  using decref_sig = void(const PyInterpreter*, PyObject*);
 
-  PyInterpreter(name_sig* name_fn) : name_fn_(name_fn) {}
+  PyInterpreter(name_sig* name_fn, decref_sig* decref_fn)
+      : name_fn_(name_fn), decref_fn_(decref_fn) {}
 
   // For debugging purposes only
   name_sig* name_fn_;
 
-  std::string name() const {
+  decref_sig* decref_fn_;
+
+  // UBSAN suppression fixes: "call to function
+  // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
+  // _object*) through pointer to incorrect function type 'void (*)(const
+  // c10::impl::PyInterpreter *, _object *)'" See
+  // https://github.com/google/sanitizers/issues/911
+
+  __ubsan_ignore_function__ std::string name() const {
     return (*name_fn_)(this);
+  }
+
+  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
+  __ubsan_ignore_function__ void decref(PyObject* pyobj) const {
+    return (*decref_fn_)(this, pyobj);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.
@@ -2169,6 +2184,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_access_should_throw_ = true;
   }
 
+  bool owns_pyobj() {
+    return owns_pyobj_;
+  }
+
+  void set_owns_pyobj(bool b) {
+    owns_pyobj_ = b;
+  }
+
  protected:
   // Policy for adjusting the behavior of is_contiguous(). Allows
   // subclass customization while still being able to inline
@@ -2292,7 +2315,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /* HasContiguityPolicy */ uint8_t has_contiguity_ : 2;
 
   // Tensor is a subclass that does not permit storage access.
-  bool storage_access_should_throw_ = false;
+  bool storage_access_should_throw_ : 1;
 
   // default member initializers for bit-fields only available with -std=c++2a
   // or -std=gnu++2a
@@ -2308,6 +2331,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
+    owns_pyobj_ = false;
+    storage_access_should_throw_ = false;
   }
 
   // Tensor is stored in the channels last 2d memory format, when dimensions
@@ -2359,6 +2384,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
+
+  // If pyobj_ is nullptr, this is always false.
+  // Otherwise, this indicates whether or not TensorImpl owns the pyobj_
+  // or vice versa.  Ordinarily, pyobj_ owns TensorImpl, but if the
+  // Python object's refcount goes to zero, we flip the ownership
+  // direction (to make sure the pyobj stays live).
+  bool owns_pyobj_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
