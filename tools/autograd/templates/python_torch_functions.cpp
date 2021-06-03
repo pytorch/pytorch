@@ -488,73 +488,56 @@ static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObj
 
     auto elsize = at::elementSize(dtype);
     size_t actual_count = 0;
-
     Py_buffer view;
-    c10::optional<std::string> error_str = c10::nullopt;
 
     if (PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) < 0) {
       return nullptr;
     }
 
+    Py_INCREF(view.obj);
+    THPObjectPtr obj(view.obj);
+
     auto len = view.len;
     auto buf = view.buf;
-    auto obj = view.obj;
-
-    Py_INCREF(obj);
     PyBuffer_Release(&view);
 
-    if (len == 0 || count == 0) {
-      error_str = fmt::format(
-          "both buffer length ({}) and 'count' ({}) must not be empty",
-          len,
-          count);
-    } else if (offset < 0 || offset >= len) {
-      error_str = fmt::format(
-          "offset must be non-negative and no greater than buffer length"
-          "({}) minus 1, but got: {}",
-          len,
-          offset);
-    } else if (count < 0 && (len - offset) % elsize != 0) {
-      error_str = fmt::format(
-          "buffer size ({}) after offset ({}) must be a multiple of "
-          "element size ({})",
-          len,
-          offset,
-          elsize);
+    TORCH_CHECK_VALUE(
+        len > 0 && count != 0,
+        "both buffer length (", len, ") and 'count' (", count, ") must not be empty");
+    TORCH_CHECK_VALUE(
+        offset >= 0 || offset < len,
+        "offset (", offset, ") must be non-negative and no greater than buffer length "
+        "(", len, ") minus 1");
+    TORCH_CHECK_VALUE(
+        count > 0 || (len - offset) % elsize != 0,
+        "buffer length (", len - offset, " bytes) after offset (", offset, " bytes) "
+        "must be a multiple of element size (", elsize, ")");
+
+    if (count < 0) {
+      actual_count = (len - offset) / elsize;
     } else {
-      if (count < 0) {
-        actual_count = (len - offset) / elsize;
-      } else {
-        actual_count = static_cast<uint64_t>(count);
-      }
-
-      if (offset + actual_count * elsize > len) {
-        error_str = fmt::format(
-            "buffer has only {} elements after offset {}, but specified a size of {}",
-            (len - offset) / elsize,
-            offset,
-            actual_count);
-      } else {
-        auto offset_buf = static_cast<char*>(buf) + offset;
-        auto options = TensorOptions().dtype(dtype).device(device_opt);
-
-        auto tensor =
-            at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
-                .options(options)
-                .deleter([=](void*) {
-                  pybind11::gil_scoped_acquire gil;
-                  Py_DECREF(obj);
-                })
-                .make_tensor();
-        tensor.requires_grad_(requires_grad);
-        ret = wrap(tensor);
-      }
+      actual_count = static_cast<size_t>(count);
     }
 
-    if (error_str.has_value()) {
-      Py_DECREF(obj);
-      PyErr_SetString(PyExc_ValueError, error_str.value());
-    }
+    TORCH_CHECK_VALUE(
+        offset + actual_count * elsize > len,
+        "requested buffer length (", actual_count, " * ", elsize, " bytes) "
+        "after offset (", offset, " bytes) must not be greater than actual "
+        "buffer length (", len, " bytes)");
+
+    auto offset_buf = static_cast<char*>(buf) + offset;
+    auto options = TensorOptions().dtype(dtype).device(device_opt);
+
+    auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
+                      .options(options)
+                      .deleter([obj = std::move(obj)](void*) mutable {
+                        pybind11::gil_scoped_acquire gil;
+                        Py_DECREF(obj.get());
+                        obj.release();
+                      })
+                      .make_tensor();
+    tensor.requires_grad_(requires_grad);
+    ret = wrap(tensor);
   }
 
   return ret;
