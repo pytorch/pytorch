@@ -1030,7 +1030,10 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scala
 
   ScalarType out_dtype = result.defined() ? result.scalar_type() : (opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type()));
 
-  auto iter = make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype);
+// omit in_dtype in the following call, to avoid make_reduction explicitly casting input to out_dtype
+  auto iter = isComplexType(self.scalar_type()) ?
+      make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype) :
+      make_reduction("norm", result, self, dim, keepdim, out_dtype);
 
   if (iter.numel() == 0) {
     result.zero_();
@@ -1746,19 +1749,6 @@ Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
 }
 
-Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
-  auto mask = (self != 0);
-  return mask.sum(dims);
-}
-
-Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
-  if (dim){
-    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
-    return at::count_nonzero(self, IntArrayRef{wrap_dim});
-  }
-  return at::count_nonzero(self, IntArrayRef{});
-}
-
 bool cpu_equal(const Tensor& self, const Tensor& other) {
   if (!at::namedinference::are_names_equal(
         self.unsafeGetTensorImpl(), other.unsafeGetTensorImpl())) {
@@ -1775,8 +1765,8 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   }
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
-    .add_borrowed_input(self)
-    .add_borrowed_input(other)
+    .add_input(self)
+    .add_input(other)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .build();
