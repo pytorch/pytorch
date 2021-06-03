@@ -278,7 +278,13 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     updated_val = at::sqrt(inputTensorValues[0]);
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Div) {
+    // One example shows at::div(CPULongType, CPULongType) = CPUFloatType,
+    // So we add a cast below.
     updated_val = at::div(inputTensorValues[0], inputTensorValues[1]);
+    if (inputTensorValues[0].scalar_type() ==
+        inputTensorValues[1].scalar_type()) {
+      updated_val = updated_val.to(inputTensorValues[0].scalar_type());
+    }
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Mul) {
     updated_val = at::mul(inputTensorValues[0], inputTensorValues[1]);
@@ -303,7 +309,11 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       std::vector<int64_t> axes;
       for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
         // ONNX unsqueeze accepts negative axes
-        axes_a[i] += axes_a[i] < 0 ? inputTensorValues[0].sizes().size() : 0;
+        // From https://pytorch.org/docs/stable/generated/torch.unsqueeze.html
+        // Negative dim will correspond to unsqueeze() applied at dim = dim +
+        // input.dim() + 1.
+        axes_a[i] +=
+            axes_a[i] < 0 ? inputTensorValues[0].sizes().size() + 1 : 0;
         axes.push_back(axes_a[i]);
       }
       std::sort(axes.begin(), axes.end());
@@ -471,6 +481,23 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
   } else if (node->kind() == onnx::Neg) {
     updated_val = at::neg(inputTensorValues[0]);
     return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Not) {
+    auto ones =
+        at::ones(inputTensorValues[0].sizes(), inputTensorValues[0].dtype());
+    updated_val = at::ne(inputTensorValues[0], ones);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Size) {
+    int64_t total_size = 1;
+    for (auto size : inputTensorValues[0].sizes()) {
+      total_size *= size;
+    }
+    auto options = c10::TensorOptions().dtype(at::kLong).device(at::kCPU);
+    std::vector<int64_t> size_data = {total_size};
+    auto f = at::from_blob(size_data.data(), {1}, at::kLong).to(at::kCPU);
+    // Need copy here
+    at::Tensor f_copy = at::empty({1}, options);
+    f_copy.copy_(f);
+    return c10::optional<at::Tensor>(at::squeeze(f_copy, 0));
   } else {
     return c10::nullopt;
   }
@@ -591,7 +618,6 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
          std::make_pair(newSourceNodeOutput->debugName(), updatedVal)});
     newSourceNodeOutput->inferTypeFrom(updatedVal);
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
-
     // Next we remove the current node that has been replaced by
     // an initializer. But before we start de-wiring this node,
     // we check if any parents of this nodes were onnx::Constant

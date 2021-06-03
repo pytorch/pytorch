@@ -3,7 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/AdaptivePooling.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
 
 namespace at { namespace native {
@@ -101,9 +101,9 @@ void cpu_adaptive_max_pool_channels_last(
   int64_t output_height = output_size[0];
   int64_t output_width = output_size[1];
 
-  using Vec = vec256::Vec256<scalar_t>;
-  using integer_t = vec256::int_same_size_t<scalar_t>;
-  using iVec = vec256::Vec256<integer_t>;
+  using Vec = vec::Vectorized<scalar_t>;
+  using integer_t = vec::int_same_size_t<scalar_t>;
+  using iVec = vec::Vectorized<integer_t>;
   // for the convience of vectorization, use integer of the same size of scalar_t,
   //   e.g. int32_t for float, int64_t for double
   // need to make sure doesn't overflow
@@ -158,7 +158,7 @@ void cpu_adaptive_max_pool_channels_last(
 
             // true = all ones, false = all zeros
             Vec mask = (val_vec > maxval_vec) | val_vec.isnan();
-            iVec imask = vec256::cast<integer_t>(mask);
+            iVec imask = vec::cast<integer_t>(mask);
             Vec out_vec = Vec::blendv(maxval_vec, val_vec, mask);
             iVec ind_vec = iVec::blendv(maxindex_vec, index_vec, imask);
 
@@ -178,7 +178,7 @@ void cpu_adaptive_max_pool_channels_last(
         }
       }
       // convert indice data type
-      vec256::convert<integer_t, int64_t>(index_buffer.get(), ind, len);
+      vec::convert<integer_t, int64_t>(index_buffer.get(), ind, len);
 
       // move on to next output index
       data_index_step(n, nbatch, oh, output_height, ow, output_width);
