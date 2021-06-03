@@ -77,11 +77,17 @@ https://github.com/pytorch/pytorch#from-source
 
 To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing PyTorch installs:
+1. Uninstall all existing PyTorch installs. You may need to run `pip
+uninstall torch` multiple times. You'll know `torch` is fully
+uninstalled when you see `WARNING: Skipping torch as it is not
+installed`. (You should only have to `pip uninstall` a few times, but
+you can always `uninstall` with `timeout` or in a loop if you're feeling
+lazy.)
+
+
 ```bash
-conda uninstall pytorch
-pip uninstall torch
-pip uninstall torch # run this command twice
+conda -y uninstall pytorch
+yes | pip uninstall torch
 ```
 
 2. Clone a copy of PyTorch from source:
@@ -134,8 +140,10 @@ For example:
 You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
 if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
-In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
-and `python setup.py clean`. Then you can install in `develop` mode again.
+In case you want to reinstall, make sure that you uninstall PyTorch
+first by running `pip uninstall torch` until you see `WARNING: Skipping
+torch as it is not installed`; next run `python setup.py clean`. After
+that, you can install in `develop` mode again.
 
 ### Tips and Debugging
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
@@ -902,7 +910,7 @@ tensor([1., 2., 3., 4.], dtype=torch.float64)
 ```
 
 GDB tries to automatically load `pytorch-gdb` thanks to the
-[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, auto-loadings is disabled by default, because of security reasons:
+[.gdbinit](.gdbinit) at the root of the pytorch repo. However, auto-loadings is disabled by default, because of security reasons:
 
 ```
 $ gdb
