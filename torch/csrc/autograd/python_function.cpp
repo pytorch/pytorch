@@ -197,19 +197,9 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 
 static int THPFunction_clear(THPFunction *self)
 {
-  // Why is this guaranteed to be true?  Suppose that self->cdata is non-null
-  // (otherwise the condition is trivially true).  Then there is a PyNode
-  // which contains an owning reference to this object.  But we are only
-  // allowed to clear if all owning references are gone!  Contradiction.
-  //
-  // However, note that THPFunction_clear is typically called in the shared_ptr
-  // destructor of PyNode; in that case, per
-  // https://cplusplus.github.io/LWG/lwg-active.html#2751 it's not currently
-  // specified in the standard that this is guaranteed.  If you see this
-  // assert triggering in the wild, feel free to comment it out.  They're
-  // likely to standardize that you ARE guaranteed to see the weak pointers
-  // as expired in the destructor in the future, so we'll keep this for now.
-  TORCH_INTERNAL_ASSERT(self->cdata.expired());
+  // Note that the cdata might not be expired yet in the case where this
+  // object is part of a cycle and the GC happens to tp_clear this PyObject
+  // before the other ones that trigger the de-allocation of the cdata
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -227,6 +217,20 @@ static int THPFunction_clear(THPFunction *self)
 
 static void THPFunction_dealloc(THPFunction* self)
 {
+  // Why is this guaranteed to be true?  Suppose that self->cdata is non-null
+  // (otherwise the condition is trivially true).  Then there is a PyNode
+  // which contains an owning reference to this object.  But we are only
+  // allowed to clear if all owning references are gone!  Contradiction.
+  //
+  // However, note that THPFunction_clear is typically called in the shared_ptr
+  // destructor of PyNode; in that case, per
+  // https://cplusplus.github.io/LWG/lwg-active.html#2751 it's not currently
+  // specified in the standard that this is guaranteed.  If you see this
+  // assert triggering in the wild, feel free to comment it out.  They're
+  // likely to standardize that you ARE guaranteed to see the weak pointers
+  // as expired in the destructor in the future, so we'll keep this for now.
+  TORCH_INTERNAL_ASSERT(self->cdata.expired());
+
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
   self->cdata.~weak_ptr<PyNode>();

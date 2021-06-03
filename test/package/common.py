@@ -2,8 +2,8 @@ import os
 import sys
 from tempfile import NamedTemporaryFile
 
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
 import torch.package.package_exporter
+from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
 
 
 class PackageTestCase(TestCase):
@@ -30,7 +30,6 @@ class PackageTestCase(TestCase):
         self.orig_sys_path = sys.path.copy()
         sys.path.append(self.package_test_dir)
         torch.package.package_exporter._gate_torchscript_serialization = False
-
 
     def tearDown(self):
         super().tearDown()
