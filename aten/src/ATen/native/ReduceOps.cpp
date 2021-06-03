@@ -34,7 +34,7 @@ void check_reduction(
     TensorIteratorBase& iter,
     const char* name,
     const Tensor& self,
-    int64_t dim,
+    IntArrayRef dims,
     bool keepdim) {
   // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(
@@ -61,25 +61,25 @@ void check_reduction(
     }
   }
 
-  dim = at::maybe_wrap_dim(dim, self.dim());
-
   if (self.is_cuda()) {
     // As CUDA supports dynamic type casting, we use this overload of
     // `make_reduction`, which doesn't cast input to the result type i.e.
     // kBool., otherwise we use the overload below which casts the input to
     // kBool (which is an extra operation).
     make_reduction(
-        iter, name, result, self, dim, keepdim, self.scalar_type(), out_dtype);
+        iter, name, result, self, dims, keepdim, self.scalar_type(), out_dtype);
   }
   make_reduction(
-      iter, name, result, self, dim, keepdim, /*out_dtype=*/out_dtype);
+      iter, name, result, self, dims, keepdim, /*out_dtype=*/out_dtype);
 }
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
   check_reduction(*this, "all", self, dim, keepdim);
 }
 
 TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
   check_reduction(*this, "all", self, dim, keepdim);
 }
 
@@ -1174,33 +1174,9 @@ inline Tensor & _all(Tensor & result, TensorIterator & iter) {
 }
 
 Tensor all(const Tensor& self) {
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "all only supports CPU AND CUDA device type, got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "all only supports strided layout, got: ", self.layout());
-
-  // Refer [all, any : uint8 compatibility]
-  Tensor result;
-  ScalarType out_dtype;
-  if (self.scalar_type() == ScalarType::Byte){
-    result = at::empty({0}, self.options());
-    out_dtype = self.scalar_type();
-  } else {
-    result = at::empty({0}, self.options().dtype(kBool));
-    out_dtype = ScalarType::Bool;
-  }
-
-  if (self.is_cuda()) {
-    // As CUDA supports dynamic type casting, we use this overload of
-    // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
-    // otherwise we use the overload below which casts the input to kBool (which is
-    // an extra operation).
-    auto iter = make_reduction(
-        "all", result, self, {}, false, self.scalar_type(), out_dtype);
-    return _all(result, iter);
-  }
-  auto iter =
-      make_reduction("all", result, self, {}, false, /*out_dtype=*/out_dtype);
+  TensorIterator iter;
+  at::meta::check_reduction(iter, "all", self, {}, false);
+  auto result = iter.maybe_get_output(0);
   return _all(result, iter);
 }
 
@@ -1224,33 +1200,9 @@ inline Tensor & _any(Tensor & result, TensorIterator & iter) {
 }
 
 Tensor any(const Tensor& self) {
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "any only supports CPU AND CUDA device type, got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
-              "any only supports strided AND sparse layout, got: ", self.layout());
-
-  // Refer [all, any : uint8 compatibility]
-  Tensor result;
-  ScalarType out_dtype;
-  if (self.scalar_type() == ScalarType::Byte){
-    result = at::empty({0}, self.options());
-    out_dtype = self.scalar_type();
-  } else {
-    result = at::empty({0}, self.options().dtype(kBool));
-    out_dtype = ScalarType::Bool;
-  }
-
-  if (self.is_cuda()) {
-    // As CUDA supports dynamic type casting, we use this overload of
-    // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
-    // otherwise we use the overload below which casts the input to kBool (which is
-    // an extra operation).
-    auto iter = make_reduction(
-        "any", result, self, {}, false, self.scalar_type(), out_dtype);
-    return _any(result, iter);
-  }
-  auto iter =
-      make_reduction("any", result, self, {}, false, /*out_dtype=*/out_dtype);
+  TensorIterator iter;
+  at::meta::check_reduction(iter, "any", self, {}, false);
+  auto result = iter.maybe_get_output(0);
   return _any(result, iter);
 }
 
