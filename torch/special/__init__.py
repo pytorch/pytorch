@@ -387,7 +387,7 @@ Computes the argument, x, for which the area under the Gaussian probability dens
 (integrated from minus infinity to x) is equal to :attr:`input`, elementwise.
 
 .. math::
-    \text{ndtri}(p) = \sqrt{2} * \text{erf}^{-1}(2 * p - 1)
+    \text{ndtri}(p) = \sqrt{2}\text{erf}^{-1}(2p - 1)
 
 .. note::
     Also known as quantile function for Normal Distribution.
