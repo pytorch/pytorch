@@ -6574,13 +6574,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_movedim_moveaxis),
     OpInfo('renorm',
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
-           sample_inputs_func=sample_inputs_renorm,
-           skips=(
-               # AssertionError: Resized a non-empty tensor but did not warn about it.
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_renorm),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,

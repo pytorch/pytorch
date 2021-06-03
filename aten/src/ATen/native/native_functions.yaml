@@ -5706,13 +5706,6 @@
   structured_delegate: digamma.out
   variants: method
 
-- func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_renorm_
-    CUDA: legacy::cuda::_th_renorm_
-
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
@@ -6965,16 +6958,19 @@
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
   dispatch:
-    CPU: legacy::cpu::_th_renorm_out
-    CUDA: legacy::cuda::_th_renorm_out
+    CPU, CUDA: renorm_out
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_renorm
-    CUDA: legacy::cuda::_th_renorm
+  structured_delegate: renorm.out
+
+- func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  structured_delegate: renorm.out
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
