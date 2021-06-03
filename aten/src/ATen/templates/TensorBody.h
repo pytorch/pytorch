@@ -375,9 +375,12 @@ class TORCH_API Tensor {
     return impl_->is_conj();
   }
 
-  // TODO: do I need to add this method directly on the Tensor to implement conj_view() in UnaryOps?
-  inline void set_conj(bool conjugate) const {
-    impl_->set_conj(conjugate);
+  // sets the conjugate bit of a tensor.
+  // NOTE: Conjugate bit is supposed to be a read-only field. Only change this, if you are extremely sure
+  // that's what you want. Changing this might lead to incorrect behavior since conjugation is
+  // a lazy operation and we rely on this bit to determine if a conjugation needs to be materialized.
+  inline void _set_conj(bool conjugate) const {
+    impl_->_set_conj(conjugate);
   }
 
   /// Returns a `Tensor`'s layout.

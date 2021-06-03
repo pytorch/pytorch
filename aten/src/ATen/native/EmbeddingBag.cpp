@@ -44,6 +44,18 @@ static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
 
 namespace {
 
+std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
+    const Tensor& indices,
+    const Tensor& offsets) {
+  const auto commonType =
+      promoteTypes(offsets.scalar_type(), indices.scalar_type());
+  return {
+      indices.scalar_type() == commonType ? indices
+                                          : indices.toType(commonType),
+      offsets.scalar_type() == commonType ? offsets
+                                          : offsets.toType(commonType)};
+}
+
 // Determines if we can use a fast implementation for index_select_add, which
 // is only applicable if special conditions are met
 template<typename index_t>
@@ -657,14 +669,15 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
     const Tensor& weight,
-    const Tensor& indices,
-    const Tensor& offsets,
+    const Tensor& indices_,
+    const Tensor& offsets_,
     const int64_t mode,
     const Tensor& per_sample_weights,
     bool include_last_offset,
     int64_t padding_idx,
     bool requires_grad) {
-
+  Tensor indices, offsets;
+  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   check_arguments(weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
   Tensor output = at::empty(
@@ -780,8 +793,8 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
 
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
-                              const Tensor &offsets,
+Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
+                              const Tensor &offsets_,
                               const Tensor &offset2bag,
                               const Tensor &bag_size_,
                               const Tensor &max_indices_,
@@ -793,6 +806,8 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
+  Tensor indices, offsets;
+  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
   checkContiguous("embedding_bag", indices_arg);
@@ -1015,8 +1030,8 @@ template<typename scalar_t>
 Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     const Tensor& grad,
     const Tensor& weight,  // NB: embedding table, not per_sample_weights
-    const Tensor& indices,
-    const Tensor& offsets,
+    const Tensor& indices_,
+    const Tensor& offsets_,
     const Tensor& offset2bag,
     int64_t mode,
     int64_t padding_idx) {
@@ -1027,6 +1042,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   AT_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.sizes()[1];
 
+  Tensor indices, offsets;
+  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   AT_ASSERT(indices.dim() == 1);
   auto num_samples = indices.sizes()[0];
 

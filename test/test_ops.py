@@ -99,7 +99,7 @@ class TestGradients(TestCase):
 
         return _fn
 
-    def _check_helper(self, device, dtype, op, variant, check):
+    def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False):
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
         if not op.supports_dtype(dtype, torch.device(device).type):
@@ -141,8 +141,10 @@ class TestGradients(TestCase):
                                           check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True,
                                           nondet_tol=op.gradcheck_nondet_tol,
-                                          fast_mode=op.gradcheck_fast_mode))
+                                          fast_mode=op.gradcheck_fast_mode,
+                                          check_forward_ad=check_forward_ad))
             elif check == 'gradgradcheck':
+                self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
@@ -158,8 +160,8 @@ class TestGradients(TestCase):
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
-    def _grad_test_helper(self, device, dtype, op, variant):
-        return self._check_helper(device, dtype, op, variant, 'gradcheck')
+    def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False):
+        return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad)
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
@@ -222,6 +224,19 @@ class TestGradients(TestCase):
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+
+    @_gradcheck_ops(op_db)
+    def test_forward_mode_AD(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        if op.supports_forward_ad:
+            self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+        else:
+            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            hint_msg = ("Running forward AD for an OP that has does not support it did not "
+                        "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
+            with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
+                self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
 
 
 # Tests operators for consistency between JIT and eager, also checks
@@ -309,7 +324,10 @@ class TestCommon(JitCommonTestCase):
                     cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
 
                     if variant in inplace_ops and sample.broadcasts_input:
-                        with self.assertRaises(RuntimeError):
+                        with self.assertRaises(RuntimeError,
+                                               msg=('inplace variant either incorrectly allowed '
+                                                    'resizing or you have marked the sample {}'
+                                                    ' incorrectly with `broadcasts_self=True'.format(sample.summary()))):
                             variant_forward = variant(cloned,
                                                       *sample.args,
                                                       **sample.kwargs)
@@ -365,9 +383,6 @@ class TestCommon(JitCommonTestCase):
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
-        # TODO: fix this
-        if _requires_grad and not op.supports_gradgrad:
-            self.skipTest("skipped! This test does not handle ops that don't support gragrad properly")
 
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=include_conjugated_inputs)
@@ -408,7 +423,7 @@ class TestCommon(JitCommonTestCase):
                                             out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
@@ -418,7 +433,7 @@ class TestCommon(JitCommonTestCase):
                                             out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)

@@ -9,11 +9,11 @@ namespace at {
 
 void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // Situations to handle:
-  //  1. Purely functional situation.  Easy: materialize all inputs and
+  //  1. Out-of-place operation.  Easy: materialize all inputs and
   //     call it a day.
   //  2. Inplace operation.  Desugar x.add_(2) into x.conj_().add_(2).conj_().
   //     Materialize other inputs as in (1).
-  //  3. Out-of-place operation.  Desugar add(x, 2, out=y) into y.copy_(add(x, 2))
+  //  3. out= operation.  Desugar add(x, 2, out=y) into y.copy_(add(x, 2))
   //  Materialize other inputs as in (1).
   //
   //  It is important to be able to tell if we READ from an argument and if we
@@ -22,8 +22,6 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
   //  conjugating inputs on entry that never get used.  In current schema we
   //  can't easily tell if inplace situation has happened, so don't do it.
 
-  //  std::cerr << "conj fallback " << op.schema().name() << "\n";
-
   const auto& arguments = op.schema().arguments();
   const auto num_arguments = arguments.size();
   const auto stack_start = stack->size() - num_arguments;
@@ -31,6 +29,10 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
   c10::optional<bool> is_write;
   for (int64_t i = 0; i < num_arguments; ++i) {
     const auto& alias_info = arguments[i].alias_info();
+    // Three possible states:
+    // 1. alias_info has no value --> out-of-place operation
+    // 2. alias_info does have a value, alias_info->is_write=True --> in-place or out= operation
+    // 3. alias_info does have a value, alias_info->is_write=False --> view operation
     if (alias_info.has_value()) {
       if (is_write.has_value()) {
         TORCH_CHECK(*is_write == alias_info->isWrite(),
@@ -64,7 +66,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
     const auto& argument = arguments[i];
     bool mut_arg = false;
     if (argument.alias_info()) {
-      // Was already tested by is_write loop above
+      // View operations were already filtered above, so only in-place/out= operations should get here.
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(argument.alias_info()->isWrite());
       mut_arg = true;
     }
@@ -78,7 +80,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
       TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), "Conjugate Fallback does not support meta tensors.");
       if (mut_arg) {
         // TODO: This is a waste if the argument is write only
-        tensor.set_conj(false);
+        tensor._set_conj(false);
         at::conj_physical_(tensor);
         mutable_inputs.emplace_back(tensor);
       } else {
@@ -87,11 +89,17 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
       (*stack)[stack_start + i] = std::move(tensor);
     } else if (ivalue.isTensorList()) {
       auto tensors = std::move(ivalue).toTensorList();
-      for(const auto j : c10::irange(tensors.size())) {
-        // At the time of writing this, no operators use tensorlists with mutable tensors.
-        // We could add additional code logic in the future if this changes.
-        TORCH_CHECK(!mut_arg, "Conjugate fallback doesn't work for mutable TensorLists.");
-        tensors[j] = at::resolve_conj(tensors[j]);
+      if (mut_arg) {
+        for(const auto j : c10::irange(tensors.size())) {
+          Tensor t = tensors[j];
+          t._set_conj(false);
+          at::conj_physical_(t);
+          mutable_inputs.emplace_back(t);
+        }
+      } else {
+        for(const auto j : c10::irange(tensors.size())) {
+          tensors[j] = at::resolve_conj(tensors[j]);
+        }
       }
       (*stack)[stack_start + i] = std::move(tensors);
     }
@@ -102,7 +110,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
 
     for (auto& mutable_input : mutable_inputs) {
       at::conj_physical_(mutable_input);
-      mutable_input.set_conj(true);
+      mutable_input._set_conj(true);
     }
 }
 
@@ -139,7 +147,6 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("real", torch::CppFunction::makeFallthrough());
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
-  // TODO: need to hit the view functions
 }
 
 } // namespace at

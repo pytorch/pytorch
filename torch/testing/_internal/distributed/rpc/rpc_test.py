@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import unittest
 import warnings
@@ -89,6 +90,16 @@ DONE_FUTURE = concurrent.futures.Future()
 
 FIFTY_MIL_CYCLES = 50000000
 
+_rpc_barrier_count = 0
+
+def _increment_count():
+    global _rpc_barrier_count
+    _rpc_barrier_count += 1
+
+def _reset_count():
+    global _rpc_barrier_count
+    _rpc_barrier_count = 0
+
 class StubRpcAgent:
     def __init__(self, world_size):
         self.world_size = world_size
@@ -125,7 +136,6 @@ def set_and_check_done(value):
 # classes and functions are used to test python user defined class and
 # methods over rpc
 TensorClass = namedtuple("TensorClass", ["tensors"])
-
 
 class MyPickleClass:
     def __init__(self):
@@ -1082,6 +1092,63 @@ class RpcTest(RpcAgentTestFixture):
             expected_error = self.get_timeout_error_regex()
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 rpc.api._all_gather(SlowPickleClass(0.5))
+
+    def _test_barrier_helper(self, info, names, multi_threaded=False):
+        names = sorted(names)
+        leader = names[0]
+        rpc.rpc_sync(leader, _reset_count)
+        if not multi_threaded and info.name == leader:
+            self.assertEqual(_rpc_barrier_count, 0)
+        rpc.api._barrier(names)
+        rpc.rpc_sync(leader, _increment_count)
+        rpc.api._barrier(names)
+        if not multi_threaded and info.name == leader:
+            self.assertEqual(_rpc_barrier_count, len(names))
+
+    @dist_init
+    def test_rpc_barrier_all(self):
+        # Test rpc barrier when called with full list of workers
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        names = [worker.name for worker in all_worker_info]
+        self._test_barrier_helper(info, names)
+
+    @dist_init
+    def test_rpc_barrier_subset(self):
+        # Test rpc barrier when processes are called with different subsets of the full list
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        if info.id % 2:
+            names = [worker.name for worker in all_worker_info if worker.id % 2]
+        else:
+            names = [worker.name for worker in all_worker_info if not worker.id % 2]
+        self._test_barrier_helper(info, names)
+
+    @dist_init
+    def test_rpc_barrier_partial_subset(self):
+        # Test rpc barrier when some processes are not involved in the barrier
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        if info.id % 2:
+            names = [worker.name for worker in all_worker_info if worker.id % 2]
+        else:
+            names = [f"worker{info.id}"]
+        self._test_barrier_helper(info, names)
+
+    @dist_init
+    def test_rpc_barrier_multithreaded(self):
+        # This tests validates the implementation of barrier when multiple threads call into it
+        # We only need to check that it does not hang in this case
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        names = [worker.name for worker in all_worker_info]
+        threads = []
+        for _ in range(3):
+            th = threading.Thread(target=self._test_barrier_helper, args=(info, names, True))
+            threads.append(th)
+            th.start()
+        for th in threads:
+            th.join()
 
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
@@ -4751,6 +4818,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 fut.wait()
 
+        # FIXME We wait until the remote completed creating the OwnerRRef
+        # because there's currently a race if we shut down RPC before that.
+        slow_rref.to_here()
+
     def test_rref_get_type_timeout_blocking(self):
         self._test_rref_get_type_timeout(blocking=True)
 
@@ -4793,6 +4864,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         # specified timeout.
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+
+        # FIXME We wait until the remote completed creating the OwnerRRef
+        # because there's currently a race if we shut down RPC before that.
+        slow_rref.to_here()
 
     @dist_init
     def test_rref_proxy_timeout(self):
@@ -5828,6 +5903,41 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(2)
     def test_owner_rref_forward_synchronization4(self):
         self._test_owner_rref_forward_synchronization("cuda:1", "cuda:1")
+
+    @staticmethod
+    def _return_tensor_view(i):
+        x = torch.ones(1000, 200).cuda(0) * i
+        torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+        # serialization of the return value will create a new tensor from the
+        # view, which is done outside of the user function.
+        return x.split(100)[0]
+
+    @skip_if_lt_x_gpu(1)
+    def test_tensor_view_as_return_value(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0 : 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        futs = []
+        for i in range(5):
+            futs.append(rpc.rpc_async(
+                dst,
+                TensorPipeAgentCudaRpcTest._return_tensor_view,
+                args=(i,)
+            ))
+
+        for i in range(5):
+            self.assertEqual(torch.ones(100, 200) * i, futs[i].wait())
+
+        rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
     def test_devices_option_mismatch(self):

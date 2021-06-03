@@ -161,8 +161,8 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     }
 
     // propagate the correct conjugate bit
-    dst_contig.set_conj(dst.is_conj());
-    src_contig.set_conj(iter.tensor(1).is_conj());
+    dst_contig._set_conj(dst.is_conj());
+    src_contig._set_conj(iter.tensor(1).is_conj());
 
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
