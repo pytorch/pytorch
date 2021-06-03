@@ -27,8 +27,13 @@ static std::string noop_name_fn(const PyInterpreter*) {
   return "<unloaded interpreter>";
 }
 
+static void noop_decref_fn(const PyInterpreter*, PyObject*) {
+  // no-op
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
+  decref_fn_ = &noop_decref_fn;
 }
 
 } // namespace impl
@@ -321,6 +326,18 @@ void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
     storage_ = {};
+  }
+  if (owns_pyobj_) {
+    TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
+    TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
+    pyobj_interpreter_.load(std::memory_order_acquire)->decref(pyobj_);
+    // NB: this destructor can only be entered when there are no
+    // references to this C++ object (obviously), NOR any references
+    // to the PyObject (if there are references to the PyObject,
+    // then the PyObject holds an owning reference to the tensor).
+    // So it is OK to clear pyobj_ here as it is impossible for it to
+    // be used again (modulo weak reference races)
+    pyobj_ = nullptr; // for safety
   }
 }
 
