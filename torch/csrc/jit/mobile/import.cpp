@@ -664,6 +664,13 @@ mobile::Module _load_for_mobile_impl(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   std::string error_message;
+
+  TORCH_CHECK(
+      reader->hasRecord("bytecode.pkl"),
+      "The model is not generated from the api _save_for_lite_interpreter. "
+      "Please regenerate the module by running: module._save_for_lite_interpreter('model.ptl'). "
+      "Refer to https://pytorch.org/tutorials/prototype/lite_interpreter.html for more details.");
+  
   auto guard = c10::make_scope_exit([&]() {
     if (!observer) {
       return;
