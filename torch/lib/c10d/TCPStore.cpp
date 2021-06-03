@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <c10d/TCPStore.hpp>
 
 #include <fcntl.h>
@@ -459,7 +460,7 @@ void TCPStoreMasterDaemon::checkHandler(int socket) const {
   SizeType nargs;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
-  for (size_t i = 0; i < nargs; i++) {
+  for(const auto i : c10::irange(nargs)) {
     keys[i] = tcputil::recvString(socket);
   }
   // Now we have received all the keys
@@ -474,7 +475,7 @@ void TCPStoreMasterDaemon::waitHandler(int socket) {
   SizeType nargs;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
-  for (size_t i = 0; i < nargs; i++) {
+  for(const auto i : c10::irange(nargs)) {
     keys[i] = tcputil::recvString(socket);
   }
   if (checkKeys(keys)) {
@@ -519,7 +520,7 @@ void TCPStoreMasterDaemon::run() {
   // receive the queries
   bool finished = false;
   while (!finished) {
-    for (size_t i = 0; i < sockets_.size(); i++) {
+    for(const auto i : c10::irange(sockets_.size())) {
       fds[i].revents = 0;
     }
 
@@ -547,9 +548,9 @@ void TCPStoreMasterDaemon::run() {
       }
       TCPSocket socket =
           std::get<0>(tcputil::accept(storeListenSocket_.handle()));
-      int raw_socket = socket.handle();
+      int rawSocket = socket.handle();
       sockets_.emplace_back(std::move(socket));
-      tcputil::addPollfd(fds, raw_socket, POLLIN);
+      tcputil::addPollfd(fds, rawSocket, POLLIN);
     }
     queryFds(fds);
   }
@@ -564,7 +565,7 @@ void TCPStoreMasterDaemon::run() {
   // receive the queries
   bool finished = false;
   while (!finished) {
-    for (size_t i = 0; i < sockets_.size(); i++) {
+    for(const auto i : c10::irange(sockets_.size())) {
       fds[i].revents = 0;
     }
 
@@ -582,9 +583,9 @@ void TCPStoreMasterDaemon::run() {
       }
       TCPSocket socket =
           std::get<0>(tcputil::accept(storeListenSocket_.handle()));
-      int raw_socket = socket.handle();
+      int rawSocket = socket.handle();
       sockets_.emplace_back(std::move(socket));
-      tcputil::addPollfd(fds, raw_socket, POLLIN);
+      tcputil::addPollfd(fds, rawSocket, POLLIN);
     }
 
     // The pipe receives an event which tells us to shutdown the daemon
@@ -926,12 +927,12 @@ class TCPCallbackClient {
   void setCallback(const std::string& key, WatchKeyCallback callback);
 
   explicit TCPCallbackClient(
-      int raw_socket,
+      int rawSocket,
       std::unique_ptr<TCPStoreWorkerDaemon>&& daemon)
-      : raw_socket_{raw_socket}, daemon_{std::move(daemon)} {}
+      : rawSocket_{rawSocket}, daemon_{std::move(daemon)} {}
 
  private:
-  int raw_socket_;
+  int rawSocket_;
   std::unique_ptr<TCPStoreWorkerDaemon> daemon_;
   std::mutex mutex_;
 };
@@ -942,11 +943,11 @@ std::unique_ptr<TCPCallbackClient> TCPCallbackClient::connect(
   TCPSocket socket =
       tcputil::connect(addr.host, addr.port, /*wait*/ true, opts.timeout);
 
-  int raw_socket = socket.handle();
+  int rawSocket = socket.handle();
 
   auto daemon = std::make_unique<TCPStoreWorkerDaemon>(std::move(socket));
 
-  return std::make_unique<TCPCallbackClient>(raw_socket, std::move(daemon));
+  return std::make_unique<TCPCallbackClient>(rawSocket, std::move(daemon));
 }
 
 void TCPCallbackClient::setCallback(
@@ -956,9 +957,9 @@ void TCPCallbackClient::setCallback(
 
   daemon_->setCallback(key, callback);
 
-  tcputil::sendValue<QueryType>(raw_socket_, QueryType::WATCH_KEY);
+  tcputil::sendValue<QueryType>(rawSocket_, QueryType::WATCH_KEY);
 
-  tcputil::sendString(raw_socket_, key);
+  tcputil::sendString(rawSocket_, key);
 
   daemon_->waitForCallbackRegistration();
 }
@@ -1002,7 +1003,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     waitForWorkers();
   }
 
-  callback_client_ = detail::TCPCallbackClient::connect(addr_, opts);
+  callbackClient_ = detail::TCPCallbackClient::connect(addr_, opts);
 }
 
 TCPStore::~TCPStore() = default;
@@ -1075,7 +1076,7 @@ bool TCPStore::deleteKey(const std::string& key) {
 }
 
 void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
-  callback_client_->setCallback(keyPrefix_ + key, callback);
+  callbackClient_->setCallback(keyPrefix_ + key, callback);
 }
 
 int64_t TCPStore::incrementValueBy(const std::string& key, int64_t delta) {
