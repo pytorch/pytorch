@@ -292,7 +292,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
             devices_set.update(map_.keys())
         devices_set.discard(torch.device("cpu"))
         my_devices = list(devices_set)
-    my_devices = sorted(my_devices)
+    my_devices = sorted(my_devices, key=lambda d: d.index)
 
     return reverse_device_maps, my_devices
 
