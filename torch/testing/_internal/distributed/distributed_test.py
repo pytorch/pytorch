@@ -6657,15 +6657,7 @@ class DistributedTest:
                 # All gather grads to compare them.
                 dist_grad_tensor = torch.cat([param.grad for param in ddp_model.module.parameters()])
                 local_grad_tensor = torch.cat([param.grad for param in local_model.parameters()])
-                if self.rank == 0:
-                    self.assertEqual(dist_grad_tensor, local_grad_tensor)
-                gathered_grads = [torch.zeros_like(dist_grad_tensor) for _ in range(dist.get_world_size())]
-                dist.gather(dist_grad_tensor, gathered_grads if self.rank == 0 else None)
-                if self.rank == 0:
-                    rank_0_grad = dist_grad_tensor
-                    for grad_tensor in gathered_grads:
-                        self.assertEqual(grad_tensor, dist_grad_tensor)
-                    self.assertEqual(dist_grad_tensor, local_grad_tensor)
+                self.assertEqual(dist_grad_tensor, local_grad_tensor)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
