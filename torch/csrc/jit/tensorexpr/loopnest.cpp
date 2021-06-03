@@ -422,10 +422,10 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::vectorize(For* f) {
+bool LoopNest::vectorize(For* f) {
   Block* b = dynamic_cast<Block*>(f->get_parent());
   if (!b) {
-    return;
+    return false;
   }
 
   // Can't vectorize reduction axes.
@@ -433,22 +433,29 @@ void LoopNest::vectorize(For* f) {
   for (auto* r : reductions) {
     if (std::find(r->reduce_args().begin(), r->reduce_args().end(), f->var()) !=
         r->reduce_args().end()) {
-      throw std::logic_error("Cannot vectorize reduction axis - rfactor first");
+      return false;
     }
   }
 
   Vectorizer v;
-  Stmt* old_f = Stmt::clone(f);
   Stmt* new_f = nullptr;
   try {
-    new_f = FlattenIndexes(f);
+    new_f = FlattenIndexes(Stmt::clone(f));
     new_f = v.vectorize(dynamic_cast<For*>(new_f));
   } catch (std::runtime_error& e) {
-    // Partial vectorization may have corrupted f
-    new_f = old_f;
+    // We clone f before vectorizing. So, any partial vectorization will
+    // have modified the clone. In case of an exception, we can continue
+    // using f.
+    new_f = f;
   }
 
-  b->replace_stmt(f, IRSimplifier::simplify(new_f));
+  if (new_f != f) {
+    b->replace_stmt(f, IRSimplifier::simplify(new_f));
+    return true;
+  }
+
+  // Vectorization was not successful.
+  return false;
 }
 
 void LoopNest::initialize(

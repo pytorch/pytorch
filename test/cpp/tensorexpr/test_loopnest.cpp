@@ -2662,7 +2662,8 @@ TEST(LoopNest, OuterLoopVectorization) {
       });
   LoopNest l({tensor});
 
-  l.vectorize(l.getAllLoopNestsWritingToBuf(tensor->buf())[0][0]);
+  ASSERT_TRUE(
+      LoopNest::vectorize(l.getAllLoopNestsWritingToBuf(tensor->buf())[0][0]));
 
   Stmt* root_stmt = l.root_stmt();
   Block* outer_block = dynamic_cast<Block*>(root_stmt);
@@ -4727,9 +4728,9 @@ TEST(LoopNest, VectorizeUse) {
       "c", {{N, "n"}}, [&](const VarHandle& n) { return b->load(n) + 2.0f; });
   LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
-  nest.vectorize(loops[0]);
+  ASSERT_TRUE(LoopNest::vectorize(loops[0]));
   loops = nest.getAllLoopNestsWritingToBuf(c->buf())[0];
-  nest.vectorize(loops[0]);
+  ASSERT_TRUE(LoopNest::vectorize(loops[0]));
   nest.prepareForCodegen();
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   Stmt* s = nest.root_stmt();

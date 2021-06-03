@@ -86,7 +86,7 @@ class TORCH_API LoopNest {
   //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
   std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(const Buf*) const;
 
-  static void vectorize(For*);
+  static bool vectorize(For*);
   Stmt* simplify();
 
   bool computeInline(Stmt* s);
