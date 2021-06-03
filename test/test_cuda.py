@@ -1836,8 +1836,6 @@ t1.start()
 t2.start()
 """])
 
-    # ROCm doesn't support device side asserts
-    @skipIfRocm
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
