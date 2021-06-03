@@ -1030,7 +1030,10 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scala
 
   ScalarType out_dtype = result.defined() ? result.scalar_type() : (opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type()));
 
-  auto iter = make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype);
+// omit in_dtype in the following call, to avoid make_reduction explicitly casting input to out_dtype
+  auto iter = isComplexType(self.scalar_type()) ?
+      make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype) :
+      make_reduction("norm", result, self, dim, keepdim, out_dtype);
 
   if (iter.numel() == 0) {
     result.zero_();
@@ -1306,7 +1309,7 @@ Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
-  Tensor in;
+  c10::MaybeOwned<Tensor> in;
   if (dim) {
     auto sizes = self.sizes();
     zero_numel_check_dims(self, dim.value(), "argmax()");
@@ -1322,13 +1325,13 @@ Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
       }
       return result;
     }
-    in = self;
+    in = c10::MaybeOwned<Tensor>::borrowed(self);
   } else {
     TORCH_CHECK_INDEX(self.numel() != 0, "argmax_out(): Expected reduction dim to be specified for input.numel() == 0.");
-    in = self.reshape({-1});
+    in = c10::MaybeOwned<Tensor>::owned(self.reshape({-1}));
     keepdim = false;
   }
-  auto itr = make_reduction("argmax", result, in, dim.value_or(0), keepdim,
+  auto itr = make_reduction("argmax", result, *in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
   if (itr.numel() != 0) {
     argmax_stub(itr.device_type(), itr);
@@ -1342,7 +1345,7 @@ Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 }
 
 Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
-  Tensor in;
+  c10::MaybeOwned<Tensor> in;
   if (dim) {
     auto sizes = self.sizes();
     zero_numel_check_dims(self, dim.value(), "argmin()");
@@ -1358,13 +1361,13 @@ Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
       }
       return result;
     }
-    in = self;
+    in = c10::MaybeOwned<Tensor>::borrowed(self);
   } else {
     TORCH_CHECK_INDEX(self.numel() != 0, "argmin_out(): Expected reduction dim to be specified for input.numel() == 0.");
-    in = self.reshape({-1});
+    in = c10::MaybeOwned<Tensor>::owned(self.reshape({-1}));
     keepdim = false;
   }
-  auto itr = make_reduction("argmin", result, in, dim.value_or(0), keepdim,
+  auto itr = make_reduction("argmin", result, *in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
   if (itr.numel() != 0) {
     argmin_stub(itr.device_type(), itr);
