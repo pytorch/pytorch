@@ -324,7 +324,13 @@ class Reducer {
   std::vector<VariableLocator> variable_locators_;
 
   // track the number of iterations to synchronize grads in training so far.
+  // This is the number of calls to the forward pass, not necessarily equal to
+  // number of calls to backward pass.
   long num_iterations_;
+  // Number of times backward() has been called. This is mainly used for static
+  // graph training to know when to populate the map of how many times grad
+  // hooks have been triggered.
+  long num_backward_calls_;
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;

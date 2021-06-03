@@ -130,18 +130,23 @@ class _DDPSink(Function):
         if static_graph_training and ctx.state_dict['num_iterations'] == 1:
             Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
 
-        elif state_dict['find_unused'] and not static_graph_training:
-            # First type of unused params: parameters that did not participate
-            # in computing model outputs. These are found by the below call to
-            # prepare_for_backward.
-            # Second type of unused params: params that won't get gradient
-            # because outputs they produced do not get used in computing loss
-            # for this call to backward. Due to this passthrough autograd
-            # function, autograd hooks for these parameters are now triggered
-            # with undefined gradient to maintain parity with local training.
-            # DDP takes care of undefined grads in this case to ensure the .grad
-            # field of the param is not touched.
-            ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
+        grad_enabled = state_dict['grad_enabled']
+        require_backward_grad_sync = state_dict['require_backward_grad_sync']
+        if grad_enabled and require_backward_grad_sync:
+            if static_graph_training or not state_dict['find_unused']:
+                ctx.reducer.prepare_for_backward([])
+            else:
+                # First type of unused params: parameters that did not participate
+                # in computing model outputs. These are found by the below call to
+                # prepare_for_backward.
+                # Second type of unused params: params that won't get gradient
+                # because outputs they produced do not get used in computing loss
+                # for this call to backward. Due to this passthrough autograd
+                # function, autograd hooks for these parameters are now triggered
+                # with undefined gradient to maintain parity with local training.
+                # DDP takes care of undefined grads in this case to ensure the .grad
+                # field of the param is not touched.
+                ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
 
         return (None, None, *grad_outputs)
 
@@ -818,37 +823,25 @@ class DistributedDataParallel(Module):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            if grad_enabled and self.require_backward_grad_sync:
-                self.require_forward_param_sync = True
-                if self.static_graph or not self.find_unused_parameters:
-                    self.reducer.prepare_for_backward([])
-            else:
-                self.require_forward_param_sync = False
-
-        # TODO: DDPSink is currently enabled for unused parameter detection and
-        # static graph training for first iteration, in the future we plan to
-        # enable this passthrough for all training use cases.
-        if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and self.num_iterations == 1
-        ):
-            find_unused = all([
-                grad_enabled,
-                self.require_backward_grad_sync,
-                self.find_unused_parameters,
-            ])
-            state_dict = {
-                'static_graph': self.static_graph,
-                'find_unused': find_unused,
-                'num_iterations': self.num_iterations,
-            }
-            output_tensor_list, treespec = tree_flatten(output)
-            passthrough_tensor_list = _DDPSink.apply(
-                self.reducer,
-                state_dict,
-                *output_tensor_list,
+            self.require_forward_param_sync = (
+                grad_enabled and self.require_backward_grad_sync
             )
-            # Reconstruct output data structure.
-            output = tree_unflatten(passthrough_tensor_list, treespec)
+
+        state_dict = {
+            'static_graph': self.static_graph,
+            'find_unused': self.find_unused_parameters,
+            'num_iterations': self.num_iterations,
+            'grad_enabled': grad_enabled,
+            'require_backward_grad_sync': self.require_backward_grad_sync,
+        }
+        output_tensor_list, treespec = tree_flatten(output)
+        passthrough_tensor_list = _DDPSink.apply(
+            self.reducer,
+            state_dict,
+            *output_tensor_list,
+        )
+        # Reconstruct output data structure.
+        output = tree_unflatten(passthrough_tensor_list, treespec)
         return output
 
     def scatter(self, inputs, kwargs, device_ids):

@@ -1063,7 +1063,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         # Compute loss and gradients for both outputs
         output1, output2 = model(input)
         loss1 = criterion(output1, target)
-        loss1.backward()
+        loss1.backward(retain_graph=True)
         loss2 = criterion(output2, target)
         loss2.backward()
 

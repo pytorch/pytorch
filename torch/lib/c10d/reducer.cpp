@@ -46,6 +46,7 @@ Reducer::Reducer(
       gradient_as_bucket_view_(gradient_as_bucket_view),
       local_used_maps_reduced_(false),
       num_iterations_(0),
+      num_backward_calls_(0),
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
@@ -217,11 +218,11 @@ bool Reducer::dynamic_graph_find_unused() {
 }
 
 bool Reducer::static_graph_first_iteration() {
-  return static_graph_ && num_iterations_ == 1;
+  return static_graph_ && num_backward_calls_ == 1;
 }
 
 bool Reducer::static_graph_after_first_iteration() {
-  return static_graph_ && num_iterations_ > 1;
+  return static_graph_ && num_backward_calls_ > 1;
 }
 
 void Reducer::initialize_local_used_map() {
@@ -1172,6 +1173,7 @@ void Reducer::search_unused_parameters(
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
+  ++num_backward_calls_;
 
   cpu_timer_.backward_compute_start_time = current_time_in_nanos();
   if (should_collect_runtime_stats()) {
