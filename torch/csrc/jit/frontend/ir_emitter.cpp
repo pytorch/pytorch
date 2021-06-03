@@ -59,7 +59,7 @@ struct to_ir {
     // lifting of closures and forks, this way closures are converted
     // to SSA while part of their original graph, and closures are ready to
     // be inlined into forked closures
-    ConvertToSSA(graph);
+    convertToSSA(graph);
     // convert loops with an iter and body condition specified to
     // python-recognize while loops. we do this so they can be exported,
     // and run the pass early to avoid jitter. Like conversion to SSA,
@@ -69,7 +69,7 @@ struct to_ir {
     // Convert Ops to a Normalized Form
     NormalizeOps(graph);
 
-    RunCleanupPasses(graph);
+    runCleanupPasses(graph);
   }
 
  private:
@@ -226,7 +226,7 @@ struct to_ir {
     auto ret_type = def_stack_.back().merged_return_type_;
     TORCH_INTERNAL_ASSERT(ret_type);
 
-    // in the ConvertToSSA pass, prim::ReturnStmts are lowered so that the
+    // in the convertToSSA pass, prim::ReturnStmts are lowered so that the
     // correct return value is set. Until then, we have a correctly-typed
     // placeholder return value. This is needed so that closures & graphs
     // are correctly typed.

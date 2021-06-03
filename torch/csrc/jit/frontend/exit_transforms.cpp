@@ -834,7 +834,7 @@ static void convertWithBlocksToEnterExitNodes(std::shared_ptr<Graph>& graph) {
 //         -> (%4, %i.13)
 //     -> (%44, %i)
 
-void TransformExits(std::shared_ptr<Graph>& graph) {
+void transformExits(std::shared_ptr<Graph>& graph) {
   convertEnterExitNodesToWithBlocks(graph);
   ExitTransformer e_loop(graph);
   e_loop.transformLoopContinuations();

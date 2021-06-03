@@ -51,7 +51,7 @@ void liftClosure(Node* closure) {
       TupleType::create({closure->output()->type(), context_type}));
   closure->eraseBlock(0);
   closure->g_(attr::Subgraph, std::move(subgraph));
-  RunCleanupPasses(closure->g(attr::Subgraph));
+  runCleanupPasses(closure->g(attr::Subgraph));
 }
 
 void liftClosures(Block* block) {

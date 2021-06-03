@@ -131,7 +131,7 @@ bool isDifferentiable(Graph& g) {
 //
 // The output of compiled forward graph is [real_outputs, ctx]
 // The input of compiled backward graph is [ctx, grad_values]
-// We run LowerSimpleTuples afterwards to elmininate all tuples generated in
+// We run lowerSimpleTuples afterwards to elmininate all tuples generated in
 // this process. The original node and TupleConstruct nodes in forward graph
 // will be cleaned up later using EliminateDeadCode(block). TupleUnPack node in
 // backward graph will be removed in eliminateDeadcode(ReverseDetails) defined
@@ -421,7 +421,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
 
     value_list grad_inputs =
         linearGradientForNode(node, fmap(node->outputs(), get_grad));
-    LowerSimpleTuples(reverse_block);
+    lowerSimpleTuples(reverse_block);
 
     AT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {

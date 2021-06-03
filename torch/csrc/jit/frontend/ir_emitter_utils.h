@@ -39,7 +39,6 @@ struct WithLoopStatus {
   LoopStatus prev_value_;
 };
 
-
 /* ================================================== */
 /*                   Helper Structs                   */
 /* ================================================== */
@@ -51,7 +50,6 @@ struct DefContext {
   TypePtr declared_return_type_; // nullptr if not annotated
   TypePtr merged_return_type_; // nullptr if a Return has not been seen yet
 };
-
 
 /* ================================================== */
 /*                      Getters                       */
@@ -331,7 +329,6 @@ bool validateAssignLhsExpr(const List<Expr>& lhs, const SourceRange& r) {
   return num_starred;
 }
 
-
 /* ============================================ */
 /*                      Casts                   */
 /* ============================================ */
@@ -348,7 +345,6 @@ static std::shared_ptr<MagicMethod> makeMagic(
     SugaredValuePtr base) {
   return std::make_shared<MagicMethod>(name, base);
 }
-
 
 /* ==================================================================== */
 /*                      `__setstate__` Information                      */
@@ -398,7 +394,6 @@ static bool shouldDeriveSetStateType(
   }
   return true;
 }
-
 
 /* ================================================ */
 /*                      Misc                        */

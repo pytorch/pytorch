@@ -789,7 +789,7 @@ class TensorExprFuser {
       return true;
     }
     // Cleanup the subgraph from duplicated constants while we're at it.
-    ConstantPooling(subgraph);
+    constantPooling(subgraph);
     return false;
   }
 
