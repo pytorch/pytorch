@@ -1391,14 +1391,7 @@ static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_
       .add_input(self)
       .build();
 
-  const auto max_threads = at::get_num_threads();
-  c10::SmallBuffer<double, 64> partial_sums(max_threads);
-  std::fill(partial_sums.begin(), partial_sums.end(), 0.0);
-
-  at::parallel_for(0, iter.numel(), at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
-    const auto tid = at::get_thread_num();
-    double thread_sum = 0.0;
-
+  auto reduction = [&](int64_t begin, int64_t end, double thread_sum) {
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "std_var_all_cpu", [&] {
       iter.serial_for_each([&] (char** data, const int64_t* strides, int64_t size0, int64_t size1) {
         const double local_mean = mean;
@@ -1418,13 +1411,15 @@ static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_
       }, {begin, end});
     });
 
-    partial_sums[tid] = thread_sum;
-  });
+    return thread_sum;
+  };
 
-  const double total_sum = std::accumulate(
-      partial_sums.begin(), partial_sums.end(), 0.0);
+  // ((x - mean)**2).sum()
+  const double sum_dx2 = at::parallel_reduce(
+      0, iter.numel(), at::internal::GRAIN_SIZE, 0.0, reduction, std::plus<>{});
+
   const auto var = [&] () __ubsan_ignore_float_divide_by_zero__ {
-    return total_sum / std::max(int64_t{0}, self.numel() - correction);
+    return sum_dx2 / std::max(int64_t{0}, self.numel() - correction);
   }();
   const auto result = take_sqrt ? std::sqrt(var) : var;
 
