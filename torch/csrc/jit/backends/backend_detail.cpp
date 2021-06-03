@@ -2,6 +2,8 @@
 
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 
@@ -62,6 +64,12 @@ Module codegen_backend_module(
       "torch.jit." + backend_name + "LoweredModule",
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
+
+  // 1. Initialized debug info recorder.
+  // 2. Later call debug_info_recorder.stopRecording() to gather
+  //    recorded debug info and save it in __backend_debug_info.
+  BackendDebugInfoRecorder debug_info_recorder;
+  WithBackendDebugInfoRecorder recorder_context(&debug_info_recorder);
 
   // Generate attributes.
   // This is the preprocessed module.
@@ -124,6 +132,43 @@ Module codegen_backend_module(
             )",
       loweredModuleResolver());
 
+  // backend_debug_info_class is an instance of BackendDebugInfo that
+  // stores debug information.
+  // The purpose of this class is to make the debug information available
+  // at model saving time for serializing it outside of the lowered module,
+  // while still tying it to the module's lifetime (so it gets destroyed along
+  // with it).
+  // Whereas this information is not serialized as part of the lowered
+  // module, we still need to provide a valid instance of the
+  // BackendDebugInfo class when the lowered module is deserialized.
+  // Since the deserialized modules does not need this information,
+  // we create a "dummy" instance with no extra code dependencies (to avoid
+  // overhead) when the backend is created in __setstate__.
+  c10::intrusive_ptr<torch::CustomClassHolder> backend_debug_info_class;
+  const c10::QualifiedName backend_debug_info_class_name(
+      {"__torch__",
+       "torch",
+       "classes",
+       kBackendUtilsNamespace,
+       kBackendDebugInfoClass});
+  auto debug_info_cls =
+      getCustomClass(backend_debug_info_class_name.qualifiedName());
+  TORCH_CHECK(debug_info_cls, "BackendDebugInfo class must be available.");
+  loweredModule.register_attribute(
+      "__backend_debug_info",
+      OptionalType::create(debug_info_cls),
+      IValue::make_capsule(backend_debug_info_class));
+  static const auto create_backend_debug_info_ct = CodeTemplate(R"(
+            def __create_backend_debug_info(self):
+                self.__backend_debug_info = $backend_debug_info()
+            )");
+  TemplateEnv create_backend_debug_info_te;
+  create_backend_debug_info_te.s(
+      "backend_debug_info", backend_debug_info_class_name.qualifiedName());
+  loweredModule.define(
+      create_backend_debug_info_ct.format(create_backend_debug_info_te),
+      loweredModuleResolver());
+
   // getstate and setstate are for serialization/deserialization of
   // the LoweredModule.
   // setstate is in charge of initializing self.__backend by invoking
@@ -148,6 +193,7 @@ Module codegen_backend_module(
                 # state[2] indicates whether to create the backend instance.
                 if state[2]:
                     self.__create_backend()
+                    self.__create_backend_debug_info()
                 if self.__backend.is_available() :
                     self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
                 else:
@@ -274,6 +320,14 @@ Module codegen_backend_module(
         "] is not available. Execution of this Module is still possible by "
         "saving and loading on a device where the backend is available.");
   }
+
+  // stop debug info recording and get debug_info_map
+  auto debug_info_map = debug_info_recorder.stopRecording();
+  loweredModule.run_method("__create_backend_debug_info");
+  auto backend_debug_info = loweredModule.attr("__backend_debug_info")
+                                .toCustomClass<PyTorchBackendDebugInfo>();
+  backend_debug_info->setDebugInfoMap(std::move(debug_info_map));
+
   return loweredModule;
 }
 } // namespace detail

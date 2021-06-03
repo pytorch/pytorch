@@ -243,7 +243,7 @@ class TestActivations(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            fast_gelu=st.booleans(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_gelu(self, X, fast_gelu, gc, dc):
         op = core.CreateOperator(
             "Gelu",
