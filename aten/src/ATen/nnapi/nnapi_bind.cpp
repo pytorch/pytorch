@@ -191,6 +191,12 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
       operand->zeroPoint = t.q_zero_point();
       return;
     }
+    if (t.scalar_type() == c10::kInt) {
+      operand->type = ANEURALNETWORKS_TENSOR_INT32;
+      operand->scale = 0;
+      operand->zeroPoint = 0;
+      return;
+    }
     // TODO: Support more dtypes.
     CAFFE_THROW("Bad dtype");
   }
