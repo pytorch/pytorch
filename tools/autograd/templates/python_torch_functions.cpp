@@ -520,7 +520,7 @@ static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObj
     }
 
     TORCH_CHECK_VALUE(
-        offset + actual_count * elsize > len,
+        static_cast<size_t>(offset) + actual_count * elsize > len,
         "requested buffer length (", actual_count, " * ", elsize, " bytes) "
         "after offset (", offset, " bytes) must not be greater than actual "
         "buffer length (", len, " bytes)");
@@ -530,10 +530,9 @@ static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObj
 
     auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
                       .options(options)
-                      .deleter([obj = std::move(obj)](void*) mutable {
+                      .deleter([obj = obj.release()](void*) mutable {
                         pybind11::gil_scoped_acquire gil;
-                        Py_DECREF(obj.get());
-                        obj.release();
+                        Py_DECREF(obj);
                       })
                       .make_tensor();
     tensor.requires_grad_(requires_grad);
