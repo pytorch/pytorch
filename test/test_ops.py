@@ -79,7 +79,7 @@ class TestOpInfo(TestCase):
         def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
             if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
                 exact_dtype = False
-            
+
             if dtype in [torch.uint8, torch.int8, torch.bool]:
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype,
                                        exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
@@ -93,32 +93,28 @@ class TestOpInfo(TestCase):
 
         for sample_input in tensors:
             sample_args = sample_input.args
-            sample_kwargs = sample_input.kwargs 
-            t = sample_input.input 
-            print(t.device, dtype)
-            torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
+            sample_kwargs = sample_input.kwargs
+            sample_input = sample_input.input
+            torch_kwargs, numpy_kwargs = op.sample_kwargs(sample_input.device, dtype, sample_input)
+            numpy_args = []
             if dtype is torch.bfloat16:
-                if isinstance(*sample_args, torch.Tensor):
-                    numpy_args = [sample_arg.cpu().to(torch.float32).numpy() for sample_arg in sample_args]
-                else:
-                    numpy_args = sample_args
-                a = t.cpu().to(torch.float32).numpy()
+                for sample_arg in sample_args:
+                    numpy_arg = sample_arg.cpu().to(torch.float32).numpy() if isinstance(sample_arg, torch.Tensor) \
+                                    else sample_arg
+                    numpy_args.append(numpy_arg)
+                sample_numpy_input = sample_input.cpu().clone().to(torch.float32).numpy()
             else:
-                if isinstance(*sample_args, torch.Tensor):
-                    numpy_args = [sample_arg.cpu().numpy() for sample_arg in sample_args]
-                else:
-                    numpy_args = sample_args
-                a = t.cpu().numpy()
-            actual = op(t, *sample_args, **torch_kwargs)
-            # print("a: {}".format(a))
-            # print("t: {}".format(t))
-            # print(f"numpy_args: {numpy_args} , numpy_kwargs {numpy_kwargs}")
-            expected = op.ref(a, numpy_args, **numpy_kwargs)
+                for sample_arg in sample_args:
+                    numpy_arg = sample_arg.cpu().numpy() if isinstance(sample_arg, torch.Tensor) else sample_arg
+                    numpy_args.append(numpy_arg)
+                sample_numpy_input = sample_input.cpu().clone().numpy()
+            actual = op(sample_input, *sample_args, **torch_kwargs)
+            expected = op.ref(sample_numpy_input, *numpy_args, **numpy_kwargs)
 
-            if t.numel() < 10:
+            if sample_input.numel() < 10:
                 msg = ("Failed to produce expected results! Input tensor was"
                         " {0}, torch result is {1}, and reference result is"
-                        " {2}.").format(t, actual, expected)
+                        " {2}.").format(sample_input, actual, expected)
             else:
                 msg = None
 
