@@ -105,7 +105,7 @@ class TCPStore : public Store {
   detail::SocketAddress addr_;
   std::shared_ptr<detail::TCPServer> server_;
   std::unique_ptr<detail::TCPClient> client_;
-  std::unique_ptr<detail::TCPCallbackClient> callback_client_;
+  std::unique_ptr<detail::TCPCallbackClient> callbackClient_;
   c10::optional<std::size_t> numWorkers_;
 
   const std::string initKey_ = "init/";

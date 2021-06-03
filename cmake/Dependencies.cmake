@@ -1218,8 +1218,8 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
-    list(APPEND HIP_CXX_FLAGS -DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     list(APPEND HIP_CXX_FLAGS -std=c++14)
+    add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
        list(APPEND HIP_CXX_FLAGS -g2)
@@ -1462,7 +1462,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(NOT USE_SYSTEM_ONNX)
     include_directories(${ONNX_INCLUDE_DIRS})
     # In mobile build we care about code size, and so we need drop
-    # everything (e.g. checker, optimizer) in onnx but the pb definition.
+    # everything (e.g. checker) in onnx but the pb definition.
     if(ANDROID OR IOS)
       caffe2_interface_library(onnx_proto onnx_library)
     else()
