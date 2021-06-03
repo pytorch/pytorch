@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <c10d/ProcessGroupNCCL.hpp>
 
@@ -162,7 +163,7 @@ void syncStreams(
 std::string buildNcclUniqueIdStr(const ncclUniqueId& ncclID) {
   const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&ncclID);
   std::ostringstream oss;
-  for (size_t i = 0; i < NCCL_UNIQUE_ID_BYTES; i++) {
+  for(const auto i : c10::irange(NCCL_UNIQUE_ID_BYTES)) {
     oss << std::hex << static_cast<int>(bytes[i]);
   }
   return oss.str();
@@ -1696,7 +1697,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& /* unused */) {
   auto device = outputTensors[0].device();
-  for (size_t r = 0; r < outputTensors.size(); r++) {
+  for(const auto r : c10::irange(outputTensors.size())) {
     check_gpu_single_tensor(outputTensors[r]);
     check_gpu_single_tensor(inputTensors[r]);
     TORCH_CHECK(
