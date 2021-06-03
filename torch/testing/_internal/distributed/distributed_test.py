@@ -6609,7 +6609,7 @@ class DistributedTest:
                     ):
                         self.assertEqual(p, p_static)
 
-        def _test_ddp_bwd_with_retain_graph(self, static_graph):
+        def _test_ddp_bwd_with_retain_graph(self, static_graph, find_unused_parameters):
             # Test adapted from https://github.com/pytorch/pytorch/issues/47260.
             class ToyModel(nn.Module):
                 def __init__(self):
@@ -6625,7 +6625,8 @@ class DistributedTest:
             local_model = copy.deepcopy(model)
             ddp_model = torch.nn.parallel.DistributedDataParallel(
                 model,
-                device_ids=[torch.cuda.current_device()]
+                device_ids=[torch.cuda.current_device()],
+                find_unused_parameters=find_unused_parameters,
             )
             if static_graph:
                 ddp_model._set_static_graph()
@@ -6655,8 +6656,12 @@ class DistributedTest:
                     loss_fn(outputs_local[str(i)], labels).backward()
 
                 # All gather grads to compare them.
-                dist_grad_tensor = torch.cat([param.grad for param in ddp_model.module.parameters()])
-                local_grad_tensor = torch.cat([param.grad for param in local_model.parameters()])
+                dist_grad_tensor = torch.cat(
+                    [param.grad for param in ddp_model.module.parameters()]
+                )
+                local_grad_tensor = torch.cat(
+                    [param.grad for param in local_model.parameters()]
+                )
                 self.assertEqual(dist_grad_tensor, local_grad_tensor)
 
         @skip_if_lt_x_gpu(2)
@@ -6665,7 +6670,12 @@ class DistributedTest:
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
         def test_ddp_bwd_with_retain_graph(self):
-            self._test_ddp_bwd_with_retain_graph(static_graph=False)
+            self._test_ddp_bwd_with_retain_graph(
+                static_graph=False, find_unused_parameters=False
+            )
+            self._test_ddp_bwd_with_retain_graph(
+                static_graph=False, find_unused_parameters=True
+            )
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
@@ -6673,4 +6683,9 @@ class DistributedTest:
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
         def test_static_ddp_bwd_with_retain_graph(self):
-            self._test_ddp_bwd_with_retain_graph(static_graph=True)
+            self._test_ddp_bwd_with_retain_graph(
+                static_graph=True, find_unused_parameters=False
+            )
+            self._test_ddp_bwd_with_retain_graph(
+                static_graph=True, find_unused_parameters=True
+            )
