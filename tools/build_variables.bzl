@@ -256,6 +256,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/runtime/profiling_record.cpp",
     "torch/csrc/jit/runtime/script_profile.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
+    "torch/csrc/jit/runtime/symbolic_shape_registry.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
@@ -547,6 +548,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
+    "torch/csrc/utils/crash_handler.cpp",
 ]
 
 libtorch_python_cuda_core_sources = [
@@ -621,6 +623,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
+    "torch/csrc/jit/python/python_dict.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
     "torch/csrc/jit/python/python_ir.cpp",
     "torch/csrc/jit/python/python_tracer.cpp",
@@ -641,7 +644,6 @@ libtorch_python_core_sources = [
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
-    "torch/csrc/utils/crash_handler.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
     "torch/csrc/utils/python_dispatch.cpp",
@@ -661,7 +663,6 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/lib/c10d/comm.cpp",
     "torch/lib/c10d/default_comm_hooks.cpp",
-    "torch/lib/c10d/frontend.cpp",
     "torch/lib/c10d/reducer.cpp",
     "torch/lib/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
