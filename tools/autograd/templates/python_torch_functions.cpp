@@ -520,7 +520,7 @@ static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObj
     }
 
     TORCH_CHECK_VALUE(
-        static_cast<size_t>(offset) + actual_count * elsize > len,
+        static_cast<size_t>(offset) + actual_count * elsize <= len,
         "requested buffer length (", actual_count, " * ", elsize, " bytes) "
         "after offset (", offset, " bytes) must not be greater than actual "
         "buffer length (", len, " bytes)");
