@@ -150,7 +150,7 @@ class CollateIterDataPipe(MapIterDataPipe):
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
 
-@functional_datapipe('legacy_transforms')
+@functional_datapipe('transforms')
 class TransformsIterDataPipe(MapIterDataPipe):
     r""" :class:`TransformsIterDataPipe`.
 
