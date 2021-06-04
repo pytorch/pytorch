@@ -226,7 +226,7 @@ class TORCH_CUDA_CU_API DependencyCheck {
 
   // Returns all dependent exprs that exist between
   //  the provided vals
-  static std::unordered_set<Expr*> getAllExprsBetween(
+  static std::vector<Expr*> getAllExprsBetween(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of);
 

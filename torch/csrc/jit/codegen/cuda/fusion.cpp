@@ -344,6 +344,7 @@ void Fusion::print() {
   std::cout << "\n%kernel {\n";
   IrMathPrinter op_exprs(std::cout);
   op_exprs.handle(this);
+  std::cout << "\nTransformPrinter : \n";
   IrTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
   std::cout << "}\n\n";

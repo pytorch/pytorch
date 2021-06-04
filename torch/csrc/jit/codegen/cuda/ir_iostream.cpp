@@ -1,8 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 namespace torch {
@@ -368,6 +370,37 @@ void IrPrinter::handle(const Merge* m) {
   os_ << " -> ";
   handle(m->out());
   os_ << "\n";
+}
+
+void IrTransformPrinter::handle(Fusion* f) {
+  auto all_vals = f->usedMathVals();
+
+  for (auto tv : ir_utils::filterByType<TensorView>(all_vals)) {
+    IrPrinter::handle(tv);
+    os() << "\n";
+    printTransforms(tv);
+  }
+}
+
+void IrTransformPrinter::printTransforms(TensorView* tv) {
+  auto root_domain = tv->getMaybeRFactorDomain();
+  auto all_exp = DependencyCheck::getAllExprsBetween(
+      {root_domain.begin(), root_domain.end()},
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
+
+  os() << " root domain : (";
+  for (size_t root_idx = 0; root_idx < root_domain.size(); root_idx++) {
+    IrPrinter::handle(root_domain[root_idx]);
+    if (root_idx + 1 < root_domain.size()) {
+      os() << ",";
+    }
+  }
+  os() << ")\n";
+
+  for (auto exp : all_exp) {
+    os() << "    ";
+    IrPrinter::handle(exp);
+  }
 }
 
 std::ostream& operator<<(std::ostream& os, const Statement* stmt) {

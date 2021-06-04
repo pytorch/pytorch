@@ -375,9 +375,12 @@ struct Dependencies : public IterVisitor {
   //! Vals that are found between dependencies_ and of. Topologically
   //! ordered.
   std::vector<Val*> vals_;
+  //! Exprs that are found between dependencies_ and of. Topologically
+  //! ordered.
+  std::vector<Expr*> exprs_;
   //! A set version of vals_
   std::unordered_set<Val*> dependent_vals_;
-  //! Exprs found dependent on dependencies_
+  //! A set version of exprs_
   std::unordered_set<Expr*> dependent_exprs_;
 
  private:
@@ -419,7 +422,10 @@ struct Dependencies : public IterVisitor {
             expr->inputs().begin(), expr->inputs().end(), [&](Val* input_val) {
               return dependent_vals_.find(input_val) != dependent_vals_.end();
             })) {
-      dependent_exprs_.insert(expr);
+      if (!dependent_exprs_.count(expr)) {
+        exprs_.push_back(expr);
+        dependent_exprs_.insert(expr);
+      }
     }
   }
 
@@ -442,7 +448,7 @@ struct Dependencies : public IterVisitor {
     return deps.vals_;
   }
 
-  static std::unordered_set<Expr*> getAllExprs(
+  static std::vector<Expr*> getAllExprs(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of) {
     if (of.empty()) {
@@ -450,7 +456,7 @@ struct Dependencies : public IterVisitor {
     }
 
     Dependencies deps(dependencies, of);
-    return deps.dependent_exprs_;
+    return deps.exprs_;
   }
 };
 
@@ -661,7 +667,7 @@ std::vector<Val*> DependencyCheck::getAllValsBetween(
   return Dependencies::getAllVals(dependencies, of);
 }
 
-std::unordered_set<Expr*> DependencyCheck::getAllExprsBetween(
+std::vector<Expr*> DependencyCheck::getAllExprsBetween(
     const std::unordered_set<Val*>& dependencies,
     const std::vector<Val*>& of) {
   return Dependencies::getAllExprs(dependencies, of);

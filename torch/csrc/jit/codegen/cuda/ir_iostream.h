@@ -81,6 +81,11 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
     print_inline_ = prev;
   }
 
+ protected:
+  std::ostream& os() {
+    return os_;
+  }
+
  private:
   std::ostream& os_;
   bool print_inline_ = false;
