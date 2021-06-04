@@ -3,7 +3,6 @@ from typing import Tuple, Dict, Callable, Any
 import torch
 import torch.fx
 import torchvision.models as models
-import torch.fx.experimental.fx2trt.converter.vanilla_converter
 import torch.fx.passes.splitter_base as splitter_base
 import torch.fx.passes.operator_support as op_support
 import torch.fx.passes.net_min_base as net_min_base
