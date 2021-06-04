@@ -52,6 +52,8 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
 void Logger::set_env_variables() {
   ddp_logging_data_->strs_map["master_port"] = parse_env("MASTER_PORT");
   ddp_logging_data_->strs_map["master_addr"] = parse_env("MASTER_ADDR");
+  ddp_logging_data_->strs_map["torch_distributed_debug"] =
+      parse_env("TORCH_DISTRIBUTED_DEBUG");
   ddp_logging_data_->strs_map["cuda_visible_devices"] =
       parse_env("CUDA_VISIBLE_DEVICES");
   if (reducer_->process_group_->getBackendName() == "nccl") {
