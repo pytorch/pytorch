@@ -527,6 +527,16 @@ PyObject *THPVariable_get_requires_grad(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_retains_grad(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "retains_grad");
+  }
+  return PyBool_FromLong(THPVariable_Unpack(self).retains_grad());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_get_ndim(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -907,6 +917,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"grad_fn", (getter)THPVariable_get_grad_fn, nullptr, nullptr, nullptr},
   {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, nullptr, nullptr},
   {"is_leaf", (getter)THPVariable_is_leaf, nullptr, nullptr, nullptr},
+  {"retains_grad", (getter)THPVariable_retains_grad, nullptr, nullptr, nullptr},
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, nullptr, nullptr},
   {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // Allows the python class to override .grad
   {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr},

@@ -735,13 +735,13 @@ class TORCH_API Tensor {
   /// to `backward()` will accumulate (add) gradients into it.
   const Tensor& grad() const {
     const Tensor& maybe_grad = impl_->grad();
-    if (!is_leaf() && !_is_retain_grad() && !maybe_grad.defined()) {
+    if (!is_leaf() && !retains_grad() && !maybe_grad.defined()) {
       TORCH_WARN(
         "The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
-        "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
-        "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
-        "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
-        "github.com/pytorch/pytorch/pull/30531 for more informations.");
+        "attribute won't be populated during autograd.backward(). If you indeed want the .grad "
+        "field to be populated for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. "
+        "If you access the non-leaf Tensor by mistake, make sure you access the leaf Tensor "
+        "instead. See github.com/pytorch/pytorch/pull/30531 for more informations.");
     }
     return maybe_grad;
   }
@@ -900,7 +900,7 @@ public:
 
   void retain_grad() const;
 
-  bool _is_retain_grad() const;
+  bool retains_grad() const;
 
   void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
 

@@ -76,8 +76,8 @@ void Tensor::retain_grad() const {
   impl::GetVariableHooks()->retain_grad(*this);
 }
 
-bool Tensor::_is_retain_grad() const {
-  return impl::GetVariableHooks()->_is_retain_grad(*this);
+bool Tensor::retains_grad() const {
+  return impl::GetVariableHooks()->retains_grad(*this);
 }
 
 void Tensor::_backward(TensorList inputs,

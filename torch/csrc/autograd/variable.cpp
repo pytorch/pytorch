@@ -348,7 +348,7 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   Tensor data(const Tensor& self) const override;
   int64_t _version(const Tensor& self) const override;
   void retain_grad(const Tensor& self) const override;
-  bool _is_retain_grad(const Tensor& self) const override;
+  bool retains_grad(const Tensor& self) const override;
   void _backward(const Tensor& self, at::TensorList inputs,
     const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
     bool create_graph) const override;
@@ -466,8 +466,7 @@ void VariableHooks::retain_grad(const Tensor& self) const {
   impl::get_autograd_meta(self)->retains_grad_ = true;
 }
 
-// For now, used only to produce warning when .grad is accessed on non-leaf
-bool VariableHooks::_is_retain_grad(const Tensor& self) const {
+bool VariableHooks::retains_grad(const Tensor& self) const {
   if (impl::get_autograd_meta(self)) {
     return impl::get_autograd_meta(self)->retains_grad_;
   } else {

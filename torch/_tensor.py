@@ -356,33 +356,6 @@ class Tensor(torch._C._TensorBase):
     have forward mode AD gradients.
     """)
 
-    def retain_grad(self):
-        r"""Enables .grad attribute for non-leaf Tensors."""
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.retain_grad, (self,), self)
-        if not self.requires_grad:
-            raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
-        if self.is_leaf:  # no-op for leaves
-            return
-        if hasattr(self, 'retains_grad'):
-            return
-        weak_self = weakref.ref(self)
-
-        def retain_grad_hook(grad):
-            var = weak_self()
-            if var is None:
-                return
-            if var._grad is None:
-                if grad.is_sparse:
-                    var._grad = grad.clone()
-                else:
-                    var._grad = grad.clone(memory_format=torch.contiguous_format)
-            else:
-                var._grad = var._grad + grad
-
-        self.register_hook(retain_grad_hook)
-        self.retains_grad = True
-
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
 
