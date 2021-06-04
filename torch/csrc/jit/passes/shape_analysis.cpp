@@ -195,7 +195,7 @@ class ShapePropagator {
     if (schema.is_vararg()) {
       return c10::nullopt;
     }
-    for (size_t i = 0; i < args.size(); ++i) {
+    for (const auto i : c10::irange(args.size())) {
       if (args[i].type()->isSubtypeOf(ListType::ofTensors())) {
         return c10::nullopt;
       } else if (args[i].type()->isSubtypeOf(TensorType::get())) {
@@ -276,7 +276,7 @@ class ShapePropagator {
       ArrayRef<Value*> outputs) {
     AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
     bool changed = false;
-    for (size_t i = 0; i < lhs.size(); ++i) {
+    for (const auto i : c10::irange(lhs.size())) {
       auto old_output_type = outputs[i]->type();
       auto new_type =
           unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_any=*/true);
@@ -413,7 +413,7 @@ class ShapePropagator {
     op(&stack);
 
     AT_ASSERT(stack.size() == node->outputs().size());
-    for (size_t i = 0; i < stack.size(); ++i) {
+    for (const auto i : c10::irange(stack.size())) {
       // some ops may have mixed tensor/primitive outputs
       // for primitives, we don't need to change the type because it is already
       // its most constrained form.
@@ -456,7 +456,7 @@ class ShapePropagator {
         auto tp_sizes = tp->sizes().concrete_sizes().value();
         if (sizes.size() != tp_sizes.size())
           return false;
-        for (int64_t i = 0; i < ndim; ++i) {
+        for (const auto i : c10::irange(ndim)) {
           if (sizes[i] != tp_sizes[i] && i != dim) {
             return false;
           }
@@ -570,7 +570,7 @@ class ShapePropagator {
         // propagate loop-carried input types to block inputs
         auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
         auto loop_carried_block = body_block->inputs().slice(1); // skip trip
-        for (size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        for (const auto i : c10::irange(loop_carried_inputs.size())) {
           loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
         }
         auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
@@ -585,7 +585,7 @@ class ShapePropagator {
         // now that the types are stable, we can insert the expands
         PropagateShapeOnBlock(body_block, /*insert_expands=*/true);
 
-        for (size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        for (const auto i : c10::irange(loop_carried_inputs.size())) {
           node->outputs()[i]->setType(loop_carried_block[i]->type());
         }
         return;
@@ -1590,7 +1590,7 @@ class ShapePropagator {
         } else {
           auto outputs = node->outputs();
           AT_ASSERT(types.size() == outputs.size());
-          for (size_t i = 0; i < types.size(); ++i) {
+          for (const auto i : c10::irange(types.size())) {
             AT_ASSERT(outputs[i]->type()->isSubtypeOf(TensorType::get()));
             outputs[i]->setType(types[i]);
           }
@@ -2069,7 +2069,7 @@ class ShapePropagator {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t inferred_idx;
       int64_t size_product = 1;
-      for (size_t i = 0; i < sizes.size(); ++i) {
+      for (const auto i : c10::irange(sizes.size())) {
         if (sizes.get(i) == -1) {
           if (inferred)
             throw propagation_error();

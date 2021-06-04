@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
@@ -434,7 +435,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   std::vector<DstType> castValues(const Dtype& src_dtype, const Value& v) {
     const std::vector<SrcType>& src_values = v.as_vec<SrcType>();
     std::vector<DstType> dst_values(src_values.size());
-    for (int i = 0; i < src_dtype.lanes(); ++i) {
+    for (const auto i : c10::irange(src_dtype.lanes())) {
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       dst_values[i] = static_cast<DstType>(src_values[i]);
     }
@@ -485,7 +486,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   std::vector<DstType> bitcastValues(const Dtype& src_dtype, const Value& v) {
     const std::vector<SrcType>& src_values = v.as_vec<SrcType>();
     std::vector<DstType> dst_values(src_values.size());
-    for (int i = 0; i < src_dtype.lanes(); ++i) {
+    for (const auto i : c10::irange(src_dtype.lanes())) {
       dst_values[i] = raw_bitcast<DstType>(src_values[i]);
     }
     return dst_values;
@@ -542,7 +543,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       throw malformed_input("could not find var_node in For context", v);
     }
 
-    for (int i = start; i < stop; i++) {
+    for (const auto i : c10::irange(start, stop)) {
       eval_context_[var_node] = Value(i);
       if (v->body()) {
         v->body()->accept(this);
@@ -559,7 +560,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     int lanes = v->lanes();
 
     std::vector<int> values(lanes);
-    for (int i = 0; i < lanes; i++) {
+    for (const auto i : c10::irange(lanes)) {
       values[i] = base + i * stride;
     }
 
@@ -975,7 +976,7 @@ SimpleIREvaluator::~SimpleIREvaluator() = default;
 
 void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   std::vector<void*> raw_args(args.size());
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     auto const& bufferArg = buffer_args()[i];
     auto const& callArg = args[i];
     raw_args[i] = argToPtr(bufferArg, callArg);

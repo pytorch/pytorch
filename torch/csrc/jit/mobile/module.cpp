@@ -7,6 +7,7 @@
 #include <exception>
 
 #include <ATen/record_function.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -76,7 +77,7 @@ void slot_named_params_recurse(
     const std::string& parent_name) {
   auto slots = obj->slots();
   size_t nslots = slots.size();
-  for (size_t i = 0; i < nslots; ++i) {
+  for (const auto i : c10::irange(nslots)) {
     auto slot = slots[i];
     std::string name =
         parent_name.size() == 0 ? parent_name : parent_name + ".";

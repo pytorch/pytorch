@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
@@ -99,7 +100,7 @@ class TORCH_API LoopNest {
   // This corresponds to the conditional format that is generated to handle
   // `aten::cat` op.
   //
-  //   for (int i = 0; i < 20; i++) {
+  //   for (const auto i : c10::irange(20)) {
   //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
   //   }
   //
@@ -119,17 +120,17 @@ class TORCH_API LoopNest {
   // added after the given loop.
   //
   // For example, consider the following code:
-  //   for (int i = 0; i < 100; ++i) {
+  //   for (const auto i : c10::irange(100)) {
   //     A[i] =
   //   }
   //
   // splitWithTail(i, 8, ...) will result in:
-  //   for (int i_outer = 0; i_outer < 12; ++i_outer) {
-  //     for (int i_inner = 0; i_inner < 8; ++i_inner) {
+  //   for (const auto i_outer : c10::irange(12)) {
+  //     for (const auto i_inner : c10::irange(8)) {
   //       A[i_outer * 8 + i_inner] =
   //     }
   //   }
-  //   for (int i_tail = 0; i_tail < 4; ++i_tail) {
+  //   for (const auto i_tail : c10::irange(4)) {
   //     A[i_tail + 96] =
   //   }
   //
@@ -148,13 +149,13 @@ class TORCH_API LoopNest {
   // iterations appropriately.
   //
   // For example, consider the following code:
-  //   for (int i = 0; i < 100; ++i) {
+  //   for (const auto i : c10::irange(100)) {
   //     A[i] =
   //   }
   //
   // splitWithMask(i, 8, ...) will result in:
-  //   for (int i_outer = 0; i_outer < 13; ++i_outer) {
-  //     for (int i_inner = 0; i_inner < 8; ++i_inner) {
+  //   for (const auto i_outer : c10::irange(13)) {
+  //     for (const auto i_inner : c10::irange(8)) {
   //       if (i_outer * 8 + i_inner < 100) {
   //         A[i_outer * 8 + i_inner] =
   //       }
@@ -308,11 +309,11 @@ class TORCH_API LoopNest {
   // Compresses the given buffer based on its use in the given Stmts.
   // For example, given the input:
   //
-  // for (int i = 0; i < 100; ++i) {
-  //   for (int j = 0; j < 200; ++j) {
+  // for (const auto i : c10::irange(100)) {
+  //   for (const auto j : c10::irange(200)) {
   //     A[i,j] = sin(i*j)
   //   }
-  //   for (int j = 0; j < 199; ++j) {
+  //   for (const auto j : c10::irange(199)) {
   //     B[i,j] = A[i,j] + A[i, j+1]
   //   }
   // }
@@ -320,11 +321,11 @@ class TORCH_API LoopNest {
   // compressBuffer(A, ...) will compress buffer A from
   // [100, 200] to [1, 200] and modify the code as follows:
   //
-  // for (int i = 0; i < 100; ++i) {
-  //   for (int j = 0; j < 200; ++j) {
+  // for (const auto i : c10::irange(100)) {
+  //   for (const auto j : c10::irange(200)) {
   //     A[0,j] = sin(i*j)
   //   }
-  //   for (int j = 0; j < 199; ++j) {
+  //   for (const auto j : c10::irange(199)) {
   //     B[i,j] = A[0,j] + A[0, j+1]
   //   }
   // }

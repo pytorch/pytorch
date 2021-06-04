@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -183,7 +184,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   size_t min_index_dim = dim_index_map.size();
   size_t max_index_dim = 0;
   size_t tensor_ind_count = 0;
-  for (size_t i = 0; i < dim_index_map.size(); ++i) {
+  for (const auto i : c10::irange(dim_index_map.size())) {
     auto index_i = dim_index_map.find(i);
     AT_ASSERT(index_i != dim_index_map.end());
     if (index_i->second.orig_node_kind == aten::index) {
@@ -203,7 +204,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
 
   size_t tensor_ind_offset = tensor_ind_count == 0 ? 0 : tensor_ind_count - 1;
   WithInsertPoint guard(index_put_node);
-  for (size_t i = 0; i < dim_index_map.size(); ++i) {
+  for (const auto i : c10::irange(dim_index_map.size())) {
     size_t ind_size = 0;
     auto index_i = dim_index_map.find(i);
     AT_ASSERT(index_i != dim_index_map.end());

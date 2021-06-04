@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -88,7 +89,7 @@ static c10::optional<c10::ScalarType> PromoteScalarTypes(
     return c10::nullopt;
   }
   auto st = types[0];
-  for (size_t i = 1; i < types.size(); ++i) {
+  for (const auto i : c10::irange(1, types.size())) {
     st = c10::promoteTypes(st, types[i]);
   }
   return st;

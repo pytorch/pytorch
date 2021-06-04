@@ -175,7 +175,7 @@ RegisterOperators reg(
                  "Output annotation list dimension and runtime tensor dimension must match for tolist()");
 
              // Wrap out_ty in a ListType dim times.
-             for (int i = 0; i < dim_val; ++i) {
+             for (const auto i : c10::irange(dim_val)) {
                out_ty = ListType::create(out_ty);
              }
 
@@ -1884,7 +1884,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
         std::stringstream ss;
         ss << string;
-        for (auto i = 0; i < to_append; ++i) {
+        for (const auto i : c10::irange(to_append)) {
           ss << fillchar;
         }
 
@@ -1903,7 +1903,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
             std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
         std::stringstream ss;
-        for (auto i = 0; i < to_append; ++i) {
+        for (const auto i : c10::irange(to_append)) {
           ss << fillchar;
         }
         ss << string;
@@ -1917,7 +1917,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
             std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
         std::stringstream ss;
-        for (auto i = 0; i < to_append; ++i) {
+        for (const auto i : c10::irange(to_append)) {
           ss << '0';
         }
         ss << string;
@@ -2056,7 +2056,7 @@ RegisterOperators reg1(
            pop(stack, n);
            c10::List<int64_t> elems;
            elems.reserve(n);
-           for (int i = 0; i < n; i++) {
+           for (const auto i : c10::irange(n)) {
              elems.push_back(i);
            }
            push(stack, std::move(elems));
@@ -2251,7 +2251,7 @@ RegisterOperators reg1(
            auto num_inputs = pop(stack).toInt();
            std::vector<int64_t> size;
            size.reserve(8);
-           for (auto i = 0; i < num_inputs; ++i) {
+           for (const auto i : c10::irange(num_inputs)) {
              size =
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
@@ -2288,7 +2288,7 @@ RegisterOperators reg1(
            auto sizes_tensor = torch::empty(
                {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
            auto accessor = sizes_tensor.accessor<int64_t, 1>();
-           for (size_t i = 0; i < sizes.size(); ++i) {
+           for (const auto i : c10::irange(sizes.size())) {
              accessor[i] = sizes[i];
            }
            stack->emplace_back(sizes_tensor);
@@ -2760,7 +2760,7 @@ RegisterOperators reg2({
           pop(stack, t);
           c10::List<int64_t> elems;
           elems.reserve(t.size(0));
-          for (int i = 0; i < t.size(0); i++) {
+          for (const auto i : c10::irange(t.size(0))) {
             elems.push_back(*t[i].data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
@@ -2772,7 +2772,7 @@ RegisterOperators reg2({
           c10::List<int64_t> l = pop(stack).toIntList();
           auto t = torch::empty(
               {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
-          for (size_t i = 0; i < l.size(); i++) {
+          for (const auto i : c10::irange(l.size())) {
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
@@ -2805,7 +2805,7 @@ RegisterOperators reg2({
         [](Stack* stack) {
           c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
           c10::complex<double> sum = 0.0;
-          for (int i = 0; i < l.size(); i++) {
+          for (const auto i : c10::irange(l.size())) {
             sum = sum + l.extract(i);
           }
           push(stack, sum);

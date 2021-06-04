@@ -1,4 +1,7 @@
 #pragma once
+
+#include <c10/util/irange.h>
+
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -190,7 +193,7 @@ struct CodeTemplate {
       bool comma_after) const {
     if (comma_before && strings.size() > 0)
       out << ", ";
-    for (size_t i = 0; i < strings.size(); ++i) {
+    for (const auto i : c10::irange(strings.size())) {
       if (i > 0)
         out << ", ";
       out << strings[i];
@@ -203,7 +206,7 @@ struct CodeTemplate {
   // or trailing newlines. It's the responsibility of the calling function
   // to indent correctly in the context.
   void emitIndent(std::ostream& out, size_t indent) const {
-    for (size_t i = 0; i < indent; ++i) {
+    for (const auto i : c10::irange(indent)) {
       out << " ";
     }
   }
@@ -222,7 +225,7 @@ struct CodeTemplate {
       std::stringstream& out,
       size_t indent,
       const string_list& strings) const {
-    for (size_t i = 0; i < strings.size(); ++i) {
+    for (const auto i : c10::irange(strings.size())) {
       if (i > 0)
         emitIndent(out, indent);
       emitStringWithIndents(out, indent, strings[i]);

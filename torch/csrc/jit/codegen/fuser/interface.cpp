@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
 #include <c10/util/Flags.h>
+#include <c10/util/irange.h>
 #include <stdexcept>
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -62,10 +63,10 @@ std::vector<at::Tensor> debugLaunchGraph(
   Node* fusion_group = wrapper_graph->insertNode(
       wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
-  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+  for (const auto i : c10::irange(graph.inputs().size())) {
     fusion_group->addInput(wrapper_graph->addInput());
   }
-  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+  for (const auto i : c10::irange(graph.outputs().size())) {
     wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 
@@ -84,10 +85,10 @@ std::string debugGetFusedKernelCode(
   Node* fusion_group = wrapper_graph->insertNode(
       wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
-  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+  for (const auto i : c10::irange(graph.inputs().size())) {
     fusion_group->addInput(wrapper_graph->addInput());
   }
-  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+  for (const auto i : c10::irange(graph.outputs().size())) {
     wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 

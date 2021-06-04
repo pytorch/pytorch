@@ -165,7 +165,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   }
 
   // Remove sequence outputs, and replace with scan outputs.
-  for (size_t i = 0; i < idx_to_remove.size(); ++i) {
+  for (const auto i : c10::irange(idx_to_remove.size())) {
     size_t idx = idx_to_remove[i] - i;
 
     sub_block->eraseInput(idx);
@@ -359,7 +359,7 @@ void ONNXFixupUninitializedOutput(Node* node) {
       std::vector<::c10::ShapeSymbol> dims;
       if (then_shape.rank() && else_shape.rank() &&
           then_shape.rank() == else_shape.rank()) {
-        for (size_t j = 0; j < then_shape.rank().value(); ++j) {
+        for (const auto j : c10::irange(then_shape.rank().value())) {
           if (then_shape[j] == else_shape[j]) {
             dims.emplace_back(then_shape[j]);
           } else {

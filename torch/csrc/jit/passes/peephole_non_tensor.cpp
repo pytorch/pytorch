@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/peephole.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 
@@ -45,7 +46,7 @@ struct PeepholeOptimizeNonTensorImpl {
         IfView n(node);
         // this handles redundant short circuits like "x and True" or "x or
         // False"
-        for (size_t i = 0; i < n.outputs().size(); ++i) {
+        for (const auto i : c10::irange(n.outputs().size())) {
           if (n.outputs().at(i)->type() != BoolType::get()) {
             continue;
           }

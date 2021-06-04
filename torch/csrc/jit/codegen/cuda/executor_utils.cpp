@@ -182,7 +182,7 @@ void validateKernelInputs(
 
   std::stringstream msg;
   bool mismatch = false;
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     const IValue& arg = inputs[i];
     const Val* param = fusion->inputs()[i];
     mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
@@ -207,7 +207,7 @@ void validateKernelOutputs(
 
   std::stringstream msg;
   bool mismatch = false;
-  for (size_t i = 0; i < outputs.size(); ++i) {
+  for (const auto i : c10::irange(outputs.size())) {
     const at::Tensor& arg = outputs[i];
     const Val* param = fusion->outputs()[i];
     mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;

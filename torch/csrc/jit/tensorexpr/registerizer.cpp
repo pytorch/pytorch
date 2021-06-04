@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
 namespace torch {
@@ -74,7 +75,7 @@ bool AccessInfo::overlaps(const std::shared_ptr<AccessInfo>& other) {
   // They don't overlap if there is a guaranteed difference in any
   // dimension.
   bool overlap = true;
-  for (size_t i = 0; i < indices_.size(); ++i) {
+  for (const auto i : c10::irange(indices_.size())) {
     const Expr* diff = new Sub(indices_[i], other_indices[i]);
     diff = IRSimplifier::simplify(diff);
 

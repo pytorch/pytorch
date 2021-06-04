@@ -259,7 +259,7 @@ void NodeToONNX(
     const ParamMap empty_params_dict = {};
     auto opset_version =
         py::cast<int>(onnx_symbolic.attr("_export_onnx_opset_version"));
-    for (size_t i = 0; i < num_old_outputs; ++i) {
+    for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
         // Allow symbolic() to skip specifying the type of the return node.

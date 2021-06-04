@@ -3,6 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -237,7 +238,7 @@ struct CompleteArgumentSpec {
       : hash_code(0), ninputs(inputs.size()) {
     int32_t all_dims = 0;
     const int32_t num_inputs = inputs.size();
-    for (int32_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       if (!inputs[i].isTensor())
         continue;
       auto& tensor = inputs[i].toTensor();
@@ -250,7 +251,7 @@ struct CompleteArgumentSpec {
     auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t* next_dim = sizes_strides();
     int32_t total_dims = 0;
-    for (int32_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       auto& pod = pods[i];
       pod.is_tensor = static_cast<uint32_t>(inputs[i].isTensor());
       if (pod.is_tensor) {
@@ -400,13 +401,13 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
   out << "{";
-  for (size_t i = 0; i < spec.numTensors(); ++i) {
+  for (const auto i : c10::irange(spec.numTensors())) {
     if (i > 0)
       out << ", ";
     out << spec.tensorAt(i);
   }
   out << "; ";
-  for (size_t i = 0; i < spec.numOptionals(); ++i) {
+  for (const auto i : c10::irange(spec.numOptionals())) {
     if (i > 0)
       out << ", ";
     out << spec.isPresent(i);
@@ -431,7 +432,7 @@ inline std::ostream& operator<<(
     std::ostream& out,
     const CompleteArgumentSpec& spec) {
   out << "{";
-  for (size_t i = 0; i < spec.size(); ++i) {
+  for (const auto i : c10::irange(spec.size())) {
     if (i > 0)
       out << ", ";
     out << spec.at(i);

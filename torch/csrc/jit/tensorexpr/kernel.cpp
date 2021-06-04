@@ -268,7 +268,7 @@ void annotateInputShapes(
     const std::shared_ptr<Graph>& graph,
     const std::vector<c10::optional<at::Tensor>>& example_inputs) {
   TORCH_INTERNAL_ASSERT(graph->inputs().size() == example_inputs.size());
-  for (size_t idx = 0; idx < example_inputs.size(); idx++) {
+  for (const auto idx : c10::irange(example_inputs.size())) {
     if (auto t = example_inputs[idx]) {
       auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
       graph->inputs().at(idx)->setType(concrete_tensor_type);
@@ -353,7 +353,7 @@ ExprHandle TensorExprKernel::chunk(
   size_t step = sizes[norm_dim] / chunks;
 
   std::vector<ExprHandle> indices;
-  for (size_t i = 0; i < axes.size(); ++i) {
+  for (const auto i : c10::irange(axes.size())) {
     if (i == norm_dim) {
       indices.push_back(axes[i] + IntImm::make((int)chunkIdx * (int)step));
     } else {
@@ -1123,7 +1123,7 @@ Tensor* computeCatWoConditionals(
     std::vector<Var*> for_vars(dims.size());
     std::vector<const Expr*> load_indices(dims.size());
     std::vector<const Expr*> store_indices(dims.size());
-    for (size_t i = 0; i < dims.size(); ++i) {
+    for (const auto i : c10::irange(dims.size())) {
       for_vars[i] = new Var(
           "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i), kInt);
       load_indices[i] = for_vars[i];
@@ -1145,7 +1145,7 @@ Tensor* computeCatWoConditionals(
 
   Expr* concat_dim_size = nullptr;
   auto block = new tensorexpr::Block({});
-  for (size_t i = 0; i < non_empty_inputs.size(); ++i) {
+  for (const auto i : c10::irange(non_empty_inputs.size())) {
     auto input_dims =
         ExprVectorToExprHandleVector(non_empty_inputs[i].node()->dims());
     if (concat_dim_size == nullptr) {
@@ -1205,7 +1205,7 @@ Tensor* computeCat(
                 ->value();
         newAxes[dim] = newAxes[dim] - IntImm::make(offset);
 
-        for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
+        for (const auto ii : c10::irange(1, nonEmptyInputs.size())) {
           auto input = nonEmptyInputs[ii];
           load = ifThenElse(
               CompareSelect::make(axes[dim], IntImm::make(offset), kLT),
@@ -1226,7 +1226,7 @@ std::vector<VarHandle> squeezeIndices(
     const ParameterList& indices,
     const std::vector<size_t>& axes) {
   std::vector<VarHandle> indices_squeezed;
-  for (size_t dim = 0; dim < indices.size(); ++dim) {
+  for (const auto dim : c10::irange(indices.size())) {
     if (!std::count(axes.begin(), axes.end(), dim)) {
       indices_squeezed.push_back(indices[dim]);
     }
@@ -1277,7 +1277,7 @@ Tensor* computeSoftmax(
   size_t softmax_dim =
       normalizeAndCheckIndex(c10::get<int64_t>(inputs[1]), rank);
   std::vector<DimArg> non_softmax_dims;
-  for (size_t i = 0; i < output_dims.size(); ++i) {
+  for (const auto i : c10::irange(output_dims.size())) {
     if (i != softmax_dim) {
       non_softmax_dims.push_back(output_dims[i]);
     }
@@ -1305,7 +1305,7 @@ Tensor* computeSoftmax(
   // Remove the index corresponding to the softmax dimension.
   auto remove_softmax_dim_index = [&](const ParameterList& indices) {
     std::vector<ExprHandle> new_indices;
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       if (i != softmax_dim) {
         new_indices.push_back(indices[i]);
       }
@@ -1315,7 +1315,7 @@ Tensor* computeSoftmax(
 
   auto convert_indices_to_expr_handle = [&](const ParameterList& indices) {
     std::vector<ExprHandle> new_indices(indices.size());
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       new_indices[i] = indices[i];
     }
     return new_indices;
@@ -1414,7 +1414,7 @@ Tensor* computeSum(
   std::vector<DimArg> outputDims;
   // Output dimensions are the complement of axes. When keepdim is set, a
   // one-sized dimension is inserted for each axis.
-  for (size_t dim = 0; dim < sizes.size(); ++dim) {
+  for (const auto dim : c10::irange(sizes.size())) {
     if (!std::count(axes.begin(), axes.end(), dim)) {
       outputDims.emplace_back(sizes[dim]);
     } else if (keepdim) {
@@ -2571,14 +2571,14 @@ Tensor* tensorexpr::computeOperandValue(
             */
             ExprHandle cur_stride = 1;
             std::vector<const Expr*> dims, indices;
-            for (size_t idx = 0; idx < view_dims.size(); idx++) {
+            for (const auto idx : c10::irange(view_dims.size())) {
               dims.push_back(new IntImm(view_dims[idx]));
               indices.push_back(axes[idx].node());
             }
             ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
             std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
             ExprHandle stride = IntImm::make(1);
-            for (size_t idx = 0; idx < A.ndim(); idx++) {
+            for (const auto idx : c10::irange(A.ndim())) {
               size_t dim_idx = A.ndim() - idx - 1;
               // We don't need to generate mod-div for the first dimension -
               // ideally IRSimlifier would get rid of that for us, but for now
@@ -3005,7 +3005,7 @@ static bool isValidIdentifierChar(char c, size_t pos) {
 // replaces all invalid characters with underscore
 std::string sanitizeName(const std::string& input_name) {
   std::stringstream sanitized_name;
-  for (size_t i = 0; i < input_name.size(); ++i) {
+  for (const auto i : c10::irange(input_name.size())) {
     if (isValidIdentifierChar(input_name[i], i)) {
       sanitized_name << input_name[i];
     } else {
@@ -3061,7 +3061,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
           inputTensorDims,
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
-            for (size_t i = 0; i < axes.size(); i++) {
+            for (const auto i : c10::irange(axes.size())) {
               idx = idx + axes[i] * IntImm::make(*strides[i]);
             }
             return inBuffer.load(idx);
@@ -3168,7 +3168,7 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
       "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
         auto absolute_position = IntImm::make(0);
-        for (size_t i = 0; i < axes.size(); ++i) {
+        for (const auto i : c10::irange(axes.size())) {
           absolute_position =
               absolute_position + (IntImm::make(default_strides[i]) * axes[i]);
         }
