@@ -264,7 +264,7 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& value) {
   });
 }
 
-void shrink_backward_kernel(TensorIterator& iter, const Scalar& value) {
+void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& value) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "shrink_backward_cuda", [&]() {
     auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
