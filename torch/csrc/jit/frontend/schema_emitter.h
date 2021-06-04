@@ -27,6 +27,13 @@ std::pair<size_t, MatchedSchema> matchSchemasAndPrepareGraph(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt);
 
+Value* tryConvertToTypeAndPrepareGraph(
+    const SourceRange& loc,
+    Graph& graph,
+    const TypePtr& concrete_type,
+    Value* value,
+    bool allow_conversions);
+
 Value* emitBuiltinNode(
     const MatchedSchema& matched_schema,
     const SourceRange& loc,

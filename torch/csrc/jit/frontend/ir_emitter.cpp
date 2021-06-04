@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/schema_emitter.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
@@ -42,6 +43,7 @@
 namespace torch {
 namespace jit {
 
+
 /* ============================================================ */
 /*                    Internal Utility Methods                  */
 /*      (These utility methods use some internal attribute      */
@@ -64,6 +66,7 @@ void to_ir::checkBreakContinue(
            "unrolled loops, we do not support break or continue inside the body of these loops";
   }
 }
+
 
 /* ============================================================ */
 /*                IR Generation Utility Methods                */
@@ -117,6 +120,7 @@ std::vector<NamedValue> to_ir::emitAttributes(
   });
 }
 
+
 /* ========================================= */
 /*              `Value` Getters              */
 /* ========================================= */
@@ -156,6 +160,7 @@ std::vector<Value*> to_ir::getValues(
   return getValues(trees.tree()->trees(), maybe_unpack);
 }
 
+
 /* =================================================== */
 /*            Environment Stack Manipulation           */
 /* =================================================== */
@@ -175,6 +180,7 @@ std::shared_ptr<Environment> to_ir::popFrame(bool ends_def) {
   }
   return old_frame;
 }
+
 
 /* ====================================== */
 /*               IR Emission              */
@@ -408,7 +414,7 @@ void to_ir::emitReturn(const Return& stmt) {
     // cause a None to be converted to a tensor.
     if (!(result_type->isSubtypeOf(TensorType::get()) &&
           result->type()->isSubtypeOf(NoneType::get()))) {
-      result = tryConvertToType(
+      result = tryConvertToTypeAndPrepareGraph(
           stmt.range(),
           *graph,
           result_type,
@@ -1818,7 +1824,7 @@ void to_ir::emitSelectAssign(const Assign& stmt) {
     throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
   }
 
-  TypePtr type_hint;
+  TypePtr type_hint = nullptr;
   if (stmt.type().present()) {
     type_hint = typeParser_.parseTypeFromExpr(stmt.type().get());
   }
@@ -1877,7 +1883,7 @@ std::shared_ptr<SugaredValue> to_ir::emitApplySpecialForm(
     case prim::annotate: {
       checkApplyNumInputs(apply, 2);
       TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
-      Value* expr = tryConvertToType(
+      Value* expr = tryConvertToTypeAndPrepareGraph(
           apply.range(),
           *graph,
           type,
@@ -3008,7 +3014,7 @@ std::pair<Value*, std::vector<Value*>> to_ir::emitIntAndSliceIndexing(
     }
     rdim = handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
   }
-  for (size_t i = 0; i < exprs.size(); i++) {
+  for (const auto i : c10::irange(exprs.size())) {
     if (!exprs[i].has_value()) {
       if (subscript_exprs[i].kind() == TK_SLICE_EXPR) {
         sliceable = emitSlice(
@@ -3279,6 +3285,7 @@ std::shared_ptr<SugaredValue> to_ir::emitSubscript(
     }
   }
 }
+
 
 } // namespace jit
 } // namespace torch

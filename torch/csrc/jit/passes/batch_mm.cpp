@@ -474,7 +474,7 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   AliasDb alias_db(graph);
   BatchMMTreeReduce(graph->block());
   BatchMMSide(graph->block(), alias_db);
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
   // It's possible that transpose rearrangements have created sequences of
   // consecutive transposes that didn't exist before.
 

@@ -1042,7 +1042,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
 
     AliasDb db(graph);
     MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
-    EliminateDeadCode(graph);
+    eliminateDeadCode(graph);
     GRAPH_DUMP("After convert frozen ops to mkldnn", graph);
   } else {
     GRAPH_DUMP("No mkldnn compatible frozen nodes", graph);

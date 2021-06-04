@@ -1,9 +1,31 @@
 #include <torch/csrc/jit/frontend/schema_emitter.h>
 
+#include <torch/csrc/jit/frontend/builtin_functions.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+
 #include <torch/csrc/jit/ir/named_value.h>
 
 namespace torch {
 namespace jit {
+
+// pack outputs of a function following python rules. If there is a single value
+// return a SimpleValue, otherwise pack all the values into a Tuple.
+static Value* packOutputs(
+    Graph& g,
+    at::ArrayRef<Value*> values,
+    c10::OptNameList field_names) {
+  if (values.size() == 1) {
+    return values[0];
+  }
+  std::shared_ptr<FunctionSchema> schema;
+  TupleTypePtr named_tuple = nullptr;
+  if (field_names) {
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    named_tuple =
+        TupleType::createNamed(c10::nullopt, field_names.value(), types);
+  }
+  return g.insertNode(g.createTuple(values, named_tuple))->output();
+}
 
 MatchedSchema matchSchemaAndPrepareGraph(
     const FunctionSchema& schema,
@@ -13,7 +35,7 @@ MatchedSchema matchSchemaAndPrepareGraph(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self) {
   auto matched = matchSchema(schema, loc, graph, args, kwargs, self);
-  insertGraph(graph, matched.additions, matched.inputs);
+  insertGraph(graph, *matched.additions, matched.inputs);
   return matched;
 }
 
@@ -25,13 +47,25 @@ std::pair<size_t, MatchedSchema> matchSchemasAndPrepareGraph(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self) {
   auto match_pair = matchSchemas(schemas, loc, graph, args, kwargs, self);
-  insertGraph(graph, match_pair.second.additions, match_pair.second.inputs);
+  insertGraph(graph, *match_pair.second.additions, match_pair.second.inputs);
   return match_pair;
 }
 
+Value* tryConvertToTypeAndPrepareGraph(
+    const SourceRange& loc,
+    Graph& graph,
+    const TypePtr& concrete_type,
+    Value* value,
+    bool allow_conversions) {
+      auto tmp = std::shared_ptr<Graph>(new Graph());
+      Value* res = tryConvertToType(loc, graph, tmp, concrete_type, value, allow_conversions);
+      insertGraph(graph, *tmp, tmp->inputs());
+      return res;
+    }
+
 // Given a successful match between operator schema and symbol, emit a node
 // with the appropriate inputs and outputs.
-static Value* emitBuiltinNode(
+Value* emitBuiltinNode(
     const MatchedSchema& matched_schema,
     const SourceRange& loc,
     Graph& graph,
@@ -93,7 +127,7 @@ Value* emitBuiltinCall(
     throw error;
   }
 
-  auto matched = matchSchemasAndPrepareGraphForEmission(
+  auto matched = matchSchemasAndPrepareGraph(
       schemas, loc, graph, args, kwargs, self);
 
   if (matched.first < variants.size()) {
@@ -104,6 +138,7 @@ Value* emitBuiltinCall(
     // wrappers and are not useful for keeping around to debug
     return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
   }
+}
 
 } // namespace jit
 } // namespace torch

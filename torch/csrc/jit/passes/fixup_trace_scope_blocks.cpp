@@ -370,7 +370,7 @@ void lambdaLiftBlocksAndConvertToGraph(Block* b) {
         }
         return remaps[v];
       });
-      LintGraph(graph);
+      lintGraph(graph);
       n->g_(attr::Subgraph, graph);
       n->eraseBlock(0);
     }
@@ -497,8 +497,8 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
       }
       convertTracedForksToRealForks(subgraph);
       lowerSimpleTuples(subgraph);
-      EliminateDeadCode(subgraph);
-      LintGraph(subgraph);
+      eliminateDeadCode(subgraph);
+      lintGraph(subgraph);
     }
   }
   if (getInlineEverythingMode()) {
@@ -506,8 +506,8 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   }
   convertTracedForksToRealForks(g);
   lowerSimpleTuples(g);
-  EliminateDeadCode(g);
-  LintGraph(g);
+  eliminateDeadCode(g);
+  lintGraph(g);
 }
 
 void runCleanupPasses(Module* m) {
@@ -522,7 +522,7 @@ void runCleanupPasses(Module* m) {
 
 } // namespace
 
-void FixupTraceScopeBlocks(std::shared_ptr<Graph>& graph, Module* self) {
+void fixUpTraceScopeBlocks(std::shared_ptr<Graph>& graph, Module* self) {
   if (self) {
     ConvertTracedAttrReferences().run(graph);
   } else {

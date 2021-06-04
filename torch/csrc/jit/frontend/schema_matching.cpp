@@ -63,7 +63,7 @@ Value* tryConvertToType(
     if (value->type()->kind() != OptionalType::Kind &&
         !value->type()->isSubtypeOf(NoneType::get())) {
       return tryConvertToType(
-          loc, graph, op->getElementType(), value, allow_conversions);
+          loc, graph, additions, op->getElementType(), value, allow_conversions);
     }
   }
 
@@ -88,6 +88,7 @@ Value* tryConvertToType(
           converted.emplace_back(tryConvertToType(
               loc,
               graph,
+              additions,
               concrete_tuple->elements().at(i),
               unpacked.at(i),
               allow_conversions));
@@ -186,7 +187,7 @@ static Value* tryMatchArgument(
 
   // Check if the value can be matched to the arg through any implicit
   // conversions
-  value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
+  value = tryConvertToType(loc, graph, additions, concrete_type, value, allow_conversions);
   std::stringstream ss;
   if (!value->type()->isSubtypeOfExt(
           concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
@@ -575,24 +576,6 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   throw ErrorReport(loc) << failure_messages.str();
 }
 
-// pack outputs of a function following python rules. If there is a single value
-// return a SimpleValue, otherwise pack all the values into a Tuple.
-static Value* packOutputs(
-    Graph& g,
-    at::ArrayRef<Value*> values,
-    c10::OptNameList field_names) {
-  if (values.size() == 1) {
-    return values[0];
-  }
-  std::shared_ptr<FunctionSchema> schema;
-  TupleTypePtr named_tuple = nullptr;
-  if (field_names) {
-    auto types = fmap(values, [](Value* v) { return v->type(); });
-    named_tuple =
-        TupleType::createNamed(c10::nullopt, field_names.value(), types);
-  }
-  return g.insertNode(g.createTuple(values, named_tuple))->output();
-}
 
 } // namespace jit
 } // namespace torch

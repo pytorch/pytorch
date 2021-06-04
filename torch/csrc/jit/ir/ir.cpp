@@ -621,7 +621,7 @@ void Graph::pop_scope() {
   }
 }
 
-void LintGraph(const std::shared_ptr<Graph>& graph) {
+void lintGraph(const std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 

@@ -118,7 +118,7 @@ void validateGraph(
   validateBlock(graph->block(), operator_export_type);
   // this is run on an onnx graph which doesn't have side effects.
   // ignore side effects in dead code elimination.
-  EliminateDeadCode(
+  eliminateDeadCode(
       graph->block(),
       true,
       DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
