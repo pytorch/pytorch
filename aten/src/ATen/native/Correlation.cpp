@@ -46,8 +46,7 @@ Tensor cov(
         " != ",
         num_observations);
     TORCH_CHECK(
-        !(w.is_cpu() && w.lt(0).any().item<bool>()),
-        "cov(): fweights cannot be negative");
+        w.min().item<long>() != 0, "cov(): fweights cannot be negative");
   }
 
   if (aweights.has_value()) {
@@ -69,8 +68,7 @@ Tensor cov(
         " != ",
         num_observations);
     TORCH_CHECK(
-        !(aw.is_cpu() && aw.lt(0).any().item<bool>()),
-        "cov(): aweights cannot be negative");
+        aw.min().item<double>() != 0, "cov(): aweights cannot be negative");
     w = w.defined() ? w * aw : aw;
   }
 
@@ -78,6 +76,10 @@ Tensor cov(
   const auto w_sum = w.defined()
       ? w.sum()
       : at::scalar_tensor(num_observations, in.options().dtype(kLong));
+
+  TORCH_CHECK(
+      w_sum.item<double>() != 0,
+      "cov(): weights sum to zero, can't be normalized");
 
   const auto avg = (w.defined() ? in * w : in).sum(OBSERVATIONS_DIM) / w_sum;
 
@@ -90,12 +92,10 @@ Tensor cov(
     norm_factor = w_sum - correction;
   }
 
-  if (norm_factor.is_cpu() && norm_factor.le(0).item<bool>()) {
+  if (norm_factor.item<double>() <= 0) {
     TORCH_WARN("cov(): degrees of freedom is <= 0");
+    norm_factor.zero_();
   }
-
-  norm_factor =
-      at::where(norm_factor < 0, at::zeros_like(norm_factor), norm_factor);
 
   // Compute covariance matrix
   in = in - avg.unsqueeze(1);
