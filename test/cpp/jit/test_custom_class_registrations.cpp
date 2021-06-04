@@ -4,6 +4,7 @@
 #include <torch/script.h>
 
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -274,6 +275,21 @@ struct ReLUClass : public torch::CustomClassHolder {
   }
 };
 
+struct ThreadLock : public torch::CustomClassHolder {
+  ThreadLock() : lock(mutex, std::defer_lock) {}
+
+  void enter() {
+    lock.lock();
+  }
+
+  void exit() {
+    lock.unlock();
+  }
+
+  std::mutex mutex;
+  std::unique_lock<std::mutex> lock;
+};
+
 TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<ReLUClass>("_ReLUClass")
       .def(torch::init<>())
@@ -420,6 +436,11 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           [](ElementwiseInterpreter::SerializationType state) {
             return ElementwiseInterpreter::__setstate__(std::move(state));
           });
+
+  m.class_<ThreadLock>("_ThreadLock")
+      .def(torch::init<>())
+      .def("enter", &ThreadLock::enter)
+      .def("exit", &ThreadLock::exit);
 }
 
 } // namespace

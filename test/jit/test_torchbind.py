@@ -447,3 +447,28 @@ class TestTorchbind(JitTestCase):
             return obj.decrement()
 
         self.checkScript(gn, ())
+
+    def test_thread_lock(self):
+        from typing import Any
+        @torch.jit.script
+        class ThreadLock(object):
+            def __init__(self):
+                self.t_lock = torch.classes._TorchScriptTesting._ThreadLock()
+
+            def __enter__(self):
+                self.t_lock.enter()
+                
+            def __exit__(self, type: Any, value: Any, tb: Any):
+                self.t_lock.exit()
+
+        @torch.jit.script
+        def fn():
+            t_lock = ThreadLock()
+            a = [1, 2, 3]
+            with t_lock:
+                a[1] = 3
+
+            print(a[1])
+        
+        print(fn.graph)
+        fn()
