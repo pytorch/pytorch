@@ -16,7 +16,7 @@ using namespace torch::jit::fuser::cuda;
 
 //------------------------------------------------------------------------------
 
-static void MagicScheduler_LayerNorm(benchmark::State& benchmark_state) {
+static void LayerNorm(benchmark::State& benchmark_state) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -67,7 +67,7 @@ static void MagicScheduler_LayerNorm(benchmark::State& benchmark_state) {
   }
 }
 
-static void MagicScheduler_LayerNorm_Baseline(
+static void LayerNorm_Baseline(
     benchmark::State& benchmark_state) {
   std::vector<int64_t> input_shape{656, benchmark_state.range(0)};
   const int kReductionAxis = 1;
@@ -90,13 +90,13 @@ static void MagicScheduler_LayerNorm_Baseline(
   }
 }
 
-BENCHMARK(MagicScheduler_LayerNorm)
+BENCHMARK(LayerNorm)
     ->RangeMultiplier(2)
     ->Ranges({{8, 8 << 12}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_LayerNorm_Baseline)
+BENCHMARK(LayerNorm_Baseline)
     ->RangeMultiplier(2)
     ->Ranges({{8, 8 << 12}})
     ->Unit(benchmark::kMicrosecond)

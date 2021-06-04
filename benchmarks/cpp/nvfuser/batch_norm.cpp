@@ -16,7 +16,7 @@ using namespace torch::jit::fuser::cuda;
 
 //------------------------------------------------------------------------------
 
-static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
+static void BatchNorm(benchmark::State& benchmark_state) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -68,7 +68,10 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_weight = at::ones({input_shape[1]}, options);
   at::Tensor at_bias = at::zeros({input_shape[1]}, options);
-  std::vector<c10::IValue> inputs({at_x, at_weight, at_bias});
+  at::Tensor at_run_mean = at::zeros({input_shape[1]}, options);
+  at::Tensor at_run_var = at::ones({input_shape[1]}, options);
+  std::vector<c10::IValue> inputs(
+      {at_x, at_weight, at_bias, at_run_mean, at_run_var});
 
   // outputs
   std::vector<at::Tensor> outputs;
@@ -91,7 +94,7 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
   }
 }
 
-static void MagicScheduler_BatchNorm_Baseline(
+static void BatchNorm_Baseline(
     benchmark::State& benchmark_state) {
   const float kMomentum = 0.1;
   const float kEps = 1e-5;
@@ -134,13 +137,13 @@ static void MagicScheduler_BatchNorm_Baseline(
   }
 }
 
-BENCHMARK(MagicScheduler_BatchNorm)
+BENCHMARK(BatchNorm)
     ->RangeMultiplier(2)
     ->Ranges({{64, 512}, {8, 32}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_BatchNorm_Baseline)
+BENCHMARK(BatchNorm_Baseline)
     ->RangeMultiplier(2)
     ->Ranges({{64, 512}, {8, 32}})
     ->Unit(benchmark::kMicrosecond)

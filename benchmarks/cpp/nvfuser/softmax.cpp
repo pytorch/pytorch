@@ -17,7 +17,7 @@ using namespace torch::jit::fuser::cuda;
 
 //------------------------------------------------------------------------------
 
-static void MagicScheduler_Softmax(benchmark::State& benchmark_state) {
+static void Softmax(benchmark::State& benchmark_state) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -61,7 +61,7 @@ static void MagicScheduler_Softmax(benchmark::State& benchmark_state) {
   }
 }
 
-static void MagicScheduler_Softmax_Baseline(benchmark::State& benchmark_state) {
+static void Softmax_Baseline(benchmark::State& benchmark_state) {
   std::vector<int64_t> input_shape{
       benchmark_state.range(1), benchmark_state.range(0)};
   const int kReductionAxis = benchmark_state.range(2);
@@ -80,21 +80,9 @@ static void MagicScheduler_Softmax_Baseline(benchmark::State& benchmark_state) {
   }
 }
 
-BENCHMARK(MagicScheduler_Softmax)
-    ->RangeMultiplier(2)
-    ->Ranges({{656, 656}, {8, 8 << 12}, {0, 1}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(MagicScheduler_Softmax_Baseline)
-    ->RangeMultiplier(2)
-    ->Ranges({{656, 656}, {8, 8 << 12}, {0, 1}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
 //------------------------------------------------------------------------------
 
-static void MagicScheduler_Softmax_Dropout(benchmark::State& benchmark_state) {
+static void Softmax_Dropout(benchmark::State& benchmark_state) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -162,7 +150,7 @@ static void MagicScheduler_Softmax_Dropout(benchmark::State& benchmark_state) {
   }
 }
 
-static void MagicScheduler_Softmax_Dropout_Baseline(
+static void Softmax_Dropout_Baseline(
     benchmark::State& benchmark_state) {
   std::vector<int64_t> input_shape{256, 12, 100, benchmark_state.range(0)};
   const int kReductionAxis = 3;
@@ -197,7 +185,19 @@ static void MagicScheduler_Softmax_Dropout_Baseline(
   }
 }
 
-BENCHMARK(MagicScheduler_Softmax_Dropout)
+BENCHMARK(Softmax)
+    ->RangeMultiplier(2)
+    ->Ranges({{656, 656}, {8, 8 << 12}, {0, 1}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Softmax_Baseline)
+    ->RangeMultiplier(2)
+    ->Ranges({{656, 656}, {8, 8 << 12}, {0, 1}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Softmax_Dropout)
     ->Arg(8)
     ->Arg(16)
     ->Arg(24)
@@ -217,7 +217,7 @@ BENCHMARK(MagicScheduler_Softmax_Dropout)
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_Softmax_Dropout_Baseline)
+BENCHMARK(Softmax_Dropout_Baseline)
     ->Arg(8)
     ->Arg(16)
     ->Arg(24)
