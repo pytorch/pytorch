@@ -46,7 +46,8 @@ Tensor cov(
         " != ",
         num_observations);
     TORCH_CHECK(
-        w.min().item<long>() != 0, "cov(): fweights cannot be negative");
+        num_observations == 0 || w.min().item<long>() >= 0,
+        "cov(): fweights cannot be negative");
   }
 
   if (aweights.has_value()) {
@@ -68,7 +69,8 @@ Tensor cov(
         " != ",
         num_observations);
     TORCH_CHECK(
-        aw.min().item<double>() != 0, "cov(): aweights cannot be negative");
+        num_observations == 0 || aw.min().item<double>() >= 0,
+        "cov(): aweights cannot be negative");
     w = w.defined() ? w * aw : aw;
   }
 
@@ -78,7 +80,7 @@ Tensor cov(
       : at::scalar_tensor(num_observations, in.options().dtype(kLong));
 
   TORCH_CHECK(
-      w_sum.item<double>() != 0,
+      !w.defined() || w_sum.item<double>() != 0,
       "cov(): weights sum to zero, can't be normalized");
 
   const auto avg = (w.defined() ? in * w : in).sum(OBSERVATIONS_DIM) / w_sum;

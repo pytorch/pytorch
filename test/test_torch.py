@@ -3855,7 +3855,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad1d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', 'cuda')
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4332,22 +4332,25 @@ else:
             self.assertEqual(actual, expected, atol=1e-05, rtol=1e-05)
 
         def generate_input_tensors():
-            yield torch.tensor(1, dtype=dtype, device=device)
-            yield make_tensor((1,), device, dtype)
-            yield make_tensor((10,), device, dtype)
-            yield make_tensor((5, 1), device, dtype)
+            yield make_tensor((0, 0), device, dtype)
+            yield make_tensor((1, 0), device, dtype)
+            yield make_tensor((0, 1), device, dtype)
+            yield make_tensor((2), device, dtype)
+            yield make_tensor((2, 1), device, dtype)
+            yield make_tensor((2, 2), device, dtype)
+            yield make_tensor((2, 3), device, dtype)
             yield make_tensor((5, 10), device, dtype)
             yield make_tensor((5, 10), device, dtype, noncontiguous=True)
             yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
-        check(torch.empty(0))
         for t in generate_input_tensors():
             check(t)
             num_observations = t.numel() if t.ndim < 2 else t.size(1)
-            fweights = torch.randint(1, 10, (num_observations,), device=device)
-            aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1)
-            for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
-                check(t, correction, fweights, aweights)
+            if num_observations > 0:
+                fweights = torch.randint(1, 10, (num_observations,), device=device)
+                aweights = make_tensor((num_observations,), device, torch.float, low=1)
+                for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
+                    check(t, correction, fweights, aweights)
 
     def test_cov_error(self, device):
         def check(msg, *args, **kwargs):
@@ -4362,10 +4365,8 @@ else:
         check(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
         check(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
         check(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
-
-        if self.device_type == 'cpu':
-            check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
-            check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
+        check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
+        check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
