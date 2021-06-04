@@ -1484,6 +1484,7 @@ except RuntimeError as e:
         ]
         self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
 
+    @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_multinomial_invalid_probs_cuda(self):
