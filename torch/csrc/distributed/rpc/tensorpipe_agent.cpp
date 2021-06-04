@@ -117,26 +117,26 @@ std::vector<c10::Device> getDevicesOfTensors(
     const std::vector<torch::Tensor>& tensors) {
   c10::optional<c10::impl::VirtualGuardImpl> impl;
   size_t deviceCount = 0;
-  std::vector<bool> indexBitSet;
+  std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {
     if (!tensor.is_cpu()) {
       c10::Device device = tensor.device();
       if (!impl.has_value()) {
         impl.emplace(device.type());
-        indexBitSet.resize(impl->deviceCount());
+        indexBitset.resize(impl->deviceCount());
       }
       TORCH_INTERNAL_ASSERT(device.type() == impl->type());
       TORCH_INTERNAL_ASSERT(device.has_index());
-      if (!indexBitSet[device.index()]) {
+      if (!indexBitset[device.index()]) {
         deviceCount++;
-        indexBitSet[device.index()] = true;
+        indexBitset[device.index()] = true;
       }
     }
   }
   std::vector<c10::Device> devices;
   devices.reserve(deviceCount);
-  for (c10::DeviceIndex idx = 0; idx < indexBitSet.size(); idx++) {
-    if (indexBitSet[idx]) {
+  for (c10::DeviceIndex idx = 0; idx < indexBitset.size(); idx++) {
+    if (indexBitset[idx]) {
       devices.emplace_back(impl->type(), idx);
     }
   }
