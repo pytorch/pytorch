@@ -691,6 +691,16 @@ Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_
   return c;
 }
 
+template <class T>
+static void dump(const Vectorized<T>& a) {
+  __at_align32__ T tmp_values[a.size()];
+  a.store(tmp_values);
+  for (size_t i = 0; i < a.size(); ++i) {
+      std::cout << tmp_values[i] << " ";
+  }
+  std::cout << std::endl;
+}
+
 struct Vectorizedi;
 
 #if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
