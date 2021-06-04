@@ -34,6 +34,7 @@
 #include <torch/library.h>
 $extra_cuda_headers
 $legacy_th_headers
+$external_backend_headers
 
 namespace at {
 
