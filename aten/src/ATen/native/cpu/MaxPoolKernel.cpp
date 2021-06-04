@@ -2,7 +2,7 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 
@@ -112,13 +112,13 @@ void cpu_max_pool_channels_last(
   int64_t output_height = output.size(2);
   int64_t output_width = output.size(3);
 
-  using Vec = vec256::Vec256<scalar_t>;
-  using integer_t = vec256::int_same_size_t<scalar_t>;
-  using iVec = vec256::Vec256<integer_t>;
+  using Vec = vec::Vectorized<scalar_t>;
+  using integer_t = vec::int_same_size_t<scalar_t>;
+  using iVec = vec::Vectorized<integer_t>;
   // for the convience of vectorization, use integer of the same size of scalar_t,
   //   e.g. int32_t for float, int64_t for double
   // need to make sure doesn't overflow
-  TORCH_CHECK(input_height <= std::ceil((double)std::numeric_limits<integer_t>::max() / (double)input_width));
+  TORCH_CHECK(input_height * input_width <= std::numeric_limits<integer_t>::max());
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
@@ -171,7 +171,7 @@ void cpu_max_pool_channels_last(
 
             // true = all ones, false = all zeros
             Vec mask = (val_vec > maxval_vec) | val_vec.isnan();
-            iVec imask = vec256::cast<integer_t>(mask);
+            iVec imask = vec::cast<integer_t>(mask);
             Vec out_vec = Vec::blendv(maxval_vec, val_vec, mask);
             iVec ind_vec = iVec::blendv(maxindex_vec, index_vec, imask);
 
@@ -191,7 +191,7 @@ void cpu_max_pool_channels_last(
         }
       }
       // convert indice data type
-      vec256::convert<integer_t, int64_t>(index_buffer.get(), ind, len);
+      vec::convert<integer_t, int64_t>(index_buffer.get(), ind, len);
 
       // move on to next output index
       data_index_step(n, nbatch, oh, output_height, ow, output_width);
@@ -233,11 +233,11 @@ void cpu_max_pool_channels_last<BFloat16>(
   int64_t output_height = output.size(2);
   int64_t output_width = output.size(3);
 
-  using bVec = vec256::Vec256<BFloat16>;
-  using fVec = vec256::Vec256<float>;
-  using iVec = vec256::Vec256<int32_t>;
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  using iVec = vec::Vectorized<int32_t>;
   // for the convience of vectorization, use int32_t instead of int64_t
-  TORCH_CHECK(input_height <= std::ceil((double)std::numeric_limits<int32_t>::max() / (double)input_width));
+  TORCH_CHECK(input_height * input_width <= std::numeric_limits<int32_t>::max());
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
@@ -298,8 +298,8 @@ void cpu_max_pool_channels_last<BFloat16>(
             // true = all ones, false = all zeros
             fVec mask0 = (val_fvec0 > maxval_fvec0) | val_fvec0.isnan();
             fVec mask1 = (val_fvec1 > maxval_fvec1) | val_fvec1.isnan();
-            iVec imask0 = vec256::cast<int32_t>(mask0);
-            iVec imask1 = vec256::cast<int32_t>(mask1);
+            iVec imask0 = vec::cast<int32_t>(mask0);
+            iVec imask1 = vec::cast<int32_t>(mask1);
 
             fVec max_fvec0 = fVec::blendv(maxval_fvec0, val_fvec0, mask0);
             fVec max_fvec1 = fVec::blendv(maxval_fvec1, val_fvec1, mask1);
@@ -335,7 +335,7 @@ void cpu_max_pool_channels_last<BFloat16>(
         out[d3] = BFloat16(max[d3]);
       }
       // convert indice data type
-      vec256::convert<int32_t, int64_t>(index_buffer.get(), ind, len);
+      vec::convert<int32_t, int64_t>(index_buffer.get(), ind, len);
 
       // move on to next output index
       data_index_step(n, nbatch, oh, output_height, ow, output_width);

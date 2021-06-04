@@ -43,6 +43,10 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
+#   USE_MKLDNN_ACL
+#     enables use of Compute Library backend for MKLDNN on Arm;
+#     USE_MKLDNN must be explicitly enabled.
+#
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
@@ -155,6 +159,9 @@
 #
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
+#
+#   ACL_ROOT_DIR
+#     specify where Compute Library is installed
 #
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
@@ -332,7 +339,7 @@ def check_submodules():
             print('Please run:\n\tgit submodule update --init --recursive')
             sys.exit(1)
     for folder in folders:
-        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE"])
+        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.txt"])
     check_for_files(os.path.join(third_party_path, 'fbgemm', 'third_party',
                                  'asmjit'), ['CMakeLists.txt'])
     check_for_files(os.path.join(third_party_path, 'onnx', 'third_party',
@@ -460,6 +467,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Not using CUDA')
         if cmake_cache_vars['USE_MKLDNN']:
             report('-- Using MKLDNN')
+            if cmake_cache_vars['USE_MKLDNN_ACL']:
+                report('-- Using Compute Library for the Arm architecture with MKLDNN')
+            else:
+                report('-- Not using Compute Library for the Arm architecture with MKLDNN')
             if cmake_cache_vars['USE_MKLDNN_CBLAS']:
                 report('-- Using CBLAS in MKLDNN')
             else:
@@ -916,7 +927,8 @@ if __name__ == '__main__':
                 'lib/*.h',
                 'include/ATen/*.h',
                 'include/ATen/cpu/*.h',
-                'include/ATen/cpu/vec256/*.h',
+                'include/ATen/cpu/vec/vec256/*.h',
+                'include/ATen/cpu/vec/*.h',
                 'include/ATen/core/*.h',
                 'include/ATen/cuda/*.cuh',
                 'include/ATen/cuda/*.h',

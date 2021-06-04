@@ -6,7 +6,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/TypeCast.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 
 namespace at {
 namespace native {
@@ -24,14 +24,14 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
         cpu_kernel_vec(
             iter,
             [=](scalar_t a) -> scalar_t { return a; },
-            [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
+            [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
       });
     } else if (isComplexType(dtype)) {
       AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
           cpu_kernel_vec(
             iter,
             [=](scalar_t a) -> scalar_t { return a; },
-            [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
+            [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
         });
     } else {
       AT_DISPATCH_ALL_TYPES_AND2(
@@ -39,7 +39,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
             cpu_kernel_vec(
                 iter,
                 [=](scalar_t a) -> scalar_t { return a; },
-                [=](Vec256<scalar_t> a) { return a; });
+                [=](Vectorized<scalar_t> a) { return a; });
           });
     }
   } else {
@@ -89,7 +89,7 @@ void transpose_copy_kernel_impl(Tensor& self, const Tensor& src) {
     for (; i < rend - (rend % BLOCK_SIZE); i += BLOCK_SIZE) {
       int64_t j = 0;
       for (; j < N - (N % BLOCK_SIZE); j += BLOCK_SIZE) {
-        vec256::tranpose_kernel_8x8<scalar_t>(
+        vec::transpose_kernel_8x8<scalar_t>(
             &src_data[j * M + i], M, &self_data[i * N + j], N);
       }
       for (; j < N; j++) {
