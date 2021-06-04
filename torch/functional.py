@@ -349,10 +349,10 @@ def einsum(*args):
 
     .. note::
 
-        As of PyTorch 1.9 :func:`torch.einsum` also supports the sublist format (see examples below). In this format,
-        subscripts for each operand are specified by a "sublist" of integers in the range [0, 52). These sublists
+        As of PyTorch 1.10 :func:`torch.einsum` also supports the sublist format (see examples below). In this format,
+        subscripts for each operand are specified by sublists, list of integers in the range [0, 52). These sublists
         follow their operands, and an extra sublist can appear at the end of the input to specify the output's
-        subscripts.", e.g.`torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis` object
+        subscripts., e.g.`torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis` object
         may be provided in a sublist to enable broadcasting as described in the Equation section above.
 
     Args:
