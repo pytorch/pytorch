@@ -1089,6 +1089,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    @skipIfUnsupportedOpsetVersion([14])
     def test_hardswish(self):
         model = torch.nn.Hardswish()
 
@@ -7586,6 +7587,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
+    @skipIfUnsupportedOpsetVersion([14])
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7709,6 +7711,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
+    @skipIfUnsupportedOpsetVersion([14])
     def test_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7745,6 +7748,7 @@ class TestONNXRuntime(unittest.TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
 
+    @skipIfUnsupportedOpsetVersion([14])
     def test_multiple_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -9487,7 +9491,7 @@ def setup_rnn_tests():
 setup_rnn_tests()
 
 
-# opset 7 tests
+'''# opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
                               (unittest.TestCase,),
                               dict(TestONNXRuntime.__dict__, opset_version=7))
@@ -9547,6 +9551,13 @@ TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
 TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
                                (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=13,
+                                    keep_initializers_as_inputs=False,
+                                    onnx_shape_inference=True))'''
+
+# opset 14 tests
+TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=14,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
 

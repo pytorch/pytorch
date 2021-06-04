@@ -271,7 +271,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return runTorchSlice_opset9(node, inputTensorValues);
     } else if (
         opset_version == ONNX_OPSET_10 || opset_version == ONNX_OPSET_11 ||
-        opset_version == ONNX_OPSET_12 || opset_version == ONNX_OPSET_13) {
+        opset_version == ONNX_OPSET_12 || opset_version == ONNX_OPSET_13 ||
+        opset_version == ONNX_OPSET_14) {
       return runTorchSlice_opset10(node, inputTensorValues);
     } else {
       std::cerr << "Warning: Constant folding - unsupported opset version. "
@@ -354,7 +355,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     }
   } else if (node->kind() == onnx::Squeeze) {
     assert(inputTensorValues.size() == 2 || inputTensorValues.size() == 1);
-    if (opset_version == ONNX_OPSET_13) {
+    if (opset_version >= ONNX_OPSET_13) {
       // Squeeze version 13 input axes is optional, inputTensorValues.size() ==
       // 1 means axes equal to None
       updated_val = inputTensorValues[0];
