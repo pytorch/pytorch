@@ -407,7 +407,7 @@ class TestFunctionalIterDataPipe(TestCase):
             for x, y in zip(map_dp, input_dp):
                 self.assertEqual(len(x), len(y))
                 for a, b in zip(x, y):
-                    print(a,b)
+                    print(a, b)
                     self.assertEqual(a, torch.tensor(b, dtype=torch.float))
 
         with self.assertRaises(Exception):
