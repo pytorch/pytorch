@@ -2,7 +2,7 @@ r"""
 `torch.distributed.launch` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
 
-NOTE: This module is deprecated, use torch.distributed.run.
+.. note:: This module is deprecated, use torch.distributed.run.
 
 The utility can be used for single-node distributed training, in which one or
 more processes per node will be spawned. The utility can be used for either
