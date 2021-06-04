@@ -42,7 +42,7 @@ void check_reduction(
       name, " only supports strided layout, got: ",
       self.layout());
 
-  auto result = iter.maybe_get_output();
+  const auto& result = iter.maybe_get_output();
   ScalarType out_dtype;
 
   if (result.defined()) {
@@ -67,10 +67,10 @@ void check_reduction(
     // kBool., otherwise we use the overload below which casts the input to
     // kBool (which is an extra operation).
     make_reduction(
-        iter, name, result, self, dims, keepdim, self.scalar_type(), out_dtype);
+        iter, name, self, dims, keepdim, self.scalar_type(), out_dtype);
   }
   make_reduction(
-      iter, name, result, self, dims, keepdim, /*out_dtype=*/out_dtype);
+      iter, name, self, dims, keepdim, /*out_dtype=*/out_dtype);
 }
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
@@ -1163,20 +1163,19 @@ Tensor norm(const Tensor& self, const Scalar& p) {
 // Tensor of dtype `bool`. However for compatibility reason,
 // for `uint8`, they return Tensor of same dtype `uint8`.
 // Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-inline Tensor & _all(Tensor & result, TensorIterator & iter) {
+inline const Tensor & _all(const Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(1);
   } else {
     and_stub(iter.device_type(), iter);
   }
-
   return result;
 }
 
 Tensor all(const Tensor& self) {
   TensorIterator iter;
   at::meta::check_reduction(iter, "all", self, {}, false);
-  auto result = iter.maybe_get_output(0);
+  const auto& result = iter.maybe_get_output(0);
   return _all(result, iter);
 }
 
@@ -1189,20 +1188,19 @@ TORCH_IMPL_FUNC(all_out)
   }
 }
 
-inline Tensor & _any(Tensor & result, TensorIterator & iter) {
+inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(0);
   } else {
     or_stub(iter.device_type(), iter);
   }
-
   return result;
 }
 
 Tensor any(const Tensor& self) {
   TensorIterator iter;
   at::meta::check_reduction(iter, "any", self, {}, false);
-  auto result = iter.maybe_get_output(0);
+  const auto& result = iter.maybe_get_output(0);
   return _any(result, iter);
 }
 
@@ -1211,7 +1209,7 @@ TORCH_IMPL_FUNC(any_out)
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
     TensorIterator wrapper(*this);
-    _all(mut_result, wrapper);
+    _any(mut_result, wrapper);
   }
 }
 

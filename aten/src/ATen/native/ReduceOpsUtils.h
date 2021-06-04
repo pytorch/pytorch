@@ -308,12 +308,12 @@ namespace meta {
 static void make_reduction(
     TensorIteratorBase& iter,
     const char* name,
-    Tensor& result,
     const Tensor& self,
     c10::optional<IntArrayRef> dim_opt,
     bool keepdim,
     ScalarType in_dtype,
     ScalarType out_dtype) {
+  const auto& result = iter.maybe_get_output();
   // check that result type and dtype match if provided
   if (result.defined()) {
     TORCH_CHECK(
@@ -332,7 +332,6 @@ static void make_reduction(
   auto mask = at::native::make_dim_mask(dim, ndim);
   auto shape = at::native::shape_from_dim_mask(self, mask, keepdim);
   iter.impl::MetaBase::set_output(shape, self.options());
-  result = iter.maybe_get_output();
   auto viewed_result =
       at::native::review_reduce_result(result, ndim, mask, keepdim);
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
@@ -345,7 +344,6 @@ static void make_reduction(
 static void make_reduction(
     TensorIteratorBase& iter,
     const char* name,
-    Tensor& result,
     const Tensor& self,
     c10::optional<IntArrayRef> dim,
     bool keepdim,
@@ -360,7 +358,7 @@ static void make_reduction(
        out_dtype == kFloat);
   auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
   return make_reduction(
-      iter, name, result, self, dim, keepdim, in_dtype, out_dtype);
+      iter, name, self, dim, keepdim, in_dtype, out_dtype);
 }
 } // namespace meta
 } // namespace at
