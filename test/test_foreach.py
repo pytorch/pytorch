@@ -194,13 +194,8 @@ class TestForeach(TestCase):
         try:
             inplace(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
-            if inplace.func == torch._foreach_neg_ and dtype == torch.bool and self.is_cuda:
-                # note(mkozuki): `foreach_neg` CUDA implementation throws a different message.
-                with self.assertRaisesRegex(type(e), "Negation, the `-` operator, on a bool tensor is not supported."):
-                    inplace_ref(copied_inputs)
-            else:
-                with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                    inplace_ref(copied_inputs)
+            with self.assertRaisesRegex(type(e), re.escape(str(e))):
+                inplace_ref(copied_inputs)
         else:
             inplace_ref(copied_inputs),
             self.assertEqual(copied_inputs, inputs)
