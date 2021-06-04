@@ -103,33 +103,38 @@ class TestBufferProtocol(common.TestCase):
     def test_invalid_positional_args(self, device, dtype):
         input = self.INPUT
         bytes = get_dtype_size(dtype)
+        in_bytes = len(input) * bytes
         # Empty array
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError,
+                                    r"both buffer length \(0 bytes\) after"):
             self._run_test(dtype, [])
         # Count equals 0
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError,
+                                    r"both buffer length .* and count \(0\)"):
             self._run_test(dtype, input, count=0)
         # Offset negative and bigger than total length
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError,
+                                    rf"offset \(-{bytes} bytes\) must be"):
             self._run_test(dtype, input, first=-1)
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError,
+                                    rf"offset \({in_bytes} bytes\) must be .* "
+                                    rf"buffer length \({in_bytes} bytes\)"):
             self._run_test(dtype, input, first=len(input))
         # Non-multiple offset with all elements
         if bytes > 1:
-            with self.assertRaises(ValueError):
+            offset = bytes - 1
+            with self.assertRaisesRegex(ValueError,
+                                        rf"buffer length \({in_bytes - offset} bytes\) after "
+                                        rf"offset \({offset} bytes\) must be"):
                 self._run_test(dtype, input, offset=bytes - 1)
         # Count too big for each good first element
         for first in range(len(input)):
-            with self.assertRaises(ValueError):
-                count = len(input) - first + 1
+            count = len(input) - first + 1
+            with self.assertRaisesRegex(ValueError,
+                                        rf"requested buffer length \({count} * {bytes} bytes\) "
+                                        rf"after offset \({first * bytes} bytes\) must .*"
+                                        rf"buffer length \({in_bytes} bytes\)"):
                 self._run_test(dtype, input, count=count, first=first)
-
-    @onlyCPU
-    @dtypes(*all_types())
-    def test_invalid_device(self, device, dtype):
-        input = self.INPUT
-        with self.assertRaises(RuntimeError):
-            self._run_test(dtype, input, device="cuda")
 
     @onlyCPU
     @dtypes(*all_types())

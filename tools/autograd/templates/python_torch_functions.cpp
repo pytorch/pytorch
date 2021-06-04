@@ -503,11 +503,11 @@ static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObj
 
     TORCH_CHECK_VALUE(
         len > 0 && count != 0,
-        "both buffer length (", len, ") and 'count' (", count, ") must not be empty");
+        "both buffer length (", len, ") and count (", count, ") must not be 0");
     TORCH_CHECK_VALUE(
-        offset >= 0 || offset < len,
-        "offset (", offset, ") must be non-negative and no greater than buffer length "
-        "(", len, ") minus 1");
+        offset >= 0 && offset < len,
+        "offset (", offset, " bytes) must be non-negative and no greater than "
+        "buffer length (", len, " bytes) minus 1");
     TORCH_CHECK_VALUE(
         count > 0 || (len - offset) % elsize == 0,
         "buffer length (", len - offset, " bytes) after offset (", offset, " bytes) "
