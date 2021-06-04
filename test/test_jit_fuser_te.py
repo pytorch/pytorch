@@ -1835,6 +1835,11 @@ class TestTEFuser(JitTestCase):
             return torch.relu(x * 1.01)
         self._test_fwd_bwd(eager)
 
+    def test_hardswish_fwd_bwd(self):
+        def eager(x):
+            return F.hardswish(x) * 1.01
+        self._test_fwd_bwd(eager)
+
     def test_hardsigmoid_fwd_bwd(self):
         def eager(x):
             return F.hardsigmoid(x) * 1.01
