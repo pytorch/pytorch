@@ -74,17 +74,17 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
     float width_scale,
     const size_t out_numel) {
 
-  CUDA_KERNEL_LOOP(index, out_numel) {
-    const int c = index % channels;
-    const int w2 = (index / channels) % width2;
-    const int h2 = (index / channels / width2) % height2;
-    const int n = index / channels / width2 / height2;
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    const size_t h1 = height1 == height2 ? h2 : nearest_neighbor_compute_source_index(height_scale, h2, height1);
-    const size_t w1 = width1 == width2 ? w2 : nearest_neighbor_compute_source_index(width_scale, w2, width1);
+  const int c = index % channels;
+  const int w2 = (index / channels) % width2;
+  const int h2 = (index / channels / width2) % height2;
+  const int n = index / channels / width2 / height2;
 
-    odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
-  }
+  const size_t h1 = height1 == height2 ? h2 : nearest_neighbor_compute_source_index(height_scale, h2, height1);
+  const size_t w1 = width1 == width2 ? w2 : nearest_neighbor_compute_source_index(width_scale, w2, width1);
+
+  odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
 }
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
@@ -157,26 +157,26 @@ __global__ void upsample_nearest2d_backward_nhwc_out_frame(
   // 1 is for grad_output (src)
   // 2 is for grad_input (dst)
 
-  CUDA_KERNEL_LOOP(index, gi_numel) {
-    const int c = index % channels;
-    const int w2 = (index / channels) % width2;
-    const int h2 = (index / channels / width2) % height2;
-    const int n = index / channels / width2 / height2;
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    int h1 = nearest_neighbor_bw_compute_source_index(height_scale, h2, height1);
-    int h1_up = nearest_neighbor_bw_compute_source_index(height_scale, h2 + 1, height1);
+  const int c = index % channels;
+  const int w2 = (index / channels) % width2;
+  const int h2 = (index / channels / width2) % height2;
+  const int n = index / channels / width2 / height2;
 
-    int w1 = nearest_neighbor_bw_compute_source_index(width_scale, w2, width1);
-    int w1_up = nearest_neighbor_bw_compute_source_index(width_scale, w2 + 1, width1);
+  int h1 = nearest_neighbor_bw_compute_source_index(height_scale, h2, height1);
+  int h1_up = nearest_neighbor_bw_compute_source_index(height_scale, h2 + 1, height1);
 
-    accscalar_t grad = 0;
-    for (int ih = h1; ih < h1_up; ih++) {
-      for (int iw = w1; iw < w1_up; iw++) {
-        grad += go[idx_cl(n, ih, iw, c, height1, width1, channels)];
-      }
+  int w1 = nearest_neighbor_bw_compute_source_index(width_scale, w2, width1);
+  int w1_up = nearest_neighbor_bw_compute_source_index(width_scale, w2 + 1, width1);
+
+  accscalar_t grad = 0;
+  for (int ih = h1; ih < h1_up; ih++) {
+    for (int iw = w1; iw < w1_up; iw++) {
+      grad += go[idx_cl(n, ih, iw, c, height1, width1, channels)];
     }
-    gi[index] = static_cast<scalar_t>(grad);
   }
+  gi[index] = static_cast<scalar_t>(grad);
 }
 
 static void upsample_nearest2d_out_cuda_template(
@@ -205,14 +205,14 @@ static void upsample_nearest2d_out_cuda_template(
 
   const auto memory_format = input_.suggest_memory_format();
 
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_INTERNAL_ASSERT(output.suggest_memory_format() == memory_format, "output should also be channels-last memory format");
-    at::Tensor input = input_;
+  if (input_.sizes() == output.sizes()) {
+    output.copy_(input_);
+    return;
+  }
 
-    if (input.sizes() == output.sizes()) {
-      output.copy_(input);
-      return;
-    }
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_INTERNAL_ASSERT(output.is_contiguous(at::MemoryFormat::ChannelsLast), "output should also be channels-last memory format");
+    at::Tensor input = input_.contiguous(at::MemoryFormat::ChannelsLast);
 
     TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
       "upsample_nearest_nhwc only supports input tensors with less than INT_MAX elements");
@@ -335,14 +335,16 @@ static void upsample_nearest2d_backward_out_cuda_template(
 
   auto memory_format = grad_output_.suggest_memory_format();
 
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    Tensor grad_output = grad_output_.contiguous(memory_format);
-    grad_input.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  if (grad_output_.sizes() == grad_input.sizes()) {
+    grad_input.copy_(grad_output_);
+    return;
+  }
 
-    if (grad_output.sizes() == grad_input.sizes()) {
-      grad_input.copy_(grad_output);
-      return;
-    }
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
+    // TORCH_INTERNAL_ASSERT(grad_input.is_contiguous(at::MemoryFormat::ChannelsLast), "output should also be channels-last memory format");
+    // ^^^ This fails
+    grad_input.unsafeGetTensorImpl()->empty_tensor_restride(at::MemoryFormat::ChannelsLast);
 
     TORCH_CHECK(grad_input.numel() < std::numeric_limits<int>::max(),
       "upsample_nearest_nhwc only supports grad_input tensors with less than INT_MAX elements");
