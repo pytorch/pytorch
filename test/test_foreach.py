@@ -20,13 +20,6 @@ class RegularFuncWrapper:
     def __call__(self, inputs, **kwargs):
         return [self.func(*i, **kwargs) for i in zip(*inputs)]
 
-class InplaceRefWrapper:
-
-    def __init__(self, method_name):
-        self.method_name = method_name
-
-    def __call__(self, inputs, **kwargs):
-        return [getattr(i1, self.method_name)(*rest, **kwargs) for i1, *rest in list(zip(*inputs))]
 
 class ForeachFuncWrapper:
 
@@ -69,7 +62,7 @@ class TestForeach(TestCase):
             ForeachFuncWrapper(op.method_variant, n_expected_cudaLaunchKernels),
             RegularFuncWrapper(op.ref),
             ForeachFuncWrapper(op.inplace_variant, n_expected_cudaLaunchKernels),
-            InplaceRefWrapper(op.ref_inplace_name),
+            RegularFuncWrapper(op.ref_inplace),
         )
 
     # todo(mkozuki): remove this method once `TestForeach` is refactored with `@op` decorator.
@@ -214,8 +207,8 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(type(e), re.escape(str(e))):
                     inplace_ref(copied_inputs)
         else:
-            inplace_ref(copied_inputs)
-        self.assertEqual(copied_inputs, inputs)
+            inplace_ref(copied_inputs),
+            self.assertEqual(copied_inputs, inputs)
 
     def _test_unary(self, device, dtype, op, N, is_fastpath):
         method, ref, inplace_method, inplace_ref = self._get_funcs(op)

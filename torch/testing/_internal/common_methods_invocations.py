@@ -2337,7 +2337,8 @@ def get_foreach_method_names(name):
     method_inplace = getattr(torch, method_name_inplace, None)
 
     ref = getattr(torch, name, None)
-    return method, method_inplace, ref, name + "_"
+    ref_inplace = getattr(torch.Tensor, name + "_", None)
+    return method, method_inplace, ref, ref_inplace
 
 class ForeachFuncInfo(OpInfo):
     """Early version of a specialized OpInfo for foreach functions"""
@@ -2361,11 +2362,11 @@ class ForeachFuncInfo(OpInfo):
             **kwargs
         )
 
-        foreach_method, foreach_method_inplace, torch_ref_method, torch_ref_inplace_name = get_foreach_method_names(name)
+        foreach_method, foreach_method_inplace, torch_ref_method, torch_ref_inplace = get_foreach_method_names(name)
         self.method_variant = foreach_method
         self.inplace_variant = foreach_method_inplace
         self.ref = torch_ref_method
-        self.ref_inplace_name = torch_ref_inplace_name
+        self.ref_inplace = torch_ref_inplace
 
 
 def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False):
