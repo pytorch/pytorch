@@ -95,55 +95,6 @@ std::shared_ptr<LazyStreamContext> createCalleeStreamContext(
   return ctx;
 }
 
-// Retrieve local devices (i.e., device keys) from the given map.
-std::unordered_set<c10::Device> getLocalDevices(
-    const std::unordered_map<std::string, DeviceMap>& deviceMap) {
-  std::unordered_set<c10::Device> deviceSet;
-  for (const auto& entry : deviceMap) {
-    for (const auto& device : entry.second) {
-      if (!device.first.is_cpu()) {
-        deviceSet.insert(device.first);
-      }
-    }
-  }
-  return deviceSet;
-}
-
-// 1) checks there is no duplication in the devices field
-// 2) checks all local devices in the deviceSet are included in deviceOpt
-void checkValidDevicesOption(
-    const std::unordered_set<c10::Device>& deviceSet,
-    const std::vector<c10::Device>& deviceOpt) {
-  std::unordered_set<c10::Device> optsDeviceSet(
-      deviceOpt.begin(), deviceOpt.end());
-
-  // no duplications are allowed in opts_.devices
-  TORCH_CHECK(
-      deviceOpt.size() == optsDeviceSet.size(),
-      "Detected duplication in TensorPipeRpcBackendOptions devices field.");
-
-  // opts_.devices must be a superset of local devices in reverseDeviceMaps_
-  std::unordered_set<c10::Device> cut;
-  for (const c10::Device& device : deviceSet) {
-    if (optsDeviceSet.find(device) == optsDeviceSet.end()) {
-      cut.insert(device);
-    }
-  }
-
-  if (!cut.empty()) {
-    std::ostringstream oss;
-    std::copy(
-        cut.begin(), cut.end(), std::ostream_iterator<c10::Device>(oss, ", "));
-    TORCH_CHECK(
-        false,
-        "The devices field in TensorPipeRpcBackendOptions must either be "
-        "None or contain all local devices use by its agent. However, "
-        "local devices ",
-        oss.str(),
-        "are used in (peer) device_maps but not included the devices field.");
-  }
-}
-
 std::vector<c10::Stream> getCurrentStreamsForDevices(
     const std::vector<c10::Device>& devices) {
   if (devices.empty()) {
@@ -492,6 +443,8 @@ TensorPipeAgent::TensorPipeAgent(
     int worldSize,
     c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
     TensorPipeRpcBackendOptions opts,
+    std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+    std::vector<c10::Device> devices,
     std::unique_ptr<RequestCallback> cb)
     : RpcAgent(
           WorkerInfo(std::move(selfName), selfId),
@@ -499,6 +452,8 @@ TensorPipeAgent::TensorPipeAgent(
           std::chrono::milliseconds(
               (long)(opts.rpcTimeoutSeconds * kSecToMsConversion))),
       opts_(std::move(opts)),
+      reverseDeviceMaps_(std::move(reverseDeviceMaps)),
+      devices_(std::move(devices)),
       threadPool_(opts_.numWorkerThreads),
       context_(std::make_shared<tensorpipe::Context>(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
@@ -509,21 +464,6 @@ TensorPipeAgent::TensorPipeAgent(
   // collect worker names
   prepareNames();
 
-  {
-    // If devices was not specified in the options, use local devices in the
-    // deviceMap to initialize devices. Later, when setting reverseDeviceMaps_,
-    // the devices_ will be updated again using local devices in
-    // reverseDeviceMaps_.
-    auto deviceSet = getLocalDevices(opts_.deviceMaps);
-    if (opts_.devices.empty()) {
-      std::copy(
-          deviceSet.begin(), deviceSet.end(), std::back_inserter(devices_));
-    } else {
-      checkValidDevicesOption(deviceSet, opts_.devices);
-      devices_ = opts_.devices;
-    }
-  }
-
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
 }
@@ -531,25 +471,6 @@ TensorPipeAgent::TensorPipeAgent(
 TensorPipeAgent::~TensorPipeAgent() {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is being destroyed";
   shutdown();
-}
-
-void TensorPipeAgent::setReverseDeviceMaps(
-    const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps) {
-  reverseDeviceMaps_ = reverseDeviceMaps;
-
-  // If devices wasn't specified in the options, update devices_ with local
-  // devices in reverseDeviceMaps_.
-  auto deviceSet = getLocalDevices(reverseDeviceMaps_);
-  if (opts_.devices.empty()) {
-    std::copy(
-        devices_.begin(),
-        devices_.end(),
-        std::inserter(deviceSet, deviceSet.begin()));
-    devices_.clear();
-    std::copy(deviceSet.begin(), deviceSet.end(), std::back_inserter(devices_));
-  } else {
-    checkValidDevicesOption(deviceSet, opts_.devices);
-  }
 }
 
 void TensorPipeAgent::startImpl() {
