@@ -192,7 +192,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
       - name: Pull docker image
         run: |
