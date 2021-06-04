@@ -1949,7 +1949,7 @@ known_failures = [
 skip_ops = [
     # Causing SIGSEGV
     # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
-    't' 
+    't'
 ]
 
 def get_name(op):
