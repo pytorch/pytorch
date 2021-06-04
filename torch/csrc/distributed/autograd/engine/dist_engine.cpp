@@ -2,6 +2,7 @@
 
 #include <ATen/Parallel.h>
 #include <c10/core/Event.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -97,7 +98,7 @@ void DistEngine::globalCpuThread(
                 variables =
                     InputBuffer::variables(std::move(task.inputs_))]() mutable {
       InputBuffer inputs(variables.size());
-      for (size_t i = 0; i < variables.size(); i++) {
+      for(const auto i : c10::irange(variables.size())) {
         inputs.add(i, std::move(variables[i]), c10::nullopt, c10::nullopt);
       }
       execute_graph_task_until_ready_queue_empty(

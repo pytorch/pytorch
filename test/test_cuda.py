@@ -1,6 +1,8 @@
 from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
+import contextlib
+import ctypes
 import gc
 import io
 import os
@@ -1313,6 +1315,37 @@ class TestCuda(TestCase):
             try_realloc = torch.cuda.FloatTensor([10, 10])
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
+
+    @contextlib.contextmanager
+    def _get_external_stream(self, device):
+        lib = ctypes.cdll.LoadLibrary(None)
+        p = ctypes.c_void_p()
+        with device:
+            try:
+                out = lib.cudaStreamCreate(ctypes.byref(p))
+                yield p.value
+            finally:
+                out = lib.cudaStreamDestroy(ctypes.c_ulonglong(p.value))
+
+    @skipIfRocm
+    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
+    def test_external_streams(self):
+        device = torch.cuda.device(0)
+        with self._get_external_stream(device) as stream_v:
+            ext_stream = torch.cuda.streams.ExternalStream(stream_v)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
+    def test_external_streams_multi_device(self):
+        device = torch.cuda.device(1)
+        with self._get_external_stream(device) as stream_v:
+            ext_stream = torch.cuda.streams.ExternalStream(
+                stream_v, device=device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
 
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
@@ -2958,6 +2991,7 @@ torch.cuda.synchronize()
         with torch.cuda.stream(s):
             a = torch.full((1000,), 1, device="cuda")
             g = torch.cuda._Graph()
+            torch.cuda.empty_cache()
             g.capture_begin()
             b = a
             for _ in range(10):
@@ -2993,6 +3027,7 @@ torch.cuda.synchronize()
                 torch.cuda.manual_seed(5)
 
                 g = torch.cuda._Graph()
+                torch.cuda.empty_cache()
                 g.capture_begin()
                 graph_out = graph_in
                 for _ in range(2):
@@ -3079,6 +3114,7 @@ torch.cuda.synchronize()
                 torch.cuda.manual_seed(5)
 
                 g = torch.cuda._Graph()
+                torch.cuda.empty_cache()
                 if (module == "torch"):
                     g.capture_begin()
                     t1 = getattr(torch, op)(*args, **kwargs)
@@ -3431,6 +3467,8 @@ torch.cuda.synchronize()
     def test_graph_record_stream(self):
         # Makes sure graph capture defers attempting to reclaim allocations used across streams. See
         # "Q. Why skip process_events if a capture might be underway?" in c10/cuda/CUDACachingAllocator.cpp
+        torch.cuda.empty_cache()
+
         potential_problem = torch.zeros((3,), device="cuda")
         a = torch.zeros((3,), device="cuda")
         s0 = torch.cuda.Stream()
@@ -3476,6 +3514,8 @@ torch.cuda.synchronize()
         # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
         # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
         # avoid syncing noncapturing streams with captured events or vice versa.
+        torch.cuda.empty_cache()
+
         model = torch.nn.LSTM(512, 512, 2, dropout=0.5).cuda()
         x = torch.ones(100, 192, 512, device="cuda")
 

@@ -398,7 +398,7 @@ void listMulIntLeftInPlace(Stack* stack) {
   } else if (n > 1) {
     size_t list_size = list.size();
     for (int64_t i = 1; i < n; i++) {
-      for (size_t j = 0; j < list_size; j++) {
+      for (const auto j : c10::irange(list_size)) {
         list.push_back(list.get(j));
       }
     }
