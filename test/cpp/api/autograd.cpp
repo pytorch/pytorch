@@ -856,8 +856,7 @@ TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
 }
 
 TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
-  bool prev = c10::Warning::get_warnAlways();
-  c10::Warning::set_warnAlways(true);
+  c10::Warning::WarnAlways guard(true);
 
   torch::Tensor x = torch::randn({5,5}).set_requires_grad(true);
   auto z = x * x;
@@ -874,8 +873,6 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
     ASSERT_TRUE(
         warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
   }
-
-  c10::Warning::set_warnAlways(prev);
 }
 
 // TODO add these tests if needed
