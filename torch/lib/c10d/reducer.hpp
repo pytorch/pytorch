@@ -26,6 +26,9 @@ constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
+// Forward declaration
+class Logger;
+
 class Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
@@ -130,6 +133,10 @@ class Reducer {
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
 
+  // Weak reference to associated DDP logger. The reference is weak to avoid
+  // refcycle between reducer and logger.
+  void set_logger(std::weak_ptr<c10d::Logger> logger);
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -169,6 +176,9 @@ class Reducer {
   std::vector<at::Tensor> local_used_maps_dev_;
   // Indicate that reduction is done and D2H copy is done as well.
   bool local_used_maps_reduced_;
+
+  // Weak pointer to associated DDP logger.
+  std::weak_ptr<c10d::Logger> logger_;
 
   // Work handle for allreduce on local_used_maps_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
@@ -446,8 +456,8 @@ class Reducer {
   // get current cuda stream
   const c10::Stream get_current_stream();
   bool dynamic_graph_find_unused();
-  bool static_graph_first_iteration();
-  bool static_graph_after_first_iteration();
+  bool static_graph_first_bwd();
+  bool static_graph_after_first_bwd();
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
