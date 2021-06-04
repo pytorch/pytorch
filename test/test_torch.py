@@ -5638,7 +5638,7 @@ else:
 
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
-    @onlyOnCUDA
+    @onlyCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
