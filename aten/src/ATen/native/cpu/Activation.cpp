@@ -369,7 +369,7 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void hardshrink_kernel(TensorIterator& iter, const Scalar& lambd) {
+void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
