@@ -436,7 +436,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*tensor_cdata_naming_scheme=*/true);
+        /*tensor_unique_id_naming_scheme=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -458,7 +458,7 @@ void ScriptModuleSerializer::writeArchive(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
-    bool tensor_cdata_naming_scheme) {
+    bool tensor_unique_id_naming_scheme) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -474,7 +474,7 @@ void ScriptModuleSerializer::writeArchive(
       &memoizedClassTypes,
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
-        if (tensor_cdata_naming_scheme) {
+        if (tensor_unique_id_naming_scheme) {
           tensor_names.push_back(
               std::to_string(
                   tensor.storage().unsafeGetStorageImpl()->get_unique_id()) +
@@ -498,7 +498,7 @@ void ScriptModuleSerializer::writeArchive(
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = tensor_dir + tensor_names[i++];
-    if (tensor_cdata_naming_scheme &&
+    if (tensor_unique_id_naming_scheme &&
         std::find(
             pre_serialized_files.begin(), pre_serialized_files.end(), fname) !=
             pre_serialized_files.end()) {
@@ -644,7 +644,7 @@ void ScriptModuleSerializer::writeByteCode(
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*tensor_unique_id_naming_scheme=*/true);
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
@@ -754,7 +754,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "data",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*tensor_unique_id_naming_scheme=*/true);
   // Then we serialize all code info.
   convertTypes(module.type());
   // The tensor constants from the code are written to a separate archive
@@ -766,7 +766,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "constants",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*tensor_unique_id_naming_scheme=*/true);
 
   // Note: writeFiles() call needs to be made in addition to calling this
   // function to have the code actually saved (tensors are saved)

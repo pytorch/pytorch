@@ -19,7 +19,7 @@ class _StorageBase(object):
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
     def get_device(self) -> int: ...  # noqa: E704
-    def get_unique_id(self) -> int: ... # noqa: E704
+    def get_unique_id(self) -> int: ...  # noqa: E704
 
     # Defined in torch/csrc/generic/StorageSharing.cpp
     def _share_filename_(self): ...  # noqa: E704
