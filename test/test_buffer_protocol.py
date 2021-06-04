@@ -131,7 +131,7 @@ class TestBufferProtocol(common.TestCase):
         for first in range(len(input)):
             count = len(input) - first + 1
             with self.assertRaisesRegex(ValueError,
-                                        rf"requested buffer length \({count} * {bytes} bytes\) "
+                                        rf"requested buffer length \({count} \* {bytes} bytes\) "
                                         rf"after offset \({first * bytes} bytes\) must .*"
                                         rf"buffer length \({in_bytes} bytes\)"):
                 self._run_test(dtype, input, count=count, first=first)
