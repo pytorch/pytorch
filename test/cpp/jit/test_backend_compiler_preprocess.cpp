@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/backends/backend.h>
-#include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include "torch/csrc/jit/backends/backend_debug_handler.h"
@@ -15,7 +15,7 @@ namespace {
 c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<IValue, IValue>& method_compile_spec,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    const BackendDebugHandleGenerator& generate_debug_handles) {
   // The output of this process would produce a dictionary
   // Key: method name.
   // Val: compiled blob (represented by a string).
@@ -32,7 +32,7 @@ c10::IValue preprocess(
     EliminateDeadCode(graph);
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto key = method.name();
-    auto node_debug_handles = debug_info_recorder.generate_debug_handles(graph);
+    auto node_debug_handles = generate_debug_handles(graph);
     std::stringstream ss;
     for (const auto& node : graph->nodes()) {
       switch (node->kind()) {

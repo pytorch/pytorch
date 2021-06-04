@@ -115,13 +115,16 @@ using BackendDebugInfoMapType =
     std::unordered_map<DebugHandleType, DebugInfoTuple>;
 
 using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
+
+using BackendDebugHandleGenerator =
+    std::function<NodeToDebugHandle(const std::shared_ptr<Graph>&)>;
+
 /*
  * This class is used to generate debug info map.
- * It instantiates debug_handle_manager and initialize thread local pointer to
- * it. backend's preprocess will call generate_debug_handles, which uses
- * debug_handle_manager to generate debug handles. When lowering process
- * finishes, calling stopRecording will return debug info map from
- * debug_handle_manager
+ * backend's preprocess will call generate_debug_handles (see
+ * backend_detail.cpp), which uses debug_handle_manager to generate debug
+ * handles. When lowering process finishes, calling stopRecording will
+ * return debug info map from debug_handle_manager
  */
 class TORCH_API BackendDebugInfoRecorder {
  public:

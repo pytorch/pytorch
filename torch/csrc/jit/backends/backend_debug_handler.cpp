@@ -34,27 +34,5 @@ BackendDebugInfoMapType BackendDebugInfoRecorder::stopRecording() {
   return handles_to_inlined_callstack_ptrs_;
 }
 
-NodeToDebugHandle BackendDebugInfoRecorder::generate_debug_handles(const std::shared_ptr<Graph>& graph) {
-  NodeToDebugHandle node_to_debug_handles;
-
-  std::stack<Block*> blocks_to_visit;
-  // TODO: Look into using DepthFirstGraphNodeIterator
-  // At the moment it takes non-const graph but maybe we can make it
-  // general such that it can work with both.
-  blocks_to_visit.push(graph->block());
-  while (!blocks_to_visit.empty()) {
-    Block* b = blocks_to_visit.top();
-    blocks_to_visit.pop();
-    for (Node* n : b->nodes()) {
-      DebugHandleType debug_handle = getNextDebugHandle(n);
-      node_to_debug_handles.emplace(n, debug_handle);
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
-    }
-  }
-  return node_to_debug_handles;
-}
-
 } // namespace jit
 } // namespace torch

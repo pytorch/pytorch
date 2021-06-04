@@ -223,6 +223,19 @@ void initTensorExprBindings(PyObject* module) {
         }
       },
       py::return_value_policy::reference);
+
+  te.def(
+      "Compute2",
+      [](const std::string& func_name,
+         const std::vector<DimArg>& dim_args,
+         py::function func) {
+        return Compute(
+            func_name, dim_args, [&func](const std::vector<VarHandle>& dims) {
+              return py::cast<ExprHandle>(func(dims));
+            });
+      },
+      py::return_value_policy::reference);
+
   py::class_<Reducer>(te, "Reducer")
       .def(py::init<
            ExprHandle,
@@ -364,8 +377,8 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_loop_body_for",
-          [](const LoopNest& self, BufHandle* b) {
-            return self.getLoopBodyFor(b->node());
+          [](const LoopNest& self, BufHandle& b) {
+            return self.getLoopBodyFor(b.node());
           },
           py::return_value_policy::reference)
       .def(
@@ -376,8 +389,8 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_all_loopnests_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllLoopNestsWritingToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllLoopNestsWritingToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
@@ -388,14 +401,14 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_innermost_loops_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllInnermostLoopsWritingToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllInnermostLoopsWritingToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
           "get_writes_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllWritesToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllWritesToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
@@ -413,17 +426,17 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "split_with_tail",
           [](const LoopNest& self, For* f, int factor) {
-            For *outer = nullptr, *inner = nullptr, *tail = nullptr;
-            self.splitWithTail(f, factor, &outer, &inner, &tail);
-            return std::make_tuple(outer, inner, tail);
+            For *inner = nullptr, *tail = nullptr;
+            self.splitWithTail(f, factor, &inner, &tail);
+            return std::make_tuple(inner, tail);
           },
           py::return_value_policy::reference)
       .def(
           "split_with_mask",
           [](const LoopNest& self, For* f, int factor) {
-            For *outer = nullptr, *inner = nullptr;
-            self.splitWithMask(f, factor, &outer, &inner);
-            return std::make_tuple(outer, inner);
+            For* inner = nullptr;
+            self.splitWithMask(f, factor, &inner);
+            return inner;
           },
           py::return_value_policy::reference)
       .def(
@@ -466,8 +479,7 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "fuse_loops",
           [](const std::vector<For*>& loops) {
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            For* fused_loop;
+            For* fused_loop = nullptr;
             LoopNest::fuseLoops(loops, &fused_loop);
             return fused_loop;
           },
@@ -494,10 +506,12 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "cache_accesses",
           [](LoopNest& self,
-             const Buf* producer,
+             const BufHandle& producer,
              const std::string& name,
              Stmt* consumer) {
-            return self.cacheAccesses(producer, name, consumer);
+            std::pair<const Buf*, Stmt*> ret =
+                self.cacheAccesses(producer.node(), name, consumer);
+            return std::make_pair(BufHandle(ret.first), ret.second);
           },
           py::return_value_policy::reference)
       .def(

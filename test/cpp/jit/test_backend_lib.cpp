@@ -74,7 +74,7 @@ namespace {
 c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<IValue, IValue>& method_compile_spec,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    const BackendDebugHandleGenerator& generate_debug_handles) {
   return mod._ivalue();
 }
 

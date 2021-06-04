@@ -9,10 +9,13 @@
 
 namespace torch {
 namespace jit {
+
 namespace detail {
 
-using BackendPreprocessFunction =
-    std::function<c10::IValue(const Module&, const c10::Dict<IValue, IValue>&, BackendDebugInfoRecorder&)>;
+using BackendPreprocessFunction = std::function<c10::IValue(
+    const Module&,
+    const c10::Dict<IValue, IValue>&,
+    const BackendDebugHandleGenerator& generate_debug_handles)>;
 
 TORCH_API void registerBackendPreprocessFunction(
     const std::string& name,

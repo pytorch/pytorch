@@ -23,6 +23,54 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+TEST(Reductions, ReduceSum0D_1) {
+  KernelScope kernel_scope;
+  const int M = 10;
+
+  Placeholder b(BufHandle("b", {M}, kFloat));
+  std::vector<float> in(M);
+  for (int j = 0; j < M; ++j) {
+    in[j] = j;
+  }
+
+  std::vector<float> out(M, -1.f);
+
+  Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {});
+  LoopNest loop({c});
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c});
+
+  cg.call({in, out});
+  for (int i = 0; i < M; ++i) {
+    ASSERT_EQ(out[i], in[i]);
+  }
+}
+
+TEST(Reductions, ReduceSum0D_2) {
+  KernelScope kernel_scope;
+  const int M = 10;
+
+  Placeholder b(BufHandle("b", {}, kFloat));
+  std::vector<float> in(1);
+  in[0] = 77.7;
+
+  std::vector<float> out(1, -1.f);
+
+  Tensor* c = Reduce("sum", {}, Sum(), b, {});
+  LoopNest loop({c});
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c});
+
+  cg.call({in, out});
+  ASSERT_EQ(out[0], in[0]);
+}
+
 // Sum an array to a single value.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum1D) {
@@ -624,22 +672,9 @@ TEST(Reductions, SplitNonReduceAxis) {
   std::vector<float> out(16, -1.f);
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_2;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_1;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail_2;
-  l.splitWithTail(x_outer, 2, &x_2, &x_1, &x_tail_2);
+  l.splitWithTail(loops[0], 2);
+  l.splitWithTail(loops[0], 2);
 
   l.prepareForCodegen();
 
@@ -1133,8 +1168,8 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *o, *i, *t;
-  loop.splitWithTail(loops[1], SPLIT_FACTOR, &o, &i, &t);
+  For *i, *t;
+  loop.splitWithTail(loops[1], SPLIT_FACTOR, &i, &t);
   loop.reorderAxis(loops[0], i);
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
@@ -1321,7 +1356,7 @@ TEST(Reductions, ReduceInlineReducerInternal) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(Reductions, ReductionCacheAccessesOuter) {
+TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   KernelScope kernel_scope;
 
   int L = 4;
@@ -1344,12 +1379,94 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
   });
 
   LoopNest l({e}, {c, d, e});
+  LoopNest l_before(l);
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
+
+  Stmt* d_loop = l.getLoopStmtsFor(d)[0];
+  l.cacheAccesses(d->buf(), "d_local", d_loop);
+  l.prepareForCodegen();
+
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(result, {a, b, e});
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(d_local); // dtype=float, dims=[4]
+#CHECK: for (int l1
+#CHECK:   d_local[l1] = 0.f
+#CHECK:   for (int n1
+#CHECK:     for (int m1
+#CHECK:       d_local[l1] = (d_local[l1]) + (scale[
+#CHECK:     }
+#CHECK:   }
+#CHECK: }
+#CHECK: for (int i
+#CHECK:   sum[i] = d_local[i]
+#CHECK: Free(d_local);
+#CHECK-NOT: d_local
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  PaddedBuffer<float> a_v(L, M, N, "a");
+  PaddedBuffer<float> b_v(L, M, N, "b");
+  PaddedBuffer<float> c_v(L, M, N, "c");
+  PaddedBuffer<float> d_v(L, "d");
+  PaddedBuffer<float> e_before(L, "e_before");
+  PaddedBuffer<float> e_after(L, "e_after");
+
+  for (int l = 0; l < L; l++) {
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        a_v(l, m, n) = at::randn({1}).item().to<float>();
+        b_v(l, m, n) = at::randn({1}).item().to<float>();
+      }
+    }
+  }
+
+  cg_before.call({a_v, b_v, e_before});
+  cg_after.call({a_v, b_v, e_after});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(e_before, e_after, 1e-5);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
+  KernelScope kernel_scope;
+
+  int L = 4;
+  int N = 3;
+  int M = 2;
+
+  Placeholder a(BufHandle("a", {L, N, M}, kFloat));
+  Placeholder b(BufHandle("b", {L, N, M}, kFloat));
+
+  Tensor* c = Compute(
+      "scale",
+      {{L, "l2"}, {N, "n1"}, {M, "m1"}},
+      [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
+        return b.load(l, n, m) * a.load(l, n, m);
+      });
+  Tensor* d = Reduce("sum", {{L, "l1"}}, Sum(), c, {{N, "n1"}, {M, "m1"}});
+
+  Tensor* e = Compute("scale", {{L, "l"}}, [&](const VarHandle& l) {
+    return b.load(0, 0, l) * d->load(l);
+  });
+
+  LoopNest l({e}, {c, d, e});
+  LoopNest l_before(l);
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
   Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
   oss << *result;
@@ -1357,21 +1474,43 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
       R"IR(
 #CHECK: Allocate(d_local); // dtype=float, dims=[1]
 #CHECK: sum[l1] = 0
-#CHECK: d_local[0] = 0
+#CHECK: d_local[0] = sum[l1]
 #CHECK: for (int n1
 #CHECK:   for (int m1
 #CHECK: d_local[0] = (d_local[0]) + (scale[
 #CHECK:   }
 #CHECK: }
-#CHECK: sum[l1] = (sum[l1]) + (d_local[0])
+#CHECK: sum[l1] = d_local[0]
 #CHECK: Free(d_local);
 #CHECK-NOT: d_local
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  PaddedBuffer<float> a_v(L, M, N, "a");
+  PaddedBuffer<float> b_v(L, M, N, "b");
+  PaddedBuffer<float> c_v(L, M, N, "c");
+  PaddedBuffer<float> d_v(L, "d");
+  PaddedBuffer<float> e_before(L, "e_before");
+  PaddedBuffer<float> e_after(L, "e_after");
+
+  for (int l = 0; l < L; l++) {
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        a_v(l, m, n) = at::randn({1}).item().to<float>();
+        b_v(l, m, n) = at::randn({1}).item().to<float>();
+      }
+    }
+  }
+
+  cg_before.call({a_v, b_v, e_before});
+  cg_after.call({a_v, b_v, e_after});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(e_before, e_after, 1e-5);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(Reductions, ReductionCacheAccessesInner) {
+TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   KernelScope kernel_scope;
 
   int L = 4;
@@ -1394,12 +1533,16 @@ TEST(Reductions, ReductionCacheAccessesInner) {
   });
 
   LoopNest l({e}, {c, d, e});
+  LoopNest l_before(l);
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[2];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
   Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
   oss << *result;
@@ -1418,6 +1561,28 @@ TEST(Reductions, ReductionCacheAccessesInner) {
 #CHECK-NOT: d_local
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  PaddedBuffer<float> a_v(L, M, N, "a");
+  PaddedBuffer<float> b_v(L, M, N, "b");
+  PaddedBuffer<float> c_v(L, M, N, "c");
+  PaddedBuffer<float> d_v(L, "d");
+  PaddedBuffer<float> e_before(L, "e_before");
+  PaddedBuffer<float> e_after(L, "e_after");
+
+  for (int l = 0; l < L; l++) {
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        a_v(l, m, n) = at::randn({1}).item().to<float>();
+        b_v(l, m, n) = at::randn({1}).item().to<float>();
+      }
+    }
+  }
+
+  cg_before.call({a_v, b_v, e_before});
+  cg_after.call({a_v, b_v, e_after});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(e_before, e_after, 1e-5);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1526,15 +1691,13 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   LoopNest l({e}, {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
 
   // Split outer reduction axis.
-  l.splitWithMask(l.getLoopStmtsFor(d)[0], 4, &outer, &inner);
+  l.splitWithMask(l.getLoopStmtsFor(d)[0], 4, &inner);
 
   // Split reduction consumer.
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &outer, &inner);
+  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
 
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
@@ -1577,8 +1740,6 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   LoopNest l({e}, {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
 
   // reorder outer reduction axes.
@@ -1586,7 +1747,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   l.reorderAxis(loops[0], loops[1]);
 
   // Split reduction consumer.
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &outer, &inner);
+  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
 
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
