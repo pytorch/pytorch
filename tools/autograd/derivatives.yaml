@@ -1365,8 +1365,6 @@
 
 - name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
-  # see the comment in the function `test_binary_cross_entropy_grads` from `test_nn.py`,
-  # where it is explained why grads wrt `target` are forbidden
   target: not_implemented("binary_cross_entropy_backward wrt `target`")
   grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
 
