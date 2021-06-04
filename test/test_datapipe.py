@@ -375,6 +375,47 @@ class TestFunctionalIterDataPipe(TestCase):
         for x, y in zip(map_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
+    def test_map_datapipe_nested_level(self):
+
+        input_dp = IDP([list(range(10)) for _ in range(3)])
+
+        def fn(item, dtype=torch.float, *, sum=False):
+            data = torch.tensor(item, dtype=dtype)
+            return data if not sum else data.sum()
+
+        map_dp = input_dp.map(lambda ls: ls * 2, nesting_level=0)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(x, y * 2)
+
+        map_dp = input_dp.map(fn, nesting_level=1)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(len(x), len(y))
+            for a, b in zip(x, y):
+                self.assertEqual(a, torch.tensor(b, dtype=torch.float))
+
+        map_dp = input_dp.map(fn, nesting_level=-1)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(len(x), len(y))
+            for a, b in zip(x, y):
+                self.assertEqual(a, torch.tensor(b, dtype=torch.float))
+
+        with self.assertRaises(Exception):
+            map_dp = input_dp.map(fn, nesting_level=4)
+            for x, y in zip(map_dp, input_dp):
+                self.assertEqual(len(x), len(y))
+                for a, b in zip(x, y):
+                    print(a,b)
+                    self.assertEqual(a, torch.tensor(b, dtype=torch.float))
+
+        with self.assertRaises(Exception):
+            input_dp.map(fn, nesting_level=-2)
+
+        with self.assertRaises(Exception):
+            input_dp.map(fn, nesting_level=-5)
+
     def test_collate_datapipe(self):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         input_dp = IDP(arrs)
