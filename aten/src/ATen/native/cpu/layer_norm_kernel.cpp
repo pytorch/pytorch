@@ -5,8 +5,8 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/Parallel.h>
 
 namespace at {
@@ -25,8 +25,8 @@ void LayerNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  using T_ACC = vec256::vec_scalar_t<T>;
-  using Vec = vec256::Vec256<T_ACC>;
+  using T_ACC = vec::vec_scalar_t<T>;
+  using Vec = vec::Vectorized<T_ACC>;
   DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
@@ -43,11 +43,11 @@ void LayerNormKernelImplInternal(
     for (int64_t i = start; i < end; ++i) {
       T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
-      T_ACC mean_val = vec256::reduce_all<T>(
+      T_ACC mean_val = vec::reduce_all<T>(
           [](Vec& x, Vec& y) { return x + y; },
           X_ptr,
           N);
-      T_ACC rstd_val = vec256::map_reduce_all<T>(
+      T_ACC rstd_val = vec::map_reduce_all<T>(
           [](Vec x) { return x * x; },
           [](Vec x, Vec y) { return x + y; },
           X_ptr,
@@ -64,7 +64,7 @@ void LayerNormKernelImplInternal(
           Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
         }
       } else {
-        vec256::map3<T>(
+        vec::map3<T>(
             [scale, bias](Vec x, Vec gamma, Vec beta) {
               return (x * Vec(scale) + Vec(bias)) * gamma + beta;
             },
@@ -109,8 +109,8 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  using T_ACC = vec256::vec_scalar_t<T>;
-  using Vec = vec256::Vec256<T_ACC>;
+  using T_ACC = vec::vec_scalar_t<T>;
+  using Vec = vec::Vectorized<T_ACC>;
   DCHECK_EQ(dY.numel(), M * N);
   DCHECK_EQ(X.numel(), M * N);
   DCHECK_EQ(mean.numel(), M);
@@ -164,7 +164,7 @@ void LayerNormBackwardKernelImplInternal(
         // for (int64_t j = 0; j < N; ++j) {
         //   dgamma_data[j] += dY_ptr[j] * (a * X_ptr[j] + b);
         // }
-        vec256::map3<T>(
+        vec::map3<T>(
             [a, b](Vec dgamma, Vec dy, Vec x) { return dgamma + dy * (Vec(a) * x + Vec(b)); },
             dgamma_buffer_ptr,
             dgamma_buffer_ptr,
@@ -177,7 +177,7 @@ void LayerNormBackwardKernelImplInternal(
         // for (int64_t j = 0; j < N; ++j) {
         //   dbeta_data[j] += dY_ptr[j];
         // }
-        vec256::map2<T>(
+        vec::map2<T>(
             [](Vec dbeta, Vec dy) { return dbeta + dy; },
             dbeta_buffer_ptr,
             dbeta_buffer_ptr,
@@ -195,25 +195,25 @@ void LayerNormBackwardKernelImplInternal(
         //   db += dY_ptr[j] * gamma_v;
         // }
         if (gamma_null) {
-          ds = vec256::map2_reduce_all<T>(
+          ds = vec::map2_reduce_all<T>(
               [](Vec x, Vec y) { return x * y; },
               [](Vec x, Vec y) { return x + y; },
               dY_ptr,
               X_ptr,
               N);
-          db = vec256::reduce_all<T>(
+          db = vec::reduce_all<T>(
               [](Vec& x, Vec& y) { return x + y; },
               dY_ptr,
               N);
         } else {
-          ds = vec256::map3_reduce_all<T>(
+          ds = vec::map3_reduce_all<T>(
               [](Vec x, Vec y, Vec z) { return x * y * z; },
               [](Vec x, Vec y) { return x + y; },
               dY_ptr,
               X_ptr,
               gamma_data,
               N);
-          db = vec256::map2_reduce_all<T>(
+          db = vec::map2_reduce_all<T>(
               [](Vec x, Vec y) { return x * y; },
               [](Vec x, Vec y) { return x + y; },
               dY_ptr,
@@ -229,14 +229,14 @@ void LayerNormBackwardKernelImplInternal(
         //   dX_ptr[j] = a * dY_ptr[j] * gamma_v + b * X_ptr[j] + c;
         // }
         if (gamma_null) {
-          vec256::map2<T>(
+          vec::map2<T>(
               [a, b, c](Vec dy, Vec x) { return Vec(a) * dy + Vec(b) * x + Vec(c); },
               dX_ptr,
               dY_ptr,
               X_ptr,
               N);
         } else {
-          vec256::map3<T>(
+          vec::map3<T>(
               [a, b, c](Vec dy, Vec gamma, Vec x) { return Vec(a) * dy * gamma + Vec(b) * x + Vec(c); },
               dX_ptr,
               dY_ptr,
