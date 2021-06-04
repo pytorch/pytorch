@@ -177,6 +177,16 @@ Tensor* Reduce(
   std::vector<const Var*> reduce_vars;
   unpack_dim_args(reduce_args, &reduce_dims, &reduce_vars);
 
+  // If reduce_vars is empty, then it's not a reduction, but rather a simple
+  // copy
+  if (reduce_vars.empty()) {
+    const Expr* body =
+        Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(vars))
+            .node();
+    Buf* func_result = new Buf(func_name, dims, body->dtype());
+    return new Tensor(func_result, vars, body);
+  }
+
   std::vector<const Var*> all_vars;
   all_vars.insert(all_vars.end(), vars.begin(), vars.end());
   all_vars.insert(all_vars.end(), reduce_vars.begin(), reduce_vars.end());
