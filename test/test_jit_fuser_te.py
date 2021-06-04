@@ -1946,6 +1946,7 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
+    'conj'
 ]
 
 def get_name(op):
