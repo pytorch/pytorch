@@ -212,6 +212,10 @@ inline bool is_signed(const Tensor& tensor) {
   return tensor.is_signed();
 }
 
+inline bool is_inference(const Tensor& tensor) {
+  return tensor.is_inference();
+}
+
 inline bool is_conj(const Tensor& tensor) {
   return tensor.is_conj();
 }

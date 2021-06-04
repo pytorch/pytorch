@@ -485,6 +485,11 @@ class TORCH_API Tensor {
     return impl_->is_meta();
   }
 
+  /// Returns if a `Tensor` is an inference tensor.
+  bool is_inference() const {
+    return impl_->is_inference();
+  }
+
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;

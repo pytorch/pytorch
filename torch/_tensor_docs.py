@@ -1991,6 +1991,13 @@ is_complex() -> bool
 Returns True if the data type of :attr:`self` is a complex data type.
 """)
 
+add_docstr_all('is_inference',
+               r"""
+is_inference() -> bool
+
+See :func:`torch.is_inference`
+""")
+
 add_docstr_all('is_conj',
                r"""
 is_conj() -> bool

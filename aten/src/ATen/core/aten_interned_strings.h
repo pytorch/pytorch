@@ -403,6 +403,7 @@ _(aten, is_cuda) \
 _(aten, is_mlc) \
 _(aten, is_distributed) \
 _(aten, is_floating_point) \
+_(aten, is_inference) \
 _(aten, is_nonzero) \
 _(aten, is_same_size) \
 _(aten, is_set_to) \
