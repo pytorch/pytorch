@@ -55,23 +55,13 @@ struct TransportRegistration {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
-struct CpuChannelRegistration {
+struct ChannelRegistration {
   std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
-
-struct CudaChannelRegistration {
-#ifdef USE_CUDA_NOT_ROCM
-  std::shared_ptr<tensorpipe::channel::Context> channel;
-  int64_t priority;
-#endif
-};
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
+C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
@@ -107,8 +97,7 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
     if (channels.has_value()) {
       for (const std::string& channelName : channels.value()) {
         TORCH_CHECK(
-            TensorPipeCudaChannelRegistry()->Has(channelName) ||
-                TensorPipeCpuChannelRegistry()->Has(channelName),
+            TensorPipeChannelRegistry()->Has(channelName),
             "Unknown channel: ",
             channelName);
       }
