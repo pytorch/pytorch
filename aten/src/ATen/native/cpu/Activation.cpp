@@ -161,7 +161,7 @@ void GeluMKLKernelImpl(TensorIteratorBase* it) {
 }
 
 template <typename T>
-void GeluBackwardMKLKernelImpl(TensorIterator* it) {
+void GeluBackwardMKLKernelImpl(TensorIteratorBase* it) {
   if (!it->can_use_32bit_indexing()) {
     for (auto& sub_it : it->with_32bit_indexing()) {
       GeluBackwardMKLKernelImpl<T>(&sub_it);
@@ -193,7 +193,7 @@ void GeluMKLKernelImpl(TensorIteratorBase* /* it */) {
 }
 
 template <typename T>
-void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
+void GeluBackwardMKLKernelImpl(TensorIteratorBase* /* it */) {
   TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
@@ -289,7 +289,7 @@ void GeluKernelImpl(TensorIteratorBase& it) {
   }
 }
 
-void GeluBackwardKernelImpl(TensorIterator& it) {
+void GeluBackwardKernelImpl(TensorIteratorBase& it) {
   if (hasMKL() && it.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
       GeluBackwardMKLKernelImpl<scalar_t>(&it);
