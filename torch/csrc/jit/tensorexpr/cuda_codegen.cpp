@@ -106,7 +106,7 @@ static void codegenOutputQuery(
   compile_to_sass = (major == prop->major) && (minor == prop->minor);
 }
 
-std::string cudaDtypeCppString(const Dtype& dtype) {
+std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
     case ScalarType::Bool:
       return "bool";
@@ -218,7 +218,7 @@ void CudaAnalysis::visit(const For* v) {
   }
 }
 
-static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
+void CudaPrinter::print_flat_alloc(const Allocate* alloc) {
   std::vector<const Expr*> dims = alloc->dims();
   // TODO: this should be merged with the storage flattener.
   int64_t flat_size = 1;
@@ -230,8 +230,8 @@ static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
       throw std::runtime_error("Only IntImm dimensions are supported for now");
     }
   }
-  os << cudaDtypeCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
-     << "[" << flat_size << "];" << std::endl;
+  os() << dtypeToCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
+       << "[" << flat_size << "];" << std::endl;
 }
 
 void CudaPrinter::visit(const Allocate* v) {
@@ -239,13 +239,13 @@ void CudaPrinter::visit(const Allocate* v) {
   if (cuda_analysis_->cross_block_bufs().count(v->buffer_var()) != 0) {
     emitIndent();
     os() << "__shared__ ";
-    print_flat_alloc(os(), v);
+    print_flat_alloc(v);
     return;
   }
 
   if (cuda_analysis_->thread_local_bufs().count(v->buffer_var()) != 0) {
     emitIndent();
-    print_flat_alloc(os(), v);
+    print_flat_alloc(v);
     return;
   }
 
@@ -273,7 +273,7 @@ void CudaPrinter::visit(const Cast* v) {
     return;
   }
 
-  os() << "(" << cudaDtypeCppString(v->dtype()) << ")";
+  os() << "(" << dtypeToCppString(v->dtype()) << ")";
   os() << "(";
   v->src_value()->accept(this);
   os() << ")";
@@ -524,7 +524,7 @@ void CudaPrinter::visit(const Block* v) {
 
 void CudaPrinter::visit(const Let* v) {
   emitIndent();
-  os() << cudaDtypeCppString(v->dtype());
+  os() << dtypeToCppString(v->dtype());
   os() << " " << *v->var() << " = ";
   v->value()->accept(this);
   os() << ";" << std::endl;
@@ -976,7 +976,8 @@ void CudaCodeGen::Initialize() {
     const Var* var = buffer_arg.var();
     Dtype dtype = buffer_arg.dtype();
 
-    os() << cudaDtypeCppString(dtype) << (buffer_arg.isVar() ? " " : "* ")
+    os() << printer_->dtypeToCppString(dtype)
+         << (buffer_arg.isVar() ? " " : "* ")
          << name_manager()->get_unique_name(var);
   }
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
