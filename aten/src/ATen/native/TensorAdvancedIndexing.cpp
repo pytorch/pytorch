@@ -106,24 +106,8 @@ void scatter_meta_impl(
 
   meta.set_output(self.sizes(), self.options());
   if (reduce.has_value()) {
-    auto op = get_operator_enum(reduce.value());
-
-    // On CUDA, if reduce='multiply', we only allow floating point types. That
-    // is because atomic multiplication on CUDA is only implemented for them in
-    // aten/src/THC/THCAtomics.cuh
-    if (self.device().is_cuda() &&
-        op == native::SCATTER_GATHER_OP::REDUCE_MULTIPLY) {
-      TORCH_CHECK(
-          at::isFloatingType(self.scalar_type()),
-          "scatter(): Expected floating type for self when reduce=multiply.");
-    }
-
-    // No bfloat16 dispatch for the scatter-gather kernel on CPU
-    if (self.device() == kCPU) {
-      TORCH_CHECK(
-          self.scalar_type() != kBFloat16,
-          "scatter(): bfloat16 not supported on cpu")
-    }
+    // Check if we have a valid reduce operator.
+    get_operator_enum(reduce.value());
   }
 }
 
