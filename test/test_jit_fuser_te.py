@@ -1853,7 +1853,7 @@ works_list = [
     'acos',
     'add',
     'addcmul',
-    'addmm.decomposed'
+    'addmm.decomposed',
     'asin',
     'atan',
     'atan2',
