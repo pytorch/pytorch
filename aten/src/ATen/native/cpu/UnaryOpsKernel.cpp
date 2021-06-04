@@ -11,8 +11,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/DistributionsHelper.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
@@ -32,7 +32,7 @@ namespace native {
 
 namespace CPU_CAPABILITY {
 
-using namespace vec256;
+using namespace vec;
 
 static void sigmoid_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sigmoid_cpu", [&]() {
@@ -43,11 +43,11 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
             float a0 = static_cast<float>(a);
             return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
           },
-          [=](Vec256<BFloat16> a) {
-            Vec256<float> a0, a1;
+          [=](Vectorized<BFloat16> a) {
+            Vectorized<float> a0, a1;
             std::tie(a0, a1) = convert_bfloat16_float(a);
-            a0 = (Vec256<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
-            a1 = (Vec256<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
+            a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
+            a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
             return convert_float_bfloat16(a0, a1);
           });
       return;
@@ -55,10 +55,10 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a)))); },
-        [=](Vec256<scalar_t> a) {
-          a = Vec256<scalar_t>(static_cast<scalar_t>(0)) - a;
+        [=](Vectorized<scalar_t> a) {
+          a = Vectorized<scalar_t>(static_cast<scalar_t>(0)) - a;
           a = a.exp();
-          a = Vec256<scalar_t>(static_cast<scalar_t>(1)) + a;
+          a = Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a;
           a = a.reciprocal();
           return a;
         });
@@ -69,11 +69,11 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
 
 template <typename T>
 void VmlLog(int64_t N, const T* X, T* Y) {
-  constexpr int64_t K = Vec256<T>::size();
+  constexpr int64_t K = Vectorized<T>::size();
   at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
-    using VT = vec256::vec_scalar_t<T>;
-    vec256::map(
-        [](Vec256<VT> x_vec) { return x_vec.log(); },
+    using VT = vec::vec_scalar_t<T>;
+    vec::map(
+        [](Vectorized<VT> x_vec) { return x_vec.log(); },
         Y + begin,
         X + begin,
         end - begin);
@@ -99,7 +99,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
     return;
   }
 
-  constexpr int64_t K = Vec256<T>::size();
+  constexpr int64_t K = Vectorized<T>::size();
   const int64_t N = it->numel();
   const T* X_data = static_cast<T*>(it->data_ptr(1));
   T* Y_data = static_cast<T*>(it->data_ptr(0));
@@ -141,7 +141,7 @@ void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
         if (at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
         } else if (eps < scalar_t(0)) {
-          const Vec256<scalar_t> kOneVec(scalar_t(1));
+          const Vectorized<scalar_t> kOneVec(scalar_t(1));
           cpu_kernel_vec(
               iter,
               [](scalar_t x) {
@@ -149,15 +149,15 @@ void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
                     ? std::numeric_limits<scalar_t>::infinity()
                     : std::log(x / (scalar_t(1) - x));
               },
-              [kOneVec](Vec256<scalar_t> x_vec) {
+              [kOneVec](Vectorized<scalar_t> x_vec) {
                 return (x_vec / (kOneVec - x_vec)).log();
               });
         } else {
           const scalar_t lo = eps;
           const scalar_t hi = scalar_t(1) - eps;
-          const Vec256<scalar_t> kOneVec(scalar_t(1));
-          const Vec256<scalar_t> lo_vec(lo);
-          const Vec256<scalar_t> hi_vec(hi);
+          const Vectorized<scalar_t> kOneVec(scalar_t(1));
+          const Vectorized<scalar_t> lo_vec(lo);
+          const Vectorized<scalar_t> hi_vec(hi);
           cpu_kernel_vec(
               iter,
               [lo, hi](scalar_t x) {
@@ -166,8 +166,8 @@ void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
                     ? std::numeric_limits<scalar_t>::infinity()
                     : std::log(x / (scalar_t(1) - x));
               },
-              [kOneVec, lo_vec, hi_vec](Vec256<scalar_t> x_vec) {
-                x_vec = vec256::clamp(x_vec, lo_vec, hi_vec);
+              [kOneVec, lo_vec, hi_vec](Vectorized<scalar_t> x_vec) {
+                x_vec = vec::clamp(x_vec, lo_vec, hi_vec);
                 return (x_vec / (kOneVec - x_vec)).log();
               });
         }
@@ -179,7 +179,7 @@ static void abs_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return abs_impl(a); },
-        [=](Vec256<scalar_t> a) { return a.abs(); });
+        [=](Vectorized<scalar_t> a) { return a.abs(); });
   });
 }
 
@@ -188,7 +188,7 @@ static void angle_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return angle_impl(a); },
-        [=](Vec256<scalar_t> a) { return a.angle(); });
+        [=](Vectorized<scalar_t> a) { return a.angle(); });
   });
 }
 
@@ -197,7 +197,7 @@ static void real_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return real_impl(a); },
-        [=](Vec256<scalar_t> a) { return a.real(); });
+        [=](Vectorized<scalar_t> a) { return a.real(); });
   });
 }
 
@@ -206,7 +206,7 @@ static void imag_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return imag_impl(a); },
-        [=](Vec256<scalar_t> a) { return a.imag(); });
+        [=](Vectorized<scalar_t> a) { return a.imag(); });
   });
 }
 
@@ -216,7 +216,7 @@ static void conj_kernel(TensorIteratorBase& iter) {
         cpu_kernel_vec(
             iter,
             [=](scalar_t a) -> scalar_t { return conj_impl(a); },
-            [=](Vec256<scalar_t> a) { return a.conj(); });
+            [=](Vectorized<scalar_t> a) { return a.conj(); });
       });
 }
 
@@ -236,7 +236,7 @@ static void bitwise_not_kernel(TensorIteratorBase& iter) {
           [](scalar_t a) -> scalar_t {
             return ~a;
           },
-          [](Vec256<scalar_t> a) -> Vec256<scalar_t> {
+          [](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
             return ~a;
           });
     });
@@ -248,7 +248,7 @@ void frac_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
-        [=](Vec256<scalar_t> a) { return a.frac(); });
+        [=](Vectorized<scalar_t> a) { return a.frac(); });
   });
 }
 
@@ -269,7 +269,7 @@ void reciprocal_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
-        [=](Vec256<scalar_t> a) { return a.reciprocal(); });
+        [=](Vectorized<scalar_t> a) { return a.reciprocal(); });
   });
 }
 
@@ -278,7 +278,7 @@ void neg_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
-        [=](Vec256<scalar_t> a) { return a.neg(); });
+        [=](Vectorized<scalar_t> a) { return a.neg(); });
   });
 }
 
@@ -287,17 +287,17 @@ void sign_kernel(TensorIteratorBase& iter){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
-        auto zero_vec = Vec256<scalar_t>(static_cast<scalar_t>(0));
-        auto one_vec = Vec256<scalar_t>(static_cast<scalar_t>(1));
+        auto zero_vec = Vectorized<scalar_t>(static_cast<scalar_t>(0));
+        auto one_vec = Vectorized<scalar_t>(static_cast<scalar_t>(1));
 
         cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
-          [=](Vec256<scalar_t> self_vec){
+          [=](Vectorized<scalar_t> self_vec){
 
               // Comparison operators returns bitmask.
-              auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
-              auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+              auto left = Vectorized<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+              auto right = Vectorized<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
 
               return left - right;
           });
@@ -316,7 +316,7 @@ static void sgn_kernel(TensorIteratorBase& iter){
     cpu_kernel_vec(
       iter,
       [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
-      [=](Vec256<scalar_t> a) { return a.sgn(); });
+      [=](Vectorized<scalar_t> a) { return a.sgn(); });
   });
 }
 
@@ -340,7 +340,7 @@ static void sinh_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); },
-        [=](Vec256<scalar_t> self_vec){return self_vec.sinh();});
+        [=](Vectorized<scalar_t> self_vec){return self_vec.sinh();});
   });
 }
 
@@ -349,7 +349,7 @@ static void cosh_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); },
-        [=](Vec256<scalar_t> self_vec){return self_vec.cosh();});
+        [=](Vectorized<scalar_t> self_vec){return self_vec.cosh();});
   });
 }
 
@@ -510,7 +510,7 @@ void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> ge
           if (!std::is_same<scalar_t, int>::value && contig) {
             scalar_t *self_seg = self_ptr + begin;
             int* tmp_seg = sample_int_ptr + begin;
-            at::vec256::convert<int, scalar_t>(tmp_seg, self_seg, len);
+            at::vec::convert<int, scalar_t>(tmp_seg, self_seg, len);
           }
         }
       };
@@ -579,7 +579,7 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
           return (static_cast<scalar_t>(1)) / std::sqrt(a);
         },
-        [=](Vec256<scalar_t> a) { return a.rsqrt(); });
+        [=](Vectorized<scalar_t> a) { return a.rsqrt(); });
   });
 }
 
@@ -623,8 +623,22 @@ static void i0e_kernel(TensorIteratorBase& iter) {
         cpu_kernel_vec(
             iter,
             [](scalar_t x) { return calc_i0e(x); },
-            [](Vec256<scalar_t> x) { return x.i0e(); });
+            [](Vectorized<scalar_t> x) { return x.i0e(); });
       });
+}
+
+static void i1_kernel(TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x) { return calc_i1(x); });
+  });
+}
+
+static void i1e_kernel(TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1e_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x) { return calc_i1e(x); });
+  });
 }
 
 // TODO: Disable cont. branch to test more risky code
@@ -766,6 +780,10 @@ REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &CPU_CAPABILITY::frexp_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
