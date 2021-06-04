@@ -1,7 +1,7 @@
 import torch
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.quantization.fx._equalize import (
-    _InputEqualObserver, _WeightEqualObserver, calculate_equalization_scale
+    _InputEqualizationObserver, _WeightEqualizationObserver, calculate_equalization_scale
 )
 
 # Standard Libraries
@@ -19,10 +19,8 @@ class TestEqualizeFx(QuantizationTestCase):
            weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric,
                                            torch.per_channel_affine_float_qparams)))
     def test_input_weight_observer(self, input_qdtype, input_qscheme, weight_qdtype, weight_qscheme):
-        input_obs = _InputEqualObserver(dtype=input_qdtype,
-                                        qscheme=input_qscheme)
-        weight_obs = _WeightEqualObserver(dtype=weight_qdtype,
-                                          qscheme=weight_qscheme)
+        input_obs = _InputEqualizationObserver(dtype=input_qdtype, qscheme=input_qscheme)
+        weight_obs = _WeightEqualizationObserver(dtype=weight_qdtype, qscheme=weight_qscheme)
 
         width = np.random.randint(1, 10)
         x_height = np.random.randint(2, 10)
@@ -61,6 +59,9 @@ class TestEqualizeFx(QuantizationTestCase):
         ref_equalization_scale = np.sqrt((ref_max_weights_col - ref_min_weights_col) /
                                          (ref_max_inputs - ref_min_inputs))
         self.assertEqual(equalization_scale, ref_equalization_scale)
+
+        input_obs.set_equalization_scale(equalization_scale)
+        weight_obs.set_equalization_scale(equalization_scale)
 
         # check the input scale/zero-point values
         input_qparams = input_obs.calculate_qparams()

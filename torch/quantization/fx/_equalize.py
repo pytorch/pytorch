@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
-from torch.quantization.observer import PerChannelMinMaxObserver
+from torch.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
 
 import warnings
 
 
-class _InputEqualObserver(nn.Module):
+class _InputEqualizationObserver(nn.Module):
     r"""Observer for tracking the running min/max values of input columns, and
     computing the quantization parameters for the overall min/max input values.
 
@@ -31,8 +31,9 @@ class _InputEqualObserver(nn.Module):
     """
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 quant_min=None, quant_max=None, factory_kwargs=None) -> None:
-        super(_InputEqualObserver, self).__init__()
+                 quant_min=None, quant_max=None, output_obs=MinMaxObserver,
+                 factory_kwargs=None) -> None:
+        super(_InputEqualizationObserver, self).__init__()
 
         if qscheme not in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
             raise TypeError("Input qscheme must be per-tensor")
@@ -43,6 +44,7 @@ class _InputEqualObserver(nn.Module):
                                                   quant_max=quant_max,
                                                   factory_kwargs=factory_kwargs)
 
+        self.output_obs = output_obs
         self.equalization_scale = torch.empty(0)
 
     def forward(self, x_orig):
@@ -81,7 +83,7 @@ class _InputEqualObserver(nn.Module):
         return scale_input, zero_point_input
 
 
-class _WeightEqualObserver(nn.Module):
+class _WeightEqualizationObserver(nn.Module):
     r"""Observer for tracking the running min/max values of weight columns and
     rows, and computing the quantization parameters for the weight rows.
 
@@ -112,7 +114,7 @@ class _WeightEqualObserver(nn.Module):
 
     def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine, quant_min=None,
                  quant_max=None, factory_kwargs=None) -> None:
-        super(_WeightEqualObserver, self).__init__()
+        super(_WeightEqualizationObserver, self).__init__()
 
         self.weight_col_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
                                                        qscheme=qscheme,
@@ -195,7 +197,8 @@ class _WeightEqualObserver(nn.Module):
         return scale_weight, zero_point_weight
 
 
-def calculate_equalization_scale(input_obs: _InputEqualObserver, weight_obs: _WeightEqualObserver) -> torch.Tensor:
+def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
+                                 weight_obs: _WeightEqualizationObserver) -> torch.Tensor:
     r""" Calculates the equalization scale and sets the equalization_scale value
     in the observers.
 
@@ -214,8 +217,5 @@ def calculate_equalization_scale(input_obs: _InputEqualObserver, weight_obs: _We
         )
 
     equalization_scale = torch.sqrt((max_weights - min_weights) / (max_inputs - min_inputs))
-
-    input_obs.set_equalization_scale(equalization_scale)
-    weight_obs.set_equalization_scale(equalization_scale)
 
     return equalization_scale
