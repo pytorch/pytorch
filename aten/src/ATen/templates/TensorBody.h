@@ -140,6 +140,9 @@ class TORCH_API Tensor {
     if (!this->is_complex()) {
       return *this;
     } else {
+      if (this->is_sparse()) {
+        return this->conj_physical();
+      }
       return this->_conj();
     }
   }

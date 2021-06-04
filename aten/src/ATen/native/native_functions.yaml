@@ -323,6 +323,7 @@
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: conj_physical_out
+    SparseCPU, SparseCUDA: conj_physical_out_sparse
 
 - func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
