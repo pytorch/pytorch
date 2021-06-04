@@ -3855,7 +3855,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad1d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', 'cuda')
         def backward_func(slf, device):
             res.backward(grad)
 
