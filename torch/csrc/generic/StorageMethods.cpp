@@ -55,6 +55,14 @@ static PyObject * THPStorage_(elementSize)(PyObject *_self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPStorage_(getUniqueId)(PyObject *_self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
+  return THPUtils_packUInt64(self->cdata->get_unique_id()) ;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
@@ -347,6 +355,7 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"copy_", castPyCFunctionWithKeywords(THPStorage_(copy_)),
     METH_VARARGS | METH_KEYWORDS, nullptr},
   {"element_size", THPStorage_(elementSize), METH_NOARGS, nullptr},
+  {"get_unique_id", THPStorage_(getUniqueId), METH_NOARGS, nullptr},
   {"fill_", THPStorage_(fill_), METH_O, nullptr},
   {"new", THPStorage_(new), METH_NOARGS, nullptr},
   {"resize_", THPStorage_(resize_), METH_O, nullptr},

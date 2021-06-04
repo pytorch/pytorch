@@ -5,7 +5,11 @@
 
 #include <c10/util/intrusive_ptr.h>
 
+#include <atomic>
+
 namespace c10 {
+
+static std::atomic<std::uint64_t> next_unique_storage_id{0};
 
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
@@ -44,7 +48,8 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
         size_bytes_(size_bytes),
         resizable_(resizable),
         received_cuda_(false),
-        allocator_(allocator) {
+        allocator_(allocator),
+        unique_id(next_unique_storage_id++) {
     if (resizable) {
       TORCH_INTERNAL_ASSERT(
           allocator_, "For resizable storage, allocator must be provided");
@@ -194,6 +199,10 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
+  uint64_t get_unique_id() {
+    return unique_id;
+  }
+
  private:
   DataPtr data_ptr_;
   size_t size_bytes_;
@@ -202,5 +211,6 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   // local to process cuda memory allocation
   bool received_cuda_;
   Allocator* allocator_;
+  uint64_t unique_id;
 };
 } // namespace c10

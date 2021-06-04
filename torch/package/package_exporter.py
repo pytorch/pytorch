@@ -700,7 +700,7 @@ node [shape=box];
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = str(obj._cdata)
+            obj_key = str(obj.get_unique_id()) 
             location = location_tag(obj)
             name = f".data/{obj_key}.storage"
 
