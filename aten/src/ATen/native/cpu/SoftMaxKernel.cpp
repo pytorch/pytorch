@@ -218,13 +218,17 @@ inline void _vec_softmax(
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
+  int vectorized_step = Vec().size(); // Currently, we only support scalar_t with double or float32
+  TORCH_CHECK(
+    (vectorized_step == 8) || (vectorized_step == 4),
+    "vectorized_step must be 8 with dtype float or 4 with dtype double");
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
         while (idx < end) {
           int64_t outer_idx = idx / inner_size;
           int64_t inner_idx = idx % inner_size;
-          if (((inner_idx + 8) <= inner_size) && ((idx + 8) <= end)) {
+          if (((inner_idx + vectorized_step) <= inner_size) && ((idx + vectorized_step) <= end)) {
             // Vectorization
             scalar_t* input_data =
                 input_data_base + outer_idx * outer_stride + inner_idx;
@@ -250,14 +254,14 @@ inline void _vec_softmax(
                   Vec::loadu(output_data + d * dim_stride) / sum_m256;
               output_m256.store(output_data + d * dim_stride);
             }
-            idx += 8;
+            idx += vectorized_step;
           } else {
             // Tail case(Scalar): it is exactly same logic as host_softmax
             // inside aten/src/ATen/native/SoftMax.cpp. There are 2 kind of
             // cases which will fall through this part:
             // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallization.
             // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallization.
-            int64_t tail_number = ((idx+8) > end) ? /*Case1*/ (end - idx) : /*Case2*/ (inner_size - inner_idx);
+            int64_t tail_number = ((idx+vectorized_step) > end) ? /*Case1*/ (end - idx) : /*Case2*/ (inner_size - inner_idx);
             for (int64_t i=0; i < tail_number; i++) {
               outer_idx = (idx + i) / inner_size;
               inner_idx = (idx + i) % inner_size;
