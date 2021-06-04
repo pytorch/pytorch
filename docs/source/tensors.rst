@@ -415,6 +415,7 @@ Tensor class reference
     Tensor.is_complex
     Tensor.is_conj
     Tensor.is_floating_point
+    Tensor.is_inference
     Tensor.is_leaf
     Tensor.is_pinned
     Tensor.is_set_to

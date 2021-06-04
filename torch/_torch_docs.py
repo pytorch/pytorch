@@ -4265,6 +4265,22 @@ is_inference_mode_enabled() -> (bool)
 Returns True if inference mode is currently enabled.
 """.format(**common_args))
 
+add_docstr(torch.is_inference, r"""
+is_inference(input) -> (bool)
+
+Returns True if :attr:`input` is an inference tensor.
+
+A non-view tensor is an inference tensor if and only if it was
+allocated during inference mode. A view tensor is an inference
+tensor if and only if the tensor it is a view of is an inference tensor.
+
+For details on inference mode please see
+`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+
+Args:
+    {input}
+""".format(**common_args))
+
 add_docstr(torch.is_conj, r"""
 is_conj(input) -> (bool)
 
