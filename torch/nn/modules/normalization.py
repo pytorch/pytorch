@@ -129,18 +129,19 @@ class LayerNorm(Module):
 
     Examples::
 
+        >>> # NLP Example
+        >>> batch, length, embedding = 20, 5, 10
+        >>> embedding = torch.randn(batch, length, embedding)
+        >>> layer_norm = nn.LayerNorm(embedding)
+        >>> # Activate module
+        >>> layer_norm(embedding)
+        >>> # Image Example
         >>> N, C, H, W = 20, 5, 10, 10
         >>> input = torch.randn(N, C, H, W)
-        >>> # With Learnable Parameters
-        >>> m = nn.LayerNorm([C, H, W])
-        >>> # Without Learnable Parameters
-        >>> m = nn.LayerNorm([C, H, W], elementwise_affine=False)
-        >>> # Normalize over last dimension
-        >>> m = nn.LayerNorm(W)
         >>> # Normalize over the last three dimensions (i.e. the channel and spatial dimensions)
         >>> # as shown in the image below
-        >>> m = nn.LayerNorm([C, H, W])
-        >>> output = m(input)
+        >>> layer_norm = nn.LayerNorm([C, H, W])
+        >>> output = layer_norm(input)
 
     .. image:: ../_static/img/nn/layer_norm.jpg
         :scale: 50 %
