@@ -817,9 +817,11 @@ def assert_close(
     If :attr:`actual` and :attr:`expected` are complex-valued, they are considered close if both their real and
     imaginary components are considered close according to the definition above.
 
-    If :attr:`actual` and :attr:`expected` are sparse, their members, namely indices and values, are checked
-    individually. Sparse COO tensors are only considered close if both are either coalesced or non-coalesced (if
-    :attr:`check_is_coalesced` is ``True``.)
+    If :attr:`actual` and :attr:`expected` are sparse (either having COO or CSR layout), their strided members are
+    checked individually. Indices, namely ``indices`` for COO or ``crow_indices``  and ``col_indicies`` for CSR layout,
+    are always checked for equality whereas the values are checked for closeness according to the definition above.
+    Sparse COO tensors are only considered close if both are either coalesced or non-coalesced (if
+    :attr:`check_is_coalesced` is ``True``).
 
     :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
     from which :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. In addition, :attr:`actual` and
