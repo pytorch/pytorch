@@ -2725,7 +2725,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor)
+                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_cat_negdim_1(self):
         f_args_variable = (torch.randn(S, S, 1, dtype=torch.double, requires_grad=True),
@@ -2735,7 +2735,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_negdim_1", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor)
+                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_cat_negdim_2(self):
         f_args_variable = (torch.randn(S, 1, S, dtype=torch.double, requires_grad=True),
@@ -2745,7 +2745,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_negdim_2", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor)
+                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_cat_empty_legacy(self):
         f_args_variable = (torch.randn(0, dtype=torch.double, requires_grad=True),
@@ -2755,7 +2755,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_empty_legacy", "cat",
                               lambda a, b: torch.cat((a, b)),
-                              False, f_args_variable, f_args_tensor)
+                              False, f_args_variable, f_args_tensor, check_forward_ad=True)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
 
     def test_cat_empty(self):
@@ -2764,7 +2764,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_empty", "cat",
                               lambda a, b: torch.cat((a, b)),
-                              True, f_args_variable, f_args_tensor)
+                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_trapz(self):
         f_args_variable = (torch.randn(2, 3, dtype=torch.double, requires_grad=True),
@@ -5412,9 +5412,10 @@ def gradgradcheck_method_precision_override(test_name):
     return override
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
-                                 input_variables, run_gradgradcheck=True, check_batched_grad=True):
+                                 input_variables, run_gradgradcheck=True, check_batched_grad=True,
+                                 check_forward_ad=False):
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION,
-                                   check_batched_grad=check_batched_grad))
+                                   check_batched_grad=check_batched_grad, check_forward_ad=check_forward_ad))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -5431,12 +5432,12 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
 
 
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
-                          f_args_variable, f_args_tensor):
+                          f_args_variable, f_args_tensor, *, check_forward_ad=False):
     output_variable = apply_fn(*f_args_variable)
 
     if run_grad_checks:
         run_grad_and_gradgrad_checks(test_case, name, test_name, apply_fn,
-                                     output_variable, f_args_variable)
+                                     output_variable, f_args_variable, check_forward_ad=check_forward_ad)
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
@@ -8968,8 +8969,8 @@ class TestMultithreadAutograd(TestCase):
         def fn(x1, x2):
             return torch.cat((x1, x2), dim=-1)
 
-        torch.autograd.gradcheck(fn, [inp_r, inp_c])
-        torch.autograd.gradcheck(fn, [inp_c, inp_r])
+        torch.autograd.gradcheck(fn, [inp_r, inp_c], check_forward_ad=True)
+        torch.autograd.gradcheck(fn, [inp_c, inp_r], check_forward_ad=True)
 
 for test in method_tests():
     add_test(*test)
