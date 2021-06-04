@@ -44,13 +44,6 @@ def remote_forward_async(remote_module, args):
     return remote_module.forward_async(*args).wait()
 
 
-# RPC handler for creating a remote module by module rref on the destination worker.
-def create_remote_module_by_module_rref(remote_device, module_rref):
-    remote_module = object.__new__(RemoteModule)  # type: ignore[attr-defined]
-    remote_module.init_from_module_rref(remote_device=remote_device, module_rref=module_rref)
-    return remote_module
-
-
 class ModuleCreationMode(enum.Enum):
     MODULE_CTOR_WITH_INTERFACE = "module_ctor_with_interface"
     MODULE_CTOR = "module_ctor"
@@ -535,7 +528,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
                 )
 
     @dist_utils.dist_init
-    def test_create_remote_module_by_module_rref(self):
+    def test_create_remote_module_from_module_rref(self):
         if self.rank != 0:
             return
         dst_worker1_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
@@ -547,7 +540,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
         ):
             remote_module2 = rpc.rpc_sync(
                 dst_worker2_name,
-                create_remote_module_by_module_rref,
+                RemoteModule.init_from_module_rref,
                 (dst_worker2_name, remote_module.get_module_rref()),
             )
 
