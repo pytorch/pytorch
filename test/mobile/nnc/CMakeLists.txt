@@ -10,7 +10,15 @@ add_executable(test_mobile_nnc
   ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime/main.cpp
   ${MOBILE_NNC_TEST_SRCS})
 
-target_link_libraries(test_mobile_nnc PRIVATE torch gtest)
+add_library(nnc_backend_lib SHARED
+  ${TORCH_ROOT}/torch/csrc/jit/backends/backend_interface.cpp
+  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/backend.cpp
+  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/context.cpp
+  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/registry.cpp
+)
+target_link_libraries(nnc_backend_lib PRIVATE torch)
+
+target_link_libraries(test_mobile_nnc PRIVATE torch gtest nnc_backend_lib)
 target_include_directories(test_mobile_nnc PRIVATE ${ATen_CPU_INCLUDE})
 target_compile_definitions(test_mobile_nnc PRIVATE USE_GTEST)
 
