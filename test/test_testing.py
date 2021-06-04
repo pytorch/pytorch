@@ -826,14 +826,6 @@ class TestAsserts(TestCase):
             with self.assertRaisesRegex(AssertionError, "shape"):
                 fn()
 
-    def test_mismatching_is_sparse(self):
-        actual = torch.empty(())
-        expected = torch.sparse_coo_tensor(size=())
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "is_sparse"):
-                fn()
-
     def test_mismatching_dtype(self):
         actual = torch.empty((), dtype=torch.float)
         expected = actual.clone().to(torch.int)
@@ -1148,6 +1140,14 @@ instantiate_device_type_tests(TestAssertsMultiDevice, globals(), only_for="cuda"
 
 
 class TestAssertsSparseCOO(TestCase):
+    def test_mismatching_is_sparse(self):
+        actual = torch.empty(())
+        expected = actual.to_sparse()
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "is_sparse"):
+                fn()
+
     def test_matching_coalesced(self):
         indices = (
             (0, 1),
@@ -1243,6 +1243,14 @@ class TestAssertsSparseCOO(TestCase):
 
 
 class TestAssertsSparseCSR(TestCase):
+    def test_mismatching_is_sparse_scr(self):
+        actual = torch.empty((2, 2))
+        expected = actual.to_sparse_csr()
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "is_sparse_csr"):
+                fn()
+
     def test_matching(self):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)

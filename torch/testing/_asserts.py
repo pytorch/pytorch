@@ -118,9 +118,6 @@ def _check_sparse_coo_members_individually(
         if not actual.is_sparse:
             return check_tensors(actual, expected, **kwargs)
 
-        actual = actual.coalesce()
-        expected = expected.coalesce()
-
         exc = check_tensors(actual._indices(), expected._indices(), **kwargs)
         if exc:
             return _amend_error_message(exc, "{}\n\nThe failure occurred for the indices.")
