@@ -23,15 +23,13 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
     return self.clone(MemoryFormat::Preserve);
   }
 
-  // We initialize it to zeros when it's bool to silence asan, who thinks that we are
-  // incurring into UB after reading an undefined value in TI (although we do not use it)
   Tensor out_tensor = at::empty_like(self, MemoryFormat::Preserve);
 
   // Count dimensions in which we need to do work
   int n = 0;
   auto strides = DimVector(self.strides());
   for(int64_t i = 0; i < total_dims; i++) {
-    if(flip_dims_b[i] && out_tensor.size(i) > 1 && self.stride(i) != 0) {
+    if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
       n++;
       strides[i] = 0;
     }
@@ -68,7 +66,11 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   // To flip a dimension:
   //   - We move the pointer to the opposite vertex of the cube
   //   - We iterate in the opposite direction (invert the strides)
+
   for (int i=0; i<iter.ndim(); i++){
+    // We know that an dimension has a zero stride and self[i] does not, as we defined above
+    // Note that it may be the case that strides_dummy[i] = 0 not because we set it, but because
+    // strides_self[i] == 0. We do not want to do anything there
     if (strides_dummy[i] == 0 && strides_self[i] != 0) {
       data += strides_bytes[i] * (sizes[i]-1);
       strides_bytes[i] *= -1;
