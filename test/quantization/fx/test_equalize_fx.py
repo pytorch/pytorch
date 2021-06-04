@@ -1,8 +1,19 @@
+from torch.quantization.observer import MinMaxObserver
 import torch
-from torch.testing._internal.common_quantization import QuantizationTestCase
+import torch.nn as nn
+from torch.quantization import default_qconfig
+from torch.quantization.qconfig import QConfig
+from torch.quantization.quantize_fx import prepare_fx
 from torch.quantization.fx._equalize import (
-    _InputEqualizationObserver, _WeightEqualizationObserver, calculate_equalization_scale
+    _InputEqualizationObserver,
+    _WeightEqualizationObserver,
+    calculate_equalization_scale,
+    weight_equalization_observer,
+    default_equalization_qconfig,
 )
+
+from torch.testing._internal.common_quantization import NodeSpec as ns
+from torch.testing._internal.common_quantization import QuantizationTestCase
 
 # Standard Libraries
 import numpy as np
@@ -19,6 +30,9 @@ class TestEqualizeFx(QuantizationTestCase):
            weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric,
                                            torch.per_channel_affine_float_qparams)))
     def test_input_weight_observer(self, input_qdtype, input_qscheme, weight_qdtype, weight_qscheme):
+        """ Tests that the Input- and Weight- EqualizationObservers perform as expected
+        """
+
         input_obs = _InputEqualizationObserver(dtype=input_qdtype, qscheme=input_qscheme)
         weight_obs = _WeightEqualizationObserver(dtype=weight_qdtype, qscheme=weight_qscheme)
 
@@ -110,3 +124,48 @@ class TestEqualizeFx(QuantizationTestCase):
             ref_scales, dtype=weight_qparams[0].dtype), atol=0.0001))
         self.assertTrue(torch.allclose(weight_qparams[1], torch.tensor(
             ref_zero_points, dtype=weight_qparams[1].dtype), atol=1))
+
+    def test_input_equalization_prepare(self):
+        """ Tests that on one linear layer, the InputEqualizationObserver is
+        inserted correctly, and the output observer is default set as a MinMaxObserver.
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.linear = nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = M().eval()
+
+        # Test default case: should insert a MinMaxObserver as an output observer
+        qconfig_dict = {
+            "": default_qconfig,
+            "object_type": [(nn.Linear, default_equalization_qconfig)]}
+        prepared = prepare_fx(m, qconfig_dict)
+
+        node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(MinMaxObserver): 1,
+        }
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+
+        # Test specific case: should insert a InputEqualizationObserver as an output observer
+        output_obs = _InputEqualizationObserver()
+        new_input_equalization_observer = _InputEqualizationObserver.with_args(
+            dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, output_obs=output_obs)
+        equalization_qconfig = QConfig(activation=new_input_equalization_observer,
+                                       weight=weight_equalization_observer)
+
+        qconfig_dict = {
+            "": default_qconfig,
+            "object_type": [(nn.Linear, equalization_qconfig)]}
+        prepared = prepare_fx(m, qconfig_dict)
+
+        node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 2,
+            ns.call_module(MinMaxObserver): 0,
+        }
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)

@@ -30,6 +30,8 @@ from .quantization_patterns import (
 
 from .quantization_types import Pattern
 
+from ._equalize import _InputEqualizationObserver
+
 from .graph_module import (
     ObservedGraphModule,
     ObservedStandaloneGraphModule,
@@ -458,7 +460,10 @@ def maybe_insert_output_observer_for_node(
                     get_default_output_activation_post_process_map().get(
                         matched_pattern,
                         act_post_process_ctr)
+
             observer = act_post_process_ctr()
+            if isinstance(observer, _InputEqualizationObserver):
+                observer = observer.output_obs
             new_obs = insert_observer(node, observer, model, modules, graph)
             # set the type, so the next node can read it
             node_name_to_target_dtype[new_obs.name] = \
