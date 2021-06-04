@@ -2,9 +2,7 @@
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 # This file exports ONNX ops for opset 14
-import torch
-import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _unimplemented
+from torch.onnx.symbolic_helper import parse_args
 from torch.onnx.symbolic_helper import _block_list_in_opset
 
 # Note [ONNX operators that are added/updated in opset 14]
@@ -27,4 +25,3 @@ for block_listed_op in block_listed_operators:
 @parse_args("v")
 def hardswish(g, self):
     return g.op("HardSwish", self)
-

@@ -9491,7 +9491,7 @@ def setup_rnn_tests():
 setup_rnn_tests()
 
 
-'''# opset 7 tests
+# opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
                               (unittest.TestCase,),
                               dict(TestONNXRuntime.__dict__, opset_version=7))
@@ -9552,7 +9552,7 @@ TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
                                (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=13,
                                     keep_initializers_as_inputs=False,
-                                    onnx_shape_inference=True))'''
+                                    onnx_shape_inference=True))
 
 # opset 14 tests
 TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
