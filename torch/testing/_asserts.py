@@ -121,11 +121,11 @@ def _check_sparse_coo_members_individually(
         actual = actual.coalesce()
         expected = expected.coalesce()
 
-        exc = check_tensors(actual.indices(), expected.indices(), **kwargs)
+        exc = check_tensors(actual._indices(), expected._indices(), **kwargs)
         if exc:
             return _amend_error_message(exc, "{}\n\nThe failure occurred for the indices.")
 
-        exc = check_tensors(actual.values(), expected.values(), **kwargs)
+        exc = check_tensors(actual._values(), expected._values(), **kwargs)
         if exc:
             return _amend_error_message(exc, "{}\n\nThe failure occurred for the values.")
 
@@ -191,6 +191,7 @@ def _check_attributes_equal(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
+    check_is_coalesced: bool = True,
 ) -> Optional[AssertionError]:
     """Checks if the attributes of two tensors match.
 
@@ -204,8 +205,10 @@ def _check_attributes_equal(
             same :attr:`~torch.Tensor.device`.
         check_dtype (bool): If ``True`` (default), checks that both :attr:`actual` and :attr:`expected` have the same
             ``dtype``.
-        check_stride (bool): If ``True`` (default), checks that both :attr:`actual` and :attr:`expected` have the same
-            stride.
+        check_stride (bool): If ``True`` (default) and the tensors are strided, checks that both :attr:`actual` and
+            :attr:`expected` have the same stride.
+        check_is_coalesced (bool): If ``True`` (default) and the tensors are sparse COO, checks that both
+            :attr:`actual` and :attr:`expected` are either coalesced or not-coalesced.
 
     Returns:
         (Optional[AssertionError]): If checks did not pass.
@@ -223,6 +226,8 @@ def _check_attributes_equal(
 
     if actual.is_sparse != expected.is_sparse:
         return AssertionError(msg_fmtstr.format("is_sparse", actual.is_sparse, expected.is_sparse))
+    elif actual.is_sparse and check_is_coalesced and actual.is_coalesced() != expected.is_coalesced():
+        return AssertionError(msg_fmtstr.format("is_coalesced()", actual.is_coalesced(), expected.is_coalesced()))
     elif actual.is_sparse_csr != expected.is_sparse_csr:
         return AssertionError(msg_fmtstr.format("is_sparse_csr", actual.is_sparse_csr, expected.is_sparse_csr))
     elif not (actual.is_sparse or actual.is_sparse_csr) and check_stride and actual.stride() != expected.stride():
@@ -254,6 +259,10 @@ def _equalize_attributes(actual: Tensor, expected: Tensor) -> Tuple[Tensor, Tens
         dtype = torch.promote_types(actual.dtype, expected.dtype)
         actual = actual.to(dtype)
         expected = expected.to(dtype)
+
+    if actual.is_sparse and actual.is_coalesced() != expected.is_coalesced():
+        actual = actual.coalesce()
+        expected = expected.coalesce()
 
     return actual, expected
 
@@ -404,6 +413,7 @@ def _check_tensors_equal(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
+    check_is_coalesced: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> Optional[Exception]:
     """Checks that the values of two tensors are bitwise equal.
@@ -417,7 +427,12 @@ def _check_tensors_equal(
         Optional[Exception]: If checks did not pass.
     """
     exc: Optional[Exception] = _check_attributes_equal(
-        actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
+        actual,
+        expected,
+        check_device=check_device,
+        check_dtype=check_dtype,
+        check_stride=check_stride,
+        check_is_coalesced=check_is_coalesced,
     )
     if exc:
         return exc
@@ -440,6 +455,7 @@ def _check_tensors_close(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
+    check_is_coalesced: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> Optional[Exception]:
     r"""Checks that the values of :attr:`actual` and :attr:`expected` are close.
@@ -470,7 +486,12 @@ def _check_tensors_close(
         rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
     exc: Optional[Exception] = _check_attributes_equal(
-        actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
+        actual,
+        expected,
+        check_device=check_device,
+        check_dtype=check_dtype,
+        check_stride=check_stride,
+        check_is_coalesced=check_is_coalesced,
     )
     if exc:
         raise exc
@@ -689,6 +710,7 @@ def assert_equal(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
+    check_is_coalesced: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> None:
     """Asserts that the values of tensor pairs are bitwise equal.
@@ -759,6 +781,7 @@ def assert_equal(
         check_device=check_device,
         check_dtype=check_dtype,
         check_stride=check_stride,
+        check_is_coalesced=check_is_coalesced,
         msg=msg,
     )
     exc = _check_pair(pair, check_tensors)
@@ -776,6 +799,7 @@ def assert_close(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
+    check_is_coalesced: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> None:
     r"""Asserts that :attr:`actual` and :attr:`expected` are close.
@@ -962,6 +986,7 @@ def assert_close(
         check_device=check_device,
         check_dtype=check_dtype,
         check_stride=check_stride,
+        check_is_coalesced=check_is_coalesced,
         msg=msg,
     )
     exc = _check_pair(pair, check_tensors)

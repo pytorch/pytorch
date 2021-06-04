@@ -1148,7 +1148,19 @@ instantiate_device_type_tests(TestAssertsMultiDevice, globals(), only_for="cuda"
 
 
 class TestAssertsSparseCOO(TestCase):
-    def test_matching(self):
+    def test_matching_coalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, (2, 2)).coalesce()
+        expected = actual.clone()
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            fn()
+
+    def test_matching_uncoalesced(self):
         indices = (
             (0, 1),
             (1, 0),
@@ -1160,17 +1172,36 @@ class TestAssertsSparseCOO(TestCase):
         for fn in assert_fns_with_inputs(actual, expected):
             fn()
 
-    def test_matching_uncoalesced(self):
+    def test_mismatching_is_coalesced(self):
         indices = (
-            (0, 1, 0,),
-            (1, 0, 1,),
+            (0, 1),
+            (1, 0),
         )
-        values = (1, 1, 1)
+        values = (1, 2)
         actual = torch.sparse_coo_tensor(indices, values, (2, 2))
         expected = actual.clone().coalesce()
 
         for fn in assert_fns_with_inputs(actual, expected):
-            fn()
+            with self.assertRaisesRegex(AssertionError, "is_coalesced"):
+                fn()
+
+    def test_mismatching_is_coalesced_no_check(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, (2, 2)).coalesce()
+
+        expected_indices = (
+            (0, 1, 1,),
+            (1, 0, 0,),
+        )
+        expected_values = (1, 1, 1)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, (2, 2))
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            fn(check_is_coalesced=False)
 
     def test_mismatching_indices_msg(self):
         actual_indices = (
