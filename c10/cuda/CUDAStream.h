@@ -196,6 +196,16 @@ TORCH_API CUDAStream
 getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
 
 /**
+ * Get a CUDAStream from a externally allocated one.
+ *
+ * This is mainly for interoperability with different libraries where we
+ * want to operate on a non-torch allocated stream for data exchange or similar
+ * purposes
+ */
+TORCH_API CUDAStream
+getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
+
+/**
  * Get the default CUDA stream, for the passed CUDA device, or for the
  * current device if no device index is passed.  The default stream is
  * where most computation occurs when you aren't explicitly using
