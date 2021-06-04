@@ -309,7 +309,7 @@ static void EnsureNoTuples(Block* block) {
 
 void LowerAllTuples(const std::shared_ptr<Graph>& graph) {
   LowerAllTuples(graph->block());
-  EliminateDeadCode(graph->block());
+  eliminateDeadCode(graph->block());
   EnsureNoTuples(graph->block());
 }
 
@@ -324,7 +324,7 @@ void lowerSimpleTuples(Block* block) {
 
 void lowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
   lowerSimpleTuples(graph->block());
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
 }
 } // namespace jit
 } // namespace torch

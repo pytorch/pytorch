@@ -27,7 +27,7 @@ c10::IValue preprocess(
     // getattr nodes which after inlining dont serve any purpose.
     // Without removing them we will run into compilation errors.
     // So eliminate deadcode just remove those getattr nodes.
-    EliminateDeadCode(graph);
+    eliminateDeadCode(graph);
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto key = method.name();
     auto node_debug_handles = generate_debug_handles(graph);
