@@ -1,5 +1,5 @@
 # @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/windows_ci_workflow.yml
+# Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Windows CI (pytorch-win-vs2019-cpu-py3)
 
@@ -16,6 +16,7 @@ env:
   BUILD_WHEEL: 1
   CUDA_VERSION: "cpu"
   IN_CI: 1
+  INSTALL_WINDOWS_SDK: 1
   JOB_BASE_NAME: test
   PYTHON_VERSION: "3.6"
   SCCACHE_BUCKET: "ossci-compiler-cache"
@@ -23,6 +24,10 @@ env:
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
+
+concurrency:
+  group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -33,12 +38,7 @@ jobs:
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
-          choco install vswhere -y
           .\.circleci\scripts\vs_install.ps1
-      - name: Install Windows 10 SDK
-        shell: powershell
-        run: |
-          .\.github\scripts\install_windows_sdk.ps1
       - name: Build
         shell: bash
         run: |
@@ -75,12 +75,7 @@ jobs:
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
-          choco install vswhere -y
           .\.circleci\scripts\vs_install.ps1
-      - name: Install Windows 10 SDK
-        shell: powershell
-        run: |
-          .\.github\scripts\install_windows_sdk.ps1
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:

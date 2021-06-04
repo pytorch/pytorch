@@ -44,6 +44,7 @@ function(copy_header file)
 endfunction()
 
 set(C10D_SRCS
+  frontend.cpp
   FileStore.cpp
   ParamCommsUtils.cpp
   PrefixStore.cpp
@@ -74,7 +75,7 @@ if(USE_C10D_MPI)
 endif()
 
 if(USE_C10D_GLOO)
-  list(APPEND C10D_SRCS ProcessGroupGloo.cpp GlooDeviceFactory.cpp)
+  list(APPEND C10D_SRCS ProcessGroupGloo.cpp GlooDeviceFactory.cpp ProcessGroupWrapper.cpp)
   list(APPEND C10D_LIBS gloo)
   if(USE_CUDA)
     list(APPEND C10D_LIBS gloo_cuda)
@@ -114,15 +115,15 @@ target_include_directories(c10d PUBLIC
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 if(USE_C10D_NCCL)
-  target_compile_definitions(c10d INTERFACE USE_C10D_NCCL)
+  target_compile_definitions(c10d PUBLIC USE_C10D_NCCL)
 endif()
 
 if(USE_C10D_MPI)
-  target_compile_definitions(c10d INTERFACE USE_C10D_MPI)
+  target_compile_definitions(c10d PUBLIC USE_C10D_MPI)
 endif()
 
 if(USE_C10D_GLOO)
-  target_compile_definitions(c10d INTERFACE USE_C10D_GLOO)
+  target_compile_definitions(c10d PUBLIC USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
@@ -137,6 +138,7 @@ copy_header(sequence_num.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
   copy_header(GlooDeviceFactory.hpp)
+  copy_header(ProcessGroupWrapper.hpp)
 endif()
 if(NOT WIN32)
   copy_header(HashStore.hpp)
