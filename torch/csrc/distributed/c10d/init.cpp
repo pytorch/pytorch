@@ -1123,6 +1123,14 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "_reduce_scatter_base",
+              &::c10d::ProcessGroup::_reduce_scatter_base,
+              py::arg("outputTensor"),
+              py::arg("inputTensor"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "alltoall_base",
               &::c10d::ProcessGroup::alltoall_base,
               py::arg("output_tensor"),
