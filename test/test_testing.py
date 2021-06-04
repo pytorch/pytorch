@@ -489,7 +489,7 @@ class TestTesting(TestCase):
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
         # test to ensure common_utils.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
@@ -522,7 +522,7 @@ if __name__ == '__main__':
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
         # test to ensure common_device_type.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
@@ -562,7 +562,7 @@ if __name__ == '__main__':
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (run_tests, slowTest)
@@ -698,7 +698,7 @@ class TestFrameworkUtils(TestCase):
     def test_filtering_env_var(self):
         # Test environment variable selected device type test generator.
         test_filter_file_template = """\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
