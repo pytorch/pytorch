@@ -45,6 +45,7 @@ enum class OpType : std::uint8_t {
   RECV = 13,
   RECVANYSOURCE = 14,
   BARRIER = 15,
+  _REDUCE_SCATTER_BASE = 16,
   UNKNOWN = 100,
 };
 
@@ -258,6 +259,14 @@ class ProcessGroup : public torch::CustomClassHolder {
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) = 0;
+
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+      at::Tensor&,
+      at::Tensor&,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    throw std::runtime_error("ProcessGroup does not support reduce_scatter_base");
+  }
+
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
