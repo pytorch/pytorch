@@ -176,14 +176,14 @@ class TestForeach(TestCase):
     # note(mkozuki): fastpath test uses dtypes which fastpath implementation supports.
     # To confirm the dtypes of `OpInfo` cover the dtypes that the function support,
     # this test does not use `try-except` for fastpath.
-    def _regular_unary_test(self, dtype, method, ref, inputs, is_fastpath):
+    def _regular_unary_test(self, dtype, op, ref, inputs, is_fastpath):
         if is_fastpath:
-            self.assertEqual(ref(inputs), method(inputs, self.is_cuda, is_fastpath))
+            self.assertEqual(ref(inputs), op(inputs, self.is_cuda, is_fastpath))
             return
         try:
-            actual = method(inputs, self.is_cuda, is_fastpath)
+            actual = op(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
-            if method.func == torch._foreach_neg and dtype == torch.bool and self.is_cuda:
+            if op.func == torch._foreach_neg and dtype == torch.bool and self.is_cuda:
                 # note(mkozuki): `foreach_neg` CUDA implementation throws a different message.
                 with self.assertRaisesRegex(type(e), "Negation, the `-` operator, on a bool tensor is not supported."):
                     ref(inputs)
@@ -210,14 +210,14 @@ class TestForeach(TestCase):
             inplace_ref(copied_inputs),
             self.assertEqual(copied_inputs, inputs)
 
-    def _test_unary(self, device, dtype, op, N, is_fastpath):
-        method, ref, inplace_method, inplace_ref = self._get_funcs(op)
-        inputs = op.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
+    def _test_unary(self, device, dtype, opinfo, N, is_fastpath):
+        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo)
+        inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
         # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
-        if op.name == "_foreach_abs" and dtype in torch.testing.get_all_complex_dtypes():
+        if opinfo.name == "_foreach_abs" and dtype in torch.testing.get_all_complex_dtypes():
             is_fastpath = False
-        self._regular_unary_test(dtype, method, ref, inputs, is_fastpath)
-        self._inplace_unary_test(dtype, inplace_method, inplace_ref, inputs, is_fastpath)
+        self._regular_unary_test(dtype, op, ref, inputs, is_fastpath)
+        self._inplace_unary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
 
     @skipMeta
     @ops(foreach_unary_op_db)

@@ -2330,15 +2330,15 @@ def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False):
 
 def get_foreach_method_names(name):
     # get torch inplace reference function
-    method_name = "_foreach_" + name
-    method_name_inplace = "_foreach_" + name + "_"
+    op_name = "_foreach_" + name
+    inplace_op_name = "_foreach_" + name + "_"
 
-    method = getattr(torch, method_name, None)
-    method_inplace = getattr(torch, method_name_inplace, None)
+    op = getattr(torch, op_name, None)
+    inplace_op = getattr(torch, inplace_op_name, None)
 
     ref = getattr(torch, name, None)
     ref_inplace = getattr(torch.Tensor, name + "_", None)
-    return method, method_inplace, ref, ref_inplace
+    return op, inplace_op, ref, ref_inplace
 
 class ForeachFuncInfo(OpInfo):
     """Early version of a specialized OpInfo for foreach functions"""
