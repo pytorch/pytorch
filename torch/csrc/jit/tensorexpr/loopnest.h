@@ -403,9 +403,7 @@ class TORCH_API LoopNest {
   bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
 
   // Vectorize the given loop. This method requires that the given loop
-  // satisfies the following constraints:
-  //   * Loop is normalized.
-  //   * Loop does not perform a reduction.
+  // does not perform a reduction.
   // It returns true if vectorization is successful and false otherwise.
   static bool vectorize(For*);
 

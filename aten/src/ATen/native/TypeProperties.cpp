@@ -22,6 +22,10 @@ bool is_floating_point(const Tensor& self) {
   return self.is_floating_point();
 }
 
+bool is_inference(const Tensor& self) {
+  return self.is_inference();
+}
+
 bool is_signed(const Tensor &self) {
   return self.is_signed();
 }

@@ -2701,12 +2701,9 @@ TEST(LoopNest, VectorizeLoopNotNormalized) {
   auto block = Block::make({outer_for});
   LoopNest l(block, {a_buf.node()});
 
-  HashProvider hasher;
-  auto hash_before = hasher.hash(l.root_stmt());
-
-  ASSERT_FALSE(LoopNest::vectorize(inner_for));
-  auto hash_after = hasher.hash(l.root_stmt());
-  ASSERT_EQ(hash_before, hash_after);
+  ASSERT_TRUE(LoopNest::vectorize(inner_for));
+  ASSERT_EQ(outer_for->body()->nstmts(), 1);
+  ASSERT_EQ(dynamic_cast<For*>(outer_for->body()->front()), nullptr);
 }
 
 namespace {

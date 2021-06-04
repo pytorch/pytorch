@@ -428,10 +428,6 @@ bool LoopNest::vectorize(For* f) {
     return false;
   }
 
-  if (!isNormalized(f)) {
-    return false;
-  }
-
   // Can't vectorize reduction axes.
   auto reductions = NodeFinder<ReduceOp>::find(f);
   for (auto* r : reductions) {
@@ -444,7 +440,9 @@ bool LoopNest::vectorize(For* f) {
   Vectorizer v;
   Stmt* new_f = nullptr;
   try {
-    new_f = FlattenIndexes(Stmt::clone(f));
+    new_f = Stmt::clone(f);
+    normalize(dynamic_cast<For*>(new_f));
+    new_f = FlattenIndexes(new_f);
     new_f = v.vectorize(dynamic_cast<For*>(new_f));
   } catch (std::runtime_error& e) {
     // We clone f before vectorizing. So, any partial vectorization will
@@ -2001,8 +1999,8 @@ bool LoopNest::normalize(For* f) {
   auto for_body_normalized = Substitute(
       f->body(),
       {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
-  f->setBody(for_body_normalized);
-  f->setStop(new Sub(f->stop(), f->start()));
+  f->setBody(IRSimplifier::simplify(for_body_normalized));
+  f->setStop(IRSimplifier::simplify(new Sub(f->stop(), f->start())));
   f->setStart(new IntImm(0));
   return true;
 }
@@ -2531,10 +2529,25 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     consumer_block->replace_stmt(consumer, new_consumer);
   }
 
-  // If there's a reduction we can't just write the result straight back to the
-  // original buffer, since after parallelism the writes will race. Instead we
-  // need to create a new ReduceOp.
+  // If there's a reduction and we are operating on the reduce axis, we need to
+  // initialize the cache with 0s. Also, we can't just write the result straight
+  // back to the original buffer, since after parallelism the writes will race.
+  // Instead we need to create a new ReduceOp.
+  bool on_reduce_axis = false;
   if (reduceOp) {
+    std::set<const Var*> reduce_args(
+        reduceOp->reduce_args().begin(), reduceOp->reduce_args().end());
+    std::set<const Var*> enclosing_vars;
+    for (auto enclosing_for_stmt : NodeFinder<For>::find(consumer)) {
+      enclosing_vars.insert(enclosing_for_stmt->var());
+    }
+    for (auto reduce_arg : reduce_args) {
+      if (enclosing_vars.find(reduce_arg) == enclosing_vars.end()) {
+        on_reduce_axis = true;
+      }
+    }
+  }
+  if (reduceOp && on_reduce_axis) {
     // reduceOp means we had both loads and stores.
 
     // Init cache to 0.

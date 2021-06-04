@@ -826,7 +826,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Inference tensor doesn't have autograd or ADInplaceOrView key.
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
-  bool is_inference_tensor() {
+  bool is_inference() {
     bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
     bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -1400,14 +1400,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // set_version_counter is no-op for them.
   void set_version_counter(const c10::VariableVersion& version_counter) {
     TORCH_CHECK(
-        !(is_inference_tensor() && version_counter.enabled()),
+        !(is_inference() && version_counter.enabled()),
         "Cannot set version_counter for inference tensor");
     version_counter_ = version_counter;
   }
 
   void set_version_counter(c10::VariableVersion&& version_counter) {
     TORCH_CHECK(
-        !(is_inference_tensor() && version_counter.enabled()),
+        !(is_inference() && version_counter.enabled()),
         "Cannot set version_counter for inference tensor");
     version_counter_ = std::move(version_counter);
   }
