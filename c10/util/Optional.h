@@ -474,6 +474,8 @@ class arrayref_optional_base {
 
   constexpr bool initialized() const noexcept {
 #pragma GCC diagnostic push
+// Clang evidently doesn't have -Wclass-memaccess.
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wclass-memaccess"
     typename storage::raw repr;
     memcpy(&repr, &storage_, sizeof(storage_));
