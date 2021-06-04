@@ -53,7 +53,7 @@ class _InputEqualizationObserver(nn.Module):
                                              quant_max=quant_max,
                                              factory_kwargs=factory_kwargs)
         else:
-            self.outut_obs = output_obs
+            self.output_obs = output_obs
 
         self.equalization_scale = torch.empty(0)
 
