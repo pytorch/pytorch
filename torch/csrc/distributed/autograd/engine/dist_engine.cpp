@@ -308,6 +308,10 @@ void DistEngine::computeDependencies(
     }
   }
 
+  // Set graph task owner in a single thread since concurrent access to
+  // 'owner_' field is not permitted.
+  graphTask->owner_ = torch::autograd::CPU_DEVICE;
+
   // Let autograd context take ownership of the GraphTask.
   autogradContext->setGraphTask(std::move(graphTask));
 }
@@ -330,7 +334,6 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
   cpu_ready_queue->push(std::move(node_task), incrementOutstandingTasks);
 
   torch::autograd::set_device(torch::autograd::CPU_DEVICE);
-  graph_task->owner_ = torch::autograd::CPU_DEVICE;
   while (!cpu_ready_queue->empty()) {
     std::shared_ptr<GraphTask> local_graph_task;
     {

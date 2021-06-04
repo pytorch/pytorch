@@ -129,11 +129,13 @@ class TORCH_API Pickler {
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
-      std::vector<c10::ClassTypePtr>* memoized_class_types)
+      std::vector<c10::ClassTypePtr>* memoized_class_types,
+      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr)
       : writer_(std::move(writer)),
         tensor_table_(tensor_table),
         type_renamer_(std::move(type_renamer)),
-        memoized_class_types_(memoized_class_types) {}
+        memoized_class_types_(memoized_class_types),
+        get_tensor_id_(std::move(get_tensor_id)) {}
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Pickler();
 
@@ -258,6 +260,10 @@ class TORCH_API Pickler {
 
   // List of all the types that it wrote, inspect from the IValues it wrote.
   std::vector<c10::ClassTypePtr>* memoized_class_types_;
+
+  // Function to grab next id_name for tensor storage, function is responsible
+  // for returning unique ids
+  std::function<std::string(const at::Tensor&)> get_tensor_id_;
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT

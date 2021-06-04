@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
+#include <limits>
 
 #include <c10/util/irange.h>
 
@@ -447,12 +448,14 @@ void listSlice(Stack* stack) {
   auto end_val = pop(stack);
   auto start_val = pop(stack);
 
-  // In python convention, we mark the start and end to be
-  // INT64_MAX when nothing is given. When step is not provided, we assume step
-  // size is 1
+  // In the future, start and end of list slice will be marked
+  // as None. To prepare for this change, we make listSlice method
+  // to be able to handle future models that are scripted with newer
+  // runtime.
   int64_t step = step_val.isInt() ? step_val.to<int64_t>() : 1;
-  int64_t end = end_val.isInt() ? end_val.to<int64_t>() : INT64_MAX;
-  int64_t start = start_val.isInt() ? start_val.to<int64_t>() : INT64_MAX;
+  int64_t end = end_val.isInt() ? end_val.to<int64_t>()
+                                : std::numeric_limits<int64_t>::max();
+  int64_t start = start_val.isInt() ? start_val.to<int64_t>() : 0;
 
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 

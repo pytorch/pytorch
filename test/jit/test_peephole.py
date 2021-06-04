@@ -2,6 +2,7 @@ import torch
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
 from torch import nn
 from torch.testing import FileCheck
+from typing import List
 
 import unittest
 
@@ -237,3 +238,319 @@ class TestPeephole(JitTestCase):
         op_graph = torch.jit.script(convertible_isnot_op).graph
         FileCheck().check_count("aten::ne", 3, exactly=True).run(op_graph)
         FileCheck().check_count("aten::__isnot__", 0, exactly=True).run(op_graph)
+
+    def test_peephole_list_len(self):
+        def run_peephole_and_check_const_value(graph, const_string):
+            torch._C._jit_pass_peephole_list_idioms(graph, refine_list_len=True)
+            self.run_pass("constant_propagation", graph)
+            FileCheck().check(const_string).check_next("return").run(graph)
+
+        def gen_li(inp_len: int):
+            return [0 for i in range(inp_len)]
+
+        @torch.jit.script
+        def foo(x: List[int], y: List[int]):
+            if len(x) != 4 or len(y) != 5:
+                raise Exception("")
+
+            return len(x) + len(y)
+
+        run_peephole_and_check_const_value(foo.graph, "value=9")
+        self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
+        with self.assertRaises(Exception):
+            foo(2, 4)
+
+        @torch.jit.script
+        def foo(x: List[int], y: List[int]):
+            if len(x) == 4 and len(y) == 5:
+                pass
+            else:
+                raise Exception("hi")
+
+            return len(x) + len(y)
+
+        run_peephole_and_check_const_value(foo.graph, "value=9")
+        self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
+        with self.assertRaises(Exception):
+            foo(2, 4)
+
+        @torch.jit.script
+        def foo(x: List[int], y: List[int], z: List[int]):
+            if len(x) != 4:
+                raise Exception("..")
+            else:
+                if len(y) != 8:
+                    raise Exception("...")
+                else:
+                    if len(z) == 3:
+                        pass
+                    else:
+                        raise Exception("...")
+
+            return len(x) + len(y) * len(z)
+
+        run_peephole_and_check_const_value(foo.graph, "value=28")
+        self.assertEqual(foo(gen_li(4), gen_li(8), gen_li(3)), 28)
+        with self.assertRaises(Exception):
+            foo(1, 2, 3)
+
+        # refinement should persist in second len(x) call
+
+        @torch.jit.script
+        def foo(x: List[int], cond: bool):
+            if len(x) == 4:
+                if cond:
+                    return len(x)
+                return 4
+
+            return 4
+
+        run_peephole_and_check_const_value(foo.graph, "value=4")
+
+        def test_const_tuple_output(graph, const_inputs):
+            tup = graph.findNode("prim::TupleConstruct")
+            for i, elem in enumerate(tup.inputs()):
+                if i in const_inputs:
+                    self.assertIsNotNone(elem.toIValue())
+                else:
+                    self.assertIsNone(elem.toIValue())
+
+        # testing combinations of x1 : {True, False} x
+        # {then/else branch} x assert {True/False}
+
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) != 4
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # we can only infer len(b) == 4 here
+        test_const_tuple_output(foo.graph, [1])
+
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) == 5:
+                x1 = False
+            else:
+                x1 = len(b) != 4
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # cant infer anything
+        test_const_tuple_output(foo.graph, [])
+
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) == 4
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # we cant infer anything, only len(b) != 4
+        test_const_tuple_output(foo.graph, [])
+
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) != 4
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # can infer len(b) == 4
+        test_const_tuple_output(foo.graph, [1])
+
+        # swap branches
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) != 5:
+                x1 = len(b) != 4
+            else:
+                x1 = True
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # can infer len(b) == 4
+        test_const_tuple_output(foo.graph, [1])
+
+        # use __not__
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) != 5:
+                x1 = len(b) != 4
+            else:
+                x1 = True
+            assert not x1
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # can infer len(b) == 4
+        test_const_tuple_output(foo.graph, [1])
+
+        # Test unsuccessful optimizations
+
+        @torch.jit.script
+        def foo(x: List[int]):
+            assert len(x) == 4
+            x.append(3)
+            return len(x)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        self.run_pass("constant_propagation", foo.graph)
+        FileCheck().check_count("aten::len", 2).run(foo.graph)
+
+        @torch.jit.script
+        def foo(x: List[int], y: List[int]):
+            assert len(x) == 4 or len(y) == 5
+            return len(x) + len(y)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        self.run_pass("constant_propagation", foo.graph)
+        FileCheck().check_count("aten::len", 4).run(foo.graph)
+
+    def test_integer_refinement(self):
+        def run_peephole_and_check_const_value(graph, const_string):
+            self.run_pass("refine_integer_values", graph)
+            self.run_pass("constant_propagation", graph)
+            self.run_pass("dce", graph)
+            FileCheck().check(const_string).check_next("return").run(graph)
+
+        @torch.jit.script
+        def foo(x: int, y: int):
+            if x != 4 or y != 5:
+                raise Exception("")
+
+            return x + y
+
+        graph = foo.graph
+        self.run_pass("refine_integer_values", graph)
+        self.run_pass("constant_propagation", graph)
+        self.run_pass("dce", graph)
+
+        run_peephole_and_check_const_value(foo.graph, "value=9")
+        self.assertEqual(foo(4, 5), 9)
+        with self.assertRaises(Exception):
+            foo(2, 4)
+
+        @torch.jit.script
+        def foo(x: int, y: int):
+            if x == 4 and y == 5:
+                pass
+            else:
+                raise Exception("hi")
+
+            return x + y
+
+        run_peephole_and_check_const_value(foo.graph, "value=9")
+        self.assertEqual(foo(4, 5), 9)
+        with self.assertRaises(Exception):
+            foo(2, 4)
+
+        @torch.jit.script
+        def foo(x: int, y: int, z: int):
+            if x != 4:
+                raise Exception("..")
+            else:
+                if y != 8:
+                    raise Exception("...")
+                else:
+                    if z == 3:
+                        pass
+                    else:
+                        raise Exception("...")
+
+            return x + y * z
+
+        run_peephole_and_check_const_value(foo.graph, "value=28")
+        self.assertEqual(foo(4, 8, 3), 28)
+        with self.assertRaises(Exception):
+            foo(1, 2, 3)
+
+        # refinement should persist in second len(x) call
+
+        @torch.jit.script
+        def foo(x: int, cond: bool):
+            if x == 4:
+                if cond:
+                    return x
+                return 4
+
+            return 4
+
+        run_peephole_and_check_const_value(foo.graph, "value=4")
+
+        @torch.jit.script
+        def foo(x: int, y: int):
+            assert x == 4 or y == 5
+            return x + y
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        self.run_pass("constant_propagation", foo.graph)
+        FileCheck().check("aten::add").run(foo.graph)
+
+    def test_optimize_out_comparison_same_value(self):
+        @torch.jit.script
+        def foo(x: int):
+            return x == x, x != x
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("aten::eq").check_not("aten::neq").run(foo.graph)
+        self.assertEqual(foo(1), (True, False))
+
+    def test_refine_integer_values(self):
+        @torch.jit.script
+        def foo(x: int):
+            y = 1
+            if x == 1:
+                return y
+            else:
+                return x
+
+        self.run_pass("refine_integer_values", foo.graph)
+        self.run_pass("constant_propagation", foo.graph)
+        self.run_pass("dce", foo.graph)
+        FileCheck().check("graph").check_next("return").run(foo.graph)
+        self.assertEqual(foo(2), 2)
+        self.assertEqual(foo(1), 1)
+
+    def test_peephole_len_list(self):
+        @torch.jit.script
+        def foo(x):
+            return len(x.size())
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("aten::len").run(foo.graph)
+        inputs = list(foo.graph.inputs())
+        inputs[0].setType(inputs[0].type().with_sizes([None, None]))
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("aten::len").run(foo.graph)
+        self.assertEqual(2, foo(torch.rand([3, 1])))
+
+        @torch.jit.script
+        def foo(x):
+            li = x.size()
+            li.append(4)
+            return len(li)
+
+        inputs = list(foo.graph.inputs())
+        inputs[0].setType(inputs[0].type().with_sizes([None, None]))
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("aten::len").run(foo.graph)
+        self.assertEqual(3, foo(torch.rand([3, 1])))
