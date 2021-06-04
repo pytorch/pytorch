@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/mobile/nnc/context.h>
-#include <torch/script.h>
 
 namespace torch {
 namespace jit {

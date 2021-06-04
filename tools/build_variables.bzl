@@ -413,6 +413,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/model_compatibility.cpp",
     "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/nnc/backend.cpp",
     "torch/csrc/jit/mobile/nnc/context.cpp",
     "torch/csrc/jit/mobile/nnc/registry.cpp",
     "torch/csrc/jit/mobile/observer.cpp",

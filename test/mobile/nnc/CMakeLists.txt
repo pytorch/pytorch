@@ -2,6 +2,7 @@ set(MOBILE_NNC_TEST_ROOT ${TORCH_ROOT}/test/mobile/nnc)
 
 set(MOBILE_NNC_TEST_SRCS
   ${MOBILE_NNC_TEST_ROOT}/test_context.cpp
+  ${MOBILE_NNC_TEST_ROOT}/test_nnc_backend.cpp
   ${MOBILE_NNC_TEST_ROOT}/test_registry.cpp
 )
 
