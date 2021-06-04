@@ -995,7 +995,7 @@ void PeepholeOptimizeONNX(
   fuseListConstructListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
-  EliminateDeadCode(
+  eliminateDeadCode(
       graph->block(),
       true,
       DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);

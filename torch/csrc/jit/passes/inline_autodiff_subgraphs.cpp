@@ -82,7 +82,7 @@ void InlineAutodiffSubgraphs(Block* block, size_t threshold) {
 
 void InlineAutodiffSubgraphs(std::shared_ptr<Graph>& graph, size_t threshold) {
   InlineAutodiffSubgraphs(graph->block(), threshold);
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
 }
 
 } // namespace jit

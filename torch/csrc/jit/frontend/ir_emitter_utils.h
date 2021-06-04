@@ -122,11 +122,9 @@ Value* materializeConstant(
   if (existing_constant != map.end()) {
     return existing_constant->second;
   }
-
   WithInsertPoint guard(graph.block()->nodes().front());
   auto new_constant = graph.insertConstant(val, r);
   map[val] = new_constant;
-
   return new_constant;
 }
 
