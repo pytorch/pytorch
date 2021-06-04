@@ -23,7 +23,7 @@ TORCH_LIBRARY(aten, m) {
   // Implementations located in torch/csrc/jit/runtime/register_prim_ops.cpp
   m.def(TORCH_SELECTIVE_SCHEMA("aten::splitlines(str self, bool keepends=False) -> str[]"));
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "aten::slice.str(str string, int? start=None, int? end=None, int step=1) -> str"));
+      "aten::slice.str(str string, int? start=0, int? end=9223372036854775807, int step=1) -> str"));
   m.def(TORCH_SELECTIVE_SCHEMA("aten::isupper(str self) -> bool"));
   m.def(TORCH_SELECTIVE_SCHEMA("aten::islower(str self) -> bool"));
   m.def(TORCH_SELECTIVE_SCHEMA("aten::capitalize(str self) -> str"));
