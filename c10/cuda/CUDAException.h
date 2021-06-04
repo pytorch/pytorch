@@ -38,11 +38,12 @@ class C10_CUDA_API CUDAError : public c10::Error {
     cudaError_t __err = EXPR;                                             \
     if (__err != cudaSuccess) {                                           \
       auto error_unused C10_UNUSED = cudaGetLastError();                  \
-      auto _cuda_check_prefix = c10::cuda::get_cuda_check_prefix();       \
+      auto _cuda_check_suffix = c10::cuda::get_cuda_check_suffix();       \
       throw c10::CUDAError(                                               \
           {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},          \
           TORCH_CHECK_MSG(                                                \
-              false, "", _cuda_check_prefix, cudaGetErrorString(__err))); \
+              false, "", "CUDA error: ", cudaGetErrorString(__err),       \
+              _cuda_check_suffix));                                       \
     }                                                                     \
   } while (0)
 #endif
