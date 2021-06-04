@@ -227,10 +227,18 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
 
  public:
   ConstantString(std::string str) : str_(std::move(str)) {}
+  ConstantString(c10::string_view str) : str_(std::string(str)) {}
   static c10::intrusive_ptr<ConstantString> create(std::string str_);
+  static c10::intrusive_ptr<ConstantString> create(c10::string_view str_);
+  static c10::intrusive_ptr<ConstantString> create(const char* str_);
+
   const std::string& string() const {
     return str_;
   }
+  c10::string_view string_view() const {
+    return str_;
+  }
+
   operator const std::string&() const {
     return string();
   }
@@ -306,11 +314,21 @@ struct EnumHolder;
 
 // Future
 struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
- public:
+ private:
+  // Keep this private in order to force users to go through make_intrusive and
+  // thus prevent creating a Future that's not held by an intrusive_ptr.
   explicit Future(TypePtr type, std::vector<c10::Device> devices={})
       : type_(std::move(type)),
         impl_(getTypeOfDevices(devices)),
         devices_(sortAndDeduplicateDevices(impl_, std::move(devices))) {}
+
+  friend c10::intrusive_ptr<Future>;
+
+ public:
+  Future(const Future&) = delete;
+  Future(Future&&) = delete;
+  Future& operator=(const Future&) = delete;
+  Future& operator=(Future&&) = delete;
 
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
@@ -360,13 +378,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       IValue value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           data_ptrs = c10::nullopt) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(
-        !completed(),
-        "Attempting to mark a completed Future as complete again. Note that "
-        "a Future can only be marked completed once.");
-
     // Start by performing all steps that can throw, before setting any field.
+    // Do this before even acquiring the mutex, because extractDataPtrs might
+    // acquire the GIL, which could lead to a lock inversion with our mutex.
+    // See https://github.com/pytorch/pytorch/issues/58239.
     std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs;
     std::vector<c10::Device> usedDevices;
     try {
@@ -382,9 +397,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         ensureIsSubsetOfDevices(usedDevices, devices_);
       }
     } catch (const std::exception&) {
-      setErrorInternal(std::current_exception(), lock);
+      setError(std::current_exception());
       return;
     }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    TORCH_CHECK(
+        !completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
 
     // Only set value_ and completed_ flag once all checks and preparation steps
     // have returned successfully to allow for proper error propagation.
@@ -399,7 +420,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       events_.push_back(std::move(event));
     }
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
@@ -425,8 +446,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // log errors and thats why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
-          "it is already marked completed (this is not neccessarily "
-          "an error):\n", tryRetrieveErrorMessageInternal(eptr));
+          "it is already marked completed (this is not necessarily "
+          "an error):\n",
+          tryRetrieveErrorMessageInternal(eptr));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",
@@ -458,13 +480,28 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return value_;
   }
 
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const std::vector<std::reference_wrapper<const at::DataPtr>>& dataPtrs() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    AT_ASSERT(!eptr_);
+    return dataPtrs_;
+  }
+
   /**
    * Add a callback to the future.
    * The callbacks will be executed once the future completes.
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(void)> callback) {
+  template <typename T>
+  void addCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&)");
+#endif
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
@@ -479,19 +516,69 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
-  c10::intrusive_ptr<Future> then(
-      std::function<IValue(void)> callback,
-      TypePtr type) {
-    auto fut = createInstance(std::move(type));
+  template <typename T>
+  c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
+    using IValueWithDataPtrs = std::
+        tuple<IValue, std::vector<std::reference_wrapper<const at::DataPtr>>>;
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        guts::disjunction<
+            std::is_invocable_r<IValue, T, Future&>,
+            std::is_invocable_r<IValueWithDataPtrs, T, Future&>>::value,
+        "The callback must have signature IValue(Future&) or "
+        "std::tuple<IValue, std::vector<std::reference_wrapper<const DataPtr>>>(Future&)");
+#endif
+    auto childFut = createInstance(std::move(type));
+    addCallback([childFut,
+                 cb = std::move(callback)](Future& parentFut) mutable {
+      try {
+        guts::if_constexpr<std::is_convertible<
+            typename std::result_of<T && (Future&)>::type,
+            IValueWithDataPtrs>::value>(
+            [&](auto identity) {
+              IValue value;
+              std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
+              std::tie(value, dataPtrs) = identity(cb)(parentFut);
+              childFut->markCompleted(std::move(value), std::move(dataPtrs));
+            },
+            [&](auto identity) {
+              childFut->markCompleted(identity(cb)(parentFut));
+            });
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
+      }
+    });
+    return childFut;
+  }
+
+  template <typename T>
+  c10::intrusive_ptr<Future> thenAsync(T callback, TypePtr type) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
+        "The callback must have signature c10::intrusive_ptr<Future>(Future&)");
+#endif
+    auto childFut = createInstance(std::move(type));
     addCallback(
-        [fut, cb = std::move(callback)]() {
+        [childFut, cb = std::move(callback)](Future& parentFut) mutable {
+          c10::intrusive_ptr<Future> intermediateFut;
           try {
-            fut->markCompleted(cb());
+            intermediateFut = cb(parentFut);
           } catch (std::exception&) {
-            fut->setError(std::current_exception());
+            childFut->setError(std::current_exception());
+            return;
           }
+          intermediateFut->addCallback(
+              [childFut = std::move(childFut)](Future& intermediateFut) {
+                if (intermediateFut.hasError()) {
+                  childFut->setError(intermediateFut.exception_ptr());
+                } else {
+                  childFut->markCompleted(
+                      intermediateFut.value(), intermediateFut.dataPtrs());
+                }
+              });
         });
-    return fut;
+    return childFut;
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
@@ -529,6 +616,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return type_;
   }
 
+  const std::vector<c10::Device>& devices() const {
+    return devices_;
+  }
+
   // This method should be used when one intends to manually create a child
   // future, for example when implementing a customized version of then().
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
@@ -541,7 +632,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // how/when that happens) as it will ensure that the proper "environment" is
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
-  void invokeCallback(std::function<void(void)> callback) {
+  template<typename T>
+  void invokeCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
+    static_assert(
+        std::is_invocable_r<void, T, Future&>::value,
+        "The callback must have signature void(Future&)");
+#endif
+
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
@@ -551,12 +649,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     c10::MultiStreamGuard streamGuard(streams);
     synchronizeWithCurrentStreams();
 
-    callback();
+    callback(*this);
   }
 
   // This method should be called before this future's value is used, as it
   // ensures that the CUDA streams that are "current" at the callsite properly
-  // synchonize with the value.
+  // synchronize with the value.
   void synchronizeWithCurrentStreams() {
     for (c10::Event& event : events_) {
       event.block(impl_.getStream(event.device()));
@@ -583,7 +681,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     eptr_ = std::move(eptr);
 
-    std::vector<std::function<void(void)>> cbs;
+    std::vector<std::function<void(Future&)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
@@ -725,7 +823,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks_;
+  std::vector<std::function<void(Future&)>> callbacks_;
   std::exception_ptr eptr_;
 
   // An upcast pointer to a virtual class which allows us to manipulate events,
@@ -972,6 +1070,7 @@ DEFINE_TO(c10::impl::GenericList, toList)
 DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
+DEFINE_TO(c10::string_view, toStringView)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
 DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
@@ -1179,6 +1278,14 @@ std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
 template <typename T>
 inline T IValue::to() && {
   return generic_to(std::move(*this), _fake_type<T>{});
+}
+
+template <>
+inline c10::optional<c10::string_view> IValue::to() && {
+  // In the default implementation, the IValue is destroyed with std::move.
+  // But if the unboxed type is optional<string_view> we cannot destroy
+  // the IValue.
+  return generic_to(*this, _fake_type<c10::optional<c10::string_view>>{});
 }
 
 template <typename T>
@@ -1476,6 +1583,16 @@ inline c10::optional<std::reference_wrapper<const std::string>> IValue::
   return std::reference_wrapper<const std::string>(
       static_cast<const c10::ivalue::ConstantString*>(payload.u.as_intrusive_ptr)
           ->string());
+}
+
+inline c10::string_view IValue::toStringView() const {
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toStringView on null intrusive_ptr IValue");
+  return static_cast<const c10::ivalue::ConstantString*>(
+        payload.u.as_intrusive_ptr)
+    ->string_view();
 }
 
 inline PyObject* IValue::toPyObject() const {

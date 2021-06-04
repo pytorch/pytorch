@@ -1465,35 +1465,9 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(1, len(record_function_remote_event))
             record_function_remote_event = record_function_remote_event[0]
             self.assertEqual(record_function_remote_event.node_id, dst_rank)
-            remaining_remote_events = {
-                evt for evt in function_events if evt.node_id == dst_rank
-            } - {record_function_remote_event}
-            # These ops are created by the hack of casting record_function to a
-            # tensor, so they should not count in the actual UDF profiled time.
-            # TODO remove after https://github.com/pytorch/pytorch/issues/43868
-            # is resolved.
-            remote_events_denylist = [
-                "aten::zeros",
-                "aten::empty",
-                "aten::zero_",
-                "aten::fill_",
-            ]
-
-            REMOTE_OP_STR = "#remote_op: "
-
-            def convert_remote_to_local(event_name):
-                remote_op_key = REMOTE_OP_STR
-                return event_name[event_name.find(remote_op_key) + len(remote_op_key) :]
-
-            # Ideally, we should validate that the sum of remote operations within
-            # record_function are less than record_function's CPU time. However,
-            # there is a known bug in profiling
-            # (https://github.com/pytorch/pytorch/issues/45160) due to which we
-            # can't do this. So, we just validate they are child events.
-            prof.key_averages()
-
             # cpu_children only returns direct children, so here we get all
             # children recursively.
+
             def get_cpu_children(event):
                 if not event.cpu_children:
                     return []
@@ -1502,17 +1476,31 @@ class RpcTest(RpcAgentTestFixture):
                     cpu_children.extend(get_cpu_children(e))
                 return cpu_children
 
-            record_function_children_names = [
-                convert_remote_to_local(c.name)
-                for c in get_cpu_children(record_function_remote_event)
+            remote_children = get_cpu_children(record_function_remote_event)
+            # Get local children and verify parity.
+            with torch.autograd.profiler.profile() as prof:
+                udf_with_torch_ops(-1, True)
+
+            local_function_events = prof.function_events
+            local_record_function_event = [
+                evt for evt in local_function_events if "##forward##" in evt.name
+            ][0]
+            local_children = get_cpu_children(local_record_function_event)
+            local_children_names = [
+                evt.name for evt in local_children
             ]
-            for evt in remaining_remote_events:
+
+            REMOTE_OP_STR = "#remote_op: "
+
+            def convert_remote_to_local(event_name):
+                remote_op_key = REMOTE_OP_STR
+                return event_name[
+                    event_name.find(remote_op_key) + len(remote_op_key) :
+                ]
+
+            for evt in remote_children:
                 local_name = convert_remote_to_local(evt.name)
-                if local_name not in remote_events_denylist:
-                    self.assertTrue(
-                        local_name in record_function_children_names,
-                        f"{local_name} not in {record_function_children_names}",
-                    )
+                self.assertTrue(local_name in local_children_names)
 
     def validate_profiling_workload(self, dst, prof):
 
@@ -2691,6 +2679,12 @@ class RpcTest(RpcAgentTestFixture):
 
         # clear states for check 2
         rpc.rpc_sync(worker_name(dst_rank), clear_global_rref)
+
+        # Wait for owner rref to be cleared.
+        while int(info["num_owner_rrefs"]) != 0:
+            info = _rref_context_get_debug_info()
+            time.sleep(0.1)
+        dist.barrier()
 
         # Check 3: rpc.remote call should update owners_ map
         ####################################################
@@ -4757,6 +4751,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 fut.wait()
 
+        # FIXME We wait until the remote completed creating the OwnerRRef
+        # because there's currently a race if we shut down RPC before that.
+        slow_rref.to_here()
+
     def test_rref_get_type_timeout_blocking(self):
         self._test_rref_get_type_timeout(blocking=True)
 
@@ -4799,6 +4797,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         # specified timeout.
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+
+        # FIXME We wait until the remote completed creating the OwnerRRef
+        # because there's currently a race if we shut down RPC before that.
+        slow_rref.to_here()
 
     @dist_init
     def test_rref_proxy_timeout(self):
@@ -5813,10 +5815,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 output = model.rpc_sync().forward(data)
                 # to_here() internally calls localValue as the caller is
                 # the owner of the RRef.
-                v0 = rpc.RRef(
-                    output,
-                    devices=[torch.device(local_device).index]
-                ).remote().sum().to_here().item()
+                v0 = rpc.RRef(output).remote().sum().to_here().item()
                 v1 = output.sum().item()
                 self.assertEqual(v0, v1)
 
@@ -5837,6 +5836,41 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(2)
     def test_owner_rref_forward_synchronization4(self):
         self._test_owner_rref_forward_synchronization("cuda:1", "cuda:1")
+
+    @staticmethod
+    def _return_tensor_view(i):
+        x = torch.ones(1000, 200).cuda(0) * i
+        torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+        # serialization of the return value will create a new tensor from the
+        # view, which is done outside of the user function.
+        return x.split(100)[0]
+
+    @skip_if_lt_x_gpu(1)
+    def test_tensor_view_as_return_value(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0 : 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        futs = []
+        for i in range(5):
+            futs.append(rpc.rpc_async(
+                dst,
+                TensorPipeAgentCudaRpcTest._return_tensor_view,
+                args=(i,)
+            ))
+
+        for i in range(5):
+            self.assertEqual(torch.ones(100, 200) * i, futs[i].wait())
+
+        rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
     def test_devices_option_mismatch(self):

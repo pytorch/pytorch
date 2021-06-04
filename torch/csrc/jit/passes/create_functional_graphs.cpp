@@ -193,7 +193,6 @@ struct FunctionalGraphSlicer {
   std::unordered_set<Value*> mutated_values_;
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t minSubgraphSize_ = 6;
 };
 

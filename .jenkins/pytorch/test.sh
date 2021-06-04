@@ -153,6 +153,11 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_python_gloo_with_tls() {
+  source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
+  assert_git_not_dirty
+}
+
 
 test_aten() {
   # Test ATen
@@ -168,10 +173,10 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
     aten/tools/run_tests.sh build/bin
@@ -447,7 +452,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1 ]]; then
     test_torch_deploy
   fi
   test_without_numpy
@@ -478,6 +483,9 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
+    test_python_gloo_with_tls
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
