@@ -118,7 +118,8 @@ def _check_sparse_coo_members_individually(
         if not actual.is_sparse:
             return check_tensors(actual, expected, **kwargs)
 
-        exc = check_tensors(actual._indices(), expected._indices(), **kwargs)
+        kwargs_equal = dict(kwargs, rtol=0, atol=0)
+        exc = check_tensors(actual._indices(), expected._indices(), **kwargs_equal)
         if exc:
             return _amend_error_message(exc, "{}\n\nThe failure occurred for the indices.")
 
@@ -148,11 +149,12 @@ def _check_sparse_csr_members_individually(
         if not actual.is_sparse_csr:
             return check_tensors(actual, expected, **kwargs)
 
-        exc = check_tensors(actual.crow_indices(), expected.crow_indices(), **kwargs)
+        kwargs_equal = dict(kwargs, rtol=0, atol=0)
+        exc = check_tensors(actual.crow_indices(), expected.crow_indices(), **kwargs_equal)
         if exc:
             return _amend_error_message(exc, "{}\n\nThe failure occurred for the crow_indices.")
 
-        exc = check_tensors(actual.col_indices(), expected.col_indices(), **kwargs)
+        exc = check_tensors(actual.col_indices(), expected.col_indices(), **kwargs_equal)
         if exc:
             return _amend_error_message(exc, "{}\n\nThe failure occurred for the col_indices.")
 
