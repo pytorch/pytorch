@@ -86,7 +86,6 @@ T not_implemented_base(const char* name, const char* reason) {
     msg = c10::str(msg, " ", reason);
   };
   TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
-  // throw std::runtime_error(msg);
 }
 
 Tensor not_implemented(const char* name, const char* reason) {
