@@ -5560,13 +5560,14 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def _slow_add_on_user_stream(x, y):
         s0 = torch.cuda.current_stream(x.device)
         s1 = torch.cuda.Stream(device=x.device)
+        s1.wait_stream(s0)
+        x.record_stream(s1)
+        y.record_stream(s1)
         with torch.cuda.stream(s1):
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
-            s1.wait_stream(s0)
             z = x + y
-            event = torch.cuda.Event()
-            event.record(s1)
-        event.wait(s0)
+        s0.wait_stream(s1)
+        z.record_stream(s0)
         return z
 
     def _test_custom_stream(self, fn, device_map):
