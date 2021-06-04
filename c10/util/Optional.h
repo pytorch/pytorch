@@ -477,7 +477,7 @@ class arrayref_optional_base {
     // Cast to void* to suppress GCC's -Wclass-memaccess.
     memcpy(
         static_cast<void*>(&repr),
-        static_cast<void*>(&storage_),
+        static_cast<const void*>(&storage_),
         sizeof(storage_));
     return repr.p != nullptr || repr.sz == 0;
   }
