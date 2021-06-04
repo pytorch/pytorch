@@ -200,7 +200,7 @@ TEST(THNNConvTest, Basic) {
   graph->lint();
 
   // differentiate JIT graph
-  EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+  eliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
   ConstantPropagation(graph);
   auto grad_spec = differentiate(graph);
   LowerGradOf(*grad_spec.df);
@@ -326,7 +326,7 @@ TEST(ATenNativeBatchNormTest, Basic) {
   graph->lint();
 
   // differentiate JIT graph
-  EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+  eliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
   ConstantPropagation(graph);
   auto grad_spec = differentiate(graph);
   LowerGradOf(*grad_spec.df);

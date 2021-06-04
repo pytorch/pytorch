@@ -39,7 +39,7 @@ namespace jit {
 //      methods.
 //
 //  Then, we'll have a well-formed graph with proper method calls.
-TORCH_API void FixupTraceScopeBlocks(
+TORCH_API void fixUpTraceScopeBlocks(
     std::shared_ptr<Graph>& graph,
     Module* self);
 

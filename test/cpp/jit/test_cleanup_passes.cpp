@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/csrc/jit/frontend/run_cleanup_passes.cpp>
 
 namespace torch {
 namespace jit {

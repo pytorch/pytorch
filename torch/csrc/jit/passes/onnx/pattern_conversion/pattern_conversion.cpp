@@ -324,7 +324,7 @@ std::vector<Value*> ConvertIndexPutToONNX(
 
   // Convert aten type to onnx type.
   EraseNumberTypesOnBlock(subblock);
-  EliminateDeadCode(
+  eliminateDeadCode(
       subblock,
       true,
       DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);

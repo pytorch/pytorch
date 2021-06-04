@@ -730,7 +730,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
       runNondiffOptimization(opt_graph);
     }
     // Make sure there are no leftovers from any passes.
-    EliminateDeadCode(opt_graph);
+    eliminateDeadCode(opt_graph);
     GRAPH_DUMP("After compileSpec optimizations:", opt_graph);
     return ExecutionPlan(opt_graph, function_name_);
   }
@@ -814,7 +814,7 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   // add valid expand nodes when the shapes are stable
   RemoveExpands(g);
   CanonicalizeOps(g);
-  EliminateDeadCode(g);
+  eliminateDeadCode(g);
 }
 
 void packGradient(const Gradient& gradient, Node* dnode) {
@@ -913,10 +913,10 @@ void runOptimization(
     bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
-      "Before EliminateDeadCode (beginning of runOptimization)\n", *graph);
-  EliminateDeadCode(graph);
+      "Before eliminateDeadCode (beginning of runOptimization)\n", *graph);
+  eliminateDeadCode(graph);
   GRAPH_DEBUG(
-      "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
+      "After eliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
       "After EliminateCommonSubexpression, before PeepholeOptimize\n", *graph);

@@ -485,7 +485,7 @@ bool PeepholeOptimize(
   GRAPH_DUMP("After PeepholeOptimize: ", graph);
   // Eliminate dead code created by any peephole passes we've just done
   if (changed) {
-    EliminateDeadCode(graph->block());
+    eliminateDeadCode(graph->block());
   }
   return changed;
 }

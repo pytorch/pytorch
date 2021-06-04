@@ -10,7 +10,7 @@ namespace jit {
 // so downstream consumers of the IR do not need handle ops in their
 // pre-normalized form.
 // Currently only handles normalization of op aliases.
-TORCH_API void NormalizeOps(const std::shared_ptr<Graph>& graph);
+TORCH_API void normalizeOps(const std::shared_ptr<Graph>& graph);
 
 const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap();
 

@@ -191,7 +191,7 @@ graph(%x: Tensor, %y: Tensor):
   return (%x)
   )IR";
     parseIR(text, graph.get());
-    EliminateDeadCode(graph);
+    eliminateDeadCode(graph);
 
     testing::FileCheck().run(text, *graph);
   }

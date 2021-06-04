@@ -916,7 +916,7 @@ void SubGraphCloneHelper::buildObserverSubgraph(
   for (auto n : weight_subgraph) {
     cloneNodeInGraph(n, dest_graph, remap_old_to_new);
   }
-  LintGraph(dest_graph);
+  lintGraph(dest_graph);
 
   // Add last node output value as subgraph output.
   for (auto out : weight_subgraph.back()->outputs()) {

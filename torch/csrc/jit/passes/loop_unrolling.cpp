@@ -140,7 +140,7 @@ void repeatBody(Block* body, size_t times, Block* dest) {
   // constant that prevents the loop from breaking. We shouldn't wait too long
   // before removing them because they might artificially increase the loop size
   // and prevent outer loop unrolling.
-  EliminateDeadCode(dest, false);
+  eliminateDeadCode(dest, false);
 }
 
 // Replaces the builtin loop counter with a "mutable" variable outside of the
@@ -374,7 +374,7 @@ Node* PeelLoop(Node* n, size_t times) {
 bool UnrollLoops(std::shared_ptr<Graph>& graph) {
   bool changed = UnrollLoops(graph->block(), false);
   if (changed) {
-    EliminateDeadCode(graph);
+    eliminateDeadCode(graph);
   }
   return changed;
 }
@@ -382,7 +382,7 @@ bool UnrollLoops(std::shared_ptr<Graph>& graph) {
 bool UnrollConstantLoops(std::shared_ptr<Graph>& graph) {
   bool changed = UnrollLoops(graph->block(), true);
   if (changed) {
-    EliminateDeadCode(graph);
+    eliminateDeadCode(graph);
   }
   return changed;
 }

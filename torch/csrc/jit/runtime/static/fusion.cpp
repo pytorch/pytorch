@@ -26,12 +26,12 @@ void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
   auto aliasDb = torch::make_unique<AliasDb>(graph);
   createFusionGroups(graph->block(), aliasDb.get(), min_size);
   constantPooling(graph);
   ConstantPropagation(graph);
-  torch::jit::EliminateDeadCode(graph);
+  torch::jit::eliminateDeadCode(graph);
 }
 
 Operation createStaticSubgraphRuntime(const Node* node) {
