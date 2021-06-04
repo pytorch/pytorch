@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -171,7 +172,7 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
       "Overload must have same number of parameters\n",
       new_decl.range(),
       old_decl.range());
-  for (size_t i = 0; i < new_decl.params().size(); ++i) {
+  for (const auto i : c10::irange(new_decl.params().size())) {
     TORCH_INTERNAL_ASSERT(
         new_params[i].ident().name() == old_params[i].ident().name(),
         "Overload parameters must have the same names\n",
@@ -307,7 +308,7 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
       overload_decl.range(),
       impl_decl.range());
 
-  for (size_t i = 0; i < overload_params.size(); ++i) {
+  for (const auto i : c10::irange(overload_params.size())) {
     auto overload_name = overload_params[i].ident().name();
     auto impl_name = impl_params[i].ident().name();
     if (overload_name != impl_name) {
@@ -582,7 +583,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     } else if (item.a.isList()) {
       auto al = item.a.toList();
       auto bl = item.b.toList();
-      for (size_t i = 0; i < al.size(); ++i) {
+      for (const auto i : c10::irange(al.size())) {
         work.emplace_back(Work{al.get(i), bl.get(i)});
       }
     } else if (item.a.isGenericDict()) {

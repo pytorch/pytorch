@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/six.h>
@@ -33,7 +34,7 @@ template <typename T>
 py::object cast_handle_sequence(std::vector<py::handle> objs) {
   auto num_objs = objs.size();
   T sequence{num_objs};
-  for (size_t i = 0; i < num_objs; ++i)
+  for (const auto i : c10::irange(num_objs))
     sequence[i] = py::reinterpret_borrow<py::object>(objs[i]);
   return sequence;
 }
@@ -109,7 +110,7 @@ template <typename T>
 py::object cast_sequence(std::vector<py::object> objs) {
   auto num_objs = objs.size();
   T sequence{num_objs};
-  for (size_t i = 0; i < num_objs; ++i)
+  for (const auto i : c10::irange(num_objs))
     sequence[i] = std::move(objs[i]);
   return std::move(sequence);
 }
@@ -117,7 +118,7 @@ py::object cast_sequence(std::vector<py::object> objs) {
 py::object cast_dict(std::vector<py::object> objs) {
   auto num_objs = objs.size();
   py::dict sequence = {};
-  for (size_t i = 0; i < num_objs; ++i) {
+  for (const auto i : c10::irange(num_objs)) {
     py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
     sequence[obj[0]] = obj[1];
   }

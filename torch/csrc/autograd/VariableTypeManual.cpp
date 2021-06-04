@@ -71,7 +71,7 @@ Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
 
 std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
-  for (size_t i = 0; i < tl.size(); ++i) {
+  for (const auto i : c10::irange(tl.size())) {
     const auto &t = tl[i];
     if (!t.defined()) {
       continue;

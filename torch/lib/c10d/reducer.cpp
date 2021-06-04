@@ -113,8 +113,7 @@ Reducer::Reducer(
     size_t replica_index = 0;
     const auto variable_count = replicas_[replica_index].size();
     grad_accumulators_[replica_index].resize(variable_count);
-    for (size_t variable_index = 0; variable_index < variable_count;
-         variable_index++) {
+    for (const auto variable_index : c10::irange(variable_count)) {
       auto& variable = replicas_[replica_index][variable_index];
 
       // The gradient accumulator function is lazily initialized once.
@@ -434,8 +433,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
   }
   const auto replica_count = replicas_.size();
   const auto variable_count = replicas_[0].size();
-  for (size_t variable_index = 0; variable_index < variable_count;
-       ++variable_index) {
+  for (const auto variable_index : c10::irange(variable_count)) {
     push_rebuilt_params(variable_index);
   }
 }
@@ -1273,8 +1271,7 @@ std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
 std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
   std::vector<size_t> unmarked_param_indices;
   const auto variable_count = replicas_[0].size();
-  for (size_t variable_index = 0; variable_index < variable_count;
-       variable_index++) {
+  for (const auto variable_index : c10::irange(variable_count)) {
     if (perIterationReadyParams_.find(variable_index) ==
         perIterationReadyParams_.end()) {
       unmarked_param_indices.push_back(variable_index);
@@ -1287,9 +1284,7 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
   size_t replica_index = 0;
   auto& replica = bucket.replicas[replica_index];
-  for (size_t intra_bucket_index = 0;
-       intra_bucket_index < replica.variables.size();
-       intra_bucket_index++) {
+  for (const auto intra_bucket_index : c10::irange(replica.variables.size())) {
     auto& variable = replica.variables[intra_bucket_index];
     const auto offset = replica.offsets[intra_bucket_index];
     const auto length = replica.lengths[intra_bucket_index];
@@ -1323,7 +1318,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         // Wait for local_used_maps reduction to complete.
         local_used_work_->wait();
         // D2H from local_used_maps_dev_ to local_used_maps_
-        for (size_t i = 0; i < local_used_maps_.size(); i++) {
+        for (const auto i : c10::irange(local_used_maps_.size())) {
           // Blocking copy, if local_used_maps_dev_ is cuda
           local_used_maps_[i].copy_(local_used_maps_dev_[i]);
         }

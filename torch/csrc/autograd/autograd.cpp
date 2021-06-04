@@ -40,7 +40,7 @@ variable_list _make_grads(
         "gradients",
         num_tensors,
         num_gradients);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       const Variable& output = outputs[i];
       const Variable& grad_output = grad_outputs[i];
       if (!grad_output.defined()) {
@@ -89,7 +89,7 @@ variable_list run_backward(
   if (!inputs.empty()) {
     size_t num_inputs = inputs.size();
     output_edges.reserve(num_inputs);
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       const Variable& input = inputs[i];
       const auto output_nr = input.output_nr();
       auto grad_fn = input.grad_fn();
@@ -119,7 +119,7 @@ variable_list run_backward(
   // check if grad_inputs contains None or not base on the allow_unused flag
   if (!inputs.empty() && !allow_unused) {
     size_t num_inputs = inputs.size();
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       TORCH_CHECK(
           grad_inputs[i].defined(),
           "One of the "

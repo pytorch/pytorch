@@ -127,7 +127,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   for (const auto i : c10::irange(nthreads)) {
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
-      for (int i = 0; i < 100; ++i) {
+      for (const auto i : c10::irange(100)) {
         model({input.alias()}).toTensor();
       }
       auto result = model({input.alias()}).toTensor();
@@ -198,12 +198,12 @@ TEST(TorchpyTest, TaggingRace) {
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
   torch::deploy::InterpreterManager m(nthreads);
-  for (int64_t n = 0; n < trials; n++) {
+  for (const auto n : c10::irange(trials)) {
     at::Tensor t = torch::empty(2);
     std::atomic<int64_t> success(0);
     std::atomic<int64_t> failed(0);
     at::parallel_for(0, nthreads, 1, [&](int64_t begin, int64_t end) {
-      for (int64_t i = begin; i < end; i++) {
+      for (const auto i : c10::irange(begin, end)) {
         auto I = m.all_instances()[i].acquire_session();
         try {
           I.from_ivalue(t);

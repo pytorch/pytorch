@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/options/pooling.h>
 #include <torch/nn/modules/utils.h>
@@ -599,7 +600,7 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
   const IntArrayRef& padding, const c10::optional<std::vector<int64_t>>& output_size) {
   auto input_size = input.sizes();
   std::vector<int64_t> default_size;
-  for (size_t d = 0; d < kernel_size.size(); d++) {
+  for (const auto d : c10::irange(kernel_size.size())) {
     default_size.push_back((input_size[d + 2] - 1) * stride[d] +
                             kernel_size[d] - 2 * padding[d]);
   }
@@ -616,7 +617,7 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
                   " elements, but it has a length of '",
                   output_size_.size(), "'");
     }
-    for (size_t d = 0; d < kernel_size.size(); d++) {
+    for (const auto d : c10::irange(kernel_size.size())) {
       const auto min_size = default_size[d] - stride[d];
       const auto max_size = default_size[d] + stride[d];
       if (!(min_size <= output_size_[d] && output_size_[d] <= max_size)) {

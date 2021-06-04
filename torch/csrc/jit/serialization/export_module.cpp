@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/frontend/source_range.h>
@@ -84,7 +85,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
   std::vector<int64_t> op_debug_handles;
-  for (size_t i = 0; i < instructions_copy.size(); ++i) {
+  for (const auto i : c10::irange(instructions_copy.size())) {
     Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
       auto node = code->instructions_source()[i];
@@ -583,7 +584,7 @@ void ScriptModuleSerializer::updateSourceRangeTags(
 
 void ScriptModuleSerializer::convertTypes(const at::NamedTypePtr& root_type) {
   class_deps_.add(root_type);
-  for (size_t i = 0; i < class_deps_.size(); ++i) {
+  for (const auto i : c10::irange(class_deps_.size())) {
     // note: convertNameType may extend class_deps_, so re-checking .size() is
     // necessary
     convertNamedType(class_deps_[i]);

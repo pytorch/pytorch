@@ -467,7 +467,7 @@ RangeValue::RangeValue(
     Function& m,
     std::vector<Value*> inputs,
     c10::optional<int64_t> static_len) {
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)

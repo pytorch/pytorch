@@ -104,7 +104,7 @@ static bool expandArgs(
     std::vector<int64_t>& map_size,
     bool dry_run) {
   bool has_broadcast = false;
-  for (size_t i = 0; i < args.size(); ++i) {
+  for (const auto i : c10::irange(args.size())) {
     auto& arg = args[i];
     const auto& pdesc = spec.inputChunks()[i];
     if (pdesc.nSubTensors() == 1) {
@@ -271,7 +271,7 @@ void launchFusion(
   };
 
   // Adds (flattened) input arguments
-  for (size_t i = 0; i < fusion.inputDesc().size(); ++i) {
+  for (const auto i : c10::irange(fusion.inputDesc().size())) {
     const auto& chunk = fusion.chunkDesc()[i];
     const at::Tensor& tensor = inputs[i];
     if (chunk.isNoop()) {
@@ -280,7 +280,7 @@ void launchFusion(
       size_t chunk_offset = map_size[chunk.dim()] * tensor.stride(chunk.dim()) *
           elementSize(tensor.scalar_type());
       char* data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
-      for (size_t chunks = 0; chunks < chunk.nSubTensors(); ++chunks) {
+      for (const auto chunks : c10::irange(chunk.nSubTensors())) {
         addTensorInfoRaw(
             *chunk.subTensorDesc(), data_ptr, map_size, tensor.strides());
         data_ptr += chunk_offset;
@@ -295,7 +295,7 @@ void launchFusion(
   // Adds (flattened) output arguments
   outputs.reserve(fusion.outputDesc().size());
   const auto& ref_options = inputs[0].options();
-  for (size_t i = 0; i < fusion.outputDesc().size(); ++i) {
+  for (const auto i : c10::irange(fusion.outputDesc().size())) {
     const auto& c = fusion.concatDesc()[i];
     if (c.isNoop()) {
       outputs.push_back(at::empty(
@@ -308,7 +308,7 @@ void launchFusion(
       outputs.push_back(at::empty(concat_size, ref_options));
       const auto& o = outputs[i];
       size_t offset = 0;
-      for (size_t j = 0; j < c.nSubTensors(); ++j) {
+      for (const auto j : c10::irange(c.nSubTensors())) {
         // because the concatenated_output stays live, the underlying data
         // in this view remains live through the end of this function
         // so there is not need to hold onto this tensor

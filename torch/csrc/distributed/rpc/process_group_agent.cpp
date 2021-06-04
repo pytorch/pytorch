@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
 
 #include <c10/util/C++17.h>
+#include <c10/util/irange.h>
 #include <c10d/ProcessGroup.hpp>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/agent_utils.h>
@@ -175,7 +176,7 @@ bool ProcessGroupAgent::hasPendingMessage() {
   // allgather both send and recv messages in one shot
   std::vector<std::vector<torch::Tensor>> outputSnapshots(1);
 
-  for (int i = 0; i < worldSize; ++i) {
+  for (const auto i : c10::irange(worldSize)) {
     outputSnapshots[0].emplace_back(
         torch::zeros({2, worldSize}, {torch::kInt64}));
   }
@@ -185,8 +186,8 @@ bool ProcessGroupAgent::hasPendingMessage() {
   // loop through all send/recv pairs to make sure that all sent messages are
   // processed.
   const auto& peerCounts = outputSnapshots[0];
-  for (int from = 0; from < worldSize; ++from) {
-    for (int to = 0; to < worldSize; ++to) {
+  for (const auto from : c10::irange(worldSize)) {
+    for (const auto to : c10::irange(worldSize)) {
       // peerCounts[x][0] is recv counts, and peerCounts[x][1] is send counts
 
       const auto& sentCnt = peerCounts[from][1][to].data_ptr<int64_t>()[0];

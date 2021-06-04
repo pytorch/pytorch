@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 
@@ -88,7 +89,7 @@ constexpr auto rand_support_literal = R"(
       if(STATE == 0) {
         uint4 counter_ = counter;
         uint2 key_ = key;
-        for(int i = 0; i < 9; i++) {
+        for (const auto i : c10::irange(9)) {
           counter_ = single_round(counter_, key_);
           key_.x += (kPhilox10A); key_.y += (kPhilox10B);
         }
@@ -189,7 +190,7 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
       // load 4 at a time
       ${kernelLoad}
       #pragma unroll 4
-      for (int i=0; i<4; i++) {
+      for (const auto i : c10::irange(4)) {
         // calculate the results
         ${kernelBody_vec4}
       }

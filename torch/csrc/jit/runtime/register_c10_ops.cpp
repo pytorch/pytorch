@@ -1,6 +1,7 @@
 #include <ATen/core/ATenOpList.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/record_function.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -88,8 +89,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
             // doubles in the list are constants
             auto value = iter->toDoubleVector();
             std::vector<Value*> info(value.size());
-            for (size_t value_index = 0; value_index < value.size();
-                 ++value_index) {
+            for (const auto value_index : c10::irange(value.size())) {
               info[value_index] = graph->insertConstant(value[value_index]);
               tracer::recordSourceLocation(info[value_index]->node());
             }

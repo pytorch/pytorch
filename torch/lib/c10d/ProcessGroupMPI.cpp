@@ -4,6 +4,7 @@
 #include <map>
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/irange.h>
 
 #if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
@@ -265,7 +266,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       constexpr int kMaxNumRetries = 3;
       bool groupComm_updated = false;
       MPI_Barrier(MPI_COMM_WORLD);
-      for (int i = 0; i < kMaxNumRetries; ++i) {
+      for (const auto i : c10::irange(kMaxNumRetries)) {
         if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
           groupComm_updated = true;
           break;
@@ -493,7 +494,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
             mpiDatatype.at(data.scalar_type()),
             pgComm_));
 
-        for (size_t i = 0; i < outputDataVec.size(); ++i) {
+        for (const auto i : c10::irange(outputDataVec.size())) {
           outputDataVec[i].copy_(flatOutputTensor[i]);
         }
       };
@@ -564,7 +565,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         if (rank_ == opts.rootRank) {
           const std::vector<at::Tensor>& outputDataVec = entry->dst;
           // copy the flattened output tensors to the outputs
-          for (size_t i = 0; i < outputDataVec.size(); ++i) {
+          for (const auto i : c10::irange(outputDataVec.size())) {
             outputDataVec.at(i).copy_(flatOutputTensor[i]);
           }
         }
@@ -624,7 +625,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
           sendbuf = flatInputTensor.data_ptr();
 
           // copy the input tensors to the flatten large send buffer
-          for (size_t i = 0; i < inputDataVec.size(); ++i) {
+          for (const auto i : c10::irange(inputDataVec.size())) {
             flatInputTensor[i].copy_(inputDataVec.at(i));
           }
         }
@@ -783,7 +784,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
         at::Tensor dstFlatData = at::empty({dst_len}, dstdata[0].options());
         auto srcFlatDataSplits =
             srcFlatData.split_with_sizes(c10::IntArrayRef(send_lengthsL), 0);
-        for (int i = 0; i < size_; i++) {
+        for (const auto i : c10::irange(size_)) {
           srcFlatDataSplits[i].copy_(srcdata[i].view({-1}));
         }
         c10::DeviceGuard guard1(srcdata[0].device());
@@ -801,7 +802,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
 
         auto dstFlatDataSplits =
             dstFlatData.split_with_sizes(c10::IntArrayRef(recv_lengthsL), 0);
-        for (int i = 0; i < size_; i++) {
+        for (const auto i : c10::irange(size_)) {
           dstdata[i].view({-1}).copy_(dstFlatDataSplits[i]);
         }
       };

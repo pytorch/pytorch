@@ -90,7 +90,7 @@ const Expr* flatten_index(
   // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
   // stride[i] = 1,                     i = ndim-1
   strides[ndim - 1] = new IntImm(1);
-  for (size_t i = 1; i < ndim; i++) {
+  for (const auto i : c10::irange(1, ndim)) {
     strides[ndim - 1 - i] = new Mul(strides[ndim - i], dims[ndim - i]);
   }
 

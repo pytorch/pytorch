@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 
 namespace torch {
@@ -88,7 +89,7 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
     std::iota(axesAttr.begin(), axesAttr.end(), 0);
   }
   auto updated_val = inputTensorValues[0];
-  for (size_t i = 0; i < axesAttr.size(); ++i) {
+  for (const auto i : c10::irange(axesAttr.size())) {
     // ONNX slice accepts negative starts and ends values.
     int64_t axis = axesAttr[i], start = startsAttr[i], end = endsAttr[i];
     // ONNX slice accepts negative axis, fix this for aten op

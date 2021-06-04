@@ -332,7 +332,7 @@ std::vector<at::Tensor> scatter(
       ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
       : tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
-  for (size_t i = 0; i < chunks.size(); ++i) {
+  for (const auto i : c10::irange(chunks.size())) {
     const auto device_index = static_cast<int16_t>(devices[i]);
     if (device_index != tensor.get_device()) {
       if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
@@ -417,7 +417,7 @@ at::Tensor& gather_out(
         expected_size.size(),
         ")");
     expected_size[dim] = tensor.size(dim);
-    for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
+    for (const auto dimension : c10::irange(expected_size.size())) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Input tensor at index ",
@@ -471,7 +471,7 @@ at::Tensor gather(
         expected_size.size(),
         ")");
     expected_size[dim] = tensor.size(dim);
-    for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
+    for (const auto dimension : c10::irange(expected_size.size())) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Input tensor at index ",

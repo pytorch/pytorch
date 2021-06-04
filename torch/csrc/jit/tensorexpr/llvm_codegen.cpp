@@ -4,6 +4,7 @@
 
 #include <aten/src/ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
@@ -283,7 +284,7 @@ void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
   // TODO: preserve the func type.
   ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
   at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-    for (int index = f_begin; index < f_end; index++) {
+    for (const auto index : c10::irange(f_begin, f_end)) {
       callee(index, packed_data);
     }
   });
@@ -1019,7 +1020,7 @@ void LLVMCodeGenImpl::replaceVarMapping(
     const std::vector<llvm::Value*>& vals) {
   TORCH_CHECK(vars.size() == vals.size());
   int i = 0;
-  for (int i = 0; i < vars.size(); i++) {
+  for (const auto i : c10::irange(vars.size())) {
     const Var* var = vars[i];
     llvm::Value* val = vals[i];
     if (val) {
@@ -1041,7 +1042,7 @@ void LLVMCodeGenImpl::visit(const Ramp* v) {
           llvm::dyn_cast<llvm::ConstantInt>(stride)) {
     std::vector<llvm::Constant*> vals = {
         llvm::ConstantInt::get(base->getType(), 0)};
-    for (int i = 1; i < lanes; ++i) {
+    for (const auto i : c10::irange(1, lanes)) {
       vals.push_back(llvm::ConstantExpr::getAdd(vals.back(), const_stride));
     }
 
@@ -1065,7 +1066,7 @@ void LLVMCodeGenImpl::visit(const Ramp* v) {
   }
 
   value_ = llvm::UndefValue::get(vecType);
-  for (int i = 0; i < lanes; ++i) {
+  for (const auto i : c10::irange(lanes)) {
     value_ = irb_.CreateInsertElement(value_, base, i);
     base = irb_.CreateAdd(base, stride);
   }
@@ -1182,14 +1183,14 @@ llvm::Value* LLVMCodeGenImpl::packFuncArgs(
     return NullPtr;
   }
   std::vector<llvm::Type*> arg_types(func_args.size());
-  for (int i = 0; i < func_args.size(); i++) {
+  for (const auto i : c10::irange(func_args.size())) {
     arg_types[i] = func_args[i]->getType();
   }
   llvm::StructType* packed_type = llvm::StructType::create(arg_types);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
   llvm::Value* one = llvm::ConstantInt::get(IntTy_, 1);
   llvm::Value* packed = irb_.CreateAlloca(packed_type, one);
-  for (int i = 0; i < func_args.size(); i++) {
+  for (const auto i : c10::irange(func_args.size())) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     irb_.CreateStore(func_args[i], dst_ptr);
@@ -1204,7 +1205,7 @@ std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
   // TODO: extract arg_count from packed.
   std::vector<llvm::Value*> func_args(arg_count);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
-  for (int i = 0; i < arg_count; i++) {
+  for (const auto i : c10::irange(arg_count)) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     func_args[i] = irb_.CreateLoad(dst_ptr);

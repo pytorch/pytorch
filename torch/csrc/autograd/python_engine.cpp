@@ -222,7 +222,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
-    for (int i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       PyObject *input = PyTuple_GET_ITEM(inputs, i);
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Tensors, but got %s", THPUtils_typename(input));

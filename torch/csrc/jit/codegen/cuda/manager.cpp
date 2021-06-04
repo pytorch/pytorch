@@ -15,6 +15,7 @@
 
 #include <ATen/DimVector.h>
 #include <c10/core/DeviceType.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 
@@ -133,7 +134,7 @@ class CudaFusionManager {
   at::DimVector restorePermutation(at::DimVector permuted) {
     int rank = static_cast<int>(permuted.size());
     at::DimVector permutation(rank, -1);
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       permutation[permuted[i]] = i;
     }
     return permutation;
@@ -156,7 +157,7 @@ class CudaFusionManager {
     std::set<int> ordered_axes;
 
     // TODO: this does not support broadcast yet;
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       if ((*stride_properties)[i].has_value() &&
           (*stride_properties)[i]->stride_index_.has_value()) {
         ordered_axes.insert((*stride_properties)[i]->stride_index_.value());

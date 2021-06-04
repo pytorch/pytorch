@@ -240,7 +240,7 @@ SourceRange Node::sourceRange() const {
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
-  for (size_t i = 0; i < level; ++i) {
+  for (const auto i : c10::irange(level)) {
     out << "  ";
   }
   return out;
@@ -308,7 +308,7 @@ std::ostream& Node::print(
 
   out << "\n";
 
-  for (size_t i = 0; i < blocks().size(); ++i) {
+  for (const auto i : c10::irange(blocks().size())) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
                            << const_value_list_with_types(b->inputs())
@@ -894,7 +894,7 @@ void Value::replaceAllUsesDominatedByNodeWith(
 size_t findArgument(
     const FunctionSchema& the_schema,
     const std::string& unqualName) {
-  for (size_t i = 0; i < the_schema.arguments().size(); ++i) {
+  for (const auto i : c10::irange(the_schema.arguments().size())) {
     const Argument* arg = &the_schema.arguments()[i];
     if (arg->name() == unqualName) {
       return i;
@@ -943,7 +943,7 @@ bool Node::matches(const FunctionSchema& schema) const {
   }
 
   TypeEnv type_env;
-  for (size_t i = 0; i < formals.size(); ++i) {
+  for (const auto i : c10::irange(formals.size())) {
     auto formal = formals[i].type();
     const MatchTypeReturn matched_type =
         matchTypeVariables(formal, actuals[i]->type(), type_env);
@@ -1039,7 +1039,7 @@ const Operator& Node::getOperator() const {
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *this << "\n";
   er << "Input types:";
-  for (size_t i = 0; i < inputs().size(); ++i) {
+  for (const auto i : c10::irange(inputs().size())) {
     if (i > 0)
       er << ", ";
     er << *inputs()[i]->type();
@@ -1247,7 +1247,7 @@ void Node::eraseOutput(size_t i) {
   Value* n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
   owningGraph()->freeValue(n);
-  for (size_t j = i; j < outputs_.size(); j++) {
+  for (const auto j : c10::irange(i, outputs_.size())) {
     outputs_[j]->offset_--;
   }
 }
@@ -1337,7 +1337,7 @@ Value* Node::insertInput(size_t i, Value* value) {
   // after the one we're inserting. Concretely, these are the inputs at
   // indices [i, # input). Since we're inserting one input before all of
   // these inputs, increment their use offsets for this value by 1
-  for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
+  for (const auto use_itr : c10::irange(i, inputs_.size())) {
     // See Note [User node does not uniquely identify use]
     auto use = findUseForInput(use_itr);
     use->offset += 1;
@@ -1490,7 +1490,7 @@ void Node::removeInput(size_t i) {
 
 void Node::removeAllInputs() {
   op_ = nullptr;
-  for (size_t i = 0; i < inputs().size(); ++i) {
+  for (const auto i : c10::irange(inputs().size())) {
     dropInput(i);
   }
   inputs_.clear();
@@ -1501,7 +1501,7 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
   AT_ASSERT(new_order.size() == inputs_.size());
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
-  for (size_t i = 0; i < new_order.size(); ++i) {
+  for (const auto i : c10::irange(new_order.size())) {
     AT_ASSERTM(inputs_.at(new_order[i]) != nullptr, "Repeated index");
     new_inputs.push_back(inputs_.at(new_order[i]));
     auto it = findUseForInput(new_order[i]);
@@ -1516,7 +1516,7 @@ void Node::permuteOutputs(const std::vector<size_t>& new_order) {
   AT_ASSERT(new_order.size() == outputs_.size());
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
-  for (size_t i = 0; i < new_order.size(); ++i) {
+  for (const auto i : c10::irange(new_order.size())) {
     AT_ASSERTM(outputs_.at(new_order[i]) != nullptr, "Repeated index");
     new_outputs.push_back(outputs_.at(new_order[i]));
     outputs_.at(new_order[i])->setOffset(i);
@@ -1697,7 +1697,7 @@ Node* Graph::createTupleSlice(
   new_vals.reserve(num_values);
 
   int64_t i = beg;
-  for (int64_t j = 0; j < num_values; ++j) {
+  for (const auto j : c10::irange(num_values)) {
     auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
@@ -1742,7 +1742,7 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   ListTypePtr list_type = v->type()->expect<ListType>();
   TypePtr elem_type = list_type->getElementType();
   auto n = create(prim::ListUnpack, {v}, 0);
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     n->addOutput()->setType(elem_type);
   }
   return n;
@@ -1755,7 +1755,7 @@ Node* Graph::createDict(
     at::ArrayRef<Value*> values) {
   AT_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
-  for (size_t i = 0; i < keys.size(); ++i) {
+  for (const auto i : c10::irange(keys.size())) {
     AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
     AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
 
@@ -2095,7 +2095,7 @@ std::vector<Value*> inlineCallTo(
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
-  for (size_t i = 0; i < old_outputs.size(); ++i) {
+  for (const auto i : c10::irange(old_outputs.size())) {
     if (old_outputs[i]->hasDebugName()) {
       new_outputs[i]->setDebugName(old_outputs[i]->debugName());
     }
@@ -2131,7 +2131,7 @@ std::vector<Value*> insertGraph(
     std::unordered_map<Value*, Value*>& value_map) {
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     value_map[callee.inputs()[i]] = inputs[i];
   }
   for (auto* node : callee.nodes()) {

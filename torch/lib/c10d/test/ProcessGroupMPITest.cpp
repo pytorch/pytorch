@@ -1,12 +1,13 @@
+#include <unistd.h>
+
+#include <c10/util/irange.h>
+#include <c10d/ProcessGroupMPI.hpp>
+
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
-
-#include <unistd.h>
-
-#include <c10d/ProcessGroupMPI.hpp>
 
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
@@ -58,7 +59,7 @@ void testAllreduce(int iter = 1000) {
 
   // Generate inputs
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (auto i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     auto tensor = at::ones({16, 16}) * i;
     std::vector<at::Tensor> tensors = {tensor};
 
@@ -74,7 +75,7 @@ void testAllreduce(int iter = 1000) {
   auto worldSize = pg->getSize();
 
   // Verify outputs
-  for (int i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     const auto expected = worldSize * i;
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
@@ -88,7 +89,7 @@ void testAllreduce(int iter = 1000) {
 void testBroadcast(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (auto i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     auto tensors = std::vector<at::Tensor>();
     if (pg->getRank() == 0) {
       auto tensor = at::ones({16, 16}) * i;
@@ -107,7 +108,7 @@ void testBroadcast(int iter = 10000) {
   auto outputTensors = waitFuture(pg, works);
 
   // Verify outputs
-  for (int i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     const auto expected = i;
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
@@ -121,7 +122,7 @@ void testBroadcast(int iter = 10000) {
 void testReduce(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (auto i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     auto tensor = at::ones({16, 16}) * i;
     auto tensors = std::vector<at::Tensor>({tensor});
 
@@ -137,7 +138,7 @@ void testReduce(int iter = 10000) {
 
   if (pg->getRank() == 0) {
     // Verify outputs
-    for (int i = 0; i < iter; ++i) {
+    for (const auto i : c10::irange(iter)) {
       const auto expected = worldSize * i;
       auto data = outputTensors[i][0].data_ptr<float>();
       for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
@@ -158,12 +159,12 @@ void testAllgather(int iter = 10000) {
   auto rank = pg->getRank();
 
   // Generate inputs
-  for (auto i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     auto tensor = at::ones({16, 16}) * i * rank;
     auto tensors = std::vector<at::Tensor>({tensor});
     auto outputs = std::vector<std::vector<at::Tensor>>(1);
     outputs[0].resize(worldSize);
-    for (auto j = 0; j < worldSize; ++j) {
+    for (const auto j : c10::irange(worldSize)) {
       outputs[0][j] = at::zeros({16, 16});
     }
 
@@ -176,8 +177,8 @@ void testAllgather(int iter = 10000) {
   auto outputTensors = waitFuture(pg, works);
 
   // Verify outputs
-  for (int i = 0; i < iter; ++i) {
-    for (int j = 0; j < worldSize; ++j) {
+  for (const auto i : c10::irange(iter)) {
+    for (const auto j : c10::irange(worldSize)) {
       const auto expected = i * j;
       auto data = outputTensors[i][j].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
@@ -198,14 +199,14 @@ void testGather(int iter = 10000) {
   auto rank = pg->getRank();
 
   // Generate inputs
-  for (auto i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     auto tensor = at::ones({16, 16}) * i * rank;
     auto tensors = std::vector<at::Tensor>({tensor});
     auto outputs = std::vector<std::vector<at::Tensor>>(0);
     if (rank == 0) {
       outputs = std::vector<std::vector<at::Tensor>>(1);
       outputs[0].resize(worldSize);
-      for (auto j = 0; j < worldSize; ++j) {
+      for (const auto j : c10::irange(worldSize)) {
         outputs[0][j] = at::zeros({16, 16});
       }
     }
@@ -220,8 +221,8 @@ void testGather(int iter = 10000) {
 
   // Verify outputs
   if (rank == 0) {
-    for (int i = 0; i < iter; ++i) {
-      for (int j = 0; j < worldSize; ++j) {
+    for (const auto i : c10::irange(iter)) {
+      for (const auto j : c10::irange(worldSize)) {
         const auto expected = i * j;
         auto data = outputTensors[i][j].data_ptr<float>();
         for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
@@ -232,7 +233,7 @@ void testGather(int iter = 10000) {
       }
     }
   } else {
-    for (int i = 0; i < iter; ++i) {
+    for (const auto i : c10::irange(iter)) {
       if (outputTensors[i].size() != 0) {
         throw std::runtime_error("BOOM!");
       }
@@ -249,14 +250,14 @@ void testScatter(int iter = 1) {
   auto rank = pg->getRank();
 
   // Generate inputs
-  for (auto i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     auto tensor = at::zeros({16, 16});
     auto tensors = std::vector<at::Tensor>({tensor});
     auto inputs = std::vector<std::vector<at::Tensor>>(0);
     if (rank == 0) {
       inputs = std::vector<std::vector<at::Tensor>>(1);
       inputs[0].resize(worldSize);
-      for (auto j = 0; j < worldSize; ++j) {
+      for (const auto j : c10::irange(worldSize)) {
         inputs[0][j] = at::ones({16, 16}) * i * j;
       }
     }
@@ -270,8 +271,8 @@ void testScatter(int iter = 1) {
   auto outputTensors = waitFuture(pg, works);
 
   // Verify outputs
-  for (int i = 0; i < iter; ++i) {
-    for (int j = 0; j < worldSize; ++j) {
+  for (const auto i : c10::irange(iter)) {
+    for (const auto j : c10::irange(worldSize)) {
       const auto expected = i * j;
       auto data = outputTensors[i][0].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][0].numel(); ++k) {
@@ -291,7 +292,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   // pg->send does not keep sent tensors alive, so we need to.
   std::vector<std::vector<at::Tensor>> sendTensors(iter);
   auto rank = pg->getRank();
-  for (auto i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     if (rank == 0) {
       auto tensor = at::ones({16, 16}) * i;
       sendTensors[i] = std::vector<at::Tensor>({tensor});
@@ -330,7 +331,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   }
 
   // Verify outputs
-  for (int i = 0; i < iter; ++i) {
+  for (const auto i : c10::irange(iter)) {
     if (recvAnysource && srcRanks[i] != 0) {
       throw std::runtime_error("src rank is wrong for recvAnysource");
     }

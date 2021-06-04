@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 namespace c10d {
 const int kUnsetSeqNum = 0;
@@ -16,7 +17,7 @@ inline std::vector<T> toVec(uint64_t num, int numBytes) {
   std::vector<T> values;
   // Read off bytes from right to left, pushing them into
   // char array.
-  for (int i = 0; i < numBytes; ++i) {
+  for (const auto i : c10::irange(numBytes)) {
     uint8_t x = (num >> (kByteOffset * i)) & 0xff;
     values.push_back(static_cast<T>(x));
   }
@@ -28,7 +29,7 @@ template <typename T>
 inline uint64_t fromVec(const std::vector<T>& values) {
   uint64_t num = 0;
   // Set each byte at the correct location on num
-  for (int i = 0; i < values.size(); ++i) {
+  for (const auto i : c10::irange(values.size())) {
     uint8_t x = static_cast<uint8_t>(values[i]);
     num |= (static_cast<int64_t>(x) << (kByteOffset * i));
   }

@@ -1114,7 +1114,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       // put output back
       DCHECK_EQ(stack.size(), num_outputs);
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (auto i = 0; i < num_outputs; i++) {
+      for (const auto i : c10::irange(num_outputs)) {
         p_node->Output(i) = std::move(stack[i]);
       }
     };

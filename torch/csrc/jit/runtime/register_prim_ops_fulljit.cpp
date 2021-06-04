@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <bitset>
 #include <cctype>
@@ -111,7 +112,7 @@ RegisterOperators reg(
                      " outputs, but got ",
                      num_results);
                }
-               for (int64_t i = num_results; i < chunks; ++i) {
+               for (const auto i : c10::irange(num_results, chunks)) {
                  TORCH_CHECK(
                      !outputs_used[i],
                      "Expected chunk to return at least ",
@@ -423,7 +424,7 @@ bool isSortableListOfObjectsOrTuples(
   // best sorting methods. If in the future we need to support heterogenous
   // types inside list, then sorting needs to have runtime sortable checks.
   const size_t n = ivalues.size();
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     const IValue& v = ivalues.get(i);
     auto curr_type = v.type();
     if (*curr_type != *type) {
@@ -517,7 +518,7 @@ std::vector<int64_t> _output_size(
     scale_repeated = scale_factors.toDoubleVector();
   }
   std::vector<int64_t> ret;
-  for (size_t i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     ret.push_back(std::floor(input.size(i + 2) * scale_repeated[i]));
   }
   return ret;

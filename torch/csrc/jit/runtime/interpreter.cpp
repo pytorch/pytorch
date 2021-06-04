@@ -319,7 +319,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               ++frame.pc;
             } else {
               size_t n_loop_carried = inst.N - 2;
-              for (size_t i = 0; i < n_loop_carried; ++i) {
+              for (const auto i : c10::irange(n_loop_carried)) {
                 fr[i] = std::move(fr[i + 3]);
               }
               drop(stack, 3); // iteration_count, max_iter, cond
@@ -510,7 +510,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             size_t base_pointer = frame.base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
             size_t inputs_start = stack.size() - num_inputs;
-            for (size_t i = 0; i < num_inputs; ++i) {
+            for (const auto i : c10::irange(num_inputs)) {
               stack.at(base_pointer + i) =
                   std::move(stack.at(inputs_start + i));
             }
@@ -692,7 +692,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
  public:
   std::vector<StackEntry> callstack() const {
     std::vector<StackEntry> entries;
-    for (size_t i = 0; i < frames.size(); ++i) {
+    for (const auto i : c10::irange(frames.size())) {
       const Frame& frame = frames[i];
       std::string previous_fn_name = frame.function->function_name_;
       size_t pc = frame.pc;

@@ -1,6 +1,7 @@
 #pragma once
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <fstream>
@@ -108,7 +109,7 @@ struct TORCH_API LoadBalancer {
 struct TORCH_API InterpreterManager {
   InterpreterManager(size_t n_interp = 2) : resources_(n_interp) {
     TORCH_DEPLOY_TRY
-    for (size_t i = 0; i < n_interp; ++i) {
+    for (const auto i : c10::irange(n_interp)) {
       instances_.emplace_back(this);
       auto I = instances_.back().acquire_session();
       // make torch.version.interp be the interpreter id

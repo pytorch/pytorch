@@ -405,7 +405,7 @@ class Vectorizer : public IRMutator {
     }
 
     // Insert broadcasts for any inputs that weren't vectorized.
-    for (size_t i = 0; i < inputs.size(); ++i) {
+    for (const auto i : c10::irange(inputs.size())) {
       if (inputs[i] == new_inputs[i]) {
         inputs[i] = Broadcast::make(ExprHandle(inputs[i]), lanes_).node();
       } else {
@@ -1151,7 +1151,7 @@ bool LoopNest::optimizeConditionals() {
     // one loop per sub-expression.
     std::vector<Stmt*> split_loops;
     auto cond_to_replace = ifthenelse_exprs.front();
-    for (size_t i = 0; i < sub_exprs.size(); ++i) {
+    for (const auto i : c10::irange(sub_exprs.size())) {
       IfThenElseReplacer ifthenelseReplacer(cond_to_replace, sub_exprs[i]);
       auto new_store = store->accept_mutator(&ifthenelseReplacer);
       auto new_for_body =
@@ -1494,7 +1494,7 @@ std::vector<For*> LoopNest::distributeLoop(
 
   // Create loops for all the remaining blocks.
   // Add all the new loops to the parent block.
-  for (size_t i = 1; i < new_loop_bodies.size(); ++i) {
+  for (const auto i : c10::irange(1, new_loop_bodies.size())) {
     auto new_loop = loop->cloneWithNewBody(new_loop_bodies[i]);
     root_block->insert_stmt_after(new_loop, new_loops.back());
     new_loops.push_back(new_loop);
@@ -1526,7 +1526,7 @@ bool areEqual(
   if (expr_list1.size() != expr_list2.size()) {
     return false;
   }
-  for (size_t i = 0; i < expr_list1.size(); ++i) {
+  for (const auto i : c10::irange(expr_list1.size())) {
     if (!areEqual(expr_list1[i], expr_list2[i])) {
       return false;
     }
@@ -1653,7 +1653,7 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
   auto first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
   auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
-  for (size_t i = 1; i < loops.size(); ++i) {
+  for (const auto i : c10::irange(1, loops.size())) {
     auto curr_loop = loops[i];
     auto curr_loop_start = IRSimplifier::simplify(curr_loop->start());
     auto curr_loop_stop = IRSimplifier::simplify(curr_loop->stop());
@@ -1671,7 +1671,7 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
     // Fuse the loops by taking all the statements from the second loops
     // onwards and moving them into the first loop's body.
     // This way the final fused loop will be the same as the first loop.
-    for (size_t i = 1; i < loops.size(); ++i) {
+    for (const auto i : c10::irange(1, loops.size())) {
       auto body = dynamic_cast<Block*>(Substitute(
           Stmt::clone(loops[i]->body()),
           {{loops[i]->var(), first_loop->var()}}));
@@ -1696,7 +1696,7 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
   // Now that all conditions are satisfied, we fuse the given loops.
   fuse_all_loops(loops);
   *fused = loops.front();
-  for (size_t i = 1; i < loops.size(); ++i) {
+  for (const auto i : c10::irange(1, loops.size())) {
     root_block->remove_stmt(loops[i]);
   }
   return true;
@@ -1852,7 +1852,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
 }
 
 bool isTrivialPermutation(const std::vector<size_t>& permutation) {
-  for (size_t i = 0; i < permutation.size(); ++i) {
+  for (const auto i : c10::irange(permutation.size())) {
     if (permutation[i] != i) {
       return false;
     }
@@ -1891,7 +1891,7 @@ std::vector<For*> LoopNest::reorder(
 
   // Reorder the loops according to the permutation.
   std::vector<For*> result(loops.size());
-  for (size_t i = 0; i < loops.size(); ++i) {
+  for (const auto i : c10::irange(loops.size())) {
     result[permutation[i]] = loops[i];
   }
 
@@ -1902,7 +1902,7 @@ std::vector<For*> LoopNest::reorder(
   // is to be inserted.
   auto empty_block = new Block({});
   parent->replace_stmt(loops.front(), empty_block);
-  for (size_t i = 1; i < loops.size(); ++i) {
+  for (const auto i : c10::irange(1, loops.size())) {
     auto block = dynamic_cast<Block*>(loops[i]->get_parent());
     TORCH_INTERNAL_ASSERT(block);
     block->remove_stmt(loops[i]);
@@ -1950,7 +1950,7 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   std::vector<Stmt*> unrolled_stmts;
   int start_val = immediateAs<int>(start_expr);
   int stop_val = immediateAs<int>(stop_expr);
-  for (int current = start_val; current < stop_val; ++current) {
+  for (const auto current : c10::irange(start_val, stop_val)) {
     for (const auto stmt : f->body()->stmts()) {
       auto stmt_copy = Stmt::clone(stmt);
       unrolled_stmts.push_back(Substitute(
@@ -2002,7 +2002,7 @@ std::vector<For*> LoopNest::getLoopStmtsInLoopNest(For* f, size_t num) {
   std::vector<For*> loops(num);
   For* curr_for = f;
   loops[0] = curr_for;
-  for (size_t i = 1; i < num; ++i) {
+  for (const auto i : c10::irange(1, num)) {
     TORCH_INTERNAL_ASSERT(curr_for->body()->nstmts() == 1);
     curr_for = dynamic_cast<For*>(curr_for->body()->front());
     TORCH_INTERNAL_ASSERT(curr_for);
@@ -2043,7 +2043,7 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   // For the same reason, we can't store the normalized inner loops until after
   // the outer-most loop is normalized.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  for (size_t i = 0; i < loops.size(); ++i) {
+  for (const auto i : c10::irange(loops.size())) {
     size_t idx = loops.size() - i - 1;
     LoopNest::normalize(loops[idx]);
   }
@@ -2058,7 +2058,7 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
       normalized_loops[0]->var()->dtype());
   VarMapping var_mapping;
   Expr* stop = new IntImm(1);
-  for (size_t i = 0; i < normalized_loops.size(); ++i) {
+  for (const auto i : c10::irange(normalized_loops.size())) {
     size_t idx = normalized_loops.size() - i - 1;
     auto curr_loop = normalized_loops[idx];
     Expr* div = new Div(flat_var, stop);
@@ -2147,7 +2147,7 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
   std::vector<bool> dims(buf->dims().size(), true);
   auto check_indices = [&](const std::vector<const Expr*>& indices) {
     TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       auto index_vars = NodeFinder<Var>::find(indices[i]);
       for (auto iv : index_vars) {
         if (loop_vars.count(iv) == 0) {
@@ -2179,7 +2179,7 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
 
   // Compress buffer by removing the marked dims.
   std::vector<const Expr*> new_dims(buf->dims());
-  for (size_t i = 0; i < dims.size(); ++i) {
+  for (const auto i : c10::irange(dims.size())) {
     if (dims[i]) {
       new_dims[i] = new IntImm(1);
     }
@@ -2190,7 +2190,7 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
   auto get_new_indices = [&](const std::vector<const Expr*>& indices) {
     TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
     std::vector<const Expr*> new_indices(indices);
-    for (size_t i = 0; i < dims.size(); ++i) {
+    for (const auto i : c10::irange(dims.size())) {
       if (dims[i]) {
         new_indices[i] = new IntImm(0);
       }
@@ -2483,7 +2483,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   std::vector<const Expr*> new_loop_vars_expr;
 
   // Determine the size of the cache, and create a loop var for each dimension.
-  for (size_t i = 0; i < info.start.size(); ++i) {
+  for (const auto i : c10::irange(info.start.size())) {
     const Expr* dim = IRSimplifier::simplify(
         new Add(new Sub(info.stop[i], info.start[i]), new IntImm(1)));
 
@@ -2499,7 +2499,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   // determine the offsets for calls into the cache based off the loop start of
   // each axis.
   std::vector<const Expr*> tmp_params;
-  for (size_t i = 0; i < new_loop_vars.size(); ++i) {
+  for (const auto i : c10::irange(new_loop_vars.size())) {
     tmp_params.push_back(new Add(new_loop_vars[i], info.start[i]));
   }
 

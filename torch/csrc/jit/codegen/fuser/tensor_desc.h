@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
@@ -64,7 +65,7 @@ struct TORCH_API TensorDesc {
       const at::IntArrayRef& strides) {
     AT_ASSERT(sizes.size() == strides.size());
     std::vector<bool> cont(sizes.size());
-    for (size_t i = 0; i < sizes.size(); ++i) {
+    for (const auto i : c10::irange(sizes.size())) {
       const auto expected_stride =
           (i + 1 < sizes.size()) ? sizes[i + 1] * strides[i + 1] : 1;
       cont[i] = (strides[i] == expected_stride);

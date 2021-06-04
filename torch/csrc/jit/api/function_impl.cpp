@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
@@ -14,13 +15,13 @@ c10::FunctionSchema defaultSchemaFor(const Function& function) {
   std::vector<c10::Argument> returns;
   Graph& g = *function.graph();
   size_t num_inputs = function.num_inputs();
-  for (size_t i = 0; i < num_inputs; ++i) {
+  for (const auto i : c10::irange(num_inputs)) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasDebugName() ? v->debugNameBase()
                                          : ("argument_" + c10::to_string(i));
     args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
   }
-  for (size_t i = 0; i < g.outputs().size(); ++i) {
+  for (const auto i : c10::irange(g.outputs().size())) {
     returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
   }
   return {function.name(), "", std::move(args), std::move(returns)};

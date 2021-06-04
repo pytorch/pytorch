@@ -80,7 +80,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       std::vector<IValue> values;
       values.reserve(tuple_size);
-      for (size_t i = 0; i < tuple_size; ++i) {
+      for (const auto i : c10::irange(tuple_size)) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
       return tuple_type->name()

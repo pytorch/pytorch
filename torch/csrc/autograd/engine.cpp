@@ -536,7 +536,7 @@ void GraphTask::exec_post_processing() {
   // WARNING: Don't use a range-for loop here because more callbacks may be
   // added in between callback calls, so iterators may become invalidated.
   // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < final_callbacks_.size(); ++i) {
+  for (const auto i : c10::irange(final_callbacks_.size())) {
     cb_lock.unlock();
     final_callbacks_[i]();
     cb_lock.lock();
@@ -782,7 +782,7 @@ void Engine::evaluate_function(
 
   if (AnomalyMode::is_enabled()) {
     AutoGradMode grad_mode(false);
-    for (int i = 0; i < num_outputs; ++i) {
+    for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
       if (output.defined() && isnan(output).any().item<uint8_t>()) {
@@ -795,7 +795,7 @@ void Engine::evaluate_function(
 
   // Lock mutex for the accesses to GraphTask dependencies_, not_ready_ and cpu_ready_queue_ below
   std::lock_guard<std::mutex> lock(graph_task->mutex_);
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     auto& output = outputs[i];
     const auto& next = fn.next_edge(i);
 
@@ -1141,7 +1141,7 @@ auto Engine::start_device_threads() -> void {
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
-  for (int i = 0; i < num_devices; ++i) {
+  for (const auto i : c10::irange(num_devices)) {
     std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
     t.detach();
   }

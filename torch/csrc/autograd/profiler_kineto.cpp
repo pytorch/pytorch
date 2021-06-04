@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -309,7 +310,7 @@ void pushProfilingCallbacks() {
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   std::ostringstream oss;
   oss << "[";
-  for (size_t t_idx = 0; t_idx < shapes.size(); ++t_idx) {
+  for (const auto t_idx : c10::irange(shapes.size())) {
     if (t_idx > 0) {
       oss << ", ";
     }

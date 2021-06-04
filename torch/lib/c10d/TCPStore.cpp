@@ -780,7 +780,7 @@ void TCPStore::wait(
     const std::chrono::milliseconds& timeout) {
   std::vector<std::string> regKeys;
   regKeys.resize(keys.size());
-  for (size_t i = 0; i < keys.size(); ++i) {
+  for (const auto i : c10::irange(keys.size())) {
     regKeys[i] = regularPrefix_ + keys[i];
   }
   waitHelper_(regKeys, timeout);

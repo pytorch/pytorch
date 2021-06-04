@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <c10d/test/StoreTestCommon.hpp>
 
 #include <cstdlib>
@@ -82,7 +83,7 @@ void testHelper(const std::string& prefix = "") {
   // Each thread will have a client store to send/recv data
   std::vector<c10::intrusive_ptr<c10d::TCPStore>> clientTCPStores;
   std::vector<c10::intrusive_ptr<c10d::PrefixStore>> clientStores;
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     clientTCPStores.push_back(c10::make_intrusive<c10d::TCPStore>(
         "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
     clientStores.push_back(
@@ -92,7 +93,7 @@ void testHelper(const std::string& prefix = "") {
   std::string expectedCounterRes =
       std::to_string(numThreads * numIterations + 1);
 
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     threads.emplace_back(std::thread([&sem1,
                                       &sem2,
                                       &clientStores,
@@ -100,12 +101,12 @@ void testHelper(const std::string& prefix = "") {
                                       &expectedCounterRes,
                                       &numIterations,
                                       &numThreads] {
-      for (auto j = 0; j < numIterations; j++) {
+      for (const auto j : c10::irange(numIterations)) {
         clientStores[i]->add("counter", 1);
       }
       // Let each thread set and get key on its client store
       std::string key = "thread_" + std::to_string(i);
-      for (auto j = 0; j < numIterations; j++) {
+      for (const auto j : c10::irange(numIterations)) {
         std::string val = "thread_val_" + std::to_string(j);
         c10d::test::set(*clientStores[i], key, val);
         c10d::test::check(*clientStores[i], key, val);
@@ -116,7 +117,7 @@ void testHelper(const std::string& prefix = "") {
       // Check the counter results
       c10d::test::check(*clientStores[i], "counter", expectedCounterRes);
       // Now check other threads' written data
-      for (auto j = 0; j < numThreads; j++) {
+      for (const auto j : c10::irange(numThreads)) {
         if (j == i) {
           continue;
         }
@@ -144,7 +145,7 @@ void testHelper(const std::string& prefix = "") {
   c10d::test::check(*serverStore, "counter", expectedCounterRes);
 
   // Check that each threads' written data from the main thread
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     std::string key = "thread_" + std::to_string(i);
     std::string val = "thread_val_" + std::to_string(numIterations - 1);
     c10d::test::check(*serverStore, key, val);
@@ -179,7 +180,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   // Each thread will have a client store to send/recv data
   std::vector<c10::intrusive_ptr<c10d::TCPStore>> clientTCPStores;
   std::vector<c10::intrusive_ptr<c10d::PrefixStore>> clientStores;
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     clientTCPStores.push_back(c10::make_intrusive<c10d::TCPStore>(
         "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
     clientStores.push_back(
@@ -189,7 +190,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   // Start watching key on server and client stores
   std::string internalKey = "internalKey";
   std::string internalKeyCount = "internalKeyCount";
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     serverStore->watchKey(internalKey + std::to_string(i), callback);
     serverStore->watchKey(internalKeyCount + std::to_string(i), callback);
     clientStores[i]->watchKey(internalKey + std::to_string(i), callback);
@@ -198,7 +199,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
 
   std::vector<std::thread> threads;
   std::atomic<int> keyChangeOperationCount{0};
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     threads.emplace_back(std::thread([&clientStores,
                                       &internalKey,
                                       &internalKeyCount,

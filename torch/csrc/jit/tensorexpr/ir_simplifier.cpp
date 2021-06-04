@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
@@ -2179,7 +2180,7 @@ const Expr* TermExpander::mutate(const MaxTerm* v) {
   } else {
     max = variables[0];
   }
-  for (size_t i = 1; i < variables.size(); i++) {
+  for (const auto i : c10::irange(1, variables.size())) {
     max = new Max(max, variables[i], v->propagate_nans());
   }
   return max->accept_mutator(this);
@@ -2202,7 +2203,7 @@ const Expr* TermExpander::mutate(const MinTerm* v) {
   } else {
     min = variables[0];
   }
-  for (size_t i = 1; i < variables.size(); i++) {
+  for (const auto i : c10::irange(1, variables.size())) {
     min = new Min(min, variables[i], v->propagate_nans());
   }
   return min->accept_mutator(this);

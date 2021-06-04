@@ -15,6 +15,7 @@
 #include <ATen/core/Vitals.h>
 #include <TH/TH.h>
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <cstdlib>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
@@ -587,7 +588,7 @@ PyObject *THPModule_supportedQEngines(PyObject *_unused, PyObject *noargs)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
-  for (size_t i = 0; i < qengines.size(); ++i) {
+  for (const auto i : c10::irange(qengines.size())) {
     PyObject *i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
     if (!i64) {
       throw python_error();

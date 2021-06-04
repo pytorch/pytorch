@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -641,13 +642,13 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   inputs_.resize(sm.num_inputs());
   nodes_.resize(sm.nodes().size());
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto idx = 0; idx < sm.nodes().size(); ++idx) {
+  for (const auto idx : c10::irange(sm.nodes().size())) {
     const auto& n_ref = sm.nodes()[idx];
     nodes_[idx] = n_ref; // copy the node
     auto& n = nodes_[idx];
     // hook up the inputs
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < n.inputs().size(); ++i) {
+    for (const auto i : c10::irange(n.inputs().size())) {
       if (n.inputs()[i] == nullptr) {
         int node_idx = 0;
         int out_idx = 0;
@@ -770,7 +771,7 @@ c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < static_module_.num_outputs(); ++i) {
+    for (const auto i : c10::irange(static_module_.num_outputs())) {
       // use move here. Otherwise, clean up outputs_[i] explicitly
       outputs.emplace_back(std::move(*outputs_[i]));
     }
@@ -859,11 +860,11 @@ float StaticRuntime::benchmark_model(
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
 
-  for (int i = 0; i < warmup_runs; i++) {
+  for (const auto i : c10::irange(warmup_runs)) {
     operator()(args, kwargs);
   }
   caffe2::Timer timer;
-  for (int i = 0; i < main_runs; i++) {
+  for (const auto i : c10::irange(main_runs)) {
     operator()(args, kwargs);
   }
   float millis = timer.MilliSeconds();
@@ -901,7 +902,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   results.setup_time = timer.MilliSeconds();
 
   // warmup runs
-  for (int i = 0; i < warmup_runs; i++) {
+  for (const auto i : c10::irange(warmup_runs)) {
     operator()(args, kwargs);
   }
 
@@ -949,7 +950,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
       std::vector<c10::IValue> outputs;
       outputs.reserve(static_module_.num_outputs());
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (auto i = 0; i < static_module_.num_outputs(); ++i) {
+      for (const auto i : c10::irange(static_module_.num_outputs())) {
         // use move here. Otherwise, clean up outputs_[i] explicitly
         outputs.emplace_back(std::move(*outputs_[i]));
       }
@@ -1050,7 +1051,7 @@ static void assign_storage_to_managed_tensors(
   // Snapshot of the current memory state
   for (auto& pnode : runtime->nodes()) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < pnode.outputs().size(); ++i) {
+    for (const auto i : c10::irange(pnode.outputs().size())) {
       auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
       if (managed_tensor_values.count(val)) {
@@ -1092,7 +1093,7 @@ MemoryPlanner::MemoryPlanner(
     for (ProcessedNode& pnode : runtime->nodes()) {
       if (pnode.has_out_variant()) {
         // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (auto i = 0; i < pnode.outputs().size(); ++i) {
+        for (const auto i : c10::irange(pnode.outputs().size())) {
           const Value* out_v = pnode.node()->outputs()[i];
           if (external_values.count(out_v)) {
             continue;
@@ -1115,7 +1116,7 @@ MemoryPlanner::MemoryPlanner(
   std::unordered_set<IValue*> unmanaged_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < pnode.outputs().size(); ++i) {
+    for (const auto i : c10::irange(pnode.outputs().size())) {
       // Types are stored in the underlying TorchScript IR
       const Value* out_v = pnode.node()->outputs()[i];
       if (managed_tensor_values.count(out_v) || leaked_values.count(out_v)) {

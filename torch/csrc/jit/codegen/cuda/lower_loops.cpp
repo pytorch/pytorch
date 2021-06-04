@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -66,7 +67,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
     size = ir_builder_.create<kir::Int>(1);
   } else {
     size = GpuLower::lowerValue(alloc_dims[0]);
-    for (size_t i = 1; i < alloc_dims.size(); i++) {
+    for (const auto i : c10::irange(1, alloc_dims.size())) {
       size = ir_builder_.mulExpr(size, GpuLower::lowerValue(alloc_dims[i]));
     }
   }

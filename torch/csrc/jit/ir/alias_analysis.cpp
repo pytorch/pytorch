@@ -1046,7 +1046,7 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
   auto inputs = node->inputs();
   auto outputs = node->outputs();
   auto nchunks = node->i(attr::chunks);
-  for (size_t index = 0; index < inputs.size(); ++index) {
+  for (const auto index : c10::irange(inputs.size())) {
     // Each inputs[i] is aliased by exactly `nchunks` distinct output tensors:
     // inputs[i] produces chunks outputs[i * nchunks + k] for k in [0..nchunks)
     auto output_begin = outputs.begin() + index * nchunks;

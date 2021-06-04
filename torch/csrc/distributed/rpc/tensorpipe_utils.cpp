@@ -7,6 +7,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #endif
 
 #include <tensorpipe/tensorpipe.h>
@@ -103,7 +104,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
   const auto& tensorDataVec = pickler.tensorData();
-  for (size_t i = 0; i < tensorDataVec.size(); ++i) {
+  for (const auto i : c10::irange(tensorDataVec.size())) {
     // This is different from jit::getWriteableTensorData as it avoids copying
     // tensor to CPU.
     const auto& tensorData =
@@ -215,7 +216,7 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 
   size_t numTensors = tpDescriptor.tensors.size();
   tpAllocation.tensors.resize(numTensors);
-  for (size_t tensorIdx = 0; tensorIdx < numTensors; ++tensorIdx) {
+  for (const auto tensorIdx : c10::irange(numTensors)) {
     const tensorpipe::Descriptor::Tensor& tensor =
         tpDescriptor.tensors[tensorIdx];
     TORCH_INTERNAL_ASSERT(tensor.targetDevice.has_value());
@@ -284,7 +285,7 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
-  for (size_t i = 0; i < tpDescriptor.tensors.size(); ++i) {
+  for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
     auto& tensor = tpDescriptor.tensors[i];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {

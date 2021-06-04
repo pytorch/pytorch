@@ -586,7 +586,7 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
   if (grad_is_complex) {
     grad_ = at::real(grad);
   }
-  for (size_t i = 0; i < sizes.size(); ++i) {
+  for (const auto i : c10::irange(sizes.size())) {
     Tensor grad_val;
     if (!at::isComplexType(dtypes[i]) && grad_is_complex) {
       // R -> C
@@ -827,12 +827,12 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   }
   const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
-  for (int64_t i = 0; i < num_unsqueezed; ++i) {
+  for (const auto i : c10::irange(num_unsqueezed)) {
     grad = grad.sum(0, false);
   }
 
   at::DimVector grad_size, sum_dims;
-  for (size_t dim = 0; dim < input_dims; ++dim) {
+  for (const auto dim : c10::irange(input_dims)) {
     int64_t repeat = repeats[dim + num_unsqueezed];
     // Reshape gradient (repeat > 1)
     // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
@@ -1040,7 +1040,7 @@ Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &g
   // it's possible some of the grads are not defined (represents tensors of all 0s).
   // Since at::cat can't handle those, let's define them
   std::vector<Tensor> grads_all_defined(grads.size());
-  for (size_t j = 0; j < grads.size(); ++j) {
+  for (const auto j : c10::irange(grads.size())) {
     if (grads[j].defined()) {
       grads_all_defined[j] = grads[j];
     } else {

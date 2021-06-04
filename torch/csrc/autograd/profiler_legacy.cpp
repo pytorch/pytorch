@@ -18,6 +18,7 @@
 #include <ATen/record_function.h>
 #include <c10/core/Allocator.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 
@@ -319,7 +320,7 @@ std::string ProfilerThreadLocalState::getNvtxStr(
     }
     if (shapes.size() > 0) {
       s << ", sizes = [";
-      for (size_t idx = 0; idx < shapes.size(); ++idx) {
+      for (const auto idx : c10::irange(shapes.size())) {
         if (shapes[idx].size() > 0) {
           s << "[";
           for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
@@ -594,7 +595,7 @@ void LegacyEvent::record(bool record_cuda) {
   auto shapeList = shapeListIValue.toList();
   std::vector<std::vector<int64_t>> shapes;
   shapes.reserve(shapeList.size());
-  for (size_t i = 0 ; i < shapeList.size(); ++i) {
+  for (const auto i : c10::irange(shapeList.size())) {
     std::vector<int64_t> s;
     auto shapeIValue = shapeList.get(i);
     TORCH_INTERNAL_ASSERT(
@@ -602,7 +603,7 @@ void LegacyEvent::record(bool record_cuda) {
         "Expected each profiler shape element to contain shapes of type c10::impl::GenericList.")
     auto curShapesList = shapeIValue.toList();
     s.reserve(curShapesList.size());
-    for (size_t j = 0; j < curShapesList.size(); ++j) {
+    for (const auto j : c10::irange(curShapesList.size())) {
       s.emplace_back(curShapesList.get(j).toInt());
     }
     shapes.emplace_back(s);

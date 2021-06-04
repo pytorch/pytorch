@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <pybind11/functional.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
@@ -609,7 +610,7 @@ void initTensorExprBindings(PyObject* module) {
               stack.push_back(toTypeInferredIValue(obj));
             }
             auto g_inputs = self.graph()->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
+            for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }
@@ -626,7 +627,7 @@ void initTensorExprBindings(PyObject* module) {
               stack.push_back(toTypeInferredIValue(obj));
             }
             auto g_inputs = self.graph()->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
+            for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }

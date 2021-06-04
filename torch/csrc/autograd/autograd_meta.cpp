@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
@@ -76,7 +77,7 @@ namespace {
     if (base.dim() != other.dim()) {
       return false;
     }
-    for (int64_t i=0; i<base.dim(); ++i) {
+    for (const auto i : c10::irange(base.dim())) {
       if (base.sizes()[i] != other.sizes()[i]) {
         return false;
       }
