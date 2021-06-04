@@ -413,8 +413,33 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(Exception):
             input_dp.map(fn, nesting_level=-2)
 
-        with self.assertRaises(Exception):
-            input_dp.map(fn, nesting_level=-5)
+        def addition(item, amount=1.0):
+            return item + amount
+
+        map_dp = input_dp.map(addition, nesting_level=-1)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(len(x), len(y))
+            for a, b in zip(x, y):
+                self.assertEqual(a, b + 1.0)
+
+        map_dp = input_dp.map(addition, fn_kwargs={'amount': 2.0}, nesting_level=-1)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(len(x), len(y))
+            for a, b in zip(x, y):
+                self.assertEqual(a, b + 2.0)
+
+        def subtraction(item, amount):
+            return item - amount
+
+        map_dp = input_dp.map(subtraction, fn_args=(1.0, ), nesting_level=-1)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(len(x), len(y))
+            for a, b in zip(x, y):
+                self.assertEqual(a, b - 1.0)
+
 
     def test_collate_datapipe(self):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
@@ -561,12 +586,29 @@ class TestFunctionalIterDataPipe(TestCase):
             filter_dp = input_ds.filter(nesting_level=5, filter_fn=_filter_fn, fn_kwargs={'val': 5})
             temp = list(d for d in filter_dp)
 
-
         input_ds = IDP(range(10)).batch(3)
 
         filter_dp = input_ds.filter(lambda ls: len(ls) >= 3)
         expected_dp = [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
         self.assertEqual(len(list(zip(filter_dp, expected_dp))), len(expected_dp))
+        for data, exp in zip(filter_dp, expected_dp):
+            self.assertEqual(data, exp)
+
+        input_ds = IDP([[[0, 1, 2], [3, 4, 5]], [[6, 7, 8], [1, 2, 3]]])
+        filter_dp = input_ds.filter(lambda x: x > 3, nesting_level=-1)
+        expected_dp = [[[4, 5]], [[6, 7, 8]]]
+        for data, exp in zip(filter_dp, expected_dp):
+            self.assertEqual(data, exp)
+
+        input_ds = IDP([[[0, 1, 2], [3, 4, 5]], [[6, 7, 8], [1, 2, 3]]])
+        filter_dp = input_ds.filter(lambda x: x > 7, nesting_level=-1)
+        expected_dp = [[[8]]]
+        for data, exp in zip(filter_dp, expected_dp):
+            self.assertEqual(data, exp)
+
+        input_ds = IDP([[[0, 1], [3, 4]], [[6, 7, 8], [1, 2, 3]]])
+        filter_dp = input_ds.filter(lambda ls: len(ls) >= 3, nesting_level=1)
+        expected_dp = [[[6, 7, 8], [1, 2, 3]]]
         for data, exp in zip(filter_dp, expected_dp):
             self.assertEqual(data, exp)
 
