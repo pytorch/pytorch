@@ -1164,6 +1164,30 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
   return grad_target;
 }
 
+Tensor binary_cross_entropy_target_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& target,
+  const c10::optional<Tensor>& weight,
+  int64_t reduction) {
+  if (!grad.defined()) {
+    return at::zeros_like(target, at::MemoryFormat::Contiguous);
+  }
+
+  auto grad_target = (1. - self).log_().sub_(self.log()).mul_(grad);
+
+  if (isDefined(weight)) {
+    grad_target.mul_(weight.value());
+  }
+
+  if (reduction == at::Reduction::Mean) {
+    grad_target.div_(target.numel());
+  }
+
+  return grad_target;
+}
+
+
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const c10::optional<Tensor>& weight, const c10::optional<Tensor>& pos_weight, int64_t reduction) {
   Tensor grad_target;
   if (isDefined(pos_weight)) {
