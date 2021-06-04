@@ -9753,20 +9753,20 @@
 
 - func: inner.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
-# torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: outer
 
 - func: outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: outer_out
 
+# torch.ger, alias for torch.outer
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: ger
 
 - func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CompositeExplicitAutograd: ger_out
 
 - func: linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
