@@ -12,12 +12,12 @@ namespace jit {
 
 NoneStatus canBeNone(Value* v) {
   if (v->node()->mustBeNone()) {
-    return ALWAYS;
+    return NoneStatus::ALWAYS;
   }
   if (v->type()->kind() == OptionalType::Kind) {
-    return MAYBE;
+    return NoneStatus::MAYBE;
   }
-  return NEVER;
+  return NoneStatus::NEVER;
 }
 
 /* ============================================= */

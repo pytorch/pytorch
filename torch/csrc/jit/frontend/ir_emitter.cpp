@@ -43,7 +43,6 @@
 namespace torch {
 namespace jit {
 
-
 /* ============================================================ */
 /*                    Internal Utility Methods                  */
 /*      (These utility methods use some internal attribute      */
@@ -66,7 +65,6 @@ void to_ir::checkBreakContinue(
            "unrolled loops, we do not support break or continue inside the body of these loops";
   }
 }
-
 
 /* ============================================================ */
 /*                IR Generation Utility Methods                */
@@ -120,7 +118,6 @@ std::vector<NamedValue> to_ir::emitAttributes(
   });
 }
 
-
 /* ========================================= */
 /*              `Value` Getters              */
 /* ========================================= */
@@ -160,7 +157,6 @@ std::vector<Value*> to_ir::getValues(
   return getValues(trees.tree()->trees(), maybe_unpack);
 }
 
-
 /* =================================================== */
 /*            Environment Stack Manipulation           */
 /* =================================================== */
@@ -180,7 +176,6 @@ std::shared_ptr<Environment> to_ir::popFrame(bool ends_def) {
   }
   return old_frame;
 }
-
 
 /* ====================================== */
 /*               IR Emission              */
@@ -557,11 +552,11 @@ CondValue to_ir::emitCondExpr(const Expr& expr) {
       // AN , NA-> statically IS_NOT always holds, IS never holds
       // MA, MM, MN, NM, NN, AM -> cannot prove anything statically
       bool its_is = expr.kind() == TK_IS;
-      if (lhs_none == ALWAYS && rhs_none == ALWAYS) {
+      if (lhs_none == NoneStatus::ALWAYS && rhs_none == NoneStatus::ALWAYS) {
         return CondValue(*graph, expr.range(), its_is, {});
       } else if (
-          (lhs_none == ALWAYS && rhs_none == NEVER) ||
-          (lhs_none == NEVER && rhs_none == ALWAYS)) {
+          (lhs_none == NoneStatus::ALWAYS && rhs_none == NoneStatus::NEVER) ||
+          (lhs_none == NoneStatus::NEVER && rhs_none == NoneStatus::ALWAYS)) {
         // lhs_val/rhs_val with A/M: only emit never_none_branch
         return CondValue(*graph, expr.range(), !its_is, {});
       } else {
@@ -3285,7 +3280,6 @@ std::shared_ptr<SugaredValue> to_ir::emitSubscript(
     }
   }
 }
-
 
 } // namespace jit
 } // namespace torch
