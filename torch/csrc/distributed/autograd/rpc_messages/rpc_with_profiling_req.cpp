@@ -15,20 +15,20 @@ using rpc::RpcCommandBase;
 // client.
 RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::MessageType messageType,
-    rpc::Message&& wrappedMessage,
+    c10::intrusive_ptr<rpc::Message> wrappedMessage,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig,
     rpc::ProfilingId profilingKeyId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
       profilerConfig_(profilerConfig),
       profilingKeyId_(profilingKeyId) {
-  tensors_ = wrappedMessage_.tensors();
+  tensors_ = wrappedMessage_->tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
       c10::str(
           "Incorrect message type, expected message type ",
           rpc::MessageType::RUN_WITH_PROFILING_REQ));
-  wrappedMessageType_ = wrappedMessage_.type();
+  wrappedMessageType_ = wrappedMessage_->type();
 }
 
 // this constructor is only called in fromMessage() which is called in
@@ -59,13 +59,13 @@ void RpcWithProfilingReq::setWrappedRpc(
   wrappedRpc_ = std::move(wrappedRpc);
 }
 
-rpc::Message RpcWithProfilingReq::toMessageImpl() && {
+c10::intrusive_ptr<rpc::Message> RpcWithProfilingReq::toMessageImpl() && {
   // save the original message ID and type before moving it.
-  auto wrappedMsgId = wrappedMessage_.id();
-  auto wrappedMsgType = wrappedMessage_.type();
+  auto wrappedMsgId = wrappedMessage_->id();
+  auto wrappedMsgType = wrappedMessage_->type();
   // destructively move the wrappedMessage and get the payload. Now the payload
   // of wrappedMessage won't be in a valid state.
-  auto wrappedPayload = std::move(wrappedMessage_).movePayload();
+  auto wrappedPayload = std::move(*wrappedMessage_).movePayload();
   // The wrapped payload should not be empty
   TORCH_INTERNAL_ASSERT(
       !wrappedPayload.empty(), "Wrapped payload should not be empty.");
@@ -80,7 +80,7 @@ rpc::Message RpcWithProfilingReq::toMessageImpl() && {
   // add the profiling payload to the wrapped payload
   rpc::writeWrappedPayload(wrappedPayload, profilingPayload);
   // Put the wrapped payload into a message to return.
-  auto returnMsg = rpc::Message(
+  auto returnMsg = c10::make_intrusive<rpc::Message>(
       std::move(wrappedPayload),
       std::move(tensors_),
       messageType_,
@@ -128,19 +128,19 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
   rpc::ProfilingId profilerId = rpc::ProfilingId::fromIValue(tupleElements[2]);
 
   // Create new message type and build wrapped RPC
-  rpc::Message wrappedMessage(
+  auto wrappedMessage = c10::make_intrusive<rpc::Message>(
       std::move(payload), std::move(tensors), wrappedMsgType, msgId);
   TORCH_INTERNAL_ASSERT(
-      wrappedMessage.isRequest(),
+      wrappedMessage->isRequest(),
       "Messages wrapped with profiling requests must be requests.");
   std::unique_ptr<RpcCommandBase> wrappedRpc =
-      deserializeRequest(wrappedMessage);
+      deserializeRequest(*wrappedMessage);
 
   return std::make_unique<RpcWithProfilingReq>(
       origMsgType,
       std::move(wrappedRpc),
       wrappedMsgType,
-      std::move(wrappedMessage.tensors()),
+      std::move(wrappedMessage->tensors()),
       // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(cfg),
       profilerId);
