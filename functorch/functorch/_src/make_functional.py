@@ -48,7 +48,8 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     # Remove all the parameters in the model
     names = []
     for name, p in list(mod.named_parameters()):
-        _del_nested_attr(mod, name.split("."))
+        replacement = nn.Parameter(torch.empty_like(p, device='meta'))
+        _set_nested_attr(mod, name.split("."), replacement)
         names.append(name)
 
     # Make params regular Tensors instead of nn.Parameter
@@ -64,6 +65,7 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], a
     for name, p in zip(names, params):
         if as_params:
             p = nn.Parameter(p)
+        _del_nested_attr(mod, name.split("."))
         _set_nested_attr(mod, name.split("."), p)
 
 def extract_buffers(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
@@ -78,9 +80,11 @@ def extract_buffers(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     params = tuple(p for p in orig_params)
     return params, names
 
+
 def load_buffers(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], as_params=False) -> None:
     for name, p in zip(names, params):
         _set_nested_attr(mod, name.split("."), p)
+
 
 def load_state(
         model: nn.Module,
@@ -138,6 +142,7 @@ def make_functional(model: nn.Module):
 
     return weights, fun, descriptors
 
+
 def make_functional_with_buffers(model: nn.Module):
     """make_functional_with_buffers(model) -> weights, buffers, func, weight_names, buffer_names
 
@@ -173,6 +178,144 @@ def make_functional_with_buffers(model: nn.Module):
         return mutable_model(*data)
 
     return weights, buffers, fun, weight_descriptors, buf_descriptors
+
+
+class FunctionalModuleWithBuffers(nn.Module):
+    def __init__(self, stateless_model, param_names, buffer_names):
+        super(FunctionalModuleWithBuffers, self).__init__()
+        self.stateless_model = stateless_model
+        self.param_names = param_names
+        self.buffer_names = buffer_names
+
+    @staticmethod
+    def _create_from(model):
+        # TODO: We don't need to copy the model to create a stateless copy
+        model_copy = copy.deepcopy(model)
+        params, param_names = extract_weights(model_copy)
+        buffers, buffer_names = extract_buffers(model_copy)
+        return (
+            FunctionalModuleWithBuffers(model_copy, param_names, buffer_names),
+            params,
+            buffers,
+        )
+
+    def to_stateful(self, params, buffers):
+        stateful_model = copy.deepcopy(self.stateless_model)
+        load_weights(stateful_model, self.param_names, params)
+        load_buffers(stateful_model, self.buffer_names, params)
+        return stateful_model
+
+    def forward(self, params, buffers, *args, **kwargs):
+        stateful_model = self.to_stateful(params, buffers)
+        return stateful_model(*args, **kwargs)
+
+
+class FunctionalModule(nn.Module):
+    def __init__(self, stateless_model, param_names):
+        super(FunctionalModule, self).__init__()
+        self.stateless_model = stateless_model
+        self.param_names = param_names
+
+    @staticmethod
+    def _create_from(model):
+        # TODO: We don't need to copy the model to create a stateless copy
+        model_copy = copy.deepcopy(model)
+        params, param_names = extract_weights(model_copy)
+        return FunctionalModule(model_copy, param_names), params
+
+    def to_stateful(self, params):
+        stateful_model = copy.deepcopy(self.stateless_model)
+        load_weights(stateful_model, self.param_names, params)
+        return stateful_model
+
+    def forward(self, params, *args, **kwargs):
+        stateful_model = self.to_stateful(params)
+        return stateful_model(*args, **kwargs)
+
+
+def make_functional_v2(model: nn.Module):
+    """make_functional_v2(model) -> func, weights
+
+    Given an nn.Module, make_functional_v2 extracts the state (weights)
+    and returns a functional version of the model, `func`. This makes
+    it so that it is possible use transforms over the parameters of
+    `model`.
+
+    `func` can be invoked as follows:
+    ```
+    import torch
+    import torch.nn as nn
+    from functorch import make_functional_v2
+
+    x = torch.randn(4, 3)
+    model = nn.Linear(3, 3)
+    func, params = make_functional_v2(model)
+    func(params, x)
+    ```
+
+    And here is an example of applying the grad transform:
+    ```
+    import torch
+    import torch.nn as nn
+    from functorch import make_functional_v2, grad
+
+    x = torch.randn(4, 3)
+    t = torch.randn(4, 3)
+    model = nn.Linear(3, 3)
+    func, params = make_functional_v2(model)
+
+    def compute_loss(params, x, t):
+        y = func(params, x)
+        return nn.functional.mse_loss(y, t)
+
+    grad_weights = grad(compute_loss)(params, x, t)
+    ```
+    """
+    buffers = list(model.buffers())
+    if len(buffers) > 0:
+        raise RuntimeError('make_functional_v2(model): `model` has buffers. Please use '
+                           'make_functional_with_buffers_v2(model) instead.')
+    return FunctionalModule._create_from(model)
+
+
+def make_functional_with_buffers_v2(model: nn.Module):
+    """make_functional_with_buffers_v2(model) -> func, params, buffers
+
+    Given an nn.Module, make_functional_with_buffers_v2 extracts the state
+    (params and buffers) and returns a functional version of the model `func`
+    that can be invoked like a function.
+
+    `func` can be invoked as follows:
+    ```
+    import torch
+    import torch.nn as nn
+    from functorch import make_functional_with_buffers_v2
+
+    x = torch.randn(4, 3)
+    model = nn.Linear(3, 3)
+    func, params, buffers = make_functional_with_buffers_v2(model)
+    func(params, buffers, x)
+    ```
+
+    And here is an example of applying the grad transform:
+    ```
+    import torch
+    import torch.nn as nn
+    from functorch import make_functional_with_buffers_v2, grad
+
+    x = torch.randn(4, 3)
+    t = torch.randn(4, 3)
+    model = nn.Linear(3, 3)
+    func, params, buffers = make_functional_with_buffers_v2(model)
+
+    def compute_loss(params, buffers, x, t):
+        y = func(params, buffers, x)
+        return nn.functional.mse_loss(y, t)
+
+    grad_weights = grad(compute_loss)(params, buffers, x, t)
+    ```
+    """
+    return FunctionalModuleWithBuffers._create_from(model)
 
 
 def functional_init(model_class, ensemble_shape=(), device='cpu'):
