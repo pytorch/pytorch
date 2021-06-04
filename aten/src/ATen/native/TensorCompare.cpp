@@ -16,9 +16,6 @@ namespace meta {
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
   const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert
 ) {
-  TORCH_CHECK(elements.device() == test_elements.device(),
-    "Expected all tensors to be on the same device, but "
-    "found two devices, ", elements.device(), " and ", test_elements.device(), "!");
   set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 

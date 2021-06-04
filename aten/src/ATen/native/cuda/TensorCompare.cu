@@ -129,6 +129,8 @@ void clamp_max_scalar_kernel_impl(TensorIterator& iter, Scalar max) {
   });
 }
 
+// Composite op implementation for simplicity. This materializes the cross product of elements and test elements,
+// so it is not very memory efficient, but it is fast on CUDA.
 void isin_default_kernel_gpu(const Tensor& elements, const Tensor& test_elements, bool invert, const Tensor& out) {
   std::vector<int64_t> bc_shape(elements.dim(), 1);
   bc_shape.push_back(-1);

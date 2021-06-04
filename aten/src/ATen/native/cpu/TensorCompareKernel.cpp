@@ -301,7 +301,8 @@ static void mode_kernel_impl(
       });
 }
 
-// Default imperative implementation of isin(). Used when the number of test elements is small.
+// Default brute force implementation of isin(). Used when the number of test elements is small.
+// Iterates through each element and checks it against each test element.
 static void isin_default_kernel_cpu(
     const Tensor& elements,
     const Tensor& test_elements,
@@ -309,7 +310,7 @@ static void isin_default_kernel_cpu(
     const Tensor& out) {
   // Since test elements is not an input of the TensorIterator, type promotion
   // must be done manually.
-  ScalarType common_type = promoteTypes(elements.scalar_type(), test_elements.scalar_type());
+  ScalarType common_type = at::result_type(elements, test_elements);
   Tensor test_elements_flat = test_elements.to(common_type).ravel();
   Tensor promoted_elements = elements.to(common_type);
   auto iter = TensorIteratorConfig()
