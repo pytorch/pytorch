@@ -215,27 +215,24 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
   return assignOwnerRRef(
       scriptRemoteCall.retRRefId(),
       scriptRemoteCall.retForkId(),
-      std::move(future),
-      /*lsctx=*/nullptr);
+      std::move(future));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
     RpcCommandBase& rpc,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
-  auto future =
-      runPythonFunction(uprc.pythonUdf(), lsctx, uprc.isAsyncExecution());
+  auto future = runPythonFunction(
+      uprc.pythonUdf(), std::move(lsctx), uprc.isAsyncExecution());
 
-  return assignOwnerRRef(
-      uprc.rrefId(), uprc.forkId(), std::move(future), std::move(lsctx));
+  return assignOwnerRRef(uprc.rrefId(), uprc.forkId(), std::move(future));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
-    RpcCommandBase& rpc,
-    std::shared_ptr<LazyStreamContext> lsctx) const {
+    RpcCommandBase& rpc) const {
   auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
 
-  auto future = retrieveOwnerRRef(prf.rrefId(), std::move(lsctx));
+  auto future = retrieveOwnerRRef(prf.rrefId());
 
   return future->then(
       [](JitFuture& future) {
@@ -290,8 +287,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRRefBackward(
     RpcCommandBase& rpc) const {
   auto& rrefBackwardReq = static_cast<RRefBackwardReq&>(rpc);
 
-  auto future =
-      retrieveOwnerRRef(rrefBackwardReq.getRRefId(), /*lsctx=*/nullptr);
+  auto future = retrieveOwnerRRef(rrefBackwardReq.getRRefId());
 
   return future->then(
       [autogradContextId = rrefBackwardReq.getAutogradContextId(),

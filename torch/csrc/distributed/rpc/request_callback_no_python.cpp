@@ -168,8 +168,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonRemoteCall(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
     const RRefId& rrefId,
     const RRefId& forkId,
-    c10::intrusive_ptr<JitFuture> valueFuture,
-    std::shared_ptr<LazyStreamContext> lsctx) const {
+    c10::intrusive_ptr<JitFuture> valueFuture) const {
   auto& ctx = RRefContext::getInstance();
 
   c10::intrusive_ptr<OwnerRRef> ownerRRef;
@@ -193,11 +192,10 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
   }
 
   return valueFuture->then(
-      [ownerRRef, rrefId, forkId, lsctx = std::move(lsctx)](JitFuture& future) {
+      [ownerRRef, rrefId, forkId](JitFuture& future) {
         if (future.hasError()) {
           ownerRRef->setError(future.exception_ptr());
         } else {
-          ownerRRef->recordAllStreams(lsctx);
           ownerRRef->setValue(future.value());
         }
         return withDataPtrs(RemoteRet(rrefId, forkId).toMessage());
@@ -218,13 +216,11 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
   return assignOwnerRRef(
       scriptRemoteCall.retRRefId(),
       scriptRemoteCall.retForkId(),
-      std::move(future),
-      /*lsctx=*/nullptr);
+      std::move(future));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::retrieveOwnerRRef(
-    const RRefId& rrefId,
-    std::shared_ptr<LazyStreamContext> lsctx) const {
+    const RRefId& rrefId) const {
   auto& ctx = RRefContext::getInstance();
 
   auto rrefFuture = ctx.getOwnerRRef(rrefId);
@@ -232,19 +228,10 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::retrieveOwnerRRef(
   at::TypePtr type = rrefFuture->elementType();
   TORCH_INTERNAL_ASSERT(type->kind() == at::RRefType::Kind);
   return rrefFuture->thenAsync(
-      [lsctx](JitFuture& rrefFuture) {
+      [](JitFuture& rrefFuture) {
         c10::intrusive_ptr<OwnerRRef> rref =
             fromRRefInterface(rrefFuture.value().toRRef());
-        auto valueFuture = rref->getFuture();
-        // FIXME This is a temporary fix to synchronize CUDA streams. Once the
-        // OwnerRRef's internal Future becomes CUDA-aware this will be automatic
-        // and we can remove this hack.
-        return valueFuture->then(
-            [rref, lsctx](JitFuture& future) {
-              rref->blockAllStreams(lsctx);
-              return future.value();
-            },
-            valueFuture->elementType());
+        return rref->getFuture();
       },
       type->cast<at::RRefType>()->getElementType());
 }
@@ -253,7 +240,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
     processScriptRRefFetchCall(RpcCommandBase& rpc) const {
   auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
 
-  auto future = retrieveOwnerRRef(srf.rrefId(), /*lsctx=*/nullptr);
+  auto future = retrieveOwnerRRef(srf.rrefId());
 
   return future->then(
       [](JitFuture& future) {
@@ -263,9 +250,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
-    processPythonRRefFetchCall(
-        RpcCommandBase& rpc,
-        std::shared_ptr<LazyStreamContext> /* unused */) const {
+    processPythonRRefFetchCall(RpcCommandBase& rpc) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -529,7 +514,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
       return processScriptRRefFetchCall(rpc);
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
-      return processPythonRRefFetchCall(rpc, std::move(ctx));
+      return processPythonRRefFetchCall(rpc);
     }
     case MessageType::RREF_USER_DELETE: {
       return processRRefUserDelete(rpc);
