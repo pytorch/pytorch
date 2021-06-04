@@ -164,6 +164,9 @@ class TestTEFuser(JitTestCase):
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
 
+    def test_nop(self):
+        pass
+
     def test_sum_dim(self):
         def func(x):
             return x.sum((0, )) * 2
