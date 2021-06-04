@@ -538,6 +538,39 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             temp = list(d for d in filter_dp)
 
+    def test_filter_datapipe_nested_list(self):
+
+        input_ds = IDP(range(10)).batch(5)
+
+        def _filter_fn(data, val):
+            return data >= val
+
+        filter_dp = input_ds.filter(nesting_level=-1, filter_fn=_filter_fn, fn_kwargs={'val': 5})
+        expected_dp = [[5, 6, 7, 8, 9]]
+        self.assertEqual(len(list(zip(filter_dp, expected_dp))), len(expected_dp))
+        for data, exp in zip(filter_dp, expected_dp):
+            self.assertEqual(data, exp)
+
+        filter_dp = input_ds.filter(nesting_level=-1, drop_empty_batches=False, filter_fn=_filter_fn, fn_kwargs={'val': 5})
+        expected_dp = [[], [5, 6, 7, 8, 9]]
+        self.assertEqual(len(list(zip(filter_dp, expected_dp))), len(expected_dp))
+        for data, exp in zip(filter_dp, expected_dp):
+            self.assertEqual(data, exp)
+
+        with self.assertRaises(Exception):
+            filter_dp = input_ds.filter(nesting_level=5, filter_fn=_filter_fn, fn_kwargs={'val': 5})
+            temp = list(d for d in filter_dp)
+
+
+        input_ds = IDP(range(10)).batch(3)
+
+        filter_dp = input_ds.filter(lambda ls: len(ls) >= 3)
+        expected_dp = [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
+        self.assertEqual(len(list(zip(filter_dp, expected_dp))), len(expected_dp))
+        for data, exp in zip(filter_dp, expected_dp):
+            self.assertEqual(data, exp)
+
+
     def test_sampler_datapipe(self):
         input_dp = IDP(range(10))
         # Default SequentialSampler
