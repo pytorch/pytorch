@@ -145,7 +145,7 @@ class TestIterableDataPipeBasic(TestCase):
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
         # read extracted files after reaching the end of the tarfile
-        data_refs = list(rec for rec in datapipe3)
+        data_refs = list(datapipe3)
         self.assertEqual(len(data_refs), len(self.temp_files))
         for data_ref, temp_file in zip(data_refs, self.temp_files):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
@@ -170,7 +170,7 @@ class TestIterableDataPipeBasic(TestCase):
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
         # read extracted files before reaching the end of the zipile
-        data_refs = list(rec for rec in datapipe3)
+        data_refs = list(datapipe3)
         self.assertEqual(len(data_refs), len(self.temp_files))
         for data_ref, temp_file in zip(data_refs, self.temp_files):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
@@ -333,7 +333,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp_nl = IDP_NoLen(range(5))
 
         concat_dp = input_dp1.concat(input_dp_nl)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(concat_dp)
 
         self.assertEqual(list(d for d in concat_dp), list(range(10)) + list(range(5)))
@@ -363,7 +363,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp_nl = IDP_NoLen(range(10))
         map_dp_nl = input_dp_nl.map()
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(map_dp_nl)
         for x, y in zip(map_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
@@ -382,7 +382,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp_nl = IDP_NoLen(arrs)
         collate_dp_nl = input_dp_nl.collate()
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(collate_dp_nl)
         for x, y in zip(collate_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y))
@@ -411,7 +411,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp_nl = IDP_NoLen(range(10))
         batch_dp_nl = input_dp_nl.batch(batch_size=2)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(batch_dp_nl)
 
     def test_bucket_batch_datapipe(self):
@@ -421,7 +421,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp_nl = IDP_NoLen(range(20))
         bucket_dp_nl = input_dp_nl.bucket_batch(batch_size=7)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(bucket_dp_nl)
 
         # Test Bucket Batch without sort_key
@@ -480,7 +480,7 @@ class TestFunctionalIterDataPipe(TestCase):
         for data, exp in zip(filter_dp, range(5, 10)):
             self.assertEqual(data, exp)
 
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(filter_dp)
 
         def _non_bool_fn(data):
@@ -529,7 +529,7 @@ class TestFunctionalIterDataPipe(TestCase):
                 self.assertEqual(res, dl_res)
 
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
 
     @skipIfNoTorchVision
@@ -569,7 +569,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp = IDP_NoLen(inputs)  # type: ignore[assignment]
         transform = torchvision.transforms.ToTensor()
         tsfm_dp = input_dp.transforms(transform)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(tsfm_dp)
         for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
             self.assertEqual(tsfm_data, input_data)
@@ -579,7 +579,7 @@ class TestFunctionalIterDataPipe(TestCase):
             dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore[arg-type]
 
         zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore[var-annotated]
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
         self.assertEqual(list(d for d in zipped_dp), exp)

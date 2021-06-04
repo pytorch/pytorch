@@ -36,4 +36,4 @@ class FilterIterDataPipe(MapIterDataPipe):
                 yield data
 
     def __len__(self):
-        raise NotImplementedError
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
