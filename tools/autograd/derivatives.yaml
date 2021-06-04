@@ -1365,7 +1365,7 @@
 
 - name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
-  target: zeros_like(target)
+  target: not_implemented("binary_cross_entropy_backward wrt `target`")
   grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor

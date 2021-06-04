@@ -12988,6 +12988,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
             v(lambda: F.gaussian_nll_loss(input, input, var, reduction=reduction))
+            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input, reduction=reduction))
             v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
 
             zeros = torch.zeros_like(input).to(torch.int64)
@@ -13006,7 +13007,6 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction=reduction))
 
             # FIXME: should we allow derivatives on these?
-            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.detach(), reduction=reduction))
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
 
     @onlyOnCPUAndCUDA
