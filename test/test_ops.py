@@ -59,6 +59,32 @@ class TestOpInfo(TestCase):
             self.assertTrue(sample_input.dtype == dtype)
             self.assertTrue(sample_input.device.type == self.device_type)
 
+    # Verifies that backward for each unsupported floating or complex dtype
+    #   throw a runtime error.
+    @onlyOnCPUAndCUDA
+    @ops(op_db, dtypes=OpDTypes.unsupported_backward,
+         allowed_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16))
+    def test_unsupported_backward(self, device, dtype, op):
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+
+        try:
+            samples = op.sample_inputs(device, dtype, requires_grad=True)
+        except RuntimeError as e:
+            self.skipTest(f"Skipped! unable to generate sample. {e}")
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        # NOTE: assert exception raised on ANY sample input
+        with self.assertRaises(RuntimeError):
+            for sample in op.sample_inputs(device, dtype, requires_grad=True):
+                result = op(sample.input, *sample.args, **sample.kwargs)
+                # TODO: handle non-tensor outputs
+                if not isinstance(result, torch.Tensor):
+                    self.skipTest("Skipped! Test does not handle non-tensor outputs")
+                result.sum().backward()
+
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.
     # TODO: support multi-tensor outputs
