@@ -73,6 +73,8 @@ class TestOpInfo(TestCase):
             result = op(sample.input, *sample.args, **sample.kwargs)
             if not isinstance(result, torch.Tensor):
                 continue
+            if sample.output_process_fn_grad is not None:
+                result = sample.output_process_fn_grad(result)
             result.sum().backward()
 
     # Verifies that ops do not have an entry in
@@ -292,6 +294,9 @@ class TestCommon(JitCommonTestCase):
                 expected_forward = op(sample.input, *sample.args, **sample.kwargs)
                 expected_grad = None
 
+                output_process_fn_grad = sample.output_process_fn_grad if sample.output_process_fn_grad \
+                    else lambda x: x
+
                 # Skips inplace variants if the output dtype is not the same as
                 #   the input dtype
                 skip_inplace = False
@@ -306,7 +311,7 @@ class TestCommon(JitCommonTestCase):
                 #   derived from each tensor output
                 if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
                         and (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type))):
-                    expected_forward.sum().backward()
+                    output_process_fn_grad(expected_forward).sum().backward()
                     expected_grad = tensor.grad
 
                 # Test eager consistency
@@ -338,7 +343,7 @@ class TestCommon(JitCommonTestCase):
                     # Compares variant's backward
                     if expected_grad is not None and \
                             (variant not in inplace_ops or op.supports_inplace_autograd):
-                        variant_forward.sum().backward()
+                        output_process_fn_grad(variant_forward).sum().backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
         _test_consistency_helper(samples, variants)
