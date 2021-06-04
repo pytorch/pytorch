@@ -83,16 +83,19 @@ std::vector<c10::Device> getDevicesForTensors(
   return devices;
 }
 
-// A helper function that first creates a LazyStreamContext and then grabs a
-// CUDA stream for each device in the given device list.
-std::shared_ptr<LazyStreamContext> createCalleeStreamContext(
+std::vector<c10::Stream> getStreamsFromPoolForDevices(
     const std::vector<c10::Device>& devices) {
-  auto ctx = std::make_shared<LazyStreamContext>(
-      devices.empty() ? c10::kCPU : devices[0].type());
-  for (const c10::Device& device : devices) {
-    ctx->getStream(device);
+  if (devices.empty()) {
+    return {};
   }
-  return ctx;
+  c10::impl::VirtualGuardImpl impl(devices[0].type());
+  std::vector<c10::Stream> streams;
+  streams.reserve(devices.size());
+  for (const c10::Device& device : devices) {
+    TORCH_INTERNAL_ASSERT(device.type() == impl.type());
+    streams.push_back(impl.getStreamFromGlobalPool(device));
+  }
+  return streams;
 }
 
 std::vector<c10::Stream> getCurrentStreamsForDevices(
@@ -108,6 +111,48 @@ std::vector<c10::Stream> getCurrentStreamsForDevices(
     streams.push_back(impl.getStream(device));
   }
   return streams;
+}
+
+std::vector<c10::Device> getDevicesOfTensors(
+    const std::vector<torch::Tensor>& tensors) {
+  c10::optional<c10::impl::VirtualGuardImpl> impl;
+  size_t deviceCount = 0;
+  std::vector<bool> indexBitset;
+  for (const torch::Tensor& tensor : tensors) {
+    if (!tensor.is_cpu()) {
+      c10::Device device = tensor.device();
+      if (!impl.has_value()) {
+        impl.emplace(device.type());
+        indexBitset.resize(impl->deviceCount());
+      }
+      TORCH_INTERNAL_ASSERT(device.type() == impl->type());
+      TORCH_INTERNAL_ASSERT(device.has_index());
+      if (!indexBitset[device.index()]) {
+        deviceCount++;
+        indexBitset[device.index()] = true;
+      }
+    }
+  }
+  std::vector<c10::Device> devices;
+  devices.reserve(deviceCount);
+  for (c10::DeviceIndex idx = 0; idx < indexBitset.size(); idx++) {
+    if (indexBitset[idx]) {
+      devices.emplace_back(impl->type(), idx);
+    }
+  }
+  return devices;
+}
+
+void makeStreamsWaitOnOthers(
+    const std::vector<c10::Stream>& consumers,
+    const std::vector<c10::Stream>& producers) {
+  for (const c10::Stream& producer : producers) {
+    const c10::Stream& consumer =
+        getStreamForDevice(consumers, producer.device());
+    c10::Event event(producer.device_type());
+    event.record(producer);
+    event.block(consumer);
+  }
 }
 
 } // namespace
@@ -612,20 +657,20 @@ void TensorPipeAgent::pipeRead(
     std::function<void(
         const tensorpipe::Error&,
         c10::intrusive_ptr<Message>,
-        std::shared_ptr<LazyStreamContext>)> fn) noexcept {
+        std::vector<c10::Stream>)> fn) noexcept {
   pipe->readDescriptor([this, fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
                            tensorpipe::Descriptor tpDescriptor) mutable {
     if (error) {
-      fn(error, c10::intrusive_ptr<Message>(), nullptr);
+      fn(error, c10::intrusive_ptr<Message>(), {});
       return;
     }
 
-    auto ctx = createCalleeStreamContext(devices_);
+    std::vector<c10::Stream> streams = getStreamsFromPoolForDevices(devices_);
     tensorpipe::Allocation tpAllocation;
     TensorpipeReadBuffers tpBuffers;
     std::tie(tpAllocation, tpBuffers) =
-        tensorpipeAllocate(tpDescriptor, ctx->getReservedStreams());
+        tensorpipeAllocate(tpDescriptor, streams);
 
     pipe->read(
         std::move(tpAllocation),
@@ -633,9 +678,9 @@ void TensorPipeAgent::pipeRead(
          tpBuffers{
              std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
          fn{std::move(fn)},
-         ctx{std::move(ctx)}](const tensorpipe::Error& error) mutable {
+         streams{std::move(streams)}](const tensorpipe::Error& error) mutable {
           if (error) {
-            fn(error, c10::intrusive_ptr<Message>(), nullptr);
+            fn(error, c10::intrusive_ptr<Message>(), {});
             return;
           }
 
@@ -644,7 +689,7 @@ void TensorPipeAgent::pipeRead(
           c10::intrusive_ptr<Message> rpcMessage = tensorpipeDeserialize(
               std::move(tpDescriptor), std::move(*tpBuffers));
 
-          fn(error, std::move(rpcMessage), std::move(ctx));
+          fn(error, std::move(rpcMessage), std::move(streams));
         });
   });
 }
@@ -771,7 +816,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       [this, pipe](
           const tensorpipe::Error& error,
           c10::intrusive_ptr<Message> requestMessage,
-          std::shared_ptr<LazyStreamContext> ctx) mutable {
+          std::vector<c10::Stream> streams) mutable {
         if (error) {
           if (shuttingDown_) {
             // This is expected.
@@ -799,7 +844,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                          pipe,
                          messageId,
                          requestMessage{std::move(requestMessage)},
-                         ctx{std::move(ctx)}]() mutable {
+                         streams{std::move(streams)}]() mutable {
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
@@ -815,7 +860,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
             // to make sure that we fetch the correct value from `to_here()`
             // call.
             futureResponseMessage =
-                cb_->operator()(*requestMessage, ctx->getReservedStreams());
+                cb_->operator()(*requestMessage, std::move(streams));
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 c10::make_intrusive<JitFuture>(at::AnyClassType::get());
@@ -941,14 +986,16 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
-  auto ctx = std::make_shared<LazyStreamContext>(
-      devices_.empty() ? c10::kCPU : devices_[0].type());
-  ctx->waitForCurrentStreams(requestMessage->tensors());
+  std::vector<c10::Stream> streams = getStreamsFromPoolForDevices(devices_);
+  makeStreamsWaitOnOthers(
+      streams,
+      getCurrentStreamsForDevices(
+          getDevicesOfTensors(requestMessage->tensors())));
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
       std::move(devices),
-      ctx->getReservedStreams(),
+      std::move(streams),
       [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
@@ -973,7 +1020,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
             [this, &clientPipe](
                 const tensorpipe::Error& error,
                 c10::intrusive_ptr<Message> responseMessage,
-                std::shared_ptr<LazyStreamContext> ctx) {
+                std::vector<c10::Stream> streams) {
               if (error) {
                 if (error.isOfType<tensorpipe::PipeClosedError>() &&
                     !rpcAgentRunning_.load()) {
@@ -1026,7 +1073,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
                 markFutureAsComplete(
                     std::move(futureResponseMessage),
                     std::move(responseMessage),
-                    std::move(ctx));
+                    std::move(streams));
               }
             });
       });
@@ -1309,7 +1356,7 @@ void TensorPipeAgent::decreaseCallCount(int32_t& count) {
 void TensorPipeAgent::markFutureAsComplete(
     std::shared_ptr<AtomicJitFuture> atomicFuture,
     c10::intrusive_ptr<Message> message,
-    std::shared_ptr<LazyStreamContext> ctx) {
+    std::vector<c10::Stream> streams) {
   if (!atomicFuture->isComplete.test_and_set()) {
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
@@ -1317,8 +1364,8 @@ void TensorPipeAgent::markFutureAsComplete(
     threadPool_.run([this,
                      atomicFuture{std::move(atomicFuture)},
                      message{std::move(message)},
-                     ctx{std::move(ctx)}]() mutable {
-      c10::MultiStreamGuard guard(ctx->getReservedStreams());
+                     streams{std::move(streams)}]() mutable {
+      c10::MultiStreamGuard guard(streams);
       std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs =
           message->getDataPtrs();
       atomicFuture->jitFuture->markCompleted(
