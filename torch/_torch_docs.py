@@ -10463,21 +10463,21 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 """.format(**common_args))
 
 add_docstr(torch.tile, r"""
-tile(input, reps) -> Tensor
+tile(input, dims) -> Tensor
 
 Constructs a tensor by repeating the elements of :attr:`input`.
-The :attr:`reps` argument specifies the number of repetitions
+The :attr:`dims` argument specifies the number of repetitions
 in each dimension.
 
-If :attr:`reps` specifies fewer dimensions than :attr:`input` has, then
-ones are prepended to :attr:`reps` until all dimensions are specified.
-For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`reps`
-is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2).
+If :attr:`dims` specifies fewer dimensions than :attr:`input` has, then
+ones are prepended to :attr:`dims` until all dimensions are specified.
+For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`dims`
+is (2, 2), then :attr:`dims` is treated as (1, 1, 2, 2).
 
-Analogously, if :attr:`input` has fewer dimensions than :attr:`reps`
+Analogously, if :attr:`input` has fewer dimensions than :attr:`dims`
 specifies, then :attr:`input` is treated as if it were unsqueezed at
-dimension zero until it has as many dimensions as :attr:`reps` specifies.
-For example, if :attr:`input` has shape (4, 2) and :attr:`reps`
+dimension zero until it has as many dimensions as :attr:`dims` specifies.
+For example, if :attr:`input` has shape (4, 2) and :attr:`dims`
 is (3, 3, 2, 2), then :attr:`input` is treated as if it had the
 shape (1, 1, 4, 2).
 
@@ -10487,7 +10487,7 @@ shape (1, 1, 4, 2).
 
 Args:
     input (Tensor): the tensor whose elements to repeat.
-    reps (tuple): the number of repetitions per dimension.
+    dims (tuple): the number of repetitions per dimension.
 
 Example::
 
