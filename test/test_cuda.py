@@ -1472,6 +1472,7 @@ except RuntimeError as e:
     sys.exit(-2)
 """], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
             out, err = p.communicate(timeout=10)
+            p.wait(timeout=10)
         except subprocess.TimeoutExpired as e:
             p.kill()
             out, err = p.communicate()
