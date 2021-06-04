@@ -1513,7 +1513,7 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
                 make_tensor(size_append, device, dtype,
                             low=None, high=None,
                             requires_grad=requires_grad) if size_append else None)
-        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2])))
+        sample_inputs.append(SampleInput(args[0], args=args[1:]))
 
     return tuple(sample_inputs)
 
