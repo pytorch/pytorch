@@ -1827,6 +1827,25 @@ class TestTEFuser(JitTestCase):
                 zs = [torch.ones(i) for i in range(N)]
                 repro(xs, ys, zs)
 
+    def test_scalar_and_tensor_constant(self):
+        @torch.jit.script
+        def foo(a, c):
+            b = 0.0
+            if bool(a == 0.0):
+                b = 1.0
+            return b + c
+
+        a = torch.ones(1, dtype=torch.float)
+
+        def use(b):
+            return foo(b - 1.0, a) + 1.0
+        use = torch.jit.trace(use, (torch.zeros(1, dtype=torch.float),))
+
+        # test we propagated shapes through the function
+        self.assertTrue("Dynamic" not in str(use.graph))
+
+        self.assertEqual(3, use(torch.ones(1, dtype=torch.float)))
+        self.assertEqual(2, use(torch.zeros(1, dtype=torch.float)))
 
 works_list = [
     '__radd__',
