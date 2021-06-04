@@ -121,6 +121,24 @@ const auto sigmoid_out_script = R"JIT(
       return (b)
 )JIT";
 
+const auto logit_script_1 = R"JIT(
+  def forward(self, inp: Tensor):
+      a = torch.logit(inp)
+      return (a)
+)JIT";
+
+const auto logit_script_2 = R"JIT(
+  def forward(self, inp: Tensor):
+      a = torch.logit(inp, 1e-6)
+      return (a)
+)JIT";
+
+const auto logit_script_3 = R"JIT(
+  def forward(self, inp: Tensor, eps: float):
+      a = torch.logit(inp, eps)
+      return (a)
+)JIT";
+
 // b is in_contiguous
 const auto reshape_incontiguous_script = R"JIT(
   def forward(self, a: Tensor, shape: List[int]):
@@ -143,6 +161,16 @@ const auto flatten_script_2 = R"JIT(
   def forward(self, a: Tensor, start_dim: int, end_dim: int):
       b = a.transpose(0, 1)
       return torch.flatten(b, start_dim, end_dim)
+)JIT";
+
+const auto clone_script_0 = R"JIT(
+  def forward(self, input):
+      return torch.clone(input)
+)JIT";
+
+const auto clone_script_1 = R"JIT(
+  def forward(self, input: Tensor, memory_format: int):
+      return torch.clone(input, memory_format=memory_format)
 )JIT";
 
 const auto aten_sum = R"JIT(
@@ -280,6 +308,11 @@ const std::string layer_norm_without_weights = R"JIT(
       return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False)
 )JIT";
 
+const auto norm_2arg = R"JIT(
+  def forward(self, a: Tensor, p: int):
+      return torch.norm(a, p)
+)JIT";
+
 const auto norm_3arg = R"JIT(
   def forward(self, a: Tensor, p: int, dtype: int):
       return torch.norm(a, p, dtype=dtype)
@@ -298,4 +331,39 @@ const auto norm_5arg = R"JIT(
 const auto aten_matmul = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.matmul(a, b)
+)JIT";
+
+const std::string repeat = R"JIT(
+  def forward(self, a: Tensor, repeats: List[int]):
+      return torch.repeat(a, repeats)
+)JIT";
+
+const auto clamp_script_1 = R"JIT(
+  def forward(self, inp: Tensor, min: int, max: int):
+      a = torch.clamp(inp, min, max)
+      return (a)
+)JIT";
+
+const auto clamp_script_2 = R"JIT(
+  def forward(self, inp: Tensor, min: Tensor, max: Tensor):
+      a = torch.clamp(inp, min, max)
+      return (a)
+)JIT";
+
+const auto full_like_script = R"JIT(
+  def forward(self,
+              a: Tensor,
+              fill_value: int,
+              dtype: Optional[int],
+              layout: Optional[int],
+              device: Optional[Device],
+              pin_memory: Optional[bool],
+              memory_format: Optional[int]):
+      return torch.full_like(a,
+                             fill_value,
+                             dtype=dtype,
+                             layout=layout,
+                             device=device,
+                             pin_memory=pin_memory,
+                             memory_format=memory_format)
 )JIT";

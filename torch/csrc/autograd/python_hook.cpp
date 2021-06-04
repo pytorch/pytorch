@@ -1,13 +1,14 @@
 #include <torch/csrc/autograd/python_hook.h>
 
-#include <sstream>
-
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/Exceptions.h>
+
+#include <sstream>
 
 using torch::autograd::variable_list;
 using torch::autograd::Variable;
@@ -29,8 +30,11 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int value_idx)
 }
 
 PyFunctionPreHook::~PyFunctionPreHook() {
-  pybind11::gil_scoped_acquire gil;
-  Py_DECREF(dict);
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
 }
 
 auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
@@ -61,8 +65,11 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
 }
 
 PyFunctionPostHook::~PyFunctionPostHook() {
-  pybind11::gil_scoped_acquire gil;
-  Py_DECREF(dict);
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
 }
 
 auto PyFunctionPostHook::operator()(
@@ -107,7 +114,7 @@ static PyObject *wrap_variables(const variable_list& c_variables)
 
 static variable_list unwrap_variables(PyObject* py_variables)  {
   variable_list results(PyTuple_GET_SIZE(py_variables));
-  for (size_t i = 0; i < results.size(); i++) {
+  for(const auto i : c10::irange(results.size())) {
     PyObject* item = PyTuple_GET_ITEM(py_variables, i);
     if (item == Py_None) {
       continue;

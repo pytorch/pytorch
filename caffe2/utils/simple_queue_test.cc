@@ -30,7 +30,6 @@ TEST(SimpleQueueTest, SingleProducerSingleConsumer) {
   // NOLINTNEXTLINE(modernize-make-unique)
   gQueue.reset(new SimpleQueue<int>());
   std::thread consumer(ConsumerFunction, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
     gQueue->Push(i);
   }
@@ -44,7 +43,6 @@ TEST(SimpleQueueTest, SingleProducerDoubleConsumer) {
   gQueue.reset(new SimpleQueue<int>());
   std::thread consumer0(ConsumerFunction, 0);
   std::thread consumer1(ConsumerFunction, 1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
     gQueue->Push(i);
   }
@@ -58,9 +56,7 @@ TEST(SimpleQueueTest, SingleProducerDoubleConsumer) {
 TEST(SimpleQueueTest, DoubleProducerDoubleConsumer) {
   // NOLINTNEXTLINE(modernize-make-unique)
   gQueue.reset(new SimpleQueue<int>());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::thread producer0(ProducerFunction, 0, 0, 10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::thread producer1(ProducerFunction, 0, 10, 10);
   std::thread consumer0(ConsumerFunction, 2);
   std::thread consumer1(ConsumerFunction, 3);

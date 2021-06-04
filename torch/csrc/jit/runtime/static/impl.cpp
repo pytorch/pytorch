@@ -51,8 +51,7 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
     }
   }
   // check output types
-  // Static Runtime supports output types include None, Tensor and List/Tuple
-  // of Tensor
+  // Static Runtime doesn't support complex outputs such as List of Lists
   for (Value* output : graph->outputs()) {
     VLOG(1) << "output: %" << output->debugName()
             << " has type: " << output->type()->repr_str();
@@ -61,9 +60,13 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
         kind == prim::DictConstruct) {
       for (Value* input : output->node()->inputs()) {
         const auto& type = input->type();
+        const auto& type_kind = type->kind();
         TORCH_CHECK(
-            type->cast<TensorType>() != nullptr,
-            "Static Runtime expects output type as List or Tuple of Tensor, but got List or Tuple of ",
+            type_kind != TypeKind::ListType &&
+                type_kind != TypeKind::TupleType &&
+                type_kind != TypeKind::DictType,
+            "Static Runtime requires output type to not be a nested "
+            "List/Tuple/Dict, but got a List/Tuple/Dict of: ",
             type->repr_str());
       }
     }
@@ -283,12 +286,13 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
   // these need to be removed from "can_reuse" after analyzing all nodes
   std::unordered_set<const Value*> cannot_reuse;
   for (auto* n : graph->nodes()) {
+    bool can_reuse_inputs_outputs = canReuseInputsOutputs(n);
     for (const auto* v : n->inputs()) {
       if (!seen_values.count(v)) {
         all_values.emplace_back(v);
         seen_values.insert(v);
       }
-      if (canReuseInputsOutputs(n)) {
+      if (can_reuse_inputs_outputs) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
@@ -297,7 +301,7 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
     for (const auto* v : n->outputs()) {
       all_values.emplace_back(v);
       seen_values.insert(v);
-      if (canReuseInputsOutputs(n)) {
+      if (can_reuse_inputs_outputs) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
@@ -456,13 +460,11 @@ GenerateSameStorageValues(
   return same_storage_values;
 }
 
-} // namespace
-
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
-  OptimizeGraph(graph, opts);
   CheckGraphEligibility(graph);
+  OptimizeGraph(graph, opts);
   RemoveSelfFromGraphInput(graph);
 }
 
@@ -497,6 +499,8 @@ PrepareForStaticModule(
   return std::make_pair(graph, c10::nullopt);
 }
 
+} // namespace
+
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
@@ -517,17 +521,16 @@ StaticModule::StaticModule(
       schema_(std::move(graph_and_schema.second)) {
   // check opt flags
   if (opts.optimize_graph_output_memory) {
-    if (!(opts_.optimize_memory && opts_.enable_out_variant)) {
-      throw std::runtime_error(
-          "When optimize_graph_output_memory is true, optimize_memory and enable_out_variant must be set to true");
-    }
+    TORCH_CHECK(
+        opts_.enable_out_variant && opts_.optimize_memory,
+        "When optimize_graph_output_memory is true, enable_out_variant and optimize_memory must be set to true");
   }
   if (opts_.optimize_memory) {
-    if (!opts_.enable_out_variant) {
-      throw std::runtime_error(
-          "When optimize_memory is true, enable_out_variant must be set to true");
-    }
+    TORCH_CHECK(
+        opts_.enable_out_variant,
+        "When optimize_memory is true, enable_out_variant must be set to true");
   }
+
   // map Value* to IValue (from inputs or prim::Constant) or null
   std::unordered_map<Value*, IValue*> value_to_ivalue;
   // map Value* to its SSA definition IR
@@ -593,18 +596,12 @@ StaticModule::StaticModule(
     output_ssa_defs_.emplace_back(value_to_ssa_def[output]);
   }
 
+  // Prepare for memory planning
   AliasDb alias_db(graph_);
   auto lm = GetLivenessInformation(graph_, alias_db);
   external_values_ = lm.second;
   if (opts_.optimize_memory) {
     auto values = GetMemoryPlanningCandidates(graph_);
-    // Note (penguin): since it does not make sense to have optimize_memory
-    // enabled but enable_out_variant disabled, we check the flag dependence
-    // during initialization of StaticModule so that the following condition
-    // would not be true. This would make the code easier to understand
-    // if (!opts_.enable_out_variant) {
-    //   values.first = {};
-    // }
     value_to_same_storage_values_ =
         GenerateSameStorageValues(lm, values, alias_db);
   }
@@ -652,10 +649,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < n.inputs().size(); ++i) {
       if (n.inputs()[i] == nullptr) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int node_idx;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int out_idx;
+        int node_idx = 0;
+        int out_idx = 0;
         std::tie(node_idx, out_idx) = sm.index_map().at(idx)[i];
         DCHECK(out_idx >= 0);
         // input
@@ -664,6 +659,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
         } else if (node_idx == StaticModule::CONSTANT_VALUE) {
           n.set_input(i, &sm.constants()[out_idx]);
         } else {
+          DCHECK(node_idx >= 0);
           n.set_input(i, &(nodes_[node_idx].Output(out_idx)));
         }
       }
@@ -671,10 +667,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   }
 
   for (const auto& index_pair : sm.output_indices()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int node_idx;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int out_idx;
+    int node_idx = 0;
+    int out_idx = 0;
     std::tie(node_idx, out_idx) = index_pair;
     if (node_idx == StaticModule::INPUT_VALUE) {
       outputs_.emplace_back(&inputs_[out_idx]);
@@ -685,8 +679,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       outputs_.emplace_back(const_cast<IValue*>(&sm.constants()[out_idx]));
     } else {
-      auto& n = nodes_.at(node_idx);
-      auto* out = &n.Output(out_idx);
+      auto* out = &nodes_[node_idx].Output(out_idx);
       outputs_.emplace_back(out);
     }
   }
@@ -696,7 +689,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
     const std::vector<at::Tensor>& inps) {
   std::vector<c10::IValue> stack;
   stack.resize(inps.size());
-  for (size_t i = 0; i < inps.size(); i++) {
+  for (const auto i : c10::irange(inps.size())) {
     stack[i] = inps[i];
   }
 
@@ -737,11 +730,11 @@ c10::IValue StaticRuntime::operator()(
         "with StaticModule(const torch::jit::Module& m) instead.");
     std::vector<c10::IValue> s = args;
     static_module_.schema()->checkAndNormalizeInputs(s, kwargs);
-    for (size_t i = 0; i < s.size(); i++) {
+    for (const auto i : c10::irange(s.size())) {
       Input(i) = std::move(s[i]);
     }
   } else {
-    for (size_t i = 0; i < args.size(); i++) {
+    for (const auto i : c10::irange(args.size())) {
       Input(i) = args[i];
     }
   }
@@ -755,9 +748,8 @@ c10::IValue StaticRuntime::operator()(
 
   if (static_module_.opts().cleanup_activations) {
     // MemoryPlanner is created after the first invocation of `run()`. This is
-    // done intentionally because MemoryPlanner uses `TensorStorageImpl`
-    // object sizes of the previous `run()` for memory planning of subsequent
-    // runs
+    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
+    // previous `run()` for memory planning of subsequent runs
     if (!planner_) {
       planner_ = std::make_unique<MemoryPlanner>(
           this,
@@ -799,15 +791,13 @@ void StaticRuntime::benchmark(
     const int warmup_runs,
     const int main_runs) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Static runtime ms per iter: "
-            << time_per_iter
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
 
-  for (size_t i = 0; i < nodes_.size(); i++) {
+  for (const auto i : c10::irange(nodes_.size())) {
     const Node* node = nodes_[i].node();
     std::cout << "Node #" << i << ": " << results.time_per_node[i]
               << " ms/iter, ";
@@ -825,13 +815,15 @@ void StaticRuntime::benchmark(
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
     const double ms = p.second;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
-              << results.instances_per_node_type[kind] << " nodes)"
-              << std::endl;
+              << results.instances_per_node_type[kind] << " nodes";
+    if (results.out_nodes.count(kind) == 0) {
+      std::cout << ")" << std::endl;
+    } else {
+      std::cout << ", out variant)" << std::endl;
+    }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
   std::cout << "StaticRuntime setup time: " << results.setup_time << " ms"
@@ -850,6 +842,12 @@ void StaticRuntime::benchmark(
       std::cout << "Total number of reused tensors: "
                 << planner_->total_reused_tensors() << std::endl;
     }
+    std::cout << "Total number of 'out' variant nodes/total number of nodes: "
+              << results.out_nodes_count << "/" << results.total_nodes_count
+              << " ("
+              << 100.0 * (results.out_nodes_count) /
+            static_cast<float>(results.total_nodes_count)
+              << "%)" << std::endl;
   }
   check_for_memory_leak();
 }
@@ -897,7 +895,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         "with StaticModule(const torch::jit::Module& m) instead.");
     static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
   }
-  for (size_t i = 0; i < stack.size(); i++) {
+  for (const auto i : c10::irange(stack.size())) {
     Input(i) = stack[i];
   }
   results.setup_time = timer.MilliSeconds();
@@ -908,8 +906,8 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // main runs
-  for (int k = 0; k < main_runs; k++) {
-    for (size_t i = 0; i < stack.size(); i++) {
+  for (const auto k : c10::irange(main_runs)) {
+    for (const auto i : c10::irange(stack.size())) {
       Input(i) = stack[i];
     }
     timer.Start();
@@ -919,7 +917,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     float millis = timer.MilliSeconds();
     results.memory_alloc_time += millis;
 
-    for (size_t i = 0; i < nodes_.size(); i++) {
+    for (const auto i : c10::irange(nodes_.size())) {
       timer.Start();
       nodes_[i].run();
       millis = timer.MilliSeconds();
@@ -971,20 +969,24 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // post processing
-  for (size_t i = 0; i < nodes_.size(); i++) {
+  for (const auto i : c10::irange(nodes_.size())) {
     const Node* node = nodes_[i].node();
     std::string kind = std::string(node->kind().toQualString());
     results.time_per_node[i] /= static_cast<float>(main_runs);
     results.time_per_node_type[kind] += results.time_per_node[i];
     results.instances_per_node_type[kind]++;
+    if (nodes_[i].has_out_variant()) {
+      results.out_nodes.insert(kind);
+      results.out_nodes_count++;
+    }
     results.total_time += results.time_per_node[i];
   }
+  results.total_nodes_count = nodes_.size();
   results.memory_alloc_time /= static_cast<float>(main_runs);
   results.memory_dealloc_time /= static_cast<float>(main_runs);
   results.output_dealloc_time /= static_cast<float>(main_runs);
   for (const auto& p : results.time_per_node_type) {
     const std::string& kind = p.first;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     results.percent_per_node_type[kind] = p.second / results.total_time * 100;
   }
   return results;
@@ -996,15 +998,15 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   }
 
   // check for inputs
-  for (size_t i = 0; i < inputs_.size(); i++) {
+  for (const auto i : c10::irange(inputs_.size())) {
     TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
   }
 
   std::unordered_set<const IValue*> output_ivalues(
       outputs_.begin(), outputs_.end());
-  for (size_t n = 0; n < nodes_.size(); n++) {
+  for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
-    for (size_t i = 0; i < pnode.outputs().size(); i++) {
+    for (const auto i : c10::irange(pnode.outputs().size())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
@@ -1088,7 +1090,7 @@ MemoryPlanner::MemoryPlanner(
   std::unordered_set<const Value*> leaked_values;
   if (enable_out_variant) {
     for (ProcessedNode& pnode : runtime->nodes()) {
-      if (canReuseInputsOutputs(pnode.node())) {
+      if (pnode.has_out_variant()) {
         // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (auto i = 0; i < pnode.outputs().size(); ++i) {
           const Value* out_v = pnode.node()->outputs()[i];
@@ -1229,14 +1231,18 @@ ProcessedNode::ProcessedNode(
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
-  if (enable_out_variant && canRunOutOfPlace(node)) {
-    fn_ = getOutOfPlaceOperation(node);
+  if (enable_out_variant && (fn_ = getOutOfPlaceOperation(node))) {
     VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
-  } else if (canRunNatively(node)) {
+    return;
+  }
+  if (!fn_ && mayRunNatively(node)) {
     native_fn_ = getNativeOperation(node);
-    VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
-  } else if (
-      node->kind() != prim::ListConstruct &&
+    if (native_fn_) {
+      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+      return;
+    }
+  }
+  if (node->kind() != prim::ListConstruct &&
       node->kind() != prim::TupleConstruct &&
       node->kind() != prim::DictConstruct && node->kind() != prim::ListUnpack) {
     const Operator& op = node->getOperator();
@@ -1255,7 +1261,7 @@ void ProcessedNode::run() {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
     stack.reserve(size);
-    for (size_t i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       stack.emplace_back(Input(i));
     }
 

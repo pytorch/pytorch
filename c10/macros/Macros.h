@@ -29,10 +29,12 @@
 #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
 #define __ubsan_ignore_signed_int_overflow__ \
   __attribute__((no_sanitize("signed-integer-overflow")))
+#define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
 #else
 #define __ubsan_ignore_float_divide_by_zero__
 #define __ubsan_ignore_undefined__
 #define __ubsan_ignore_signed_int_overflow__
+#define __ubsan_ignore_function__
 #endif
 
 // Detect address sanitizer as some stuff doesn't work with it
@@ -82,6 +84,12 @@
 #else
 #define C10_UID __LINE__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
+#endif
+
+#ifdef __has_cpp_attribute
+#define C10_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#define C10_HAS_CPP_ATTRIBUTE(x) (0)
 #endif
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
@@ -210,6 +218,13 @@ using namespace c10::hip;
 #define C10_ALWAYS_INLINE inline
 #endif
 
+// C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
+#if C10_HAS_CPP_ATTRIBUTE(fallthrough)
+#define C10_FALLTHROUGH [[fallthrough]]
+#else
+#define C10_FALLTHROUGH
+#endif
+
 #include <sstream>
 #include <string>
 
@@ -320,6 +335,13 @@ __host__ __device__
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
+#if defined(__SYCL_DEVICE_ONLY__)
+extern SYCL_EXTERNAL void __assert_fail(
+    const char* expr,
+    const char* file,
+    unsigned int line,
+    const char* func);
+#else // __SYCL_DEVICE_ONLY__
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
     defined(__HIP_ARCH__) || defined(__HIP__)
 __host__ __device__
@@ -330,6 +352,7 @@ __host__ __device__
         const char* file,
         unsigned int line,
         const char* function) throw();
+#endif
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \

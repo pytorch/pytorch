@@ -264,7 +264,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       /*min=*/x_min,
       /*max=*/x_max,
       /*qmin=*/0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       /*qmax=*/255);
   float* weight_scales_data = w_scales.data_ptr<float>();
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
@@ -289,7 +288,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
     auto wt_numel = weight_contig.numel();
     for (int i = 0; i < wt_numel; ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
 

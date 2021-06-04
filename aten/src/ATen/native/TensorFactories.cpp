@@ -603,6 +603,21 @@ Tensor ones_like(
   return result.fill_(1.);
 }
 
+Tensor new_ones(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
+
+  return at::ones(size, self.options().merge_in(options));
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(const Scalar& s,
@@ -1125,7 +1140,6 @@ Tensor bartlett_window(
     window_length += 1;
   }
   auto window = native::arange(window_length, dtype, layout, device, pin_memory)
-                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                     .mul_(2. / static_cast<double>(window_length - 1));
   const int64_t first_half_size = ((window_length - 1) >> 1) + 1;
   window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2);
@@ -1167,7 +1181,6 @@ Tensor blackman_window(
   auto window =
       native::arange(window_length, dtype, layout, device, pin_memory)
           .mul_(c10::pi<double> / static_cast<double>(window_length - 1));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
@@ -1193,7 +1206,6 @@ Tensor hamming_window(
   return native::hamming_window(
       window_length,
       periodic,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       /*alpha=*/0.54,
       dtype,
       layout,
@@ -1210,7 +1222,6 @@ Tensor hamming_window(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   return native::hamming_window(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       window_length, periodic, alpha, /*beta=*/0.46, dtype, layout, device, pin_memory);
 }
 
@@ -1237,7 +1248,6 @@ Tensor hamming_window(
     window_length += 1;
   }
   auto window = native::arange(window_length, dtype, layout, device, pin_memory);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
@@ -1264,7 +1274,6 @@ Tensor hann_window(
 
   window_function_checks("hann_window", options, window_length);
   return native::hamming_window(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, dtype, layout, device, pin_memory);
 }
 
@@ -1278,7 +1287,6 @@ Tensor kaiser_window(int64_t window_length,
   return native::kaiser_window(
       window_length,
       /*periodic=*/true,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       /*beta=*/12.0,
       dtype,
       layout,
@@ -1291,7 +1299,6 @@ Tensor kaiser_window(int64_t window_length, bool periodic,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return native::kaiser_window(window_length, periodic, /*beta=*/12.0, dtype, layout, device, pin_memory);
 }
 
@@ -1376,7 +1383,7 @@ Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) 
   return at::detail::tensor_complex_backend(values, options);
 }
 
-Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size,
+Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::optional<int64_t> size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1393,7 +1400,7 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
         c10::StorageImpl::use_byte_size_t(),
         size_bytes,
         THMapAllocator::makeDataPtr(
-            filename.c_str(), flags, size_bytes, nullptr),
+            std::string(filename), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
     auto tensor = detail::make_tensor<at::TensorImpl>(

@@ -184,9 +184,10 @@ const Expr* IRMutator::mutate(const Load* v) {
   return new Load(dtype, buf_new, indices_new);
 }
 
-const Expr* IRMutator::mutate(const Buf* v) {
+const Expr* IRMutator::mutate(Buf* v) {
   const Var* var = v->base_handle();
-  const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
+  Var* var_new =
+      dynamic_cast<Var*>(const_cast<Expr*>(var->accept_mutator(this)));
   if (!var_new) {
     return nullptr;
   }
@@ -194,7 +195,7 @@ const Expr* IRMutator::mutate(const Buf* v) {
 
   std::vector<const Expr*> dims_old = v->dims();
   std::vector<const Expr*> dims_new(dims_old.size());
-  for (size_t i = 0; i < dims_old.size(); i++) {
+  for (const auto i : c10::irange(dims_old.size())) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
     any_change |= (dims_new[i] != dims_old[i]);
   }
@@ -203,7 +204,9 @@ const Expr* IRMutator::mutate(const Buf* v) {
     return (Expr*)v;
   }
 
-  return new Buf(var_new, dims_new, v->dtype());
+  v->set_base_handle(var_new);
+  v->set_dims(dims_new);
+  return v;
 }
 
 const Expr* IRMutator::mutate(const Broadcast* v) {

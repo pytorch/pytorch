@@ -48,7 +48,6 @@ TEST(BoundsInference, _1) {
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
@@ -60,12 +59,10 @@ TEST(BoundsInference, _1) {
   ASSERT_EQ(bounds_info.size(), 2);
   ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
   ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   verifyConstBounds(bounds_info.at(a.data())[0], {{0, 99}});
 
   ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
   ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
@@ -103,12 +100,9 @@ TEST(BoundsInference, _3) {
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle n(100);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {n + 10}, kFloat));
   Tensor* b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return a.load(i) * a.load(i + 10);
   });
   LoopNest l({b});
@@ -118,12 +112,10 @@ TEST(BoundsInference, _3) {
   ASSERT_EQ(bounds_info.size(), 2);
   ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
   ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   verifyConstBounds(bounds_info.at(a.data())[0], {{0, 109}});
 
   ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
   ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
@@ -138,9 +130,7 @@ TEST(BoundsInference, _4) {
   //   for x in 0..320:
   //     c[y,x] = a[y,x] * b[y,x]
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle W(320);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle H(200);
   Placeholder a(BufHandle("a", {H, W}, kFloat));
   Tensor* b = Compute(
@@ -161,17 +151,14 @@ TEST(BoundsInference, _4) {
 
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{0, 199}, {0, 319}});
 
     ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 199}, {0, 319}});
 
     ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(c->buf())[0], {{0, 199}, {0, 319}});
   }
   {
@@ -181,17 +168,14 @@ TEST(BoundsInference, _4) {
 
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {0, 319}});
 
     ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(b->buf())[0], {{-1, -1}, {0, 319}});
 
     ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(c->buf())[0], {{-1, -1}, {0, 319}});
   }
   {
@@ -227,7 +211,6 @@ TEST(BoundsInference, _5) {
   // for i_tail in 0..100%16:
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
@@ -235,14 +218,12 @@ TEST(BoundsInference, _5) {
   LoopNest l({b});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getLoopStmtsFor(b);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  l.splitWithTail(loops[0], 16, &outer, &inner, &tail);
+  l.splitWithTail(loops[0], 16, &inner, &tail);
+  For* outer = loops[0];
 
   {
     // Verify inferred bounds for the outer loop
@@ -251,12 +232,10 @@ TEST(BoundsInference, _5) {
 
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{0, 95}});
 
     ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 95}});
   }
   {
@@ -266,12 +245,10 @@ TEST(BoundsInference, _5) {
 
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{96, 99}});
 
     ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(b->buf())[0], {{96, 99}});
   }
 }
@@ -287,13 +264,9 @@ TEST(BoundsInference, _6) {
   //   for x in 0..32:
   //     c[y,x] = a[y+100,x+100] * b[y*2,x*5]
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle W(320);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle H(200);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle CW(32);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle CH(20);
   Placeholder a(BufHandle("a", {H, W}, kFloat));
   Tensor* b = Compute(
@@ -302,7 +275,6 @@ TEST(BoundsInference, _6) {
       });
   Tensor* c = Compute(
       "c", {{CH, "y"}, {CW, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return a.load(y + 100, x + 100) * b->load(y * 2, x * 5);
       });
   LoopNest l({c});
@@ -315,17 +287,14 @@ TEST(BoundsInference, _6) {
 
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{100, 119}, {100, 131}});
 
     ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 38}, {0, 155}});
 
     ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(c->buf())[0], {{0, 19}, {0, 31}});
   }
   {
@@ -335,17 +304,14 @@ TEST(BoundsInference, _6) {
 
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{-1, -1}, {100, 131}});
 
     ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(b->buf())[0], {{-1, -1}, {0, 155}});
 
     ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(c->buf())[0], {{-1, -1}, {0, 31}});
   }
   {
@@ -370,9 +336,7 @@ TEST(BoundsInference, _6) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, Adjacent) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle H(6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {20}, kFloat));
   Tensor* b =
       Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
@@ -389,12 +353,10 @@ TEST(BoundsInference, Adjacent) {
     // reads from a[0:5], writes to b[0:5]
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{0, 5}});
 
     ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 5}});
   }
   {
@@ -405,12 +367,10 @@ TEST(BoundsInference, Adjacent) {
     // reads from a[0+6:5+6], writes to c[0:5]
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{6, 11}});
 
     ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(c->buf())[0], {{0, 5}});
   }
   {
@@ -422,17 +382,14 @@ TEST(BoundsInference, Adjacent) {
     // merged.
     ASSERT_EQ(bounds_info.at(a.data()).size(), 1);
     ASSERT_EQ(bounds_info.at(a.data())[0].kind, kLoad);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(a.data())[0], {{0, 11}});
 
     ASSERT_EQ(bounds_info.at(b->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(b->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 5}});
 
     ASSERT_EQ(bounds_info.at(c->buf()).size(), 1);
     ASSERT_EQ(bounds_info.at(c->buf())[0].kind, kStore);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bounds_info.at(c->buf())[0], {{0, 5}});
   }
 }
@@ -440,24 +397,13 @@ TEST(BoundsInference, Adjacent) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, MultipleTopLoopLoad) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {100}, kFloat));
   Tensor* b =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("b", {{64, "x"}}, [&](const VarHandle& x) { return a.load(x); });
   Tensor* c = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "c",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{32, "x"}},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      [&](const VarHandle& x) { return a.load(x + 10); });
+      "c", {{32, "x"}}, [&](const VarHandle& x) { return a.load(x + 10); });
   Tensor* d = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "d",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{96, "x"}},
-      [&](const VarHandle& x) { return a.load(x + 2); });
+      "d", {{96, "x"}}, [&](const VarHandle& x) { return a.load(x + 2); });
   LoopNest l({b, c, d});
 
   auto bounds_info = inferBounds(l.root_stmt());
@@ -475,7 +421,6 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
     // start: Min of the 3 load bounds = Min of loop starts + offset = 0+0 (b).
     // stop: Max of the 3 load bounds = Max of loop stops + offset - 1 =
     //       96 + 2 - 1 (d).
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bound, {{0, 97}});
   }
 
@@ -486,7 +431,6 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
     auto bound = bounds[0];
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
     // Just the loop extents for b.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bound, {{0, 63}});
   }
   {
@@ -495,7 +439,6 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
     auto bound = bounds[0];
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
     // Just the loop extents for c.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bound, {{0, 31}});
   }
   {
@@ -504,7 +447,6 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
     auto bound = bounds[0];
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
     // Just the loop extents for d.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bound, {{0, 95}});
   }
 }
@@ -512,24 +454,17 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, MultipleTopLoopStore) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("a", {100}, kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("b", {100}, kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("c", {100}, kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle d("d", {100}, kFloat);
   VarHandle x("x", kInt);
 
   // Same as above but the offsets are on the Store now.
   // Can't do this through ComputeAPI without transforms we don't have yet.
   Stmt* stmt = Block::make(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {For::make(x, 0, 64, Store::make(b, {x}, Load::make(a, {x}))),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        For::make(x, 0, 32, Store::make(c, {x + 10}, Load::make(a, {x}))),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        For::make(x, 0, 96, Store::make(d, {x + 2}, Load::make(a, {x})))});
 
   auto bounds_info = inferBounds(stmt);
@@ -544,7 +479,6 @@ TEST(BoundsInference, MultipleTopLoopStore) {
     auto bound = bounds[0];
     ASSERT_EQ(bound.kind, TensorAccessKind::kLoad);
     // Bounds: there are no offsets, so this is just the max loop bounds.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bound, {{0, 95}});
   }
 
@@ -556,7 +490,6 @@ TEST(BoundsInference, MultipleTopLoopStore) {
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
     // This should be equivalent to {offset, extent + offset} for the b loop.
     // b loop has no offset, so just the loop extents.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bound, {{0, 63}});
   }
   {
@@ -566,7 +499,6 @@ TEST(BoundsInference, MultipleTopLoopStore) {
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
     // This should be equivalent to {offset, extent + offset} for the c loop.
     // Offset is 10, extent is 32-1.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bound, {{10, 41}});
   }
   {
@@ -576,7 +508,6 @@ TEST(BoundsInference, MultipleTopLoopStore) {
     ASSERT_EQ(bound.kind, TensorAccessKind::kStore);
     // This should be equivalent to {offset, extent + offset} for the d loop.
     // Offset is 2, extent is 96-1.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     verifyConstBounds(bound, {{2, 97}});
   }
 }
@@ -586,27 +517,15 @@ TEST(BoundsInference, CacheReads) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 30, j + 3);
       });
   Tensor* C = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "C",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{20, "i"}, {10, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
@@ -665,7 +584,6 @@ TEST(BoundsInference, Flattened) {
   KernelScope kernel_scope;
   Tensor* b = Compute(
       "b",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{3, "z"}, {4, "y"}, {5, "x"}},
       [&](const VarHandle& z, const VarHandle& y, const VarHandle& x) {
         return x * y + z;
@@ -692,11 +610,8 @@ TEST(BoundsInference, Flattened) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazards) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a("A", {5}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b("B", {5}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -714,7 +629,6 @@ TEST(BoundsInference, GetPotentialHazards) {
     Store* store1 = Store::make(a, {0}, Load::make(b, {0}));
     Store* store2 = Store::make(b, {0}, 3);
     Store* store3 = Store::make(a, {0}, Load::make(b, {0}));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Store* store4 = Store::make(c, {0}, 5);
     Stmt* stmt = Block::make({store1, store2, store3, store4});
 
@@ -751,17 +665,13 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return (i + 1) * (j + 1); });
+      "B", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return (i + 1) * (j + 1);
+      });
 
   LoopNest l({A, B});
 
@@ -784,18 +694,11 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
   Tensor* B = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{64, "i"}, {64, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B", {{64, "i"}, {64, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i, j) + 5;
       });
 
@@ -819,20 +722,19 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {{64, "i"}, {64, "j"}},
-      [](const VarHandle& i, const VarHandle& j) { return i * j; });
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *outer, *inner, *tail;
+  For *inner, *tail;
 
   // Splitting with tail by something offset creates a tail which also writes to
   // A.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  l.splitWithTail(l.getLoopStmtsFor(A)[0], 5, &outer, &inner, &tail);
+  For* outer = l.getLoopStmtsFor(A)[0];
+  // `outer` loop get transformed to the outer loop after splitting.
+  l.splitWithTail(outer, 5, &inner, &tail);
 
   using namespace analysis;
 
@@ -854,14 +756,11 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
   //   for (int k = 10; k < 100; k++) {
   //     A[k-1] = 20 * k;
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {200}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(k, 10, 100, Store::make(a_buf, {k - 1}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
 
@@ -882,13 +781,10 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
   //   for (int k = 10; k < 100; k++) {
   //     A[k] = 20 * k;
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {200}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forK = For::make(k, 10, 100, Store::make(a_buf, {k}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
 
@@ -909,16 +805,12 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
   //   for (int k = 10; k < 100; k++) {
   //     B[k] = A[k];
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {200}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {200}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(k, 10, 100, Store::make(b_buf, {k}, Load::make(a_buf, {k})));
   auto par = Block::make({forJ, forK});
 
@@ -939,14 +831,11 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
   //   for (int k = 10; k < 100; k++) {
   //     A[k+100] = 20 * k;
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {200}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(k, 10, 100, Store::make(a_buf, {k + 100}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
 
@@ -971,26 +860,18 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
   //       A[m+1,n] = m + n * 100;
   //     }
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20, 100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20, 50}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeA1 = Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, storeA1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, forJ);
   auto storeA2 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Store::make(a_buf, {m + 1, n}, Add::make(m, Mul::make(n, 100)));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forN = For::make(n, 0, 50, storeA2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forM = For::make(m, 0, 20, forN);
   auto par = Block::make({forI, forM});
 
@@ -1021,26 +902,18 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
   //       A[m+20,n+100] = m + n * 100;
   //     }
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20, 100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20, 50}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeA1 = Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, storeA1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, forJ);
   auto storeA2 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Store::make(a_buf, {m + 20, n + 100}, Add::make(m, Mul::make(n, 100)));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forN = For::make(n, 0, 50, storeA2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forM = For::make(m, 0, 20, forN);
   auto par = Block::make({forI, forM});
 
@@ -1071,25 +944,17 @@ TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
   //       B[m,n] = m + n * 100;
   //     }
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20, 100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20, 50}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeA1 = Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, storeA1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, forJ);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeA2 = Store::make(b_buf, {m, n}, Add::make(m, Mul::make(n, 100)));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forN = For::make(n, 0, 50, storeA2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forM = For::make(m, 0, 20, forN);
   auto par = Block::make({forI, forM});
 
@@ -1116,25 +981,17 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
   //   for (int k = 0; k < 100; k++) {
   //     B[k] = 20 * A[99-k];
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(
       k,
       0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          b_buf,
-          {k},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto par = Block::make({forJ, forK});
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
@@ -1154,24 +1011,16 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
   auto forK = For::make(
       k,
       0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          b_buf,
-          {k},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto par = Block::make({forK, forJ});
 
@@ -1192,33 +1041,21 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
   //   for (int j = 10; j < 100; j++) {
   //     C[j] = 10 * A[j];
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c_buf("C", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
   auto forK = For::make(
       k,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          b_buf,
-          {k},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto forJ = For::make(
       j,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Store::make(c_buf, {j}, Mul::make(10, Load::make(a_buf, {j}))));
   auto par = Block::make({forK, forJ});
 
@@ -1240,34 +1077,19 @@ TEST(BoundsInference, IsOverlapping) {
   //     A[i + 50] = i * 50;          // storeA2
   //     A[i + 150] = i * 150;        // storeA3
   //   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {300}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle c_buf("C", {100}, kInt);
   VarHandle i("i", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeA1 = Store::make(a_buf, {i}, i * 10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto loadA1 = Load::make(a_buf, {ExprHandle(99) - i});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeB = Store::make(b_buf, {i}, Mul::make(loadA1, 20));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto loadA2 = Load::make(a_buf, {i + 100});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeC = Store::make(c_buf, {i}, Mul::make(loadA2, 10));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeA2 = Store::make(a_buf, {i + 50}, i * 50);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeA3 = Store::make(a_buf, {i + 150}, i * 150);
   auto forI = For::make(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      i,
-      0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      100,
-      Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
+      i, 0, 100, Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
   tensorexpr::analysis::MemDependencyChecker analyzer;
   forI->accept(&analyzer);
   ASSERT_TRUE(

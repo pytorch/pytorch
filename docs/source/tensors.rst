@@ -322,6 +322,7 @@ Tensor class reference
     Tensor.divide_
     Tensor.dot
     Tensor.double
+    Tensor.dsplit
     Tensor.eig
     Tensor.element_size
     Tensor.eq
@@ -378,6 +379,7 @@ Tensor class reference
     Tensor.hardshrink
     Tensor.heaviside
     Tensor.histc
+    Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_
     Tensor.i0
@@ -409,6 +411,7 @@ Tensor class reference
     Tensor.is_contiguous
     Tensor.is_complex
     Tensor.is_floating_point
+    Tensor.is_inference
     Tensor.is_leaf
     Tensor.is_pinned
     Tensor.is_set_to
@@ -662,6 +665,7 @@ Tensor class reference
     Tensor.vdot
     Tensor.view
     Tensor.view_as
+    Tensor.vsplit
     Tensor.where
     Tensor.xlogy
     Tensor.xlogy_
