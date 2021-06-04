@@ -2046,18 +2046,18 @@ class TestBinaryUfuncs(TestCase):
 
     @onlyCUDA
     def test_heaviside_cross_device(self, device):
-        x = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        x = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
         y = torch.tensor(0)
         result = torch.heaviside(x, y)
-        expect = torch.tensor([0, 1, 0, 1, 0, 1], device='cuda')
+        expect = torch.tensor([0, 1, 0, 1, 0, 1], device=device)
         self.assertEqual(result, expect)
 
         result = torch.heaviside(y, x)
-        expect = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        expect = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
         self.assertEqual(result, expect)
 
         x = torch.tensor([-9, 5, 0, 6, -2, 2])
-        y = torch.tensor(0, device='cuda')
+        y = torch.tensor(0, device=device)
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             torch.heaviside(x, y)
 
@@ -2761,17 +2761,21 @@ tensor_binary_ops = [
     '__add__', '__radd__', '__iadd__',
     '__sub__', '__rsub__', '__isub__',
     '__mul__', '__rmul__', '__imul__',
-    '__matmul__', '__rmatmul__', '__imatmul__',
+    '__matmul__', '__rmatmul__',
     '__truediv__', '__rtruediv__', '__itruediv__',
     '__floordiv__', '__rfloordiv__', '__ifloordiv__',
-    '__mod__', '__rmod__', '__imod__',
-    '__divmod__', '__rdivmod__', '__idivmod__',
+    '__mod__', '__imod__',
     '__pow__', '__rpow__', '__ipow__',
-    '__lshift__', '__rlshift__', '__ilshift__',
-    '__rshift__', '__rrshift__', '__irshift__',
-    '__and__', '__rand__', '__iand__',
-    '__xor__', '__rxor__', '__ixor__',
-    '__or__', '__ror__', '__ior__',
+    '__lshift__', '__ilshift__',
+    '__rshift__', '__irshift__',
+    '__and__', '__iand__',
+    '__xor__', '__ixor__',
+    '__or__', '__ior__',
+
+    # Unsupported operators
+    # '__rmod__', '__imatmul__',
+    # '__divmod__', '__rdivmod__', '__idivmod__',
+    # '__rand__', '__ror__', '__rxor__', '__rlshift__', '__rrshift__',
 ]
 
 # Test that binary math operations return NotImplemented for unknown types.
@@ -2795,7 +2799,7 @@ def generate_not_implemented_tests(cls):
             return t.clamp(min=(_number(_div_min, 1, dtype)))
         return t
 
-    for op in tensor_binary_ops:
+    def create_test_func(op):
         @dtypes(*_types)
         def test(self, device, dtype):
             # Generate the inputs
@@ -2804,12 +2808,14 @@ def generate_not_implemented_tests(cls):
             # Runs the tensor op on the device
             result = getattr(tensor, op)(UnknownType())
             self.assertEqual(result, NotImplemented)
+        return test
 
+    for op in tensor_binary_ops:
         test_name = "test_{}_not_implemented".format(op)
         assert not hasattr(cls, test_name), "{0} already in {1}".format(
             test_name, cls.__name__)
 
-        setattr(cls, test_name, test)
+        setattr(cls, test_name, create_test_func(op))
 
 
 generate_not_implemented_tests(TestBinaryUfuncs)

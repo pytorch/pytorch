@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 model_dump: a one-stop shop for TorchScript model inspection.
 

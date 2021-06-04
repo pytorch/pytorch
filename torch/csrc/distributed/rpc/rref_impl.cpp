@@ -169,7 +169,7 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // ScriptRRefFetchCall message always carries autograd context id even if
   // the message itself does not contain any tensor, because the response would
   // potentially contain tensors.
-  Message msgToSend;
+  c10::intrusive_ptr<Message> msgToSend;
 
   if (isPyObj()) {
     msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
@@ -246,7 +246,7 @@ OwnerRRef::OwnerRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
     TypePtr type,
-    std::vector<c10::DeviceIndex> devices)
+    std::vector<c10::Device> devices)
     : OwnerRRef(ownerId, rrefId, type, /* value */ {}, std::move(devices)) {}
 
 OwnerRRef::OwnerRRef(
@@ -254,15 +254,10 @@ OwnerRRef::OwnerRRef(
     const RRefId& rrefId,
     TypePtr type,
     c10::optional<IValue> value,
-    std::vector<c10::DeviceIndex> devices)
+    std::vector<c10::Device> devices)
     : RRef(ownerId, rrefId, type) {
-  std::vector<c10::Device> fullDevices;
-  fullDevices.reserve(devices.size());
-  for (const c10::DeviceIndex& idx : devices) {
-    fullDevices.emplace_back(c10::kCUDA, idx);
-  }
-  future_ = std::make_shared<JitFuture>(
-      at::AnyClassType::get(), std::move(fullDevices));
+  future_ = c10::make_intrusive<JitFuture>(
+      at::AnyClassType::get(), std::move(devices));
 
   if (value.has_value()) {
     future_->markCompleted(value.value());
@@ -288,7 +283,7 @@ bool OwnerRRef::hasValue() const {
   return future_->completed();
 }
 
-std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+c10::intrusive_ptr<JitFuture> OwnerRRef::getFuture() {
   return future_;
 }
 
@@ -311,7 +306,7 @@ void OwnerRRef::recordAllStreams(
   }
 }
 
-void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
+void OwnerRRef::blockAllStreams(const std::shared_ptr<LazyStreamContext>& ctx) {
   if (ctx) {
     for (c10::Event& event : events_) {
       event.block(ctx->getStream(event.device()));

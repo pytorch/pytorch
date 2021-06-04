@@ -142,7 +142,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, int64_t> tensors
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, int64_t> tensors) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
@@ -154,7 +153,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor,
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, at::Tensor, int64_t> tensors) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
@@ -178,7 +176,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
