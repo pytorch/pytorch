@@ -37,6 +37,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         fn: Function called over each item
         fn_args: Positional arguments for `fn`
         fn_kwargs: Keyword arguments for `fn`
+        nesting_level: Determines which level the fn gets applied to
     """
     datapipe: IterDataPipe
     fn: Callable
@@ -46,6 +47,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
                  fn: Callable = default_fn,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
+                 nesting_level: int = 0,
                  ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -56,10 +58,28 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         self.fn = fn  # type: ignore[assignment]
         self.args = () if fn_args is None else fn_args
         self.kwargs = {} if fn_kwargs is None else fn_kwargs
+        if nesting_level < -1:
+            raise Exception("nesting_level must be -1 or >= 0.")
+        self.nesting_level = nesting_level
+
+    def _apply(self, data, nesting_level, fn, args, kwargs):
+        if nesting_level == 0:
+            return fn(data, *args, **kwargs)
+        elif nesting_level > 0:
+            if not isinstance(data, list):
+                raise Exception("nesting_level exceeds data pipe depth.")
+            result = [self._apply(i, nesting_level - 1, fn, args, kwargs) for i in data]
+            return result
+        else:
+            if isinstance(data, list):
+                result = [self._apply(i, nesting_level, fn, args, kwargs) for i in data]
+                return result
+            else:
+                return fn(data, *args, **kwargs)
 
     def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
-            yield self.fn(data, *self.args, **self.kwargs)
+            yield self._apply(data, self.nesting_level, self.fn, self.args, self.kwargs)
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
@@ -120,16 +140,17 @@ class CollateIterDataPipe(MapIterDataPipe):
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
     """
+
     def __init__(self,
                  datapipe: IterDataPipe,
                  collate_fn: Callable = _utils.collate.default_collate,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
                  ) -> None:
-        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
+        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs, batch_level=True)
 
 
-@functional_datapipe('transforms')
+@functional_datapipe('legacy_transforms')
 class TransformsIterDataPipe(MapIterDataPipe):
     r""" :class:`TransformsIterDataPipe`.
 
