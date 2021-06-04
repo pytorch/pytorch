@@ -78,6 +78,8 @@ class BackgroundThread {
   virtual ~BackgroundThread() = 0;
 
  protected:
+  void dispose();
+
   TCPSocket storeListenSocket_;
   std::thread daemonThread_{};
   std::vector<TCPSocket> sockets_{};
@@ -106,7 +108,13 @@ BackgroundThread::BackgroundThread(TCPSocket&& storeListenSocket)
   initStopSignal();
 }
 
-BackgroundThread::~BackgroundThread() {
+BackgroundThread::~BackgroundThread() = default;
+
+// WARNING:
+// Since we rely on the subclass for the daemon thread clean-up, we cannot
+// destruct our member variables in the destructor. The subclass must call
+// dispose() in its own destructor.
+void BackgroundThread::dispose() {
   // Stop the run
   stop();
   // Join the thread
@@ -192,6 +200,8 @@ class TCPStoreMasterDaemon : public BackgroundThread {
  public:
   explicit TCPStoreMasterDaemon(TCPSocket&& storeListenSocket);
 
+  ~TCPStoreMasterDaemon() override;
+
  private:
   void run();
   void queryFds(std::vector<struct pollfd>& fds);
@@ -232,6 +242,10 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 TCPStoreMasterDaemon::TCPStoreMasterDaemon(TCPSocket&& storeListenSocket)
     : BackgroundThread{std::move(storeListenSocket)} {
   daemonThread_ = std::thread{&TCPStoreMasterDaemon::run, this};
+}
+
+TCPStoreMasterDaemon::~TCPStoreMasterDaemon() {
+  dispose();
 }
 
 void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
@@ -611,6 +625,7 @@ void TCPStoreMasterDaemon::run() {
 class TCPStoreWorkerDaemon : public BackgroundThread {
  public:
   explicit TCPStoreWorkerDaemon(TCPSocket&& listenSocket);
+  ~TCPStoreWorkerDaemon() override;
   // Set the callback to run key change
   void setCallback(std::string key, WatchKeyCallback cb);
   void waitForCallbackRegistration() {
@@ -643,6 +658,10 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
 TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(TCPSocket&& listenSocket)
     : BackgroundThread{std::move(listenSocket)} {
   daemonThread_ = std::thread{&TCPStoreWorkerDaemon::run, this};
+}
+
+TCPStoreWorkerDaemon::~TCPStoreWorkerDaemon() {
+  dispose();
 }
 
 void TCPStoreWorkerDaemon::setCallback(
