@@ -634,9 +634,6 @@ std::vector<Val*> Fusion::getTerminatingOutputs() {
 }
 
 void Fusion::aliasOutputToInput(Val* output, Val* input) {
-  TORCH_INTERNAL_ASSERT(
-      hasInput(input) && hasOutput(output),
-      "alias only allows from output to input");
   io_alias_[output] = input;
 }
 

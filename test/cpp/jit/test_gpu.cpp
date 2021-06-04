@@ -15035,6 +15035,60 @@ TEST(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
       lparams);
 }
 
+TEST(NVFuserTest, FusionSegmentIoAlias_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  TensorView* tv1 = makeSymbolicTensor(1);
+  TensorView* tv2 = makeSymbolicTensor(2);
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  fusion->addInput(tv2);
+
+  TensorView* tv3 = add(tv0, new Double(1)); // Group 0
+  TensorView* tv4 =
+      max(tv3, {0}); // Group 0 (use max instead to avoid numerical issues)
+  TensorView* tv5 = add(tv4, tv1); //  Group 0 (Non Broadcast after reduce,
+                                   //  keeps normalization scheduler away)
+  TensorView* tv6 = add(tv5, tv2); //  Group 1 (Broadcast after reduce)
+
+  fusion->addOutput(tv6);
+  // Note: test alias;
+  fusion->aliasOutputToInput(tv6, tv0);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({128, 65}, options);
+  at::Tensor t1 = at::randn({65}, options);
+  at::Tensor t2 = at::randn({128, 65}, options);
+
+  auto t3 = t0.add(1.0);
+  auto t4 = std::get<0>(at::max(t3, 0));
+  auto t5 = t4.add(t1);
+  auto t6 = t5.add(t2);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto outputs = executor_cache.runFusionWithInputs({t0, t1, t2});
+
+  // validating aliasing
+  TORCH_INTERNAL_ASSERT(outputs[0].data_ptr() == t0.data_ptr());
+
+  TORCH_CHECK(
+      executor_cache.getMostRecentKernelRuntime()->isSegmented(),
+      "segmentation didn't happen");
+  TORCH_CHECK(
+      executor_cache.getMostRecentKernelRuntime()
+              ->fusionSegments()
+              ->groups()
+              .size() == 2,
+      "segmentation didn't happen as expected");
+
+  testValidate(
+      executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionWelford1Output_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();

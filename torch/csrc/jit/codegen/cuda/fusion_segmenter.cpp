@@ -187,6 +187,21 @@ void SegmentedGroup::finalize() {
   // Outputs
   insertUniquePredicated(
       output_vals, consumer_edges, [](Val* v) { return !v->isFusionOutput(); });
+
+  // alias aware segmentation. we add inputs that are aliased by output
+  // generated in this SegmentedGroup
+  for (auto output : output_vals) {
+    if (auto aliased_input = segmented_fusion_->findAlias(output)) {
+      // aliasing currently only supported as output to input
+      TORCH_INTERNAL_ASSERT(
+          aliased_input->isFusionInput(),
+          "aliased input is not found in the complete fusion");
+      if (!input_set.count(aliased_input)) {
+        input_set.insert(aliased_input);
+        input_vals.push_back(aliased_input);
+      }
+    }
+  }
 }
 
 std::ostream& operator<<(std::ostream& os, const SegmentedGroup* group) {

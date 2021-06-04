@@ -278,6 +278,14 @@ class TORCH_CUDA_CU_API SegmentedFusion {
     return complete_fusion_->outputs();
   }
 
+  Val* findAlias(Val* val) const {
+    Val* alias_val = nullptr;
+    if (complete_fusion_->io_alias_.count(val) != 0) {
+      alias_val = complete_fusion_->io_alias_[val];
+    }
+    return alias_val;
+  }
+
   //! Make a clone of the group and convert to fusion
   std::unique_ptr<Fusion> makeFusion(SegmentedGroup* sg);
 
