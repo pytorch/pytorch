@@ -30,7 +30,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
 
   // TODO: we can avoid this guard by moving operations

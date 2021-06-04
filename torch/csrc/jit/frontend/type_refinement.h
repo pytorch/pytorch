@@ -11,12 +11,9 @@ namespace jit {
 struct Refinement {
   Refinement(std::string identifier, TypePtr type)
       : identifier_(std::move(identifier)), type_(std::move(type)) {}
-  const std::string& identifier() const {
-    return identifier_;
-  }
-  TypePtr type() const {
-    return type_;
-  }
+
+  const std::string& identifier() const;
+  TypePtr type() const;
 
  private:
   std::string identifier_;
@@ -39,66 +36,16 @@ struct RefinementSet {
             Refinements({std::move(single_true)}),
             Refinements({std::move(single_false)})) {}
   RefinementSet() = default; // empty
-  RefinementSet And(const RefinementSet& rhs) const {
-    // if the result of an AND is true, both a & b had to be true,
-    // so we take the union of a.true_refinements and b.true_refinements.
-    // if the result is false, either a or b could have been false,
-    // so we take their intersection.
-    return RefinementSet(
-        unionSet(true_refinements_, rhs.true_refinements_),
-        intersectSet(false_refinements_, rhs.false_refinements_));
-  }
-  RefinementSet Or(const RefinementSet& rhs) const {
-    // if the result of an OR is true, either a & b could have been true,
-    // so we take the intersection of a.true_refinements & b.true_refinements.
-    // if the result is false, both a and b had to be false,
-    // so we take their union.
-    return RefinementSet(
-        intersectSet(true_refinements_, rhs.true_refinements_),
-        unionSet(false_refinements_, rhs.false_refinements_));
-  }
 
-  RefinementSet Not() const {
-    return RefinementSet(false_refinements_, true_refinements_);
-  }
-  const std::vector<Refinement> activeRefinements() const {
-    return true_refinements_;
-  }
+  RefinementSet And(const RefinementSet& rhs) const;
+  RefinementSet Or(const RefinementSet& rhs) const;
+  RefinementSet Not() const;
+  const std::vector<Refinement> activeRefinements() const;
 
  private:
-  static bool sameVar(const Refinement& a, const Refinement& b) {
-    return a.identifier() == b.identifier();
-  }
-  static Refinements unionSet(const Refinements& a, const Refinements& b) {
-    Refinements result = a;
-    for (const Refinement& r : b) {
-      auto it =
-          std::find_if(result.begin(), result.end(), [&](const Refinement& e) {
-            return e.identifier() == r.identifier();
-          });
-      if (it == result.end()) {
-        result.push_back(r);
-      } else if (*it->type() != *r.type()) {
-        // we only keep refinements when they exactly match one
-        // refinement type, for instance, we do not attempt to refine:
-        // isinstance(x, float) and isinstance(x, int)
-        result.erase(it);
-      }
-    }
-    return result;
-  }
-  static Refinements intersectSet(const Refinements& a, const Refinements& b) {
-    Refinements result;
-    for (const Refinement& r : a) {
-      auto it = std::find_if(b.begin(), b.end(), [&](const Refinement& e) {
-        return e.identifier() == r.identifier();
-      });
-      if (it != b.end() && r.type() == it->type()) {
-        result.push_back(r);
-      }
-    }
-    return result;
-  }
+  static bool sameVar(const Refinement& a, const Refinement& b);
+  static Refinements unionSet(const Refinements& a, const Refinements& b);
+  static Refinements intersectSet(const Refinements& a, const Refinements& b);
 
   Refinements true_refinements_;
   Refinements false_refinements_;
@@ -120,15 +67,10 @@ struct CondValue {
       : value_(g.insertConstant(static_value, loc)),
         refinements_(std::move(refinements)),
         static_if_(static_value) {}
-  Value* value() const {
-    return value_;
-  }
-  const RefinementSet& refinements() const {
-    return refinements_;
-  }
-  c10::optional<bool> staticIf() const {
-    return static_if_;
-  }
+
+  Value* value() const;
+  const RefinementSet& refinements() const;
+  c10::optional<bool> staticIf() const;
 
  private:
   Value* value_;

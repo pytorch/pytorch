@@ -1253,13 +1253,13 @@ void FuseTensorExprs(
   }
 
   // Get rid of dead code so that we don't waste effort fusing it.
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
 
   TensorExprFuser fuser(graph, min_group_size, disable_shape_checks);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
 
   GRAPH_DUMP("After TExprFuser: ", graph);
 }

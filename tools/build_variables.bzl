@@ -153,6 +153,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/frontend/versioned_symbols.cpp",
     "torch/csrc/jit/frontend/canonicalize_modified_loop.cpp",
     "torch/csrc/jit/frontend/convert_to_ssa.cpp",
+    "torch/csrc/jit/frontend/environment.cpp",
     "torch/csrc/jit/frontend/exit_transforms.cpp",
     "torch/csrc/jit/frontend/inline_loop_condition.cpp",
     "torch/csrc/jit/frontend/ir_emitter.cpp",

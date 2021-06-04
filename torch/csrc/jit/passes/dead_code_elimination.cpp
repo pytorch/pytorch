@@ -296,7 +296,7 @@ class DeadCodeEliminator {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
 
-      // onnx export calls EliminateDeadCode but sometimes passes invalid
+      // onnx export calls eliminateDeadCode but sometimes passes invalid
       // aten operators. So we call maybeSchema so we handle the cases when
       // there is no valid schema for a node
       auto schema = node->maybeSchema();
@@ -426,22 +426,22 @@ class DeadCodeEliminator {
       [](const std::unordered_set<const Value*>&) {};
 };
 
-void EliminateDeadCode(
+void eliminateDeadCode(
     const std::shared_ptr<Graph>& graph,
     DCESideEffectPolicy sideEffectPolicy) {
   DeadCodeEliminator(graph, sideEffectPolicy)
       .run(graph->block(), /*recurse=*/true);
-  GRAPH_DUMP("After EliminateDeadCode: ", graph);
+  GRAPH_DUMP("After eliminateDeadCode: ", graph);
 }
 
-void EliminateDeadCode(
+void eliminateDeadCode(
     Block* block,
     bool recurse,
     DCESideEffectPolicy sideEffectPolicy) {
   DeadCodeEliminator(sideEffectPolicy).run(block, recurse);
 }
 
-void EliminateDeadCode(
+void eliminateDeadCode(
     Block* block,
     std::function<void(const std::unordered_set<const Value*>&)> cb,
     DCESideEffectPolicy sideEffectPolicy) {
