@@ -1057,7 +1057,8 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
     }
   }
 
-  auto vectorize_shift = loops.back()->vectorize_shift();
+  auto vectorize_shift =
+      loops.empty() ? nullptr : loops.back()->vectorize_shift();
 
   // Global striding
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
@@ -1523,7 +1524,8 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
     }
   }
 
-  auto vectorize_shift = loops.back()->vectorize_shift();
+  auto vectorize_shift =
+      loops.empty() ? nullptr : loops.back()->vectorize_shift();
 
   // Global striding
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());

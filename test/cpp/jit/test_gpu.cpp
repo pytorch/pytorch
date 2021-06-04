@@ -15292,6 +15292,55 @@ TEST(NVFuserTest, TestSegmentIslands_CUDA) {
   fusion_executor_cache.runFusionWithInputs({t0, t1});
 }
 
+TEST(NVFuserTest, FusionSegfaultReduction_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int batch = 2;
+  int c = 1;
+  int h = 1;
+  int w = 1;
+  int numDims = 4;
+
+  auto input = makeConcreteTensor({-1, 1, 1, 1});
+  fusion.addInput(input);
+  auto bcast_bias = makeConcreteTensor({-1, 1, 1, 1});
+  fusion.addInput(bcast_bias);
+
+  std::vector<int64_t> at_sum_axes;
+  std::vector<int> outer_reduction_axes;
+  std::vector<bool> outer_broadcast_mask(numDims, false);
+  Val* N = new Double(1);
+  for (size_t axis = 0; axis < numDims; ++axis) {
+    if (axis != 1) {
+      outer_reduction_axes.push_back(axis);
+      at_sum_axes.push_back(axis);
+      outer_broadcast_mask[axis] = true;
+      N = mul(N, input->domain()->domain()[axis]->extent());
+    }
+  }
+
+  auto output0 = mul(input, bcast_bias);
+  fusion.addOutput(output0);
+  auto output1 = sum(output0, outer_reduction_axes);
+  fusion.addOutput(output1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input0 = at::randn({batch, c, h, w}, options);
+  at::Tensor input1 = at::randn({batch, c, h, w}, options);
+
+  auto at_output0 = input0.mul(input1);
+  auto at_output1 = at_output0.sum(at_sum_axes);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  std::vector<IValue> inputs = {input0, input1};
+  auto outputs = fec.runFusionWithInputs(inputs);
+
+  testValidate(
+      &fusion, outputs, inputs, {at_output0, at_output1}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
