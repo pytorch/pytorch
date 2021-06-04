@@ -147,7 +147,7 @@ class CollateIterDataPipe(MapIterDataPipe):
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
                  ) -> None:
-        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs, batch_level=True)
+        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
 
 @functional_datapipe('legacy_transforms')
