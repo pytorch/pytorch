@@ -1243,6 +1243,7 @@ class TestTEFuser(JitTestCase):
             torch.reciprocal,
             torch.neg,
             torch.relu,
+            F.relu6,
             torch.log,
             torch.log10,
             torch.log1p,
@@ -1261,6 +1262,7 @@ class TestTEFuser(JitTestCase):
             torch.atan,
             torch.tanh,
             F.hardtanh,
+            F.hardsigmoid,
             F.hardswish,
             torch.sqrt,
             torch.rsqrt,
@@ -1809,6 +1811,40 @@ class TestTEFuser(JitTestCase):
         z = 2
         script = self.checkScript(eager, (x, y, z))
 
+    def _test_fwd_bwd(self, fn):
+        x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
+        xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
+        script = torch.jit.script(fn)
+        for i in range(11):
+            y = fn(x)
+            g0 = torch.rand_like(y)
+            y.backward(g0)
+
+            ys = script(xs)
+            ys.backward(g0)
+
+            with torch.no_grad():
+                x -= 0.1 * x.grad
+                xs -= 0.1 * xs.grad
+                x.grad = None
+                xs.grad = None
+        torch.testing.assert_allclose(y, ys)
+
+    def test_relu_fwd_bwd(self):
+        def eager(x):
+            return torch.relu(x * 1.01)
+        self._test_fwd_bwd(eager)
+
+    def test_hardswish_fwd_bwd(self):
+        def eager(x):
+            return F.hardswish(x) * 1.01
+        self._test_fwd_bwd(eager)
+
+    def test_hardsigmoid_fwd_bwd(self):
+        def eager(x):
+            return F.hardsigmoid(x) * 1.01
+        self._test_fwd_bwd(eager)
+
     def test_dynamic_cat(self):
         with inline_fusion_groups():
             @torch.jit.script
@@ -1836,8 +1872,8 @@ works_list = [
     'add',
     'addcmul',
     'asin',
-    'atan2',
     'atan',
+    'atan2',
     'ceil',
     'clamp',
     'clamp.scalar',
@@ -1850,17 +1886,20 @@ works_list = [
     'erfc',
     'exp',
     'expand',
+    'expand_as',
     'expm1',
     'floor',
+    'fmod',
+    'fmod.autodiffed',
     'ge',
     'gt',
     'le',
     'lerp',
     'lgamma',
+    'log',
     'log10',
     'log1p',
     'log2',
-    'log',
     'lt',
     'masked_fill',
     'max.binary',
@@ -1871,11 +1910,17 @@ works_list = [
     'neg',
     'nn.functional.gelu',
     'nn.functional.hardshrink',
+    'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
     'nn.functional.hardtanh',
     'nn.functional.leaky_relu',
+    'nn.functional.relu6',
+    'permute',
     'pow',
     'reciprocal',
+    'remainder',
+    'remainder.autodiffed',
+    'reshape',
     'round',
     'rsqrt',
     'sigmoid',
@@ -1887,13 +1932,15 @@ works_list = [
     'tan',
     'tanh',
     'transpose',
+    'true_divide',
     'trunc',
     'unsqueeze',
+    'view',
+    'where',
 ]
 
 known_failures = [
     'matmul',
-    'permute',
     'frac',
     '__rmatmul__'
 ]
