@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from sys import version_info
 from tempfile import TemporaryDirectory
 from unittest import skipIf
 
@@ -98,6 +99,7 @@ class DirectoryReaderTest(PackageTestCase):
             self.assertTrue(dir_importer.zip_reader.has_record("package_a/__init__.py"))
             self.assertFalse(dir_importer.zip_reader.has_record("package_a"))
 
+    @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_resource_reader(self):
         """Tests DirectoryReader as the base for get_resource_reader."""
         filename = self.temp()
@@ -131,7 +133,7 @@ class DirectoryReaderTest(PackageTestCase):
             importer = PackageImporter(Path(temp_dir) / Path(filename).name)
             reader_one = importer.get_resource_reader("one")
 
-            # different behavior from still zipped archives
+            # Different behavior from still zipped archives
             resource_path = os.path.join(
                 Path(temp_dir), Path(filename).name, "one", "a.txt"
             )
@@ -168,6 +170,7 @@ class DirectoryReaderTest(PackageTestCase):
 
             self.assertIsNone(importer.get_resource_reader("nonexistent_package"))
 
+    @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_package_resource_access(self):
         """Packaged modules should be able to use the importlib.resources API to access
         resources saved in the package.
@@ -196,6 +199,7 @@ class DirectoryReaderTest(PackageTestCase):
                 "my sekrit plays",
             )
 
+    @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_importer_access(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
@@ -221,6 +225,7 @@ class DirectoryReaderTest(PackageTestCase):
             self.assertEqual(m.t, "my string")
             self.assertEqual(m.b, "my string".encode("utf-8"))
 
+    @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_resource_access_by_path(self):
         """
         Tests that packaged code can used importlib.resources.path.

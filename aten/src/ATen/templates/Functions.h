@@ -212,4 +212,8 @@ inline bool is_signed(const Tensor& tensor) {
   return tensor.is_signed();
 }
 
+inline bool is_inference(const Tensor& tensor) {
+  return tensor.is_inference();
+}
+
 }
