@@ -33,9 +33,9 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
         auto result = allreduce_fut.value();
         TORCH_INTERNAL_ASSERT(result.isTensorList(),
             "ProcessGroup::allreduce should return TensorList");
-        auto tensor = result.toTensorVector()[0];
-        tensor.copy_(tensor.to(torch::kFloat) / size);
-        return c10::IValue(tensor);
+        auto reduce_tensor = result.toTensorVector()[0];
+        reduce_tensor.copy_(reduce_tensor.to(torch::kFloat) / size);
+        return c10::IValue(reduce_tensor);
       };
 
   return allreduce_fut->then(
