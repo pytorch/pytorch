@@ -815,7 +815,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
             // to make sure that we fetch the correct value from `to_here()`
             // call.
             futureResponseMessage =
-                cb_->operator()(*requestMessage, std::move(ctx));
+                cb_->operator()(*requestMessage, ctx->getReservedStreams());
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 c10::make_intrusive<JitFuture>(at::AnyClassType::get());
