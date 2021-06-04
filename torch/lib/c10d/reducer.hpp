@@ -296,8 +296,8 @@ class Reducer {
     // Number of replicas to be marked done before this bucket is ready.
     size_t pending;
 
-    // Keep future work handle around DDP comm hook. If no hook is registered, a
-    // temporary vanilla allreduce hook will be used.
+    // Keep future work handle around DDP comm hook.
+    // If no hook is registered, a temporary vanilla allreduce hook will be used.
     c10::intrusive_ptr<torch::jit::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
