@@ -3,4 +3,6 @@ from .api import (
     DevicePlacementSpec,
     EnumerableShardingSpec,
     PlacementSpec,
+    ShardMetadata,
+    ShardingSpec,
 )

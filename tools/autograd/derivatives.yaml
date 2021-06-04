@@ -298,6 +298,7 @@
   self: maybe_multiply(grad, beta.conj())
   batch1: grad.bmm(batch2.transpose(1, 2).conj()) * alpha.conj()
   batch2: batch1.transpose(1, 2).conj().bmm(grad) * alpha.conj()
+  result: maybe_multiply(self_t, beta) + maybe_multiply(batch1_t.bmm(batch2_p), alpha) + maybe_multiply(batch1_p.bmm(batch2_t), alpha)
 
 - name: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
   self: zeros_like(grad)
@@ -312,19 +313,23 @@
 - name: bmm(Tensor self, Tensor mat2) -> Tensor
   self: grad.bmm(mat2.transpose(1, 2).conj())
   mat2: self.transpose(1, 2).conj().bmm(grad)
+  result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
 
 - name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
   self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
   mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
+  result: at::_bmm(self_t, mat2_p, deterministic) + at::_bmm(self_p, mat2_t, deterministic)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
+  result: cat_jvp(tensors, dim)
 
 - name: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
 
 - name: ceil(Tensor self) -> Tensor
   self: zeros_like(grad)
+  result: auto_element_wise
 
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
@@ -346,20 +351,25 @@
 
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
+  result: auto_element_wise
 
 - name: clamp_min(Tensor self, Scalar min) -> Tensor
   self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+  result: auto_element_wise
 
 - name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
   self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
   min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
+  result: where(self_p >= min_p, self_t, at::scalar_tensor(0., self_p.options())) + where(self_p < min_p, min_t, at::scalar_tensor(0., self_p.options()))
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+  result: auto_element_wise
 
 - name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
   self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
   max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
+  result: where(self_p <= max_p, self_t, at::scalar_tensor(0., self_p.options())) + where(self_p > max_p, max_t, at::scalar_tensor(0., self_p.options()))
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
@@ -370,27 +380,39 @@
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
   real: at::real(grad)
-  imag: at::imag(grad)
+  imag: at::imag(grad.resolve_conj())
+  result: at::complex(real_t, imag_t)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs, angle: polar_backward(grad, result)
 
-- name: _conj(Tensor self) -> Tensor
+- name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
   result: self_t.conj()
+
+- name: _conj_physical(Tensor self) -> Tensor
+  self: grad.conj_physical()
+  result: self_t.conj_physical()
+
+- name: conj_physical_(Tensor(a!) self) -> Tensor(a!)
+  self: grad.conj_physical()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
   other: zeros_like(other)
+  result: copysign_tensor_self_backward(self_t, self_p, result)
 
 - name: copysign.Scalar(Tensor self, Scalar other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: cos(Tensor self) -> Tensor
   self: grad * -self.sin().conj()
+  result: auto_element_wise
 
 - name: cosh(Tensor self) -> Tensor
   self: grad * self.sinh().conj()
+  result: auto_element_wise
 
 - name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   output_differentiability: [False]
@@ -401,15 +423,18 @@
 - name: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   self: other.conj().cross(grad, dim)
   other: grad.cross(self.conj(), dim)
+  result: "at::cross(self_t, other_p, dim) + at::cross(self_p, other_t, dim)"
 
 - name: logcumsumexp(Tensor self, int dim) -> Tensor
   self: logcumsumexp_backward(grad, self, result, dim)
 
 - name: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumprod_backward(grad.to(self.scalar_type()), self, dim, result)
+  result: "cumprod_jvp(self_t, self_p, result, dim).to(dtype.has_value() ? *dtype : self_p.scalar_type())"
 
 - name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumsum_backward(grad.to(self.scalar_type()), dim)
+  result: auto_linear
 
 - name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
   self: cummaxmin_backward(grad, self, indices, dim)
@@ -594,7 +619,16 @@
   other: grad * other / result
 
 - name: i0(Tensor self) -> Tensor
-  self: not_implemented("i0")
+  self: grad * at::special_i1(self)
+
+- name: special_i0e(Tensor self) -> Tensor
+  self: grad * (at::special_i1e(self) - self.sgn() * result)
+
+- name: special_i1(Tensor self) -> Tensor
+  self: i1_backward(grad, self, result)
+
+- name: special_i1e(Tensor self) -> Tensor
+  self: i1e_backward(grad, self, result)
 
 - name: igamma(Tensor self, Tensor other) -> Tensor
   self: 'not_implemented("igamma: input")'
@@ -1170,7 +1204,7 @@
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
 
-- name: one_hot(Tensor self, int num_classes=-1, ScalarType dtype=long) -> Tensor
+- name: one_hot(Tensor self, int num_classes=-1) -> Tensor
   self: non_differentiable
 
 - name: flip(Tensor self, int[] dims) -> Tensor
@@ -1279,12 +1313,16 @@
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
   output_differentiability: [False]
 
+# If the conj bit for self is set, this is effectively a fused conj() and view_as_real
+- name: _view_as_real_physical(Tensor(a) self) -> Tensor(a)
+  self: "self.is_conj() ? at::view_as_complex(grad.contiguous()) : at::view_as_complex(grad.contiguous()).conj()"
+
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
   result: at::view_as_real(self_t)
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous()) # [gx, gy]
+  self: at::view_as_real(grad.contiguous().resolve_conj()) # [gx, gy]
   result: at::view_as_complex(self_t)
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
@@ -1415,6 +1453,9 @@
 
 - name: silu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
+
+- name: mish(Tensor self) -> Tensor
+  self: "GradMode::is_enabled() ? infinitely_differentiable_mish_backward(grad, self) : mish_backward(grad, self)"
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, /* is_result */ false, self)
