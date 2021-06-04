@@ -43,8 +43,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct LazyStreamContext;
-
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -235,7 +233,7 @@ class TensorPipeAgent : public RpcAgent {
       std::function<void(
           const tensorpipe::Error&,
           c10::intrusive_ptr<Message>,
-          std::shared_ptr<LazyStreamContext>)>) noexcept;
+          std::vector<c10::Stream>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
@@ -437,7 +435,7 @@ class TensorPipeAgent : public RpcAgent {
   void markFutureAsComplete(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
       c10::intrusive_ptr<Message> message,
-      std::shared_ptr<LazyStreamContext> ctx);
+      std::vector<c10::Stream> streams);
   void markFutureWithError(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
       std::string errorMsg);
