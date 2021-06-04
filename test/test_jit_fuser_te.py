@@ -1828,15 +1828,11 @@ class TestTEFuser(JitTestCase):
                 repro(xs, ys, zs)
 
     def test_scalar_only_inputs(self):
-        def eager(c):
+        def eager(b: float):
             a = torch.ones(1)
-            b = 2.0
-            if torch.all(c == 0.0):
-                b = 1.0
-            return a * b + 3.0
+            return a * b
 
-        c = torch.ones(1)
-        script = self.checkScript(eager, c)
+        script = self.checkScript(eager, (1.0,))
 
 
 works_list = [
