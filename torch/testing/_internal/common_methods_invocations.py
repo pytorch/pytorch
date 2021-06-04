@@ -2324,7 +2324,7 @@ class ShapeFuncInfo(OpInfo):
         self.ref = ref
 
 def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False):
-    tensors = [make_tensor((N, N), device, dtype, noncontiguous=noncontiguous) for i in range(N)]
+    tensors = [make_tensor((N - i, N - i), device, dtype, noncontiguous=noncontiguous) for i in range(N)]
     return tensors
 
 
