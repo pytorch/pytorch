@@ -12,12 +12,12 @@ class FilterIterDataPipe(MapIterDataPipe):
 
     Iterable DataPipe to filter elements from datapipe according to filter_fn.
     args:
-        datapipe: Iterable DataPipe being filterd
+        datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
         fn_args: Positional arguments for `filter_fn`
         fn_kwargs: Keyword arguments for `filter_fn`
-        drop_empty_batches:
-        nesting_level:
+        drop_empty_batches: By default, drops batch if it is empty after filtering instead of keeping an empty list
+        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0)
     """
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
@@ -45,7 +45,9 @@ class FilterIterDataPipe(MapIterDataPipe):
     def __iter__(self) -> Iterator[T_co]:
         res: bool
         for data in self.datapipe:
-            if self.nesting_level == 0 or not isinstance(data, list):
+            if self.nesting_level > 0 and not isinstance(data, list):
+                raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
+            elif self.nesting_level == 0 or not isinstance(data, list):
                 res = self.fn(data, *self.args, **self.kwargs)
                 if not isinstance(res, bool):
                     raise ValueError("Boolean output is required for "
@@ -53,7 +55,7 @@ class FilterIterDataPipe(MapIterDataPipe):
                 if res:
                     yield data
             else:
-                mask = self._apply(data, self.nesting_level, self.fn, self.args, self.kwargs)
+                mask = self._apply(data, self.nesting_level)
                 merged = self._merge(data, mask)
                 if len(merged) > 0 or not self.drop_empty_batches:
                     yield merged
