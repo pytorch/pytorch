@@ -219,6 +219,7 @@ class TestForeach(TestCase):
         self._regular_unary_test(dtype, method, ref, inputs, is_fastpath)
         self._inplace_unary_test(dtype, inplace_method, inplace_ref, inputs, is_fastpath)
 
+    @skipMeta
     @ops(foreach_unary_op_db)
     def test_unary_fastpath(self, device, dtype, op):
         for N in N_values:
