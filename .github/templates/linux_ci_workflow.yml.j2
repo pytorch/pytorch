@@ -208,6 +208,8 @@ jobs:
           docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
