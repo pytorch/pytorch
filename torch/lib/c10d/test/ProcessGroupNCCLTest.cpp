@@ -297,6 +297,41 @@ struct ReduceScatterNCCLTest : NCCLTest {
   }
 };
 
+class ReduceScatterBaseNCCLTest : public NCCLTest {
+ public:
+  ReduceScatterBaseNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {
+        output_tensor_ = at::empty({1}, at::kCUDA);
+        input_tensor_ = at::empty({worldSize}, at::kCUDA);
+        for(int i = 0; i < worldSize; i++)
+        {
+          input_tensor_[i] = i;
+        }
+      }
+
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+    // For the duration of this function, make THC use our streams
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+
+    launchDeviceSleep();
+    return pg_->_reduce_scatter_base(output_tensor_, input_tensor_);
+  }
+
+  at::Tensor getOutputTensor() {
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    return output_tensor_.cpu();
+  }
+
+  at::Tensor getInputTensor() {
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    return input_tensor_.cpu();
+  }
+
+  private:
+    at::Tensor output_tensor_;
+    at::Tensor input_tensor_;
+};
+
 void testAllreduce(const std::string& path, int rank, int size) {
   auto test = AllreduceNCCLTest(path, size);
   test.initialize(rank, size);
@@ -415,6 +450,26 @@ void testAllgatherBase(const std::string& path, int rank, int size) {
     const auto expected = (i / input_tensor.numel()) * test.numDevices();
     EXPECT_EQ(data[i], expected)
           << "Allgather_base outputs do not match expected outputs";
+  }
+}
+void testReduceScatterBase(const std::string& path, int rank, int size) {
+  auto test = ReduceScatterBaseNCCLTest(path, size);
+  test.initialize(rank, size);
+  auto work = test.run();
+  // Wait for work to finish
+  test.wait(work);
+  // Validation
+  auto output_tensor = test.getOutputTensor();
+  auto input_tensor = test.getInputTensor();
+
+  auto data = output_tensor.data_ptr<float>();
+
+  // Rank index
+  for (const auto i : c10::irange(output_tensor.numel())) {
+    // expected is i * input.numel() <- rank, and each rank contributed rank * num_gpu
+    const auto expected = size * rank * test.numDevices();
+    EXPECT_EQ(data[i], expected)
+          << "Reducescatter_base outputs do not match expected outputs";
   }
 }
 
@@ -567,6 +622,16 @@ TEST_F(ProcessGroupNCCLTest, testSequenceNumInit) {
   {
     TemporaryFile file;
     testSequenceNumInit(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testReduceScatterBase) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testReduceScatterBase(file.path, rank_, size_);
   }
 }
 
