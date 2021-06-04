@@ -25,7 +25,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::FusionSegments, false},
       {DebugDumpOption::PrintRuntimeArgs, false},
       {DebugDumpOption::EffectiveBandwidth, false},
-      {DebugDumpOption::FusionSegmentsDrawing, false}};
+      {DebugDumpOption::FusionSegmentsDrawing, false},
+      {DebugDumpOption::PrintPtxasLog, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -54,6 +55,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::EffectiveBandwidth] = true;
       } else if (token == "draw_segmented_fusion") {
         options_map[DebugDumpOption::FusionSegmentsDrawing] = true;
+      } else if (token == "ptxas_verbose") {
+        options_map[DebugDumpOption::PrintPtxasLog] = true;
       } else {
         TORCH_CHECK(
             false,

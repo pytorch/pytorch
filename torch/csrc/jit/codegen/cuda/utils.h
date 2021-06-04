@@ -23,7 +23,8 @@ enum class DebugDumpOption {
   PrintRuntimeArgs, //!< Print the runtime arguments when launching kernels
   EffectiveBandwidth, //! Measure kernel performance and print effective
                       //! bandwidth
-  FusionSegmentsDrawing //!< Dump Segmented Fusion Graph
+  FusionSegmentsDrawing, //!< Dump Segmented Fusion Graph
+  PrintPtxasLog //!< Print the ptxas verbose log including register usage
 };
 
 bool isDebugDumpEnabled(DebugDumpOption option);
