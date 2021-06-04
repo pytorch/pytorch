@@ -427,17 +427,28 @@ struct trivially_copyable_optimization_optional_base {
 // (https://www.uclibc.org/docs/psABI-x86_64.pdf).
 template <class ArrayRefT>
 class arrayref_optional_base {
+  // Same layout as storage::uninit and ArrayRef. Must have a default
+  // ctor because you can't use uninitialized variables in constexpr
+  // contexts before C++20. In contrast, storage::uninit must *not*
+  // have a default ctor, on pain of triggering -Wclass-memaccess.
+  struct raw {
+    const void* p = nullptr;
+    size_t sz = 1;
+  };
+
  public:
   union storage {
-    struct raw {
+    struct uninit {
       // ArrayRef has the invariant that if Data is nullptr then
       // Length must be zero, so this is an unused bit pattern.
-      const void* p = nullptr;
-      size_t sz = 1;
+      const void* p;
+      size_t sz;
     } uninitialized_{};
     ArrayRefT value_;
 
-    constexpr storage() noexcept : uninitialized_() {}
+    constexpr storage() noexcept : uninitialized_() {
+      setUninitialized();
+    }
 
     constexpr void setUninitialized() noexcept {
       uninitialized_.p = nullptr;
@@ -471,7 +482,7 @@ class arrayref_optional_base {
       : storage_(v) {}
 
   constexpr bool initialized() const noexcept {
-    typename storage::raw repr;
+    raw repr;
     memcpy(&repr, &storage_, sizeof(storage_));
     return repr.p != nullptr || repr.sz == 0;
   }
