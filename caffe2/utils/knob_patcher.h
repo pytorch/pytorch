@@ -20,6 +20,8 @@ class KnobPatcher {
 
   KnobPatcher(KnobPatcher&&) noexcept;
   KnobPatcher& operator=(KnobPatcher&&) noexcept;
+  KnobPatcher(const KnobPatcher&) = delete;
+  KnobPatcher& operator=(const KnobPatcher&) = delete;
 
  private:
   class PatchState;
