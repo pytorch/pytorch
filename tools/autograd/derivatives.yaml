@@ -588,10 +588,10 @@
 - name: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   self: not_implemented("geqrf")
 
-- name: ger(Tensor self, Tensor vec2) -> Tensor
-  self: grad.mv(vec2.conj())
-  vec2: grad.t().mv(self.conj())
-  result: at::ger(self_t, vec2_p) + at::ger(self_p, vec2_t)
+- name: outer(Tensor self, Tensor vec2) -> Tensor
+  self: grad.mm(vec2.unsqueeze(-1).conj()).squeeze(-1)
+  vec2: grad.t().mm(self.unsqueeze(-1).conj()).squeeze(-1)
+  result: at::outer(self_t, vec2_p) + at::outer(self_p, vec2_t)
 
 - name: indices(Tensor(a) self) -> Tensor(a)
   output_differentiability: [False]

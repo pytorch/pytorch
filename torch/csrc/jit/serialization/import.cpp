@@ -3,6 +3,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue_inl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
 #include <torch/csrc/jit/serialization/import_legacy.h>
@@ -39,7 +40,7 @@ using caffe2::serialize::ReadAdapterInterface;
 void postSetStateValidate(const IValue& v) {
   auto obj = v.toObject();
   const auto& objType = obj->type();
-  for (size_t i = 0; i < objType->numAttributes(); i++) {
+  for (const auto i : c10::irange(objType->numAttributes())) {
     const auto& attrType = objType->getAttribute(i);
     const auto& attrName = objType->getAttributeName(i);
     const auto& slot = obj->getSlot(i);
