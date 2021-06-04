@@ -137,7 +137,7 @@ def _check_sparse_coo_members_individually(
 def _check_sparse_csr_members_individually(
     check_tensors: Callable[..., Optional[Exception]]
 ) -> Callable[..., Optional[Exception]]:
-    """Decorates strided tensor check functions to handle sparse COO members, namely XXXX individually tensors.
+    """Decorates strided tensor check functions to individually handle sparse CSR members.
 
     If the inputs are not sparse CSR, this decorator is a no-op.
 
@@ -804,7 +804,7 @@ def assert_close(
 ) -> None:
     r"""Asserts that :attr:`actual` and :attr:`expected` are close.
 
-    If :attr:`actual` and :attr:`expected` are real-valued and finite, they are considered close if
+    If :attr:`actual` and :attr:`expected` are strided, real-valued, and finite, they are considered close if
 
     .. math::
 
@@ -817,6 +817,10 @@ def assert_close(
 
     If :attr:`actual` and :attr:`expected` are complex-valued, they are considered close if both their real and
     imaginary components are considered close according to the definition above.
+
+    If :attr:`actual` and :attr:`expected` are sparse, their members, namely indices and values, are checked
+    individually. Sparse COO tensors are only considered close if both are either coalesced or non-coalesced (if
+    :attr:`check_is_coalesced` is ``True``.)
 
     :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
     from which :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. In addition, :attr:`actual` and
@@ -839,14 +843,18 @@ def assert_close(
         check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
             check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`) before being compared.
-        check_stride (bool): If ``True`` (default), asserts that corresponding tensors have the same stride.
+        check_stride (bool): If ``True`` (default) and corresponding tensors are strided, asserts that they have the
+            same stride.
+        check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
+            :attr:`actual` and :attr:`expected` are either coalesced or not-coalesced. If this check is disabled,
+            tensors are :meth:`~torch.Tensor.coalesce`'ed before being compared.
         msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message to use if
             the values of corresponding tensors mismatch. Can be passed as callable in which case it will be called
             with the mismatching tensors and a namespace of diagnostic info about the mismatches. See below for details.
 
     Raises:
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is sparse. This is a temporary restriction and will be relaxed in the future.
+        UsageError: If any tensor is quantized. This is a temporary restriction and will be relaxed in the future.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If corresponding array-likes have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
@@ -855,7 +863,9 @@ def assert_close(
         AssertionError: If :attr:`check_device`, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
         AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
-        AssertionError: If :attr:`check_stride`, but corresponding tensors do not have the same stride.
+        AssertionError: If :attr:`check_stride`, but corresponding strided tensors do not have the same stride.
+        AssertionError: If :attr:`check_is_coalesced`, but corresponding sparse COO tensors are not both either
+            coalesced or not-coalesced.
         AssertionError: If the values of corresponding tensors are not close.
 
     The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. Note that the ``dtype``
