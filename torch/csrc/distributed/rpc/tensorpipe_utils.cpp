@@ -42,7 +42,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
  public:
   c10::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
-      const std::vector<c10::Stream>& streams,
+      const std::vector<c10::Stream>& /* streams */,
       tensorpipe::Message& message) const override {
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
@@ -60,7 +60,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return std::move(storageData);
+      return storageData;
     } else {
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = storage.data<char>();
@@ -76,9 +76,9 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
   }
 
   at::DataPtr allocateTensorForReceiving(
-      int deviceIndex,
+      int /* deviceIndex */,
       size_t length,
-      const std::vector<c10::Stream>& streams,
+      const std::vector<c10::Stream>& /* streams */,
       tensorpipe::Allocation& allocation) const override {
     at::DataPtr dataPtr = at::getCPUAllocator()->allocate(length);
 
