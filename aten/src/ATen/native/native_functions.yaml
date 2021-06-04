@@ -271,6 +271,11 @@
   dispatch:
     CPU, CUDA: view_as_real
 
+- func: _view_as_real_physical(Tensor(a) self) -> Tensor(a)
+  variants: function
+  dispatch:
+    CPU, CUDA: _view_as_real_physical
+
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
@@ -298,20 +303,35 @@
   device_check: NoCheck   # TensorIterator
   variants: function
 
-- func: conj(Tensor(a) self) -> Tensor(a)
-  device_check: NoCheck   # TensorIterator
+- func: _conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
-
-- func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  dispatch:
-    CPU, CUDA: conj_out
-    SparseCPU, SparseCUDA: conj_out_sparse
-
-- func: _conj(Tensor self) -> Tensor
-  variants: function
   dispatch:
     CompositeExplicitAutograd: _conj
+
+- func: conj(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+  manual_cpp_binding: True
+
+- func: _conj_physical(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _conj_physical
+
+- func: conj_physical(Tensor self) -> Tensor
+  variants: function, method
+
+- func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: conj_physical_out
+    SparseCPU, SparseCUDA: conj_physical_out_sparse
+
+- func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: conj_physical_
+
+- func: resolve_conj(Tensor(a) self) -> Tensor(a)
+  variants: function, method
 
 - func: acos(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -2246,6 +2266,11 @@
 - func: is_complex(Tensor self) -> bool
   variants: function, method
   device_check: NoCheck
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: is_conj(Tensor self) -> bool
+  variants: function, method
   device_guard: False
   manual_cpp_binding: True
 

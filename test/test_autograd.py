@@ -4279,7 +4279,7 @@ class TestAutograd(TestCase):
                 gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
             def basic_mul(x):
-                return torch.view_as_real(x * 1j)
+                return torch.view_as_real(torch.resolve_conj(x * 1j))
             gradcheck(basic_mul, x, check_forward_ad=True, fast_mode=fast_mode)
 
             # Test for one input and one output being complex
@@ -5459,7 +5459,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'zero_',
                 '__radd__', 'mul', '__rmul__', 'diagonal', 'fill_', 'sub', 'narrow',
-                'swapaxes', 'swapdims', 'tensor_split'] + separate_complex_tests
+                'swapaxes', 'swapdims', 'tensor_split', 'select', 'clone'] + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
@@ -5591,7 +5591,9 @@ def add_test(
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
                                 output_variable = (output_variable,)
+
                             inplace_self_variable = deepcopy(self_variable)
+                            self.assertEqual(inplace_self_variable, self_variable)
                             inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                                for i in (inplace_self_variable,))
                             inplace_args_variable = deepcopy(args_variable)
