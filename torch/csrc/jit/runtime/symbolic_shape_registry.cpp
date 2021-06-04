@@ -62,8 +62,12 @@ const std::string shape_compute_functions =
           return out
 
         def view(self: List[int], sizes: List[int]):
+          # TODO: add assertions to check whether requested dims are valid
           out: List[int] = []
           for elem in sizes:
+            if elem == -1:
+              # TODO: support -1 in view dimensions
+              raise AssertionError("Shape function doesn't support -1 view dims yet")
             out.append(elem)
           return out
 
