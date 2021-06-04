@@ -5543,7 +5543,7 @@ else:
     # So, we are skipping it here.
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes())
     @dtypesIfCUDA(*torch.testing.get_all_dtypes())
     def test_scatter_reduce_operations_to_large_input(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
@@ -5573,7 +5573,7 @@ else:
     # So, we are skipping it here.
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes())
     @dtypesIfCUDA(*torch.testing.get_all_dtypes())
     def test_scatter_reduce_scalar(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
@@ -5614,7 +5614,7 @@ else:
     # So, we are skipping it here.
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes())
     @dtypesIfCUDA(*torch.testing.get_all_dtypes())
     def test_scatter_reduce_non_unique_index(self, device, dtype):
         height = 2
@@ -5641,7 +5641,6 @@ else:
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))
-    @dtypesIfCPU(torch.bfloat16)
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
