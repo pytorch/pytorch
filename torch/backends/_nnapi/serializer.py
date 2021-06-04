@@ -416,8 +416,8 @@ class _NnapiSerializer(object):
                 self.compute_operand_shape(operand_id, dim, f"args[{arg_idx}].shape[{dim}]")
         return operand_id
 
-    def add_tensor_operand_for_weight(self, tensor):
-        toper = self.torch_tensor_to_operand(tensor, DimOrder.UNKNOWN_CONSTANT)
+    def add_tensor_operand_for_weight(self, tensor, dim_order=DimOrder.UNKNOWN_CONSTANT):
+        toper = self.torch_tensor_to_operand(tensor, dim_order)
         operand_id = len(self.operands)
         self.operands.append(toper)
         tsize = tensor_size(toper.op_type, toper.shape)
@@ -495,7 +495,10 @@ class _NnapiSerializer(object):
         operand_id = self.jitval_operand_map.get(jitval)
         if operand_id is None:
             _, value = self.get_constant_value(jitval, "TensorType")
-            operand_id = self.add_tensor_operand_for_weight(value)
+            dim_order = (
+                DimOrder.CHANNELS_LAST if getattr(value, "nnapi_nhwc", False)
+                else DimOrder.PRESUMED_CONTIGUOUS)
+            operand_id = self.add_tensor_operand_for_weight(value, dim_order)
         return (operand_id, self.operands[operand_id])
 
     def get_tensor_operand_for_weight(self, jitval):
@@ -1310,9 +1313,8 @@ class _NnapiSerializer(object):
         assert node.inputsAt(0).type().kind() == "TensorType"
         assert node.inputsAt(1).type().kind() == "TensorType"
 
-        # TODO: Should support constant as either operand.
-        in0_id, in0_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
-        in1_id, in1_oper = self.get_tensor_operand_by_jitval(node.inputsAt(1))
+        in0_id, in0_oper = self.get_tensor_operand_or_constant(node.inputsAt(0))
+        in1_id, in1_oper = self.get_tensor_operand_or_constant(node.inputsAt(1))
 
         assert in0_oper.op_type == in1_oper.op_type
         in0_id, in0_oper, in1_id, in1_oper = self.transpose_for_broadcast(

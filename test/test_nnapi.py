@@ -232,6 +232,22 @@ class TestNNAPI(TestCase):
                             return lhs / rhs
                         raise Exception("Bad op")
 
+                class BinaryConstModule(torch.nn.Module):
+                    def __init__(self, rhs):
+                        super().__init__()
+                        self.rhs = rhs
+
+                    def forward(self, lhs):
+                        if op == "add":
+                            return lhs + self.rhs
+                        if op == "sub":
+                            return lhs - self.rhs
+                        if op == "mul":
+                            return lhs * self.rhs
+                        if op == "div":
+                            return lhs / self.rhs
+                        raise Exception("Bad op")
+
                 self.check(
                     BinaryModule(),
                     [
@@ -262,6 +278,30 @@ class TestNNAPI(TestCase):
                         torch.tensor([[3.0, 4.0], [5.0, 6.0]]),
                     ],
                     convert_args=[torch.zeros(1, 2), torch.zeros(2, 2)],
+                )
+
+                # Test Const Module
+                self.check(
+                    BinaryConstModule(torch.tensor([3.0, 4.0])),
+                    torch.tensor([1.0, 2.0])
+                )
+
+                self.check(
+                    BinaryConstModule(torch.tensor([[1.0, 2.0]])),
+                    torch.tensor([[3.0, 4.0], [5.0, 6.0]])
+                )
+
+                with self.assertRaisesRegex(Exception, "Non-equal-rank broadcast"):
+                    self.check(
+                        BinaryConstModule(torch.tensor([1.0, 2.0])),
+                        torch.tensor([[3.0, 4.0], [5.0, 6.0]])
+                    )
+
+                # Test flexible size
+                self.check(
+                    BinaryConstModule(torch.tensor([[1.0, 2.0]])),
+                    torch.tensor([[3.0, 4.0], [5.0, 6.0]]),
+                    convert_args=[torch.zeros(2, 2)]
                 )
 
     def test_hardtanh(self):
