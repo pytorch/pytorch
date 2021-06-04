@@ -23,7 +23,7 @@ export PROJECT_DIR_WIN
 export TEST_DIR="${PWD}/test"
 TEST_DIR_WIN=$(cygpath -w "${TEST_DIR}")
 export TEST_DIR_WIN
-export PYTORCH_FINAL_PACKAGE_DIR="/c/users/circleci/workspace/build-results"
+export PYTORCH_FINAL_PACKAGE_DIR="${PYTORCH_FINAL_PACKAGE_DIR:-/c/users/circleci/workspace/build-results}"
 PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
 export PYTORCH_TEST_SKIP_NOARCH=1
@@ -42,10 +42,8 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
-# CIRCLE_PULL_REQUEST comes from CircleCI
-# GITHUB_HEAD_REF comes from Github Actions
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+# Try to pull value from CIRCLE_PULL_REQUEST
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
 if [ -n "$IN_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
   file_diff_from_base "$DETERMINE_FROM"
