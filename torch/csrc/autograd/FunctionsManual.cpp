@@ -1170,10 +1170,6 @@ Tensor binary_cross_entropy_target_backward(
   const Tensor& target,
   const c10::optional<Tensor>& weight,
   int64_t reduction) {
-  if (!grad.defined()) {
-    return at::zeros_like(target, at::MemoryFormat::Contiguous);
-  }
-
   auto grad_target = (1. - self).log_().sub_(self.log()).mul_(grad);
 
   if (isDefined(weight)) {

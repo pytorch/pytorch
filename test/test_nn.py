@@ -8671,6 +8671,35 @@ class TestNN(NNTestCase):
         inp = torch.randn(4, 5, device='cuda', requires_grad=True)
         gradgradcheck(F.pdist, (inp,))
 
+    def test_binary_cross_entropy_grads(self):
+        import torch.nn.functional as F
+        for device in device_():
+            input = torch.rand(3, 3, dtype=torch.double, device=device, requires_grad=True)
+            target = torch.rand(3, 3, dtype=torch.double, device=device)
+
+            gradcheck(F.binary_cross_entropy, [input, target])
+            gradgradcheck(F.binary_cross_entropy, [input, target])
+
+            # now with diffentiable target
+            target.requires_grad_(True)
+            # grad wrt target is not a native function (in a sense that it is
+            # implemented on top of "high-level" functions, and does not have
+            # explicit device-specific dispatches)
+            # and uses in-place operations that trigger vmap failures in gradcheck,
+            # hence the flag `check_batched_grad=False`
+            # TODO: use native kernels to circumvent this limitation.
+            gradcheck(F.binary_cross_entropy, [input, target], check_batched_grad=False)
+            with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                # binary_cross_entropy_backward only returns grads wrt input,
+                # which means that the explict backward for binary_cross_entropy_backward
+                # does not handle grads wrt target in the input, and hence the double backward wrt target
+                # will be wrong (all zeros to be more precise).
+                # Therefore we explicitly forbid this computation and test whether it fails.
+                # TODO: enable double backward for target by reimplementing
+                # binary_cross_entropy_backward to return (grad_input, grad_target)
+                # and by properly modifying the double backward function.
+                gradgradcheck(F.binary_cross_entropy, [input, target], check_batched_grad=False)
+
     def test_cosine_embedding_loss_with_diff_type(self):
         for device in device_():
             input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
