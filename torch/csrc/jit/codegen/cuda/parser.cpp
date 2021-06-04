@@ -31,6 +31,13 @@ constexpr auto kNumSumToSize = 2;
 
 namespace {
 
+#define REGISTER_PARSE_RULE(op, func_body, ...)                             \
+  registerParseRule(                                                        \
+      op,                                                                   \
+      [](const Node* node,                                                  \
+         std::unordered_map<size_t, CgValue>& value_map) -> void func_body, \
+      __VA_ARGS__)
+
 const auto& sizeAttr = Symbol::attr("profiled_size");
 const auto& intListAttr = Symbol::attr("profiled_int_list");
 const auto& boolListAttr = Symbol::attr("profiled_bool_list");
@@ -241,10 +248,9 @@ class IrParser {
         "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
     for (auto signature : BinaryOpWithAlpha) {
       auto ptr_op = getOperatorForLiteral(signature);
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             using BinaryOpWithAlphaType = Val* (*)(Val*, Val*, Val*);
             static std::unordered_map<
                 Symbol,
@@ -270,7 +276,9 @@ class IrParser {
               auto out = op_mapping[node->kind()].second(lhs, rhs, alpha);
               value_map.emplace(node->output()->unique(), out);
             }
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     std::array<const char*, kNumBinaryOps> BinaryOp = {
@@ -305,10 +313,9 @@ class IrParser {
         "aten::lt(Tensor self, Scalar other) -> Tensor"};
     for (auto signature : BinaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping(
                 {{aten::div, BinaryOpType::Div},
                  {aten::mul, BinaryOpType::Mul},
@@ -336,7 +343,9 @@ class IrParser {
 
             auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     // TODO: cast operations should be merged in.
@@ -376,10 +385,9 @@ class IrParser {
     };
     for (auto signature : UnaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             static std::unordered_map<Symbol, UnaryOpType> op_mapping({
                 {aten::neg, UnaryOpType::Neg},
                 {aten::abs, UnaryOpType::Abs},
@@ -418,61 +426,65 @@ class IrParser {
 
             auto out = unaryOp(op_mapping[node->kind()], operand);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto operand = value_map[node->inputs()[0]->unique()];
 
             auto out = unaryOp(UnaryOpType::RandLike, operand);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto operand = value_map[node->inputs()[0]->unique()];
             auto beta = value_map[node->inputs()[1]->unique()];
             auto threshold = value_map[node->inputs()[2]->unique()];
             auto out = softplus(operand, beta, threshold);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto operand = value_map[node->inputs()[0]->unique()];
             auto th = value_map[node->inputs()[1]->unique()];
             auto value = value_map[node->inputs()[2]->unique()];
 
             auto out = threshold(operand, th, value);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto operand = value_map[node->inputs()[0]->unique()];
             // TODO: we need to get a proper lower bound per dtype in operand.
             auto low = value_map.count(node->inputs()[1]->unique()) != 0
@@ -484,23 +496,26 @@ class IrParser {
 
             auto out = clamp(operand, low, high);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto condition = value_map[node->inputs()[0]->unique()];
             auto x = value_map[node->inputs()[1]->unique()];
             auto y = value_map[node->inputs()[2]->unique()];
 
             auto out = where(condition, x, y);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
@@ -509,27 +524,27 @@ class IrParser {
           "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor"};
       for (auto signature : LerpOp) {
         auto ptr_op = getOperatorForLiteral(signature);
-        registerParseRule(
+        REGISTER_PARSE_RULE(
             ptr_op,
-            [](const Node* node,
-               std::unordered_map<size_t, CgValue>& value_map) -> void {
+            {
               auto self = value_map[node->inputs()[0]->unique()];
               auto end = value_map[node->inputs()[1]->unique()];
               auto weight = value_map[node->inputs()[2]->unique()];
 
               auto out = lerp(self, end, weight);
               value_map.emplace(node->output()->unique(), out);
-            });
+            },
+            nullptr,
+            nullptr);
       }
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto self = value_map[node->inputs()[0]->unique()];
             auto tensor1 = value_map[node->inputs()[1]->unique()];
             auto tensor2 = value_map[node->inputs()[2]->unique()];
@@ -537,16 +552,17 @@ class IrParser {
 
             auto out = addcmul(self, tensor1, tensor2, value);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto input = value_map[node->input(0)->unique()]->as<TensorView>();
             auto prob = value_map[node->input(1)->unique()];
             auto scale = value_map[node->input(2)->unique()];
@@ -560,16 +576,17 @@ class IrParser {
 
             value_map.emplace(node->output(0)->unique(), result.output);
             value_map.emplace(node->output(1)->unique(), result.mask);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::dropout(Tensor input, float p, bool train) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto input = value_map[node->input(0)->unique()]->as<TensorView>();
             auto train = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
@@ -583,23 +600,26 @@ class IrParser {
             } else {
               value_map.emplace(node->output()->unique(), input);
             }
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::native_dropout_backward(Tensor grad, Tensor mask, float scale) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto grad = value_map[node->input(0)->unique()]->as<TensorView>();
             auto mask = value_map[node->input(1)->unique()]->as<TensorView>();
             auto scale = value_map[node->input(2)->unique()];
 
             auto output = dropout_backward(grad, mask, scale);
             value_map.emplace(node->output()->unique(), output);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
@@ -609,10 +629,9 @@ class IrParser {
           "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor"};
       for (auto signature : BatchNormFwd) {
         auto ptr_op = getOperatorForLiteral(signature);
-        registerParseRule(
+        REGISTER_PARSE_RULE(
             ptr_op,
-            [](const Node* node,
-               std::unordered_map<size_t, CgValue>& value_map) -> void {
+            {
               auto fusion = FusionGuard::getCurFusion();
 
               auto input =
@@ -720,10 +739,9 @@ class IrParser {
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             // discard impl_index and reservedSpace since we don't use them
 
             auto input = value_map[node->input(1)->unique()]->as<TensorView>();
@@ -860,10 +878,9 @@ class IrParser {
           "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor"};
       for (auto signature : LayerNormFwd) {
         auto ptr_op = getOperatorForLiteral(signature);
-        registerParseRule(
+        REGISTER_PARSE_RULE(
             ptr_op,
-            [](const Node* node,
-               std::unordered_map<size_t, CgValue>& value_map) -> void {
+            {
               auto input =
                   value_map[node->input(0)->unique()]->as<TensorView>();
 
@@ -918,10 +935,9 @@ class IrParser {
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto grad_out =
                 value_map[node->input(0)->unique()]->as<TensorView>();
 
@@ -1008,10 +1024,9 @@ class IrParser {
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::softmax.int(Tensor self, int dim, int? dtype) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto input = value_map[node->input(0)->unique()]->as<TensorView>();
 
             auto dim_value = constant_as<int>(node->input(1));
@@ -1039,10 +1054,9 @@ class IrParser {
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto grad_output =
                 value_map[node->input(0)->unique()]->as<TensorView>();
 
@@ -1072,10 +1086,9 @@ class IrParser {
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto self = value_map[node->input(0)->unique()];
             auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
             TORCH_INTERNAL_ASSERT(
@@ -1125,10 +1138,9 @@ class IrParser {
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto self = value_map[node->input(0)->unique()]->as<TensorView>();
             auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
             TORCH_INTERNAL_ASSERT(
@@ -1187,10 +1199,9 @@ class IrParser {
           "aten::sum_to_size(Tensor self, int[] size) -> Tensor"};
       for (auto signature : SumToSize) {
         auto ptr_op = getOperatorForLiteral(signature);
-        registerParseRule(
+        REGISTER_PARSE_RULE(
             ptr_op,
-            [](const Node* node,
-               std::unordered_map<size_t, CgValue>& value_map) -> void {
+            {
               auto self = value_map[node->input(0)->unique()];
               auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
@@ -1229,10 +1240,9 @@ class IrParser {
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::type_as(Tensor self, Tensor other) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto self = value_map[node->inputs()[0]->unique()];
 
             // TODO: switch to PyTorch dtype as it's closer to truth.
@@ -1245,7 +1255,9 @@ class IrParser {
 
             auto out = castOp(opt_dtype.value(), self);
             value_map.emplace(node->output()->unique(), out);
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
@@ -1255,10 +1267,9 @@ class IrParser {
       // During fusion pass, We decompose linear into gemm + elementwise.
       auto ptr_op = getOperatorForLiteral(
           "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             // this entry is created so we do profile input tensors;
             TORCH_INTERNAL_ASSERT(false, "not implemented yet");
           },
@@ -1275,10 +1286,9 @@ class IrParser {
     {
       auto ptr_op = getOperatorForLiteral(
           "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             // this entry is created so we do profile input tensors;
             if (node->input(1)->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
@@ -1293,16 +1303,17 @@ class IrParser {
               auto out = binaryOp(BinaryOpType::Add, lhs, rhs);
               value_map.emplace(node->output()->unique(), out);
             }
-          });
+          },
+          nullptr,
+          nullptr);
     }
 
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::gelu_backward(Tensor grad, Tensor self) -> Tensor");
-      registerParseRule(
+      REGISTER_PARSE_RULE(
           ptr_op,
-          [](const Node* node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
+          {
             auto grad = value_map[node->inputs()[0]->unique()];
             auto self = value_map[node->inputs()[1]->unique()];
             // TODO: add gelu backward function to composite operations
@@ -1323,7 +1334,9 @@ class IrParser {
             auto out_2 = mul(out_1, grad);
 
             value_map.emplace(node->output()->unique(), out_2);
-          });
+          },
+          nullptr,
+          nullptr);
     }
   }
 
