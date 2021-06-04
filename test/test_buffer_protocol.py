@@ -106,7 +106,7 @@ class TestBufferProtocol(common.TestCase):
         in_bytes = len(input) * bytes
         # Empty array
         with self.assertRaisesRegex(ValueError,
-                                    r"both buffer length \(0\) after"):
+                                    r"both buffer length \(0\) and count"):
             self._run_test(dtype, [])
         # Count equals 0
         with self.assertRaisesRegex(ValueError,
