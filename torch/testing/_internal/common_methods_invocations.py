@@ -882,6 +882,14 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, extra_kwar
         samples.append(sample)
     return tuple(samples)
 
+
+def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    return (SampleInput(make_arg((1, 2))),
+            SampleInput(make_arg((2,))),
+            SampleInput(make_arg(())))
+
+
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
     args_list = (
         ((S, M), (M, S)),
@@ -6917,6 +6925,11 @@ op_db: List[OpInfo] = [
            # the gradient check for complex fails.
            backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            ),
+    OpInfo('t',
+           sample_inputs_func=sample_inputs_t,
+           supports_out=False,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           assert_autodiffed=True,),
 ]
 
 # Common operator groupings
@@ -7030,7 +7043,6 @@ def ident(x):
 def method_tests():
     set_rng_seed(SEED)
     return [
-        ('t', (1, 2), NO_ARGS, '', (False,)),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
