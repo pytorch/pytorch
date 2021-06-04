@@ -11,13 +11,12 @@ c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
   std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
   auto allreduce_fut = state_->allreduce(tensors)->getFuture();
 
-  auto div_by_process_group_size = [allreduce_fut,
-                                    this](c10::ivalue::Future& /* unused */) {
-
-    auto result = allreduce_fut->value();
+  auto div_by_process_group_size = [size = state_->getSize()](
+        c10::ivalue::Future& allreduce_fut) {
+    auto result = allreduce_fut.value();
     TORCH_INTERNAL_ASSERT(result.isTensorList(),
         "ProcessGroup::allreduce should return TensorList");
-    auto tensor = result.toTensorVector()[0] / state_->getSize();
+    auto tensor = result.toTensorVector()[0] / size;
     return c10::IValue(tensor);
   };
 
@@ -34,8 +33,8 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
   // FIXME Access the result through the Future passed as argument, instead of
   // capturing the Work.
   auto decompress_and_div_by_process_group_size =
-      [allreduce_fut, this](c10::ivalue::Future& /* unused */) {
-        auto result = allreduce_fut->value();
+      [allreduce_fut, this](c10::ivalue::Future& allreduce_fut) {
+        auto result = allreduce_fut.value();
         TORCH_INTERNAL_ASSERT(result.isTensorList(),
             "ProcessGroup::allreduce should return TensorList");
         auto tensor = result.toTensorVector()[0];
