@@ -223,6 +223,19 @@ void initTensorExprBindings(PyObject* module) {
         }
       },
       py::return_value_policy::reference);
+
+  te.def(
+      "Compute2",
+      [](const std::string& func_name,
+         const std::vector<DimArg>& dim_args,
+         py::function func) {
+        return Compute(
+            func_name, dim_args, [&func](const std::vector<VarHandle>& dims) {
+              return py::cast<ExprHandle>(func(dims));
+            });
+      },
+      py::return_value_policy::reference);
+
   py::class_<Reducer>(te, "Reducer")
       .def(py::init<
            ExprHandle,
