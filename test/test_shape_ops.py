@@ -385,6 +385,8 @@ class TestShapeOps(TestCase):
             dims = 0
             out_t = make_from_data([3, 3, 2, 2, 1, 1]).view(3, 2)
             yield in_t, dims, out_t
+            # Noop on expanded dimension
+            yield in_t, 1, in_t
 
             # Transposed
             in_t = make_from_data([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2).transpose(0, 1)
@@ -401,17 +403,27 @@ class TestShapeOps(TestCase):
             out_t = make_from_data([[3, 2, 1], [6, 5, 4]])
             yield in_t, dims, out_t
 
-            # Empty tensor
-            in_t = make_from_data(())
-            dims = 0
-            out_t = in_t
-            yield in_t, dims, out_t
+            # Noops (edge cases)
 
-            # dims = () is noop
+            # Size 0
+            in_t = make_from_data(())
+            yield in_t, 0, in_t
+            yield in_t, (), in_t
+
+            # dims = ()
             in_t = make_from_size((3, 2, 1))
-            dims = ()
-            out_t = in_t
-            yield in_t, dims, out_t
+            yield in_t, (), in_t
+
+            # Zero elements, non-zero size
+            in_t = make_from_size((3, 0, 2))
+            for i in range(in_t.ndim):
+                yield in_t, i, in_t
+
+            # Size 1
+            in_t = make_from_size(())
+            yield in_t, 0, in_t
+            in_t = make_from_size((1,))
+            yield in_t, 0, in_t
 
         for in_tensor, dims, out_tensor in gen_data():
             test_flip_impl(in_tensor, dims, out_tensor)

@@ -13,24 +13,25 @@ namespace at {
 namespace native {
 
 Tensor flip(const Tensor& self, IntArrayRef dims) {
-  // Nothing to do, we return fast (accounts for cases like size = (3, 0), dim = {0})
-  if (self.numel() == 0) {
-    return self.clone(MemoryFormat::Preserve);
-  }
   const int64_t total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
+
+  // Nothing to do, we return fast (accounts for cases like size = (3, 0), dim = {0})
+  // This needs to happen after dim_list_to_bitset, which is where the checks are made
+  if (self.numel() <= 1) {
+    return self.clone(MemoryFormat::Preserve);
+  }
+
   // We initialize it to zeros when it's bool to silence asan, who thinks that we are
   // incurring into UB after reading an undefined value in TI (although we do not use it)
-  Tensor out_tensor = self.scalar_type() == ScalarType::Bool ?
-    at::zeros_like(self, MemoryFormat::Preserve) :
-    at::empty_like(self, MemoryFormat::Preserve);
+  Tensor out_tensor = at::empty_like(self, MemoryFormat::Preserve);
 
   // Count dimensions in which we need to do work
   int n = 0;
-  auto strides = DimVector(out_tensor.strides());
+  auto strides = DimVector(self.strides());
   for(int64_t i = 0; i < total_dims; i++) {
-    if(flip_dims_b[i] && out_tensor.size(i) > 1) {
+    if(flip_dims_b[i] && out_tensor.size(i) > 1 && self.stride(i) != 0) {
       n++;
       strides[i] = 0;
     }
@@ -43,20 +44,21 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   }
 
   //create dummy output with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
-  auto restrided_out = out_tensor.as_strided(out_tensor.sizes(), strides);
+  const auto restrided_self = self.as_strided(self.sizes(), strides);
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .declare_static_dtype_and_device(self.scalar_type(), self.device())
     .add_output(out_tensor)
     .add_input(self)
-    .add_input(restrided_out)
+    .add_input(restrided_self)
     .build();
 
   auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
   const auto sizes = iter.shape();
   // This is a SmallVector of _signed_ ints
   auto strides_bytes = DimVector(iter.strides(0));
+  const auto strides_self = iter.strides(1);
   const auto strides_dummy = iter.strides(2);
 
   // To understand this transformation, think of a 3D cube.
@@ -67,7 +69,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   //   - We move the pointer to the opposite vertex of the cube
   //   - We iterate in the opposite direction (invert the strides)
   for (int i=0; i<iter.ndim(); i++){
-    if (strides_dummy[i] == 0) {
+    if (strides_dummy[i] == 0 && strides_self[i] != 0) {
       data += strides_bytes[i] * (sizes[i]-1);
       strides_bytes[i] *= -1;
     }
