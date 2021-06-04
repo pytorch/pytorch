@@ -36,6 +36,43 @@ static bool te_must_use_llvm_on_cpu = true;
 static bool cat_wo_conditionals = true; // NOLINT
 static bool opt_conditionals = false; // NOLINT
 
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
+}
+
+// replaces all invalid characters with underscore
+static std::string sanitizeName(const std::string& input_name) {
+  std::stringstream sanitized_name;
+  for (size_t i = 0; i < input_name.size(); ++i) {
+    if (isValidIdentifierChar(input_name[i], i)) {
+      sanitized_name << input_name[i];
+    } else {
+      sanitized_name << "_";
+    }
+  }
+  return sanitized_name.str();
+}
+
+static void sanitizeName(torch::jit::Block* block) {
+  for (auto inp : block->inputs()) {
+    if (inp->hasDebugName()) {
+      inp->setDebugName(sanitizeName(inp->debugName()));
+    }
+  }
+
+  for (auto n : block->nodes()) {
+    for (auto o : n->outputs()) {
+      if (o->hasDebugName()) {
+        o->setDebugName(sanitizeName(o->debugName()));
+      }
+    }
+
+    for (auto ib : n->blocks()) {
+      sanitizeName(ib);
+    }
+  }
+}
+
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
   fallback_allowed = value;
@@ -2981,22 +3018,7 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
   return backendType;
 }
 
-static bool isValidIdentifierChar(char c, size_t pos) {
-  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
-}
 
-// replaces all invalid characters with underscore
-std::string sanitizeName(const std::string& input_name) {
-  std::stringstream sanitized_name;
-  for (size_t i = 0; i < input_name.size(); ++i) {
-    if (isValidIdentifierChar(input_name[i], i)) {
-      sanitized_name << input_name[i];
-    } else {
-      sanitized_name << "_";
-    }
-  }
-  return sanitized_name.str();
-}
 
 // we use the debug names in printing cuda code, they need to be removed
 // of characters that can't be used in a variable identifier
@@ -3005,14 +3027,14 @@ void TensorExprKernel::genInputDebugNames() {
   std::unordered_set<std::string> name_set;
   std::unordered_map<const torch::jit::Value*, std::string> value_to_name;
   for (const torch::jit::Value* input : graph_->inputs()) {
-    std::string sanitized_name = sanitizeName(input->debugName());
+    std::string name = input->debugName();
     // we could get fancier here, but name conflict is extremely unlikely
-    while (name_set.count(sanitized_name)) {
+    while (name_set.count(name)) {
       // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      sanitized_name = sanitized_name + "_";
+      name = name + "_";
     }
-    value_to_name[input] = sanitized_name;
-    name_set.insert(sanitized_name);
+    value_to_name[input] = name;
+    name_set.insert(name);
   }
   input_name_map_ = std::move(value_to_name);
 }
@@ -3296,6 +3318,7 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
+  sanitizeName(subgraph->block());
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();

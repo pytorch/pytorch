@@ -153,6 +153,60 @@ class TestTEFuser(JitTestCase):
         # we would compute the wrong result silently
         self.assertEqual(scripted(a, a), fused_kernel(a, a))
 
+    def test_invalid_input_names(self):
+
+        code = '''
+            graph(%i.1 : Tensor,
+                  %2 : Tensor,
+                  %3 : Tensor,
+                  %4 : Tensor):
+                %cnst : int = prim::Constant[value=1]()
+                %5 : Tensor = aten::add(%i.1, %2, %cnst)
+                %6 : Tensor = aten::mul(%3, %5)
+                %7 : Tensor = aten::sub(%6, %4, %cnst)
+                return (%7)
+        '''
+
+        @torch.jit.script
+        def foo(x):
+            return torch.sum(x)
+
+        print(foo.graph)
+
+        graph = torch._C.parse_ir(code)
+        m = self.createFunctionFromGraph(graph)
+        x = torch.rand(1).cuda()
+        m(x, x, x, x)
+        m(x, x, x, x)
+        m(x, x, x, x)
+
+
+    def test_inlined_module_names(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super(Sub, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand(3, 4))
+
+            def forward(self, thing):
+                return self.weight + thing
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.seq = torch.nn.Sequential(Sub(), Sub(), Sub(), Sub())
+
+            def forward(self, x):
+                return self.seq(x)
+
+
+        scripted = torch.jit.script(Mod().cuda())
+        scripted = torch.jit.optimize_for_inference(scripted)
+
+        x = torch.rand(3, 4).cuda()
+        scripted(x)
+        scripted(x)
+        scripted(x)
+
     def test_sum_simple(self):
         def func(x):
             x2 = x * x
