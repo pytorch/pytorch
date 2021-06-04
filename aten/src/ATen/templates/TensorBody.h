@@ -711,7 +711,13 @@ class TORCH_API Tensor {
 
   /// \fn void retain_grad() const;
   ///
-  /// Enables .grad() for non-leaf Tensors.
+  /// Enables this Tensor to have their :attr:`grad` populated during
+  /// :func:`backward`. This is a no-op for leaf tensors.
+
+  /// \fn bool retains_grad() const;
+  ///
+  /// Is ``true`` if this Tensor is non-leaf and its :attr:`grad` is enabled to be
+  /// populated during :func:`backward`, ``false`` otherwise.
 
   const Tensor& set_requires_grad(bool requires_grad) const {
     impl_->set_requires_grad(requires_grad);
