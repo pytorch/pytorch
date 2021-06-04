@@ -148,12 +148,6 @@ class ShapePropagator {
     return dim;
   }
 
-  // TODO: Would be better to make JIT not assume that CUDA devices
-  // are the only thing that exist.
-  static at::Device jitDeviceIndexToDevice(int device) {
-    return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
-  }
-
   IValue representativeValue(Value* v) {
     TypePtr type_ = v->type();
     // if the value is actually constant, just use it!
@@ -162,13 +156,12 @@ class ShapePropagator {
     }
     if (TensorTypePtr type = type_->cast<TensorType>()) {
       if (type->isComplete()) {
-        auto attype = type->device()->is_cpu() ? at::CPU(*type->scalarType())
-                                               : at::CUDA(*type->scalarType());
         at::DeviceGuard device_guard(*type->device());
         return at::empty_strided(
                    *type->sizes().concrete_sizes(),
                    *type->strides().concrete_sizes(),
-                   attype.options())
+                   at::TensorOptions(*type->device())
+                       .dtype(*type->scalarType()))
             .zero_();
       }
       // fallthrough
