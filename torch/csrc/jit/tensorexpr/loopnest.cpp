@@ -2527,10 +2527,25 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     consumer_block->replace_stmt(consumer, new_consumer);
   }
 
-  // If there's a reduction we can't just write the result straight back to the
-  // original buffer, since after parallelism the writes will race. Instead we
-  // need to create a new ReduceOp.
+  // If there's a reduction and we are operating on the reduce axis, we need to
+  // initialize the cache with 0s. Also, we can't just write the result straight
+  // back to the original buffer, since after parallelism the writes will race.
+  // Instead we need to create a new ReduceOp.
+  bool on_reduce_axis = false;
   if (reduceOp) {
+    std::set<const Var*> reduce_args(
+        reduceOp->reduce_args().begin(), reduceOp->reduce_args().end());
+    std::set<const Var*> enclosing_vars;
+    for (auto enclosing_for_stmt : NodeFinder<For>::find(consumer)) {
+      enclosing_vars.insert(enclosing_for_stmt->var());
+    }
+    for (auto reduce_arg : reduce_args) {
+      if (enclosing_vars.find(reduce_arg) == enclosing_vars.end()) {
+        on_reduce_axis = true;
+      }
+    }
+  }
+  if (reduceOp && on_reduce_axis) {
     // reduceOp means we had both loads and stores.
 
     // Init cache to 0.
