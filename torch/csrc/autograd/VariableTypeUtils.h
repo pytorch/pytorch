@@ -298,7 +298,7 @@ inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
     std::string msg = "the derivative for '";
     msg += name;
     msg += "' is not implemented";
-    throw std::runtime_error(msg);
+    TORCH_CHECK(false, msg);
   }
 }
 
