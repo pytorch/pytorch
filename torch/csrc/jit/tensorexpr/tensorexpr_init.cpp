@@ -364,8 +364,8 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_loop_body_for",
-          [](const LoopNest& self, BufHandle* b) {
-            return self.getLoopBodyFor(b->node());
+          [](const LoopNest& self, BufHandle& b) {
+            return self.getLoopBodyFor(b.node());
           },
           py::return_value_policy::reference)
       .def(
@@ -376,8 +376,8 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_all_loopnests_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllLoopNestsWritingToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllLoopNestsWritingToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
@@ -388,14 +388,14 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_innermost_loops_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllInnermostLoopsWritingToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllInnermostLoopsWritingToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
           "get_writes_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllWritesToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllWritesToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
