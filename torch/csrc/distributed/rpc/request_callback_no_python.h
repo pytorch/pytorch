@@ -34,8 +34,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   c10::intrusive_ptr<JitFuture> assignOwnerRRef(
       const RRefId& rrefId,
       const RRefId& forkId,
-      c10::intrusive_ptr<JitFuture> valueFuture,
-      std::shared_ptr<LazyStreamContext> lsctx) const;
+      c10::intrusive_ptr<JitFuture> valueFuture) const;
 
   virtual c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
       RpcCommandBase& rpc,
@@ -45,16 +44,13 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
-  c10::intrusive_ptr<JitFuture> retrieveOwnerRRef(
-      const RRefId& rrefId,
-      std::shared_ptr<LazyStreamContext> lsctx) const;
+  c10::intrusive_ptr<JitFuture> retrieveOwnerRRef(const RRefId& rrefId) const;
 
   c10::intrusive_ptr<JitFuture> processScriptRRefFetchCall(
       RpcCommandBase& rpc) const;
 
   virtual c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      RpcCommandBase& rpc) const;
 
   c10::intrusive_ptr<JitFuture> processRRefUserDelete(
       RpcCommandBase& rpc) const;

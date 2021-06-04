@@ -32,8 +32,7 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       std::shared_ptr<LazyStreamContext> ctx) const override;
 
   c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> ctx) const override;
+      RpcCommandBase& rpc) const override;
 
   void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const override;
 
