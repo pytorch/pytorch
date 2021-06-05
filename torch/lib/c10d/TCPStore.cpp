@@ -617,6 +617,11 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       numWorkers_{opts.numWorkers} {
   tcputil::socketInitialize();
   if (isServer_) {
+    if (opts.multiTenant) {
+      LOG(WARNING) <<
+          "The multi-tenant feature of TCPStore is not implemented yet.";
+    }
+
     // Opening up the listening socket
     std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(opts.port);
   }
