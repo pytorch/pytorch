@@ -15,7 +15,7 @@ class AllReduceCommHook : public CppCommHookInterface<ProcessGroup*> {
   explicit AllReduceCommHook(ProcessGroup* state)
       : CppCommHookInterface<ProcessGroup*>(state) {}
 
-  ~AllReduceCommHook() override {}
+  ~AllReduceCommHook() override = default;
 
   c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 };
@@ -25,7 +25,7 @@ class FP16CompressCommHook : public CppCommHookInterface<ProcessGroup*> {
   explicit FP16CompressCommHook(ProcessGroup* state)
       : CppCommHookInterface<ProcessGroup*>(state) {}
 
-  ~FP16CompressCommHook() override {}
+  ~FP16CompressCommHook() override = default;
 
   c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 };
@@ -35,17 +35,20 @@ struct _AllReduceCommHookWithDivFactorState {
       : pg(pg), div_factor(div_factor) {}
 
   ProcessGroup* pg;
-  // Should be equal to the process group size, with the exception of unevent input.
+  // Should be equal to the process group size, with the exception of unevent
+  // input.
   int div_factor;
 };
 
-// Almost same as AllReduceCommHook, but requires an additional ``div_factor`` as the state for handling unevent input.
-// Only used internally and not released as a public built-in communication hook.
+// Almost same as AllReduceCommHook, but requires an additional ``div_factor``
+// as the state for handling unevent input. Only used internally and not
+// released as a public built-in communication hook.
 class _AllReduceCommHookWithDivFactor
     : public CppCommHookInterface<_AllReduceCommHookWithDivFactorState> {
  public:
   using CppCommHookInterface::CppCommHookInterface;
-  ~_AllReduceCommHookWithDivFactor() override {}
+
+  ~_AllReduceCommHookWithDivFactor() override = default;
 
   c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 };

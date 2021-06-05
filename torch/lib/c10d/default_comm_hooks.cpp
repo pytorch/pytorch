@@ -45,8 +45,8 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
       decompress_and_div_by_process_group_size, allreduce_fut->elementType());
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> _AllReduceCommHookWithDivFactor::runHook(
-    GradBucket& bucket) {
+c10::intrusive_ptr<c10::ivalue::Future> _AllReduceCommHookWithDivFactor::
+    runHook(GradBucket& bucket) {
   std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
   auto allreduce_fut = state_.pg->allreduce(tensors)->getFuture();
   int div_factor = state_.div_factor;
