@@ -164,6 +164,9 @@ class TestTEFuser(JitTestCase):
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
 
+    def test_nop(self):
+        pass
+
     def test_sum_dim(self):
         def func(x):
             return x.sum((0, )) * 2
@@ -996,7 +999,6 @@ class TestTEFuser(JitTestCase):
         assert cx.elapsed_value() == 1
         self.assertEqual(out, x + y)
 
-    @unittest.skip("Reenable when TE will add support for 0-dim tensors")
     def test_scalar(self):
         def fn(x, y):
             return 2 * x + y
@@ -1262,6 +1264,7 @@ class TestTEFuser(JitTestCase):
             torch.atan,
             torch.tanh,
             F.hardtanh,
+            F.hardsigmoid,
             F.hardswish,
             torch.sqrt,
             torch.rsqrt,
@@ -1810,6 +1813,40 @@ class TestTEFuser(JitTestCase):
         z = 2
         script = self.checkScript(eager, (x, y, z))
 
+    def _test_fwd_bwd(self, fn):
+        x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
+        xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
+        script = torch.jit.script(fn)
+        for i in range(11):
+            y = fn(x)
+            g0 = torch.rand_like(y)
+            y.backward(g0)
+
+            ys = script(xs)
+            ys.backward(g0)
+
+            with torch.no_grad():
+                x -= 0.1 * x.grad
+                xs -= 0.1 * xs.grad
+                x.grad = None
+                xs.grad = None
+        torch.testing.assert_allclose(y, ys)
+
+    def test_relu_fwd_bwd(self):
+        def eager(x):
+            return torch.relu(x * 1.01)
+        self._test_fwd_bwd(eager)
+
+    def test_hardswish_fwd_bwd(self):
+        def eager(x):
+            return F.hardswish(x) * 1.01
+        self._test_fwd_bwd(eager)
+
+    def test_hardsigmoid_fwd_bwd(self):
+        def eager(x):
+            return F.hardsigmoid(x) * 1.01
+        self._test_fwd_bwd(eager)
+
     def test_dynamic_cat(self):
         with inline_fusion_groups():
             @torch.jit.script
@@ -1826,6 +1863,13 @@ class TestTEFuser(JitTestCase):
                 ys = [torch.ones(N - i) for i in range(N)]
                 zs = [torch.ones(i) for i in range(N)]
                 repro(xs, ys, zs)
+
+    def test_scalar_only_inputs(self):
+        def eager(b: float):
+            a = torch.ones(1)
+            return a * b
+
+        script = self.checkScript(eager, (1.0,))
 
 
 works_list = [
@@ -1875,6 +1919,7 @@ works_list = [
     'neg',
     'nn.functional.gelu',
     'nn.functional.hardshrink',
+    'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
     'nn.functional.hardtanh',
     'nn.functional.leaky_relu',
@@ -1911,6 +1956,7 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
+    'conj'
 ]
 
 def get_name(op):
@@ -1926,7 +1972,6 @@ class TestNNCOpInfo(TestCase):
         if op.name in skip_ops:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-        is_compiling = False
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
@@ -1958,22 +2003,11 @@ def f({', '.join(param_names)}):
             f.__module__ = 'test'
             out = f(*param_values)
 
-            # NNC currently oftens segfault when asked to lower ops with 0-dim tensor outputs
-            if isinstance(out, torch.Tensor) and out.dim() == 0:
-                continue
-            else:
-                is_compiling = True
-
             ts_g = torch.jit.trace(f, param_values)
             kernel = torch._C._te.TensorExprKernel(ts_g.graph)
             correct_val = f(*param_values)
             self.assertEqual(kernel.run(tuple(param_values)), correct_val)
             self.assertEqual(kernel.fallback(tuple(param_values)), correct_val)
-
-        # If all sample inputs have scalar output, we won't have tested it and
-        # we consider the op to be not working
-        if not is_compiling:
-            raise RuntimeError("Skipped all inputs")
 
     @onlyCPU
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
