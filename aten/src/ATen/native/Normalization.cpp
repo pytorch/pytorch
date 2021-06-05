@@ -647,11 +647,17 @@ TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
   // For cuda half, calculate norm in float precision then cast
   // normalization factor to half
   auto dtype = self.scalar_type();
-  auto acc_type = dtype == kHalf ? kFloat : dtype;
-  auto norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims,
-                                     /*keepdim=*/true, /*dtype=*/acc_type);
+  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
+  Tensor norm;
+  if (acc_type != dtype) {
+    norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims,
+                                  /*keepdim=*/true, /*dtype=*/acc_type);
+  } else {
+    norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims,
+                                  /*keepdim=*/true);
+  }
 
-  auto factor = (acc_type == dtype) ?
+  auto factor = (acc_type == c10::toValueType(dtype)) ?
       norm : at::empty(norm.sizes(), self.options());
   auto iter = TensorIteratorConfig()
       .add_output(factor)

@@ -86,8 +86,10 @@ class Tensor(torch._C._TensorBase):
                         self.requires_grad,
                         self._backward_hooks)
                 else:
-                    new_tensor = self.new()
+                    new_tensor = self.new_empty([])
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    if self.is_conj():
+                        new_tensor = new_tensor.conj_physical()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
