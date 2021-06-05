@@ -6812,6 +6812,12 @@
   structured_delegate: remainder.Tensor_out
   variants: method
 
+- func: remainder.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  dispatch:
+    CPU, CUDA: remainder
+
 - func: min(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function

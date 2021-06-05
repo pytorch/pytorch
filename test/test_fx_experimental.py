@@ -1335,6 +1335,7 @@ class TestNormalizeOperators(JitTestCase):
                    '__rsub__',
                    '__rmul__',
                    '__rdiv__',
+                   '__rmod__',
                    '__rpow__',
                    '__rmatmul__'}
 
