@@ -133,6 +133,10 @@ struct TCPStoreOptions {
   c10::optional<std::size_t> numWorkers = c10::nullopt;
   bool waitWorkers = true;
   std::chrono::milliseconds timeout = Store::kDefaultTimeout;
+
+  // A boolean value indicating whether multiple store instances can be
+  // initialized with the same host:port pair.
+  bool multiTenant = false;
 };
 
 class TCPStore : public Store {
