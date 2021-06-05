@@ -675,12 +675,17 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, SumAllAxes) {
+TEST_F(Kernel, DISABLED_SumAllAxes) {
+  // [zero-dim tensors]
+  // NNC does not yet handle zero-dim tensors. aten::sum with no axis
+  // input returns a zero-dim tensors, so these tests must be disabled
+  // until we add support for zero-dim tensors.
+
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : ${dtype}
-        %2 : ${out_dtype}(requires_grad=0, device=cpu) = aten::sum(%0, %1)
+        %2 : Tensor = aten::sum(%0, %1)
         return (%2))IR";
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
@@ -688,11 +693,6 @@ TEST_F(Kernel, SumAllAxes) {
     KernelScope kernel_scope;
     TemplateEnv env;
     env.s("dtype", dtypeConstant(scalar_type));
-    if (scalar_type == ScalarType::Undefined) {
-      env.s("out_dtype", "Float");
-    } else {
-      env.s("out_dtype", "Double");
-    }
     const auto graph_string = format(graph_template, env);
 
     auto graph = std::make_shared<Graph>();
@@ -1104,16 +1104,17 @@ TEST_F(Kernel, Softmax4D) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, InlineProducerIntoReduction) {
+TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
+  // see : [zero-dim tensors]
   KernelScope kernel_scope;
 
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
-        %2 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %1)
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : int = prim::Constant[value=7]()
-        %4 : Double(device=cpu) = aten::sum(%2, %3)
+        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
         return (%4))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -1144,7 +1145,9 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, InlineReductionIntoConsumer) {
+TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
+  // see : [zero-dim tensors]
+
   KernelScope kernel_scope;
 
   // Inline producer (mul %2) into reduction (sum %4) but DO NOT
@@ -1154,8 +1157,8 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : int = prim::Constant[value=6]()
-        %4 : Float(device=cpu) = aten::sum(%2, %3)
-        %5 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%2, %4)
+        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
+        %5 : Float(5, 3, strides=[3, 1]) = aten::mul(%2, %4)
         return (%5))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);

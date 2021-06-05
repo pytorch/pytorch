@@ -25,6 +25,8 @@ inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
 }
 
+constexpr int kUnsetDivFactor = -1;
+
 // Macro that wraps TORCH_CHECK with DDP logging.
 #define REDUCER_CHECK(cond, logger_, ...)             \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {               \

@@ -122,6 +122,22 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
+c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
+  c10::optional<at::Device> device = c10::nullopt;
+  for (auto const& node : graph->nodes()) {
+    for (auto const& input : node->inputs()) {
+      if (auto tt = input->type()->cast<TensorType>()) {
+        if (auto inputDevice = tt->device()) {
+          TORCH_INTERNAL_ASSERT(!device || *device == *inputDevice);
+          device = inputDevice;
+        }
+      }
+    }
+  }
+  TORCH_INTERNAL_ASSERT(device);
+  return device;
+}
+
 // If v is a Tensor with concretely-known sizes and dtype, return them, else
 // nullopt.
 c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
@@ -179,37 +195,37 @@ bool conv2dIsSupported(
   if (input.dtype != c10::ScalarType::Float ||
       weight.dtype != c10::ScalarType::Float ||
       bias.dtype != c10::ScalarType::Float) {
-    GRAPH_DEBUG("conv2dIsSupported: only float32 allowed");
+    GRAPH_DEBUG("only float32 allowed");
     return false;
   }
   if (input.dims.size() != 4 || weight.dims.size() != 4 ||
       bias.dims.size() != 1) {
-    GRAPH_DEBUG("conv2dIsSupported: inputs are the wrong size");
+    GRAPH_DEBUG("inputs are the wrong size");
     return false;
   }
   auto Cin = input.dims[1];
   auto Cout = weight.dims[0];
   auto CperG = weight.dims[1];
   if (Cin != Cout || Cin != groups || CperG != 1) {
-    GRAPH_DEBUG("conv2dIsSupported: not depthwise");
+    GRAPH_DEBUG("not depthwise");
     return false;
   }
   auto KH = weight.dims[2];
   auto KW = weight.dims[3];
   if (KH != 3 || KW != 3) {
-    GRAPH_DEBUG("conv2dIsSupported: not 3x3");
+    GRAPH_DEBUG("not 3x3");
     return false;
   }
   if (stride.size() != 2 || stride[0] != stride[1]) {
-    GRAPH_DEBUG("conv2dIsSupported: unsupported stride");
+    GRAPH_DEBUG("unsupported stride");
     return false;
   }
   if (pad.size() != 2 || pad[0] != pad[1]) {
-    GRAPH_DEBUG("conv2dIsSupported: unsupported pad");
+    GRAPH_DEBUG("unsupported pad");
     return false;
   }
   if (dilation.size() != 2 || dilation[0] != 1 || dilation[1] != 1) {
-    GRAPH_DEBUG("conv2dIsSupported: unsupported dilation");
+    GRAPH_DEBUG("unsupported dilation");
     return false;
   }
   return true;
@@ -704,10 +720,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     default: {
       GRAPH_DEBUG("Can't infer sizes for the node: ", *v->node());
       GRAPH_DEBUG("Full fusion group graph:\n", *v->node()->owningGraph());
-      std::string msg =
-          std::string("Unhandled node kind (in inferSizesForValue): ") +
-          v->node()->kind().toQualString();
-      throw malformed_input(msg);
+      throw std::runtime_error("Unhandled node kind");
     }
   }
 }
@@ -1394,39 +1407,30 @@ Tensor* computeSum(
   // aten::sum takes the input tensor named self.
   auto sizes = valueShape(inputs[0]);
 
-  size_t rank = sizes.size();
+  int rank = sizes.size();
   if (inputs.size() > 2) {
-    if (auto emptyAxes = c10::get_if<BufList>(&inputs[1])) {
-      // If dim-array is an empty list, it will appear as BufList instead of
-      // IntList, and hence we need a special handling for it.
-      // In that case, we need to sum over all axes.
-      TORCH_INTERNAL_ASSERT(emptyAxes->empty());
-      axes.resize(rank);
-      std::iota(axes.begin(), axes.end(), 0);
-    } else if (rank > 0) {
-      auto nodeAxes = c10::get<IntList>(inputs[1]);
-      // Canonicalize axes: wrap around, sort and make unique.
-      for (auto axis : nodeAxes) {
-        axes.push_back(at::maybe_wrap_dim(axis, rank));
-      }
-      std::sort(axes.begin(), axes.end());
-      axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
+    auto nodeAxes = c10::get<IntList>(inputs[1]);
+    // Canonicalize axes: wrap around, sort and make unique.
+    for (auto axis : nodeAxes) {
+      axes.push_back(at::maybe_wrap_dim(axis, rank));
     }
+    std::sort(axes.begin(), axes.end());
+    axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
     keepdim = c10::get<bool>(inputs[2]);
   } else {
-    axes.resize(rank);
+    axes.resize(sizes.size());
     std::iota(axes.begin(), axes.end(), 0);
   }
   // Axes go into reduction dimensions.
   std::vector<DimArg> reductionDims;
-  reductionDims.reserve(rank);
+  reductionDims.reserve(sizes.size());
   for (size_t axis : axes) {
     reductionDims.emplace_back(sizes[axis]);
   }
   std::vector<DimArg> outputDims;
   // Output dimensions are the complement of axes. When keepdim is set, a
   // one-sized dimension is inserted for each axis.
-  for (size_t dim = 0; dim < rank; ++dim) {
+  for (size_t dim = 0; dim < sizes.size(); ++dim) {
     if (!std::count(axes.begin(), axes.end(), dim)) {
       outputDims.emplace_back(sizes[dim]);
     } else if (keepdim) {
@@ -2506,6 +2510,9 @@ Tensor* tensorexpr::computeOperandValue(
     }
     case aten::t: {
       auto shape = valueShape(inputs[0]);
+      if (shape.size() == 1) {
+        return new Tensor(c10::get<BufHandle>(inputs[0]).node(), nullptr);
+      }
       return computeOperandValue(
           aten::transpose,
           {inputs[0], (int64_t)1, (int64_t)0},
@@ -2514,17 +2521,6 @@ Tensor* tensorexpr::computeOperandValue(
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
-      // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
-      if (A.ndim() < 1) {
-        return Compute(
-            "aten_transpose",
-            c10::fmap<DimArg>(outputShape),
-            [&](std::vector<VarHandle> axes) {
-              TORCH_INTERNAL_ASSERT(axes.size() <= 1);
-              return A.load(axes);
-            });
-      }
-      // Usual case where transpose actually swaps dimensions
       auto start_dim =
           at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
       auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
@@ -2538,16 +2534,6 @@ Tensor* tensorexpr::computeOperandValue(
     }
     case aten::permute: {
       auto A = c10::get<BufHandle>(inputs[0]);
-      // Trivial case of 0-dim tensors: just a copy of the input
-      if (A.ndim() == 0) {
-        return Compute(
-            "aten_permute",
-            c10::fmap<DimArg>(outputShape),
-            [&](const std::vector<VarHandle>& axes) {
-              std::vector<ExprHandle> empty_indices;
-              return A.load(empty_indices);
-            });
-      }
       auto permute_dims = c10::get<IntList>(inputs[1]);
       return Compute(
           "aten_permute",
@@ -2577,15 +2563,6 @@ Tensor* tensorexpr::computeOperandValue(
     case aten::reshape:
     case aten::view: {
       auto A = c10::get<BufHandle>(inputs[0]);
-      if (A.ndim() == 0) {
-        return Compute(
-            "aten_view",
-            c10::fmap<DimArg>(outputShape),
-            [&](const std::vector<VarHandle>& axes) {
-              std::vector<ExprHandle> empty_indices;
-              return A.load(empty_indices);
-            });
-      }
       auto view_dims = c10::get<IntList>(inputs[1]);
       return Compute(
           "aten_reshape",
@@ -2656,8 +2633,7 @@ Tensor* tensorexpr::computeOperandValue(
     } break;
     default: {
       std::string msg =
-          std::string("Unhandled node kind (in computeOperandValue): ") +
-          op.toQualString();
+          std::string("Unhandled node kind: ") + op.toQualString();
       throw malformed_input(msg);
     }
   }
@@ -2805,7 +2781,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     default: {
-      std::string msg = std::string("Unhandled node kind (in computeValue): ") +
+      std::string msg = std::string("Unhandled node kind: ") +
           v->node()->kind().toQualString();
       throw malformed_input(msg);
     }
@@ -3264,7 +3240,7 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
-  device_ = *pickDeviceType(graph_->inputs());
+  device_ = *pickDeviceType(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});
