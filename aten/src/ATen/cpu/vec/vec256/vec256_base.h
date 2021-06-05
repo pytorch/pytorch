@@ -528,7 +528,7 @@ public:
 };
 
 template <class T> Vectorized<T> inline operator+(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] + b[i];
   }
@@ -536,7 +536,7 @@ template <class T> Vectorized<T> inline operator+(const Vectorized<T> &a, const 
 }
 
 template <class T> Vectorized<T> inline operator-(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] - b[i];
   }
@@ -544,7 +544,7 @@ template <class T> Vectorized<T> inline operator-(const Vectorized<T> &a, const 
 }
 
 template <class T> Vectorized<T> inline operator*(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] * b[i];
   }
@@ -552,7 +552,7 @@ template <class T> Vectorized<T> inline operator*(const Vectorized<T> &a, const 
 }
 
 template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] / b[i];
   }
@@ -561,7 +561,7 @@ template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const 
 
 template <class T> Vectorized<T> inline operator||(
     const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] || b[i];
   }
@@ -573,7 +573,7 @@ template <class T> Vectorized<T> inline operator||(
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (a[i] > b[i]) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -589,7 +589,7 @@ Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
 template <class T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (std::abs(a[i]) > std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -607,7 +607,7 @@ Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (a[i] < b[i]) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -623,7 +623,7 @@ Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
 template <class T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (std::abs(a[i]) < std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -639,7 +639,7 @@ Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_vec, const Vectorized<T> &max_vec) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = std::min(std::max(a[i], min_vec[i]), max_vec[i]);
   }
@@ -649,7 +649,7 @@ Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_vec,
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline clamp_max(const Vectorized<T> &a, const Vectorized<T> &max_vec) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
   }
@@ -659,7 +659,7 @@ Vectorized<T> inline clamp_max(const Vectorized<T> &a, const Vectorized<T> &max_
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_vec) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
   }

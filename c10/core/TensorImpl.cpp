@@ -111,7 +111,7 @@ TensorImpl::TensorImpl(
       key_set_(key_set) {
   init_bitfields();
   // Inference tensor doesn't have version counter.
-  if (!is_inference_tensor()) {
+  if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
   }
 }
@@ -167,7 +167,7 @@ TensorImpl::TensorImpl(
   }
 
   // Inference tensor doesn't have version counter.
-  if (!is_inference_tensor()) {
+  if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
   }
 
@@ -420,8 +420,7 @@ AutogradMetaInterface::~AutogradMetaInterface() {}
 // to delete these setter code in their code which is not ideal.
 void TensorImpl::set_requires_grad(bool requires_grad) {
   TORCH_CHECK(
-      !(requires_grad && is_inference_tensor() &&
-        !c10::InferenceMode::is_enabled()),
+      !(requires_grad && is_inference() && !c10::InferenceMode::is_enabled()),
       "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
   if (!requires_grad && !autograd_meta_)
     return;
@@ -533,7 +532,7 @@ void TensorImpl::copy_tensor_metadata(
   // TODO: In the ideal end state, it's okay to set disabled version_counter
   // on inference tensor since it's a no-op. This requires refactor on call
   // sites.
-  if (!dest_impl->is_inference_tensor()) {
+  if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(version_counter);
   }
 }
@@ -545,7 +544,7 @@ void TensorImpl::copy_tensor_metadata(
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(
       src_impl, dest_impl, allow_tensor_metadata_change);
-  if (!dest_impl->is_inference_tensor()) {
+  if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(std::move(version_counter));
   }
 }

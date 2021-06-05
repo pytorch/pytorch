@@ -68,6 +68,12 @@ if [[ -z "$DOCKER_IMAGE" ]]; then
   fi
 fi
 
+USE_GOLD_LINKER="OFF"
+# GOLD linker can not be used if CUPTI is statically linked into PyTorch, see https://github.com/pytorch/pytorch/issues/57744
+if [[ ${DESIRED_CUDA} == "cpu" ]]; then
+  USE_GOLD_LINKER="ON"
+fi
+
 # Default to nightly, since that's where this normally uploads to
 PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
@@ -169,7 +175,7 @@ export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
 export CIRCLE_BRANCH="$CIRCLE_BRANCH"
 export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
 
-export USE_GOLD_LINKER=1
+export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
 export USE_GLOO_WITH_OPENSSL=1
 # =================== The above code will be executed inside Docker container ===================
 EOL

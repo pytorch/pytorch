@@ -35,25 +35,6 @@ namespace {
   }
 }
 
-Scalar _th_std_var(const Tensor& self, int64_t correction, bool take_sqrt) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CPU, dispatch_scalar_type);
-            return convert<double>(THDoubleTensor_std_var_all(self_, correction, take_sqrt));
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CPU, dispatch_scalar_type);
-            return convert<float>(THFloatTensor_std_var_all(self_, correction, take_sqrt));
-            break;
-        }
-        default:
-            AT_ERROR("_th_var not supported on CPUType for ", dispatch_scalar_type);
-    }
-}
 Tensor & _th_histc_out(const Tensor & self, int64_t bins, const Scalar& min, const Scalar& max, Tensor & result) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);

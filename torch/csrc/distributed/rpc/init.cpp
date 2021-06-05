@@ -649,29 +649,36 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
-          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                      std::string selfName,
-                      worker_id_t selfId,
-                      int worldSize,
-                      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
-                      TensorPipeRpcBackendOptions opts) {
-            return std::shared_ptr<TensorPipeAgent>(
-                new TensorPipeAgent(
-                    store,
-                    std::move(selfName),
-                    selfId,
-                    worldSize,
-                    std::move(processGroup),
-                    std::move(opts),
-                    std::make_unique<RequestCallbackImpl>()),
-                impl::destroy_without_gil<TensorPipeAgent>);
-          }),
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 std::string selfName,
+                 worker_id_t selfId,
+                 int worldSize,
+                 c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
+                 TensorPipeRpcBackendOptions opts,
+                 std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+                 std::vector<c10::Device> devices) {
+                return std::shared_ptr<TensorPipeAgent>(
+                    new TensorPipeAgent(
+                        store,
+                        std::move(selfName),
+                        selfId,
+                        worldSize,
+                        std::move(processGroup),
+                        std::move(opts),
+                        std::move(reverseDeviceMaps),
+                        std::move(devices),
+                        std::make_unique<RequestCallbackImpl>()),
+                    impl::destroy_without_gil<TensorPipeAgent>);
+              }),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
           py::arg("process_group"),
-          py::arg("rpc_backend_options"))
+          py::arg("rpc_backend_options"),
+          py::arg("reverse_device_maps"),
+          py::arg("devices"))
       .def(
           "join",
           &TensorPipeAgent::join,
@@ -705,11 +712,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "_get_device_map",
           (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
               TensorPipeAgent::getDeviceMap,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_set_reverse_device_maps",
-          // intentionally not releasing GIL to avoid unnecessary context switch
-          &TensorPipeAgent::setReverseDeviceMaps);
+          py::call_guard<py::gil_scoped_release>());
 
 #endif // USE_TENSORPIPE
 
