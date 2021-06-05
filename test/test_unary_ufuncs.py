@@ -1507,8 +1507,9 @@ class TestUnaryUfuncs(TestCase):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
             a = a.to(dtype)
-            # bfloat16 overflows
             if dtype == torch.bfloat16:
+                with self.assertRaises(TypeError):  # compare_with_numpy doesn't support bfloat16
+                    self.compare_with_numpy(torch.exp, np.exp, a)
                 return
             self.compare_with_numpy(torch.exp, np.exp, a)
 
