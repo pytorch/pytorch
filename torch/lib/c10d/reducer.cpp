@@ -1,4 +1,5 @@
 #include <c10d/reducer.hpp>
+#include <c10d/default_comm_hooks.hpp>
 
 #include <functional>
 
@@ -74,7 +75,7 @@ Reducer::Reducer(
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
-      // TODO: Retire divFactor_.
+      // Only used for handling unevent input.
       divFactor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
@@ -827,7 +828,8 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec);
   if (comm_hook_ == nullptr) {
-    AllReduceCommHook allreduce_hook(process_group_.get());
+    _AllReduceCommHookWithDivFactorState state(process_group_.get(), divFactor_);
+    _AllReduceCommHookWithDivFactor allreduce_hook(state);
     bucket.future_work = allreduce_hook.runHook(grad_bucket);
   } else {
     bucket.future_work = comm_hook_->runHook(grad_bucket);

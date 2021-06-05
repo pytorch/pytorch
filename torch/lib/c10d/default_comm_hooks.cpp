@@ -45,4 +45,23 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
       decompress_and_div_by_process_group_size, allreduce_fut->elementType());
 }
 
+c10::intrusive_ptr<c10::ivalue::Future> _AllReduceCommHookWithDivFactor::runHook(
+    GradBucket& bucket) {
+  std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
+  auto allreduce_fut = state_.pg->allreduce(tensors)->getFuture();
+  int div_factor = state_.div_factor;
+  auto div_by_process_group_size =
+      [div_factor](c10::ivalue::Future& allreduce_fut) {
+        auto result = allreduce_fut.value();
+        TORCH_INTERNAL_ASSERT(
+            result.isTensorList(),
+            "ProcessGroup::allreduce should return TensorList");
+        auto tensor = result.toTensorVector()[0] / div_factor;
+        return c10::IValue(tensor);
+      };
+
+  return allreduce_fut->then(
+      div_by_process_group_size, allreduce_fut->elementType());
+}
+
 } // namespace c10d
