@@ -5942,6 +5942,20 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/pull/57934#issuecomment-840091579
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                         device_type='cuda', dtypes=(torch.bfloat16,)),)),
+    OpInfo('__rmod__',
+           op=torch.Tensor.__rmod__,
+           dtypes=all_types_and(torch.bfloat16, torch.half),
+           dtypesIfCPU=floating_types_and(torch.half,),
+           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_rbinops,
+           supports_out=False,
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
+           # Support autograd after torch.remainder(Tensor, Tensor) supports
+           # autograd of the second argument.
+           # https://github.com/pytorch/pytorch/pull/58476/files#r637167630
+           supports_autograd=False,
+           assert_autodiffed=True,
+           autodiff_nonfusible_nodes=['aten::remainder'],),
     OpInfo('__rpow__',
            op=torch.Tensor.__rpow__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
