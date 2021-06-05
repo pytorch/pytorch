@@ -1120,10 +1120,7 @@ class TestCase(expecttest.TestCase):
         if isinstance(tensor_like, torch.Tensor):
             assert device is None
             assert dtype is None
-            t_cpu = tensor_like.detach().cpu()
-            if t_cpu.dtype is torch.bfloat16:
-                t_cpu = t_cpu.float()
-            a = t_cpu.numpy()
+            a = tensor_like.detach().cpu().numpy()
             t = tensor_like
         else:
             d = copy.copy(torch_to_numpy_dtype_dict)
@@ -1142,7 +1139,7 @@ class TestCase(expecttest.TestCase):
                 # NOTE: copying an array before conversion is necessary when,
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
-            if t.dtype is torch.bfloat16 and torch_result.dtype is torch.bfloat16 and np_result.dtype is torch.float:
+            if dtype is torch.bfloat16 and torch_result.dtype is torch.bfloat16 and np_result.dtype is torch.float:
                 torch_result = torch_result.to(torch.float)
 
         self.assertEqual(np_result, torch_result, **kwargs)
