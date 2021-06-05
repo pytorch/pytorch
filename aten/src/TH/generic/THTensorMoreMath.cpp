@@ -244,19 +244,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
-accreal THTensor_(std_var_all)(THTensor* tensor, int64_t correction, bool take_sqrt)
-    __ubsan_ignore_float_divide_by_zero__ {
-  accreal mean = THTensor_wrap(tensor).mean().item<accreal>();
-  accreal sum = 0;
-  TH_TENSOR_APPLY(scalar_t, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= std::max(int64_t{0}, THTensor_(nElement)(tensor) - correction);
-  if (take_sqrt) {
-    return std::sqrt(sum);
-  } else {
-    return sum;
-  }
-}
-
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
 {
   if (nbins <= 0) {
