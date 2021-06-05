@@ -195,37 +195,37 @@ bool conv2dIsSupported(
   if (input.dtype != c10::ScalarType::Float ||
       weight.dtype != c10::ScalarType::Float ||
       bias.dtype != c10::ScalarType::Float) {
-    GRAPH_DEBUG("only float32 allowed");
+    GRAPH_DEBUG("conv2dIsSupported: only float32 allowed");
     return false;
   }
   if (input.dims.size() != 4 || weight.dims.size() != 4 ||
       bias.dims.size() != 1) {
-    GRAPH_DEBUG("inputs are the wrong size");
+    GRAPH_DEBUG("conv2dIsSupported: inputs are the wrong size");
     return false;
   }
   auto Cin = input.dims[1];
   auto Cout = weight.dims[0];
   auto CperG = weight.dims[1];
   if (Cin != Cout || Cin != groups || CperG != 1) {
-    GRAPH_DEBUG("not depthwise");
+    GRAPH_DEBUG("conv2dIsSupported: not depthwise");
     return false;
   }
   auto KH = weight.dims[2];
   auto KW = weight.dims[3];
   if (KH != 3 || KW != 3) {
-    GRAPH_DEBUG("not 3x3");
+    GRAPH_DEBUG("conv2dIsSupported: not 3x3");
     return false;
   }
   if (stride.size() != 2 || stride[0] != stride[1]) {
-    GRAPH_DEBUG("unsupported stride");
+    GRAPH_DEBUG("conv2dIsSupported: unsupported stride");
     return false;
   }
   if (pad.size() != 2 || pad[0] != pad[1]) {
-    GRAPH_DEBUG("unsupported pad");
+    GRAPH_DEBUG("conv2dIsSupported: unsupported pad");
     return false;
   }
   if (dilation.size() != 2 || dilation[0] != 1 || dilation[1] != 1) {
-    GRAPH_DEBUG("unsupported dilation");
+    GRAPH_DEBUG("conv2dIsSupported: unsupported dilation");
     return false;
   }
   return true;
@@ -720,7 +720,10 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     default: {
       GRAPH_DEBUG("Can't infer sizes for the node: ", *v->node());
       GRAPH_DEBUG("Full fusion group graph:\n", *v->node()->owningGraph());
-      throw std::runtime_error("Unhandled node kind");
+      std::string msg =
+          std::string("Unhandled node kind (in inferSizesForValue): ") +
+          v->node()->kind().toQualString();
+      throw malformed_input(msg);
     }
   }
 }
@@ -2633,7 +2636,8 @@ Tensor* tensorexpr::computeOperandValue(
     } break;
     default: {
       std::string msg =
-          std::string("Unhandled node kind: ") + op.toQualString();
+          std::string("Unhandled node kind (in computeOperandValue): ") +
+          op.toQualString();
       throw malformed_input(msg);
     }
   }
@@ -2781,7 +2785,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     default: {
-      std::string msg = std::string("Unhandled node kind: ") +
+      std::string msg = std::string("Unhandled node kind (in computeValue): ") +
           v->node()->kind().toQualString();
       throw malformed_input(msg);
     }
