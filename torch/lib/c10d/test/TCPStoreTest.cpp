@@ -380,3 +380,23 @@ TEST(TCPStoreTest, testCleanShutdown) {
 
   clientThread.join();
 }
+
+TEST(TCPStoreTest, testMultiTenantStores) {
+  c10d::TCPStoreOptions opts {};
+  opts.isServer = true;
+  opts.multiTenant = true;
+
+  // Construct two server stores on the same port.
+  auto store1 = c10::make_intrusive<c10d::TCPStore>("localhost", opts);
+  auto store2 = c10::make_intrusive<c10d::TCPStore>("localhost", opts);
+
+  // Assert that the two stores share the same server.
+  c10d::test::set(*store1, "key0", "value0");
+  c10d::test::check(*store2, "key0", "value0");
+
+  // Dispose the second instance and assert that the server is still alive.
+  store2.reset();
+
+  c10d::test::set(*store1, "key0", "value0");
+  c10d::test::check(*store1, "key0", "value0");
+}
