@@ -25,22 +25,6 @@ inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
 }
 
-// FIXME: Should make this a static method of C++ comm hook,
-// and reuse it instead of createing duplicate code.
-std::vector<at::Tensor> parseHookResult(const c10::IValue& result) {
-  TORCH_INTERNAL_ASSERT(
-      result.isTensor() || result.isTensorList(),
-      "expected the hook result is either a Tensor or a TensorList");
-
-  if (result.isTensor()) {
-    return {result.toTensor()};
-  }
-
-  return result.toTensorVector();
-}
-
-constexpr int kUnsetDivFactor = -1;
-
 // Macro that wraps TORCH_CHECK with DDP logging.
 #define REDUCER_CHECK(cond, logger_, ...)             \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {               \
@@ -1395,7 +1379,7 @@ void Reducer::finalize_backward() {
         "This may indicate that communication hook was not properly installed.");
     bucket.future_work->wait();
     auto future_result = comm_hook_ == nullptr
-        ? parseHookResult(bucket.future_work->value())
+        ? _parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
     for (const auto i : c10::irange(future_result.size())) {
       auto& replica = bucket.replicas[i];
