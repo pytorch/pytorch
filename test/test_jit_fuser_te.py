@@ -164,6 +164,9 @@ class TestTEFuser(JitTestCase):
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
 
+    def test_nop(self):
+        pass
+
     def test_sum_dim(self):
         def func(x):
             return x.sum((0, )) * 2
@@ -1862,6 +1865,13 @@ class TestTEFuser(JitTestCase):
                 zs = [torch.ones(i) for i in range(N)]
                 repro(xs, ys, zs)
 
+    def test_scalar_only_inputs(self):
+        def eager(b: float):
+            a = torch.ones(1)
+            return a * b
+
+        script = self.checkScript(eager, (1.0,))
+
 
 works_list = [
     '__radd__',
@@ -1949,7 +1959,8 @@ known_failures = [
 skip_ops = [
     # Causing SIGSEGV
     # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
-    't'
+    't',
+    'conj'
 ]
 
 def get_name(op):

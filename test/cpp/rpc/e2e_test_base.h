@@ -28,8 +28,14 @@ class TestE2EBase : public ::testing::Test {
     autogradContainer = getDistAutogradContainer();
 
     // Setup server store.
-    store = c10::make_intrusive<c10d::TCPStore>(
-        serverAddress, 0, numWorkers, true, std::chrono::seconds(10));
+    c10d::TCPStoreOptions opts{
+        /* port */ 0,
+        /* isServer */ true,
+        numWorkers,
+        /* waitWorkers */ true,
+        /* timeout */ std::chrono::seconds(10)};
+
+    store = c10::make_intrusive<c10d::TCPStore>(serverAddress, opts);
 
     buildRpcAgent();
 
