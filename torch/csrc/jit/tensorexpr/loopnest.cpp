@@ -2232,12 +2232,6 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Stmt* s) const {
   return result;
 }
 
-void LoopNest::setBufferMap(
-    For* f,
-    const std::unordered_map<std::string, const Buf*>& map) {
-  f->set_buffer_map(map);
-}
-
 Stmt* LoopNest::getLoopBodyFor(Tensor* t) const {
   return getLoopBodyFor(t->buf());
 }

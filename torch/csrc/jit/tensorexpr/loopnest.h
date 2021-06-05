@@ -400,10 +400,6 @@ class TORCH_API LoopNest {
   static bool rfactor(Stmt* s, For* outer_reduction_for);
   static bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
 
-  void setBufferMap(
-      For* f,
-      const std::unordered_map<std::string, const Buf*>& map);
-
   void eliminateDeadStores();
   void prepareForCodegen();
 
