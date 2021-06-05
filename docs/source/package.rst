@@ -449,6 +449,83 @@ Understand what dependencies my code has?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
+Explanation
+-----------
+``torch.package`` Format Overview
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+A ``torch.package`` file is a ZIP archive which conventionally uses the ``.pt`` extension. Inside the ZIP archive, there are two kinds of files:
+
+* Framework files, which are placed in the ``.data/``.
+* User files, which is everything else.
+
+As an example, this is what a fully packaged ResNet model from ``torchvision`` looks like:
+
+
+::
+
+    resnet
+    ├── .data  # All framework-specific data is stored here.
+    │   │      # It's named to avoid conflicts with user-serialized code.
+    │   ├── 94286146172688.storage  # tensor data
+    │   ├── 94286146172784.storage
+    │   ├── extern_modules  # text file with names of extern modules (e.g. 'torch')
+    │   ├── version         # version metadata
+    │   ├── ...
+    ├── model  # the pickled model
+    │   └── model.pkl
+    └── torchvision  # all code dependencies are captured as source files
+        └── models
+            ├── resnet.py
+            └── utils.py
+
+
+Framework files
+"""""""""""""""
+The ``.data/`` directory is owned by torch.package, and its contents are considered to be a private implementation detail.
+The ``torch.package`` format makes no guarantees about the contents of ``.data/``, but any changes made will be backward compatible
+(that is, newer version of PyTorch will always be able to load older ``torch.packages``).
+
+Currently, the ``.data/`` directory contains the following items:
+
+* ``version``: a version number for the serialized format, so that the ``torch.package`` import infrastructures knows how to load this package.
+* ``extern_modules``: a list of modules that are considered ``extern:class:`PackageImporter`. ``extern`` modules will be imported using the loading environment’s system importer.
+* ``*.storage``: serialized tensor data.
+
+
+::
+
+    .data
+    ├── 94286146172688.storage
+    ├── 94286146172784.storage
+    ├── extern_modules
+    ├── version
+    ├── ...
+
+
+User files
+""""""""""
+All other files in the archive were put there by a user. The layout is identical to a Python
+`regular package <https://docs.python.org/3/reference/import.html#regular-packages>`_. For a deeper dive in how Python packaging works,
+please consult `this essay <https://www.python.org/doc/essays/packages/>`_ (it’s slightly out of date, so double-check implementation details
+with the `Python reference documentation <https://docs.python.org/3/library/importlib.html>`_).
+
+
+::
+
+    <package root>
+    ├── model  # the pickled model
+    │   └── model.pkl
+    ├── another_package
+    │   ├── __init__.py
+    │   ├── foo.txt         # a resource file , see importlib.resources
+    │   └── ...
+    └── torchvision
+        └── models
+            ├── resnet.py   # torchvision.models.resnet
+            └── utils.py    # torchvision.models.utils
+
+
+
 API Reference
 -------------
 .. autoclass:: torch.package.PackagingError
