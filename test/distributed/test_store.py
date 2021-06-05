@@ -10,6 +10,7 @@ from sys import platform
 
 import torch
 import torch.distributed as dist
+import torch.distributed.rpc as rpc
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
@@ -172,6 +173,46 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # object is not destroyed before the second object is created.
             store1 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
+
+    def test_multitenancy(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+
+        # Use noqa to silence flake8.
+        # Need to store in an unused variable here to ensure the first
+        # object is not destroyed before the second object is created.
+        store1 = dist.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
+        store2 = dist.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
+
+    @skip_if_win32()
+    def test_init_pg_and_rpc_with_same_socket(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+
+        os.environ["MASTER_ADDR"] = addr
+        os.environ["MASTER_PORT"] = str(port)
+
+        # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
+        # initialize even when using the same socket address.
+
+        dist.init_process_group(
+            backend="gloo",
+            init_method="env://",
+            rank=0,
+            world_size=1,
+        )
+
+        backend_opts = rpc.ProcessGroupRpcBackendOptions(
+            init_method=f"tcp://{addr}:{port}"
+        )
+        rpc.init_rpc(
+            name="worker0",
+            rank=0,
+            world_size=1,
+            rpc_backend_options=backend_opts,
+        )
+
+        rpc.shutdown()
 
     # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
     # the user and one additional key used for coordinate all the workers.

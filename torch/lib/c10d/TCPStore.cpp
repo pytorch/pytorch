@@ -788,22 +788,61 @@ class TCPServer {
  private:
   std::uint16_t port_;
   std::unique_ptr<TCPStoreMasterDaemon> daemon_;
+
+  // We store weak references to all TCPServers for which the caller requested
+  // multi-tenancy.
+  static std::unordered_map<std::uint16_t, std::weak_ptr<TCPServer>>
+      cachedServers_;
+
+  static std::mutex cache_mutex_;
 };
 
+std::unordered_map<std::uint16_t, std::weak_ptr<TCPServer>>
+    TCPServer::cachedServers_{};
+
+std::mutex TCPServer::cache_mutex_{};
+
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
+  auto startCore = [&opts]() {
+    TCPSocket socket{};
+    std::uint16_t port{};
+
+    std::tie(socket, port) = tcputil::listen(opts.port);
+
+    auto daemon = std::make_unique<TCPStoreMasterDaemon>(std::move(socket));
+
+    return std::make_shared<TCPServer>(port, std::move(daemon));
+  };
+
+  std::shared_ptr<TCPServer> server{};
+
   if (opts.multiTenant) {
-    LOG(WARNING)
-        << "The multi-tenant feature of TCPStore is not implemented yet.";
+    std::lock_guard<std::mutex> guard{cache_mutex_};
+
+    // If the caller is okay with a multi-tenant store, first check if we already
+    // have a TCPServer running on the specified port.
+    if (opts.port > 0) {
+      auto pos = cachedServers_.find(opts.port);
+      if (pos != cachedServers_.end()) {
+        server = pos->second.lock();
+        if (server != nullptr) {
+          return server;
+        }
+
+        // Looks like the TCPStore has been disposed, make sure that we release
+        // the control block.
+        cachedServers_.erase(pos);
+      }
+    }
+
+    server = startCore();
+
+    cachedServers_.emplace(server->port(), server);
+  } else {
+    server = startCore();
   }
 
-  TCPSocket socket{};
-  std::uint16_t port{};
-
-  std::tie(socket, port) = tcputil::listen(opts.port);
-
-  auto daemon = std::make_unique<TCPStoreMasterDaemon>(std::move(socket));
-
-  return std::make_shared<TCPServer>(port, std::move(daemon));
+  return server;
 }
 
 class TCPClient {
