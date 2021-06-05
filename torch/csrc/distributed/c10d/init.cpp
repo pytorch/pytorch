@@ -871,13 +871,22 @@ Example::
     >>> client_store.get("first_key")
       )")
       .def(
-          py::init<
-              const std::string&,
-              int,
-              int,
-              bool,
-              std::chrono::milliseconds,
-              bool>(),
+          py::init([](const std::string& host,
+                      ::c10d::PortType port,
+                      int worldSize,
+                      bool isServer,
+                      std::chrono::milliseconds timeout,
+                      bool waitWorkers) {
+            c10::optional<std::size_t> numWorkers = c10::nullopt;
+            if (worldSize > -1) {
+              numWorkers = static_cast<std::size_t>(worldSize);
+            }
+
+            ::c10d::TCPStoreOptions opts{
+                port, isServer, numWorkers, waitWorkers, timeout};
+
+            return c10::make_intrusive<::c10d::TCPStore>(host, opts);
+          }),
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size") = -1,

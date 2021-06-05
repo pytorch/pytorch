@@ -9,6 +9,7 @@
 #include <unistd.h>
 #endif
 
+#include <utility>
 #include <fcntl.h>
 #include <algorithm>
 #include <system_error>
@@ -599,17 +600,25 @@ TCPStore::TCPStore(
     bool isServer,
     const std::chrono::milliseconds& timeout,
     bool waitWorkers)
-    : Store(timeout),
-      isServer_(isServer),
-      tcpStoreAddr_(masterAddr),
-      tcpStorePort_(masterPort),
-      numWorkers_(numWorkers),
-      initKey_("init/"),
-      regularPrefix_("/") {
+    : TCPStore{
+          masterAddr,
+          TCPStoreOptions{masterPort,
+                          isServer,
+                          numWorkers ? c10::optional<std::size_t>(*numWorkers)
+                                     : c10::nullopt,
+                          waitWorkers,
+                          timeout}} {}
+
+TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
+    : Store{opts.timeout},
+      isServer_{opts.isServer},
+      tcpStoreAddr_{std::move(host)},
+      tcpStorePort_{opts.port},
+      numWorkers_{opts.numWorkers} {
   tcputil::socketInitialize();
   if (isServer_) {
     // Opening up the listening socket
-    std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
+    std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(opts.port);
   }
   try {
     if (isServer_) {
@@ -620,7 +629,7 @@ TCPStore::TCPStore(
     // Connect to the daemon
     storeSocket_ = tcputil::connect(
         tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-    if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
+    if (opts.waitWorkers) {
       waitForWorkers();
     }
 
@@ -658,6 +667,10 @@ TCPStore::~TCPStore() {
 }
 
 void TCPStore::waitForWorkers() {
+  if (numWorkers_ == c10::nullopt) {
+    return;
+  }
+
   addHelper_(initKey_, 1);
   // Let server block until all workers have completed, this ensures that
   // the server daemon thread is always running until the very end
@@ -668,7 +681,7 @@ void TCPStore::waitForWorkers() {
       auto buf = reinterpret_cast<const char*>(value.data());
       auto len = value.size();
       int numWorkersCompleted = std::stoi(std::string(buf, len));
-      if (numWorkersCompleted >= numWorkers_.value_or(-1)) {
+      if (numWorkersCompleted >= *numWorkers_) {
         break;
       }
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
