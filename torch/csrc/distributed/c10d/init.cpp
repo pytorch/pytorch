@@ -876,14 +876,15 @@ Example::
                       int worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
-                      bool waitWorkers) {
+                      bool waitWorkers,
+                      bool multiTenant) {
             c10::optional<std::size_t> numWorkers = c10::nullopt;
             if (worldSize > -1) {
               numWorkers = static_cast<std::size_t>(worldSize);
             }
 
             ::c10d::TCPStoreOptions opts{
-                port, isServer, numWorkers, waitWorkers, timeout};
+                port, isServer, numWorkers, waitWorkers, timeout, multiTenant};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -895,7 +896,8 @@ Example::
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
-          py::arg("wait_for_workers") = true)
+          py::arg("wait_for_workers") = true,
+          py::arg("multi_tenant") = false)
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
