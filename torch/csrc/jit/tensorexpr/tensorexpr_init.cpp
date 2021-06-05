@@ -425,33 +425,33 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "split_with_tail",
-          [](const LoopNest& self, For* f, int factor) {
+          [](For* f, int factor) {
             For *inner = nullptr, *tail = nullptr;
-            self.splitWithTail(f, factor, &inner, &tail);
+            LoopNest::splitWithTail(f, factor, &inner, &tail);
             return std::make_tuple(inner, tail);
           },
           py::return_value_policy::reference)
       .def(
           "split_with_mask",
-          [](const LoopNest& self, For* f, int factor) {
+          [](For* f, int factor) {
             For* inner = nullptr;
-            self.splitWithMask(f, factor, &inner);
+            LoopNest::splitWithMask(f, factor, &inner);
             return inner;
           },
           py::return_value_policy::reference)
       .def(
           "slice_head",
-          [](LoopNest& self, For* f, int factor) {
+          [](For* f, int factor) {
             For *head = nullptr, *tail = nullptr;
-            self.sliceHead(f, factor, &head, &tail);
+            LoopNest::sliceHead(f, factor, &head, &tail);
             return std::make_tuple(head, tail);
           },
           py::return_value_policy::reference)
       .def(
           "slice_tail",
-          [](LoopNest& self, For* f, int factor) {
+          [](For* f, int factor) {
             For *head = nullptr, *tail = nullptr;
-            self.sliceTail(f, factor, &head, &tail);
+            LoopNest::sliceTail(f, factor, &head, &tail);
             return std::make_tuple(head, tail);
           },
           py::return_value_policy::reference)
@@ -501,22 +501,19 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "vectorize",
-          [](const LoopNest& self, For* f) { self.vectorize(f); },
+          [](For* f) { LoopNest::vectorize(f); },
           py::return_value_policy::reference)
       .def(
           "cache_accesses",
-          [](LoopNest& self,
-             const BufHandle& producer,
+          [](const BufHandle& producer,
              const std::string& name,
              Stmt* consumer) {
             std::pair<const Buf*, Stmt*> ret =
-                self.cacheAccesses(producer.node(), name, consumer);
+                LoopNest::cacheAccesses(producer.node(), name, consumer);
             return std::make_pair(BufHandle(ret.first), ret.second);
           },
           py::return_value_policy::reference)
-      .def(
-          "compute_at",
-          [](LoopNest& self, Stmt* s, For* at) { self.computeAt(s, at); })
+      .def("compute_at", [](Stmt* s, For* at) { LoopNest::computeAt(s, at); })
       .def(
           "compute_inline",
           [](LoopNest& self, Stmt* s) { self.computeInline(s); },
@@ -529,17 +526,17 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "rfactor",
-          [](LoopNest& self, Stmt* s, For* target_for) {
+          [](Stmt* s, For* target_for) {
             Buf* rfac_buf = nullptr;
-            self.rfactor(s, target_for, &rfac_buf);
+            LoopNest::rfactor(s, target_for, &rfac_buf);
             return BufHandle(rfac_buf);
           },
           py::return_value_policy::reference)
       .def(
           "flatten",
-          [](const LoopNest& self, const std::vector<For*>& loops) {
+          [](const std::vector<For*>& loops) {
             For* flattened = nullptr;
-            self.flatten(loops, &flattened);
+            LoopNest::flatten(loops, &flattened);
             return flattened;
           },
           py::return_value_policy::reference)

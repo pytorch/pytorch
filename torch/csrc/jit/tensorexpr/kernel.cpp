@@ -2950,7 +2950,7 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
         if (blockSize < 0) {
           blockSize = kDefaultBlockSize;
         }
-        l.splitWithMask(flattened, blockSize, &inner);
+        LoopNest::splitWithMask(flattened, blockSize, &inner);
         l.setGPUBlockIndex(flattened, 0);
         l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
@@ -2963,8 +2963,8 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
         const int kDefaultBlockSize = 256;
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
-        l.splitWithMask(flattened, blockCount * blockSize, &inner);
-        l.splitWithMask(inner, blockSize, &inner1);
+        LoopNest::splitWithMask(flattened, blockCount * blockSize, &inner);
+        LoopNest::splitWithMask(inner, blockSize, &inner1);
         l.setGPUBlockIndex(inner, 0);
         l.setGPUThreadIndex(inner1, 0);
       } else {
@@ -2990,7 +2990,7 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
       assert(flattened);
 
       For* inner = nullptr;
-      l.splitWithMask(flattened, blockSize, &inner);
+      LoopNest::splitWithMask(flattened, blockSize, &inner);
       l.setGPUBlockIndex(flattened, 0);
       l.setGPUThreadIndex(inner, 0);
       l.setBufferMap(flattened, block_analysis->getBufferMap());
