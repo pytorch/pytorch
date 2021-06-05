@@ -30,7 +30,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   }
 
   // Nothing to do, we return fast
-  if (n == 0) {
+  if (n == 0 || self.numel() <=1) {
     out_tensor.copy_(self);
     return out_tensor;
   }
