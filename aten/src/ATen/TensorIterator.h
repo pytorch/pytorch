@@ -299,10 +299,6 @@ public:
   StrideVector get_inner_strides() const { return get_dim_strides(0); }
   PtrVector get_base_ptrs() const;
 
-  // Helper functions for advanced stride manipulations (e.g. torch.flip)
-  void _unsafe_set_arg_strides(const int arg, IntArrayRef strides) { operands_[arg].stride_bytes = std::move(strides); }
-  void _unsafe_set_arg_data(const int arg, void* data) { operands_[arg].data = data; }
-
   /// true if the stride computation can use 32-bit arithmetic. Used by GPU kernels
   bool can_use_32bit_indexing() const;
 
