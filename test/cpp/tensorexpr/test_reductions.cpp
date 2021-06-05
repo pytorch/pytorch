@@ -713,8 +713,8 @@ TEST(Reductions, ReorderedReductionInitializer) {
   LoopNest l({tensor});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
 
   LoopNest::reorderAxis(loops[1], loops[2]);
 

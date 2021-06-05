@@ -2232,14 +2232,6 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Stmt* s) const {
   return result;
 }
 
-void LoopNest::setGPUBlockIndex(For* f, int block_index) {
-  f->set_gpu_block_index(block_index);
-}
-
-void LoopNest::setGPUThreadIndex(For* f, int thread_index) {
-  f->set_gpu_thread_index(thread_index);
-}
-
 void LoopNest::setBufferMap(
     For* f,
     const std::unordered_map<std::string, const Buf*>& map) {

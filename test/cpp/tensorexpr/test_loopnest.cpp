@@ -165,7 +165,7 @@ TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
-  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
+  loops[0]->set_gpu_block_index(LoopOptions::IDX_Y);
   LoopNest::sliceHead(loops[0], 2, &head, &tail);
 
   Block* body = getSimplifiedBody(l);
@@ -196,7 +196,7 @@ TEST(LoopNest, ExprSliceTailWithLoopOptions) {
   For* tail_head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail_tail;
-  l.setGPUBlockIndex(tail, LoopOptions::IDX_Y);
+  tail->set_gpu_block_index(LoopOptions::IDX_Y);
   LoopNest::sliceTail(tail, 2, &tail_head, &tail_tail);
 
   Block* body = getSimplifiedBody(l);
@@ -676,7 +676,7 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
   LoopNest l({tensor});
   auto loops = NodeFinder<For>::find(l.root_stmt());
   ASSERT_GT(loops.size(), 0);
-  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
+  loops[0]->set_gpu_block_index(LoopOptions::IDX_Y);
   LoopNest::splitWithTail(loops[0], 4, &inner, &tail);
   ASSERT_NE(inner, nullptr);
   ASSERT_NE(tail, nullptr);
@@ -707,7 +707,7 @@ TEST(LoopNest, SplitWithMaskWithLoopOptions) {
 
   LoopNest l({tensor});
   auto loops = NodeFinder<For>::find(l.root_stmt());
-  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
+  loops[0]->set_gpu_block_index(LoopOptions::IDX_Y);
   LoopNest::splitWithMask(loops[0], 4, &inner);
   For* outer = loops[0];
 

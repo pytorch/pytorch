@@ -325,6 +325,16 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def("body", &For::body, py::return_value_policy::reference)
       .def("set_parallel", &For::set_parallel)
+      .def(
+          "set_gpu_block_index",
+          [](For& self, int block_index) {
+            self.set_gpu_block_index(block_index);
+          })
+      .def(
+          "set_gpu_thread_index",
+          [](For& self, int thread_index) {
+            self.set_gpu_thread_index(thread_index);
+          })
       .def_static(
           "make",
           [](const VarHandle& var,
@@ -545,14 +555,6 @@ void initTensorExprBindings(PyObject* module) {
           &LoopNest::reorderAxis,
           py::return_value_policy::reference)
       .def("simplify", &LoopNest::simplify, py::return_value_policy::reference)
-      .def(
-          "set_GPU_block_index",
-          &LoopNest::setGPUBlockIndex,
-          py::return_value_policy::reference)
-      .def(
-          "set_GPU_thread_index",
-          &LoopNest::setGPUThreadIndex,
-          py::return_value_policy::reference)
       .def(
           "inline_intermediate_bufs",
           [](LoopNest& self, bool allow_duplicated_work) {
