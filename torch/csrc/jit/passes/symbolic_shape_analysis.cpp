@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -119,6 +120,7 @@ struct SymbolicShapeAnalyzer {
       RefineIntegerValues(graph_);
       ConstantPropagation(graph_);
       EliminateCommonSubexpression(graph_);
+      HoistCommonExpression(graph_);
     }
     substituteInputTensorProperties(/*substitute_symbolic_dims*/ true);
     // XXX: do not run any passes after we have substituted in symbolic

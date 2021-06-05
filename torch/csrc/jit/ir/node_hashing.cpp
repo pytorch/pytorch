@@ -203,6 +203,10 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
 } // anonymous namespace
 
+// Makes a hash where hashes are equal when they can be
+// merged into the same expression. Notably, the output variable
+// are assigned to different variables but are guaranteed
+// to otherwise hold the same data.
 size_t HashNode::operator()(const Node* k) const {
   AT_ASSERT(k != nullptr);
   size_t constant_hash = 0;
@@ -230,6 +234,10 @@ size_t HashNode::operator()(const Node* k) const {
       constant_hash);
 };
 
+// Checks that two nodes are equal enough for them to be
+// merged into the same expression. Notably, the output variable
+// are assigned to different variables but are guaranteed
+// to otherwise hold the same data.
 bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (lhs == nullptr && rhs == nullptr)
     return true;
