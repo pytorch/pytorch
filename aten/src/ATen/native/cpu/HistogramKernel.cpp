@@ -147,20 +147,10 @@ void histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>&
             ? c10::optional<Tensor>(weight.value().reshape({numel_in}))
             : c10::optional<Tensor>();
 
-    switch (self.scalar_type()) {
-        case ScalarType::Double: {
-            histogram_cpu_contiguous<double, bin_algorithm>(
-                  hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
-            break;
-        }
-        case ScalarType::Float: {
-            histogram_cpu_contiguous<float, bin_algorithm>(
-                  hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
-            break;
-        }
-        default:
-            TORCH_CHECK(false, "torch.histogram: not supported on CPU for dtype ", self.dtype());
-    }
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histogram_cpu", [&]() {
+        histogram_cpu_contiguous<scalar_t, bin_algorithm>(
+                hist, bin_edges.contiguous(), reshaped_input, reshaped_weight);
+    });
 
     // Converts the bin totals to a probability density function
     if (density) {

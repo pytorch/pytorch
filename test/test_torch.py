@@ -4965,15 +4965,15 @@ else:
         for bin_ct, shape in product(range(1, 10), shapes):
             values = make_tensor(shape, device, dtype, low=-9, high=9)
             (actual_hist, actual_bin_edges) = torch.histogram(values, bin_ct)
-            (expected_hist, expected_bin_edges) = torch.histogram(values, bin_ct,
-                        min=None, max=None, weight=None, density=False)
+            (expected_hist, expected_bin_edges) = torch.histogram(
+                    values, bin_ct, min=None, max=None, weight=None, density=False)
             self.assertEqual(actual_hist, expected_hist)
             self.assertEqual(actual_bin_edges, expected_bin_edges)
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64)
     def test_histogram_error_handling(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, 'not supported on CPU for dtype'):
+        with self.assertRaisesRegex(RuntimeError, '\"histogram_cpu\" not implemented for'):
             values = make_tensor((), device, dtype=torch.int32)
             torch.histogram(values, 1)
 
