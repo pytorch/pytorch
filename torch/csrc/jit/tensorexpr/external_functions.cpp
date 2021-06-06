@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
 
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
