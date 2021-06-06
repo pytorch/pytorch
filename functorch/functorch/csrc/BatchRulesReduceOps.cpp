@@ -26,7 +26,6 @@ bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
 }
 
 
-// Not used right now, since ATEN_OPS isn't landed. Kinda annoying.
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
@@ -52,6 +51,10 @@ std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
   auto result = Func(self_, new_dims, std::forward<ExtraArgs>(extra_args)...);
   return { result, 0 };
 }
+
+// For now I'm not macroing these (don't see another way to do it), since I'm
+// worried about various edge cases popping up that make things more annoying.
+// Will re-evaluate after adding more reduction batching rules
 
 std::tuple<Tensor,optional<int64_t>> sum_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
@@ -93,6 +96,17 @@ std::tuple<Tensor,optional<int64_t>> nansum_batch_rule(
   return nansum_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), false, dtype);
 }
 
+std::tuple<Tensor,optional<int64_t>> std_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool unbiased, bool keepdim) {
+  return reduction_dim_batch_rule<decltype(&ATEN_FN2(std, dim)), &at::std, bool, bool>(self, self_bdim, dims, unbiased, keepdim);
+}
+
+std::tuple<Tensor,optional<int64_t>> std_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, bool unbiased) {
+  return std_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), unbiased, false);
+}
+
+// Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
 
 template<typename F, F Func>
 std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
@@ -114,7 +128,7 @@ std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
   auto new_dim = getPhysicalDim(self_, self_bdim.has_value(), *dim);
   if (self_.dim() <= new_dim) {
     // This happens when the original tensor is a scalar
-    // vmap(argmax([], 0)) => argmax([5, 1], 1)
+    // vmap(argmax(shape [], 0)) => argmax(shape [5, 1], 1)
     TORCH_INTERNAL_ASSERT(self_.dim() == 1);
     self_ = self_.unsqueeze(-1);
   }
@@ -173,6 +187,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
   VMAP_SUPPORT("nansum", nansum_batch_rule);
   VMAP_SUPPORT("nansum.dim_IntList", nansum_dim_batch_rule);
+  VMAP_SUPPORT("std", std_batch_rule);
+  VMAP_SUPPORT("std.dim", std_dim_batch_rule);
   VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
   VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
