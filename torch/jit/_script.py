@@ -960,11 +960,11 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
         #     Output:
         #     >> 11.6
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
-        if maybe_already_compiled_fn:
-            _clear_jit_function_cache(obj)
+        _clear_jit_function_cache(obj)
 
-    return script(obj, optimize, _frames_up, _rcb)
+    return script_impl(obj, optimize, _frames_up, _rcb)
 
+script = _script_pdt
 
 def create_script_dict(obj):
     """
@@ -982,7 +982,7 @@ def create_script_dict(obj):
     return torch._C.ScriptDict(obj)  # type: ignore[attr-defined]
 
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None):
+def script_impl(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
