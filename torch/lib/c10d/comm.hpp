@@ -89,7 +89,7 @@ class TORCH_PYTHON_API CommHookInterface {
 
 // This helper function is called both by CppCommHookInterface below and inside
 // reducer.
-std::vector<at::Tensor> _parseCppCommHookResult(const c10::IValue& result) {
+inline std::vector<at::Tensor> _parseCppCommHookResult(const c10::IValue& result) {
   TORCH_INTERNAL_ASSERT(
       result.isTensor() || result.isTensorList(),
       "expected the hook result is either a Tensor or a TensorList");
