@@ -1270,8 +1270,8 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
     auto b_stride = matrixStride(b);
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
-      auto handle = at::cuda::getCurrentCUDASolverDnHandle();
       at::cuda::solver::getrs<scalar_t>(
         handle,
         n,

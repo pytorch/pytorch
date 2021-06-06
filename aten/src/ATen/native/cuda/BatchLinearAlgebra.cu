@@ -2869,7 +2869,7 @@ static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& p
   }
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
-  else if (batch_size > 2 & m <= 128) {
+  else if (batch_size > 2 && m <= 128) {
     lu_solve_batched_cublas(b, lu, pivots);
   }
 #endif // ifdef CUDART_VERSION
