@@ -922,6 +922,14 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, extra_kwar
         samples.append(sample)
     return tuple(samples)
 
+
+def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    return (SampleInput(make_arg((1, 2))),
+            SampleInput(make_arg((2,))),
+            SampleInput(make_arg(())))
+
+
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
     args_list = (
         ((S, M), (M, S)),
@@ -2966,17 +2974,16 @@ def sample_inputs_geqrf(op_info, device, dtype, requires_grad=False):
         samples.append(SampleInput(a))
     return samples
 
-def sample_inputs_flip(op_info, device, dtype, requires_grad, **kwargs):
-    tensors = (
-        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    )
+def sample_inputs_flip(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    sizes = ((S, M, S), (S, 0, M))
+    all_dims = ((0, 1, 2), (0,), (0, 2), (-1,), ())
 
-    dims = ((0, 1, 2), (0,), (0, 2), (-1,), ())
+    def gen_samples():
+        for size, dims in product(sizes, all_dims):
+            yield SampleInput(make_arg(size), kwargs={"dims": dims})
 
-    samples = [SampleInput(tensor, kwargs={'dims': dim}) for tensor, dim in product(tensors, dims)]
-
-    return samples
+    return list(gen_samples())
 
 def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs):
     tensors = (
@@ -3206,6 +3213,29 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
             yield SampleInput(make_arg(shape), args=arg)
 
     return list(generator())
+
+
+def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return (SampleInput(make_arg((S, S)), args=(), output_process_fn_grad=lambda x: x.to_dense()),
+            SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
+
+
+def sample_inputs_log_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    if with_dtype:
+        cases = (((S, S, S), (1, torch.float64)),)
+    else:
+        cases = (((S, S, S), (1,)),)  # type:ignore[assignment]
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -5927,6 +5957,20 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/pull/57934#issuecomment-840091579
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                         device_type='cuda', dtypes=(torch.bfloat16,)),)),
+    OpInfo('__rmod__',
+           op=torch.Tensor.__rmod__,
+           dtypes=all_types_and(torch.bfloat16, torch.half),
+           dtypesIfCPU=floating_types_and(torch.half,),
+           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_rbinops,
+           supports_out=False,
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
+           # Support autograd after torch.remainder(Tensor, Tensor) supports
+           # autograd of the second argument.
+           # https://github.com/pytorch/pytorch/pull/58476/files#r637167630
+           supports_autograd=False,
+           assert_autodiffed=True,
+           autodiff_nonfusible_nodes=['aten::remainder'],),
     OpInfo('__rpow__',
            op=torch.Tensor.__rpow__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
@@ -6754,6 +6798,20 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )
            ),
+    OpInfo('to_sparse',
+           op=lambda x, *args: x.to_sparse(*args),
+           sample_inputs_func=sample_inputs_to_sparse,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types(),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           skips=(
+               # JIT has issue when op is passed as lambda
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           )
+           ),
     OpInfo('logcumsumexp',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -6877,6 +6935,22 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_logdet,
         decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm)),
+    # `log_softmax` supports different dtypes based on whether `dtype` argument,
+    # is passed or not. Hence two OpInfo entries, one with dtype and other without.
+    OpInfo(
+        'log_softmax',
+        supports_out=False,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_log_softmax,
+        assert_autodiffed=True),
+    OpInfo(
+        'log_softmax',
+        variant_test_name='dtype',
+        supports_out=False,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        sample_inputs_func=partial(sample_inputs_log_softmax, with_dtype=True),
+        assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
                    domain=(0, 1),
@@ -6963,6 +7037,11 @@ op_db: List[OpInfo] = [
            # the gradient check for complex fails.
            backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            ),
+    OpInfo('t',
+           sample_inputs_func=sample_inputs_t,
+           supports_out=False,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           assert_autodiffed=True,),
 ]
 
 # Common operator groupings
@@ -7076,7 +7155,6 @@ def ident(x):
 def method_tests():
     set_rng_seed(SEED)
     return [
-        ('t', (1, 2), NO_ARGS, '', (False,)),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
@@ -7099,11 +7177,8 @@ def method_tests():
         ('std_mean', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
         ('std_mean', (S,), (0,), 'dim_1d', [0]),
         ('std_mean', (S,), (0, True, True), 'keepdim_dim_1d', [0]),
-        ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
-        ('to_sparse', (S, S), (1,), 'dim', (), (), [], lambda x: x.to_dense())
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
