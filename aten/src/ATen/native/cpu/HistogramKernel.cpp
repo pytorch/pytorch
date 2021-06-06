@@ -15,6 +15,26 @@ namespace {
 constexpr int64_t HISTOGRAM_GRAIN_SIZE = 200;
 
 /* The main algorithm. Maps the elements of input into the bins defined by bin_edges.
+ * Expects that the elements of bin_edges are increasing; behavior is otherwise undefined.
+ *
+ * Accepts a template argument of type BIN_SELECTION_ALGORITHM specifying how the
+ * elements of input should be mapped into the bins:
+ *
+ *     - LINEAR_INTERPOLATION: bin_edges must contain a linear progression. Elements of input
+ *       are mapped to bins by computing (elt - leftmost_edge)/(rightmost_edge - leftmost_edge)
+ *       and truncating the result to an integer. Results may not be perfectly consistent with the
+ *       boundaries specified in bin_edges due to precision issues (or if bin_edges doesn't
+ *       actually contain a linear progression).
+ *
+ *     - LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH: Also expects that bin_edges contains a
+ *       linear progression. For each element, if 'pos' is the bin selected by the
+ *       LINEAR_INTERPOLATION approach, this approach inspects the boundaries in bin_edges to
+ *       place the element into pos - 1, pos, or pos + 1. The "local search" over neighboring
+ *       bins allows for correction of misclassifications due to precision issues.
+ *
+ *     - BINARY_SEARCH: Handles the general case by searching over the elements of bin_edges.
+ *       Implemented using std::upper_bound.
+ *
  * Accumulates the total weight in each bin into the hist tensor.
  */
 enum BIN_SELECTION_ALGORITHM {
@@ -32,12 +52,12 @@ void histogram_cpu_contiguous(Tensor& hist, const Tensor& bin_edges,
     TORCH_INTERNAL_ASSERT(!weight.has_value() || weight.value().dim() == 1);
 
     const int64_t numel_in = input.numel();
-    if (!numel_in) {
-        return;
-    }
 
     TensorAccessor<input_t, 1> accessor_in = input.accessor<input_t, 1>();
 
+    /* Constructs a c10::optional<TensorAccessor> containing an accessor iff
+     * the optional weight tensor has a value.
+     */
     const auto accessor_wt = weight.has_value()
             ? c10::optional<TensorAccessor<input_t, 1>>(weight.value().accessor<input_t, 1>())
             : c10::optional<TensorAccessor<input_t, 1>>();
@@ -142,12 +162,11 @@ void histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>&
             TORCH_CHECK(false, "torch.histogram: not supported on CPU for dtype ", self.dtype());
     }
 
+    // Converts the bin totals to a probability density function
     if (density) {
         auto bin_widths = bin_edges.diff();
         auto hist_sum = hist.sum().item();
-        // Converts the bin totals to a probability density function by dividing by the bin widths
         hist.div_(bin_widths);
-        // Normalizes the PDF so that the integral over the bins is 1
         hist.div_(hist_sum);
     }
 }

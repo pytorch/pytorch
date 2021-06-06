@@ -8,7 +8,7 @@
 #include <tuple>
 #include <c10/core/DefaultDtype.h>
 
-/* Implement a numpy-like histogram function running on cpu
+/* Implements a numpy-like histogram function running on cpu
  * https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
  *
  * - torch.histogram(input, bins, range=None, weight=None, density=False)
@@ -118,9 +118,9 @@ std::pair<double, double> select_outer_bin_edges(const Tensor& input,
 /* histc's version of the logic for outermost bin edges.
  */
 std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
-		const Scalar& min, const Scalar& max) {
-	double leftmost_edge = min.to<double>();
-	double rightmost_edge = max.to<double>();
+        const Scalar& min, const Scalar& max) {
+    double leftmost_edge = min.to<double>();
+    double rightmost_edge = max.to<double>();
 
     if (leftmost_edge == rightmost_edge) {
         auto extrema = _aminmax(input);
@@ -144,6 +144,8 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
 
 } // namespace
 
+/* Versions of histogram in which bins is a Tensor defining the sequence of bin edges.
+ */
 std::tuple<Tensor&, Tensor&>
 histogram_out_cpu(const Tensor& self, const Tensor& bins,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
@@ -156,7 +158,6 @@ histogram_out_cpu(const Tensor& self, const Tensor& bins,
     histogram_stub(self.device().type(), self, weight, density, hist, bin_edges);
     return std::forward_as_tuple(hist, bin_edges);
 }
-
 std::tuple<Tensor, Tensor>
 histogram_cpu(const Tensor& self, const Tensor& bins,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
@@ -166,6 +167,8 @@ histogram_cpu(const Tensor& self, const Tensor& bins,
     return histogram_out_cpu(self, bins, min, max, weight, density, hist, bin_edges);
 }
 
+/* Versions of histogram in which bins is an integer specifying the number of equal-width bins.
+ */
 std::tuple<Tensor&, Tensor&>
 histogram_out_cpu(const Tensor& self, int64_t bin_ct,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
@@ -179,7 +182,6 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct,
     histogram_linear_stub(self.device().type(), self, weight, density, hist, bin_edges, true);
     return std::forward_as_tuple(hist, bin_edges);
 }
-
 std::tuple<Tensor, Tensor>
 histogram_cpu(const Tensor& self, int64_t bin_ct,
         const c10::optional<Scalar>& min, const c10::optional<Scalar>& max,
@@ -189,6 +191,8 @@ histogram_cpu(const Tensor& self, int64_t bin_ct,
     return histogram_out_cpu(self, bin_ct, min, max, weight, density, hist, bin_edges_out);
 }
 
+/* Narrowed interface for the legacy torch.histc function.
+ */
 Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
         const Scalar& min, const Scalar& max, Tensor& hist) {
     Tensor bin_edges = at::empty({0}, self.options());
@@ -201,7 +205,6 @@ Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
             c10::optional<Tensor>(), false, hist, bin_edges, false);
     return hist;
 }
-
 Tensor histogram_histc_cpu(const Tensor& self, int64_t bin_ct,
         const Scalar& min, const Scalar& max) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
