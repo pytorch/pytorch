@@ -4529,6 +4529,8 @@ op_db: List[OpInfo] = [
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
+               SkipInfo('TestOpInfo', 'test_unsupported_backward',
+                        device_type='cuda', dtypes=(torch.bfloat16,), active_if=TEST_WITH_ROCM),
            ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -5377,7 +5379,11 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_multi_dot,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           ),
+           skips=(
+               # some test samples works for ROCM backward but not all
+               SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
+                        dtypes=(torch.bfloat16,), active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -5556,7 +5562,12 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_matrix_exp,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # some test samples works for ROCM backward but not all
+               SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
+                        dtypes=(torch.bfloat16,), active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('matmul',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex(),
@@ -5579,6 +5590,9 @@ op_db: List[OpInfo] = [
                # "addmv_impl_cpu" not implemented for 'Half'
                SkipInfo('TestOpInfo', 'test_unsupported_backward',
                         device_type='cpu', dtypes=(torch.float16,)),
+               # some test samples works for ROCM backward but not all
+               SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
+                        dtypes=(torch.complex64, torch.complex128), active_if=TEST_WITH_ROCM),
            )),
     OpInfo('max',
            op=torch.max,
@@ -5980,7 +5994,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
-           dtypesIfROCM=floating_types_and(torch.half),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
@@ -5993,7 +6006,8 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                         device_type='cuda', dtypes=(torch.bfloat16,)),
                # addmv_impl_cpu" not implemented for 'Half'
-               SkipInfo('TestOpInfo', 'test_unsupported_backward', dtypes=(torch.float16,)),
+               SkipInfo('TestOpInfo', 'test_unsupported_backward',
+                        dtypes=(torch.float16, torch.bfloat16)),
            )),
     OpInfo('__rmod__',
            op=torch.Tensor.__rmod__,
@@ -6354,6 +6368,8 @@ op_db: List[OpInfo] = [
                         dtypes=[torch.bool]),
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                         device_type='cuda', dtypes=integral_types_and(torch.bfloat16)),
+               SkipInfo('TestOpInfo', 'test_unsupported_backward',
+                        device_type='cuda', dtypes=(torch.bfloat16,)),
            )),
     OpInfo('svd',
            op=torch.svd,
@@ -7068,9 +7084,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            backward_dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            skips=(
-               # following 2 tests failed intermittenly
+               # following 3 tests failed intermittenly
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=(torch.complex64,)),
+               SkipInfo('TestGradients', 'test_fn_grad',
+                        device_type='cpu', dtypes=(torch.complex128,)),
                SkipInfo('TestGradients', 'test_fn_gradgrad',
                         device_type='cpu', dtypes=(torch.complex128,)),
            )
