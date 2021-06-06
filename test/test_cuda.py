@@ -2456,6 +2456,8 @@ torch.cuda.synchronize()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
+    # Test is flaky on Windows
+    @unittest.skipIf(IS_WINDOWS)
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
