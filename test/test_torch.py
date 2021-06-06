@@ -8008,9 +8008,12 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         x.sigmoid()
 
 
-# TODO: this empy class is temporarily instantiated for XLA compatibility
+# TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
+    pass
+
+class TestTensorDeviceOps(TestCase):
     pass
 
 # Generates tests
@@ -8018,6 +8021,7 @@ class TestViewOps(TestCase):
 # pytest will fail.
 add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals())
+instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 

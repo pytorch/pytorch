@@ -4841,7 +4841,7 @@ op_db: List[OpInfo] = [
                # Resized a non-empty tensor but did not warn about it.
                SkipInfo('TestCommon', 'test_out'),
                # CUDA illegal memory access on Windows
-               SkipInfo('TestCommon', 'test_variant_consistency_eager', active_if=IS_WINDOWS))),
+               SkipInfo(device_type='cuda', active_if=IS_WINDOWS))),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
