@@ -1467,6 +1467,8 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
 
   /* sqrt(2pi) */
   constexpr T s2pi = 2.50662827463100050242E0;
+  constexpr T one = 1;
+  constexpr T zero = 0;
 
   /* approximation for 0 <= |y - 0.5| <= 3/8 */
   static const T P0[5] = {
@@ -1544,35 +1546,35 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
       6.79019408009981274425E-9,
   };
 
-  if (y0 == 0.0) {
+  if (y0 == zero) {
     return -std::numeric_limits<T>::infinity();
   }
-  if (y0 == 1.0) {
+  if (y0 == one) {
     return std::numeric_limits<T>::infinity();
   }
-  if (y0 < 0.0 || y0 > 1.0) {
+  if (y0 < zero || y0 > one) {
     return std::numeric_limits<T>::quiet_NaN();
   }
   bool code = true;
-  auto y = y0;
-  if (y > (1.0 - 0.13533528323661269189)) { /* 0.135... = exp(-2) */
-    y = static_cast<T>(1.0) - y;
+  T y = y0;
+  if (y > one - T{0.13533528323661269189}) { /* 0.135... = exp(-2) */
+    y = one - y;
     code = false;
   }
 
-  if (y > 0.13533528323661269189) {
-    y = y - static_cast<T>(0.5);
+  if (y > T{0.13533528323661269189}) {
+    y = y - T{0.5};
     const T y2 = y * y;
-    auto x = y + y * (y2 * polevl(y2, P0, 4) / polevl(y2, Q0, 8));
+    T x = y + y * (y2 * polevl(y2, P0, 4) / polevl(y2, Q0, 8));
     return (x * s2pi);
   }
 
-  T x = ::sqrt(static_cast<T>(-2.0) * ::log(y));
+  T x = ::sqrt(T{-2.0} * ::log(y));
   const T x0 = x - ::log(x) / x;
 
-  auto z = static_cast<T>(1.0) / x;
+  const T z = one / x;
   T x1;
-  if (x < 8.0) /* y > exp(-32) = 1.2664165549e-14 */
+  if (x < T{8.0}) /* y > exp(-32) = 1.2664165549e-14 */
   {
     x1 = z * polevl(z, P1, 8) / polevl(z, Q1, 8);
   } else {
