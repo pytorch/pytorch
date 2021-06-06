@@ -16,28 +16,30 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       const MessageType& messageType) const override;
 
   c10::intrusive_ptr<JitFuture> processPythonCall(
-      RpcCommandBase& rpc) const override;
+      RpcCommandBase& rpc,
+      std::vector<c10::Stream> streams) const override;
 
   c10::intrusive_ptr<JitFuture> processScriptCall(
-      RpcCommandBase& rpc) const override;
+      RpcCommandBase& rpc,
+      std::vector<c10::Stream> streams) const override;
 
   c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
-      RpcCommandBase& rpc) const override;
+      RpcCommandBase& rpc,
+      std::vector<c10::Stream> streams) const override;
 
   c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> ctx) const override;
+      std::vector<c10::Stream> streams) const override;
 
   c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> ctx) const override;
+      RpcCommandBase& rpc) const override;
 
   void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const override;
 
   c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      std::shared_ptr<LazyStreamContext> ctx) const override;
+      std::vector<c10::Stream> streams) const override;
 
   bool cudaAvailable() const override;
 
@@ -49,10 +51,12 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   c10::intrusive_ptr<JitFuture> runJitFunction(
       const c10::QualifiedName& name,
       std::vector<at::IValue>& stack,
+      std::vector<c10::Stream> streams,
       bool isAsyncExecution) const;
 
   c10::intrusive_ptr<JitFuture> runPythonFunction(
       const py::object& function,
+      std::vector<c10::Stream> streams,
       bool isAsyncExecution) const;
 };
 
