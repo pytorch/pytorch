@@ -297,7 +297,8 @@ class Reducer {
     size_t pending;
 
     // Keep future work handle around DDP comm hook.
-    // If no hook is registered, a temporary vanilla allreduce hook will be used.
+    // If no hook is registered, a temporary vanilla allreduce hook will be
+    // used.
     c10::intrusive_ptr<torch::jit::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
@@ -414,7 +415,9 @@ class Reducer {
   ForwardPassAllreduceWork forwardPassWorkHandle_;
 
   // Division factor for reduction of gradients.
-  int divFactor_;
+  // Equal to the process group size, with an exception of handling uneven
+  // input.
+  int div_factor_;
 
   bool static_graph_;
 

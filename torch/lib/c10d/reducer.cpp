@@ -61,8 +61,7 @@ Reducer::Reducer(
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
-      // Only used for handling unevent input.
-      divFactor_(kUnsetDivFactor),
+      div_factor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
       thread_local_state_(at::ThreadLocalState()),
@@ -426,8 +425,8 @@ void Reducer::push_rebuilt_params(const size_t& index) {
 void Reducer::set_divide_factor() {
   // If it was scheduled, wait on allreduce in forward pass that tells us
   // division factor based on no. of currently participating processes.
-  if (divFactor_ == kUnsetDivFactor) {
-    divFactor_ = process_group_->getSize();
+  if (div_factor_ == kUnsetDivFactor) {
+    div_factor_ = process_group_->getSize();
     auto& workHandle = forwardPassWorkHandle_.workHandle;
     if (workHandle && !forwardPassWorkHandle_.useStaticWorldSize) {
       workHandle->wait();
@@ -435,7 +434,7 @@ void Reducer::set_divide_factor() {
       // Guard against the results being empty
       TORCH_INTERNAL_ASSERT(results.size() > 0);
       at::Tensor& res = results.front();
-      divFactor_ = res.item().to<int>();
+      div_factor_ = res.item().to<int>();
     }
   }
 }
@@ -814,7 +813,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec);
   if (comm_hook_ == nullptr) {
-    _AllReduceCommHookWithDivFactorState state(process_group_.get(), divFactor_);
+    _AllReduceCommHookWithDivFactorState state(process_group_.get(), div_factor_);
     _AllReduceCommHookWithDivFactor allreduce_hook(state);
     bucket.future_work = allreduce_hook.runHook(grad_bucket);
   } else {
@@ -1370,7 +1369,7 @@ void Reducer::finalize_backward() {
 
   // Unset allreduce division factor, as it may change in next backwards pass
   // when running with DDP join mode.
-  divFactor_ = kUnsetDivFactor;
+  div_factor_ = kUnsetDivFactor;
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
