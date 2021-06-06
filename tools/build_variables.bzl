@@ -89,8 +89,6 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
-    "torch/csrc/autograd/profiler_legacy.cpp",
-    "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/autograd/profiler_utils.cpp",
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
@@ -110,6 +108,12 @@ core_sources_common = [
 ]
 
 libtorch_sources_common = core_sources_common
+
+# The profilers are not needed in the lite interpreter build.
+libtorch_profiler_sources = [
+    "torch/csrc/autograd/profiler_legacy.cpp",
+    "torch/csrc/autograd/profiler_kineto.cpp",
+]
 
 core_trainer_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
@@ -297,7 +301,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
-]
+] + libtorch_profiler_sources
 
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
