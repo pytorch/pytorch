@@ -2456,7 +2456,7 @@ torch.cuda.synchronize()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
-    # Test is flaky on Windows
+    # Test is flaky on Windows (https://github.com/pytorch/pytorch/issues/57401)
     @unittest.skipIf(IS_WINDOWS)
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
