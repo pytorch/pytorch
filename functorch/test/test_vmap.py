@@ -2826,7 +2826,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 class TestVmapOperatorsOpInfo(TestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
-    def test_normalize_operator_exhaustive(self, device, dtype, op):
+    def test_vmap_exhaustive(self, device, dtype, op):
         # These are ops that we can't generate fallbacks for
         op_skip = {
             'broadcast_to',
@@ -2837,7 +2837,11 @@ class TestVmapOperatorsOpInfo(TestCase):
             'moveaxis',
             'positive',
             'tensor_split',
-            'gradient'
+            'gradient',
+            'fill_',
+            'resize_as_',
+            'resolve_conj',
+            'resize_',
         }
         # Unsupported input types
         if op.name in op_skip:
