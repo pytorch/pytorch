@@ -11,8 +11,8 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
 namespace torch {
@@ -276,18 +276,16 @@ TEST(ExternalCall, Prepacked_Linear_float) {
   at::Tensor ref = at::linear(input, weight, bias);
 
   // Create prepacked xnnpack context object.
-  auto linear_clamp_prepack_op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("prepacked::linear_clamp_prepack", "")
-      .typed<c10::intrusive_ptr<LinearOpContext> (
-          at::Tensor,
-          c10::optional<at::Tensor>,
-          const c10::optional<at::Scalar>&,
-          const c10::optional<at::Scalar>&)>();
+  auto linear_clamp_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("prepacked::linear_clamp_prepack", "")
+          .typed<c10::intrusive_ptr<LinearOpContext>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              const c10::optional<at::Scalar>&,
+              const c10::optional<at::Scalar>&)>();
   auto prepacked = linear_clamp_prepack_op.call(
-      weight,
-      bias,
-      c10::optional<at::Scalar>(),
-      c10::optional<at::Scalar>());
+      weight, bias, c10::optional<at::Scalar>(), c10::optional<at::Scalar>());
 
   Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
   Tensor* Result = new Tensor(
@@ -295,8 +293,7 @@ TEST(ExternalCall, Prepacked_Linear_float) {
       ExternalCall::make(
           ResultBuf,
           "nnc_prepacked_linear_clamp_run",
-          {BufHandle(Input.data()),
-           BufHandle(DummyPrepacked.data())},
+          {BufHandle(Input.data()), BufHandle(DummyPrepacked.data())},
           {}));
   LoopNest l({Result});
   l.prepareForCodegen();
@@ -355,17 +352,18 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
       groups);
 
   // Create prepacked xnnpack context object.
-  auto conv2d_clamp_prepack_op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("prepacked::conv2d_clamp_prepack", "")
-      .typed<c10::intrusive_ptr<Conv2dOpContext> (
-          at::Tensor,
-          c10::optional<at::Tensor>,
-          std::vector<int64_t>,
-          std::vector<int64_t>,
-          std::vector<int64_t>,
-          int64_t,
-          const c10::optional<at::Scalar>&,
-          const c10::optional<at::Scalar>&)>();
+  auto conv2d_clamp_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("prepacked::conv2d_clamp_prepack", "")
+          .typed<c10::intrusive_ptr<Conv2dOpContext>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              std::vector<int64_t>,
+              std::vector<int64_t>,
+              std::vector<int64_t>,
+              int64_t,
+              const c10::optional<at::Scalar>&,
+              const c10::optional<at::Scalar>&)>();
   auto prepacked = conv2d_clamp_prepack_op.call(
       weight,
       bias,
@@ -382,8 +380,7 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
       ExternalCall::make(
           ResultBuf,
           "nnc_prepacked_conv2d_clamp_run",
-          {BufHandle(Input.data()),
-           BufHandle(DummyPrepacked.data())},
+          {BufHandle(Input.data()), BufHandle(DummyPrepacked.data())},
           {}));
   LoopNest l({Result});
   l.prepareForCodegen();

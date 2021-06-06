@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
-#include "c10/util/intrusive_ptr.h"
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/Functions.h>
@@ -200,14 +199,18 @@ void nnc_prepacked_linear_clamp_run(
       constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
   const at::Tensor& x = tensors[1];
-  const auto prepacked = c10::intrusive_ptr<LinearOpContext>::unsafe_reclaim_from_nonowning(
-    reinterpret_cast<LinearOpContext*>(buf_data[2]));
+  const auto prepacked =
+      c10::intrusive_ptr<LinearOpContext>::unsafe_reclaim_from_nonowning(
+          reinterpret_cast<LinearOpContext*>(buf_data[2]));
 
-  static auto op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("prepacked::linear_clamp_run", "")
-      .typed<at::Tensor (const at::Tensor&, const c10::intrusive_ptr<LinearOpContext>&)>();
+  static auto op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("prepacked::linear_clamp_run", "")
+          .typed<at::Tensor(
+              const at::Tensor&, const c10::intrusive_ptr<LinearOpContext>&)>();
   at::Tensor output = op.call(x, prepacked);
-  memcpy(buf_data[0], output.data_ptr(), output.element_size() * output.numel());
+  memcpy(
+      buf_data[0], output.data_ptr(), output.element_size() * output.numel());
 }
 
 void nnc_prepacked_conv2d_clamp_run(
@@ -224,14 +227,18 @@ void nnc_prepacked_conv2d_clamp_run(
       constructTensors(bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
   const at::Tensor& x = tensors[1];
-  const auto prepacked = c10::intrusive_ptr<Conv2dOpContext>::unsafe_reclaim_from_nonowning(
-    reinterpret_cast<Conv2dOpContext*>(buf_data[2]));
+  const auto prepacked =
+      c10::intrusive_ptr<Conv2dOpContext>::unsafe_reclaim_from_nonowning(
+          reinterpret_cast<Conv2dOpContext*>(buf_data[2]));
 
-  static auto op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("prepacked::conv2d_clamp_run", "")
-      .typed<at::Tensor (const at::Tensor&, const c10::intrusive_ptr<Conv2dOpContext>&)>();
+  static auto op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("prepacked::conv2d_clamp_run", "")
+          .typed<at::Tensor(
+              const at::Tensor&, const c10::intrusive_ptr<Conv2dOpContext>&)>();
   at::Tensor output = op.call(x, prepacked);
-  memcpy(buf_data[0], output.data_ptr(), output.element_size() * output.numel());
+  memcpy(
+      buf_data[0], output.data_ptr(), output.element_size() * output.numel());
 }
 
 #endif // USE_XNNPACK
