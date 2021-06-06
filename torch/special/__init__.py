@@ -307,6 +307,29 @@ Example::
     tensor([2.7726, 2.1972, 1.3863])
 """.format(**common_args))
 
+i0 = _add_docstr(_special.special_i0,
+                 r"""
+i0(input, *, out=None) -> Tensor
+
+Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = I_0(\text{input}_{i}) = \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.i0(torch.arange(5, dtype=torch.float32))
+    tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
+
+""".format(**common_args))
+
 i0e = _add_docstr(_special.special_i0e,
                   r"""
 i0e(input, *, out=None) -> Tensor
@@ -363,4 +386,25 @@ Keyword args:
 Example::
     >>> torch.special.i1e(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.2079, 0.2153, 0.1968, 0.1788])
+""".format(**common_args))
+
+ndtr = _add_docstr(_special.special_ndtr,
+                   r"""
+ndtr(input, *, out=None) -> Tensor
+Computes the area under the standard Gaussian probability density function,
+integrated from minus infinity to :attr:`input`, elementwise.
+
+.. math::
+    \text{ndtr}(x) = \frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
+    tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
 """.format(**common_args))

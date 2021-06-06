@@ -28,8 +28,10 @@ Functions
 .. autofunction:: gammaln
 .. autofunction:: digamma
 .. autofunction:: psi
+.. autofunction:: i0
 .. autofunction:: i0e
 .. autofunction:: i1
 .. autofunction:: i1e
 .. autofunction:: logit
+.. autofunction:: ndtr
 .. autofunction:: xlog1py

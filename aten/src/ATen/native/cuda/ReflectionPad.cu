@@ -146,57 +146,6 @@ __global__ void reflection_pad2d_backward_out_kernel(
   }
 }
 
-void reflection_pad1d_backward_out_template(
-    Tensor & grad_input, const Tensor & grad_output_,
-    const Tensor & input, IntArrayRef padding) {
-
-  if (grad_input.numel() == 0) {
-    return;
-  }
-
-  TORCH_CHECK(canUse32BitIndexMath(input),
-    "input tensor must fit into 32-bit index math");
-
-  TORCH_CHECK(canUse32BitIndexMath(grad_output_),
-    "input tensor must fit into 32-bit index math");
-
-  int64_t dim_plane = 0;
-  int64_t dim_w = 1;
-  int64_t nbatch = 1;
-
-  if (input.ndimension() == 3) {
-    nbatch = input.size(0);
-    dim_plane++;
-    dim_w++;
-  }
-
-  int64_t pad_l = padding[0];
-  int64_t pad_r = padding[1];
-
-  int64_t nplane = input.size(dim_plane);
-  int64_t input_w = input.size(dim_w);
-  int64_t output_w  = input_w + pad_l + pad_r;
-
-  Tensor grad_output = grad_output_.contiguous();
-
-  TORCH_CHECK(output_w == grad_output.size(dim_w),
-    "gradOutput width unexpected. Expected: ", output_w, ", Got: ",
-    grad_output.size(dim_w));
-
-  dim3 block_size(output_w > 256 ? 256 : output_w);
-  dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
-    grad_input.scalar_type(), "reflection_pad1d_backward_out_template", [&] {
-      reflection_pad1d_backward_out_kernel<<<
-        grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
-          input_w, pad_l, pad_r);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    }
-  );
-}
-
 void reflection_pad2d_out_template(
     Tensor &output, const Tensor &input_, IntArrayRef padding) {
 
@@ -408,31 +357,56 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_cuda)
       });
 }
 
-Tensor& reflection_pad1d_backward_out_cuda(const Tensor& grad_output,
+TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
     const Tensor& input,
     IntArrayRef padding,
-    Tensor& grad_input) {
+    const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("reflection_pad1d_backward_out_cuda");
-  grad_input.resize_as_(input);
   grad_input.zero_();
-  reflection_pad1d_backward_out_template(
-    grad_input, grad_output, input, padding);
-  return grad_input;
-}
 
-Tensor reflection_pad1d_backward_cuda(
-    const Tensor& grad_output,
-    const Tensor& input,
-    IntArrayRef padding) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("reflection_pad1d_backward_cuda");
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  reflection_pad1d_backward_out_template(
-    grad_input, grad_output, input, padding);
-  return grad_input;
+  if (grad_input.numel() == 0) {
+    return;
+  }
+
+  TORCH_CHECK(canUse32BitIndexMath(input),
+    "input tensor must fit into 32-bit index math");
+
+  TORCH_CHECK(canUse32BitIndexMath(grad_output_),
+    "input tensor must fit into 32-bit index math");
+
+  int64_t dim_plane = 0;
+  int64_t dim_w = 1;
+  int64_t nbatch = 1;
+
+  if (input.ndimension() == 3) {
+    nbatch = input.size(0);
+    dim_plane++;
+    dim_w++;
+  }
+
+  int64_t pad_l = padding[0];
+  int64_t pad_r = padding[1];
+
+  int64_t nplane = input.size(dim_plane);
+  int64_t input_w = input.size(dim_w);
+  int64_t output_w  = input_w + pad_l + pad_r;
+
+  Tensor grad_output = grad_output_.contiguous();
+
+  dim3 block_size(output_w > 256 ? 256 : output_w);
+  dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+    grad_input.scalar_type(), "reflection_pad1d_backward_out_cuda", [&] {
+      reflection_pad1d_backward_out_kernel<<<
+        grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
+          input_w, pad_l, pad_r);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+  );
 }
 
 Tensor& reflection_pad2d_out_cuda(const Tensor& input, IntArrayRef padding,

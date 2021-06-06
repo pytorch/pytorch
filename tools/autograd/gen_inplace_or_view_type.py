@@ -28,7 +28,7 @@ from .gen_trace_type import (
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', '_view_as_real_physical', 'view_as_real', '_conj']
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
