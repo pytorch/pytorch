@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 
 namespace at { namespace native {
 
