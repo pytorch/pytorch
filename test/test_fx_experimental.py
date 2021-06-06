@@ -1325,6 +1325,7 @@ class TestNormalizeOperators(JitTestCase):
                    'reshape_as',
                    'resize_',
                    'resize_as_',
+                   'to_sparse',
                    'view',
                    'view_as',
                    'unfold',
