@@ -4966,7 +4966,7 @@ else:
             values = make_tensor(shape, device, dtype, low=-9, high=9)
             (actual_hist, actual_bin_edges) = torch.histogram(values, bin_ct)
             (expected_hist, expected_bin_edges) = torch.histogram(
-                    values, bin_ct, min=None, max=None, weight=None, density=False)
+                values, bin_ct, min=None, max=None, weight=None, density=False)
             self.assertEqual(actual_hist, expected_hist)
             self.assertEqual(actual_bin_edges, expected_bin_edges)
 
