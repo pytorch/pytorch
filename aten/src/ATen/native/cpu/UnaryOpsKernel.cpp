@@ -193,6 +193,7 @@ static void imag_kernel(TensorIteratorBase& iter) {
   });
 }
 
+// NB: Ignores the negative bit on tensors
 static void conj_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
@@ -716,7 +717,7 @@ REGISTER_DISPATCH(real_stub, &CPU_CAPABILITY::real_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(imag_stub, &CPU_CAPABILITY::imag_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(conj_stub, &CPU_CAPABILITY::conj_kernel);
+REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
