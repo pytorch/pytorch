@@ -14,6 +14,8 @@ this project requires some investment, we'd love to hear from and work with
 early adopters to shape the design. Please reach out on the issue tracker
 if you're interested in using this for your project.
 
+In addition, there is experimental functionality to trace through these transformations using FX in order to capture the results of these transforms ahead of time. This would allow us to compile the results of vmap or grad to improve performance.
+
 ## Why composable function transforms?
 
 There are a number of use cases that are tricky to do in
@@ -195,6 +197,36 @@ batched jacobians:
 >>> x = torch.randn(5)
 >>> hessian = jacrev(jacrev(f))(x)
 ```
+
+### Tracing through the transformations
+We can also trace through these transformations in order to capture the results as new code using `make_fx`. There is also experimental integration with the NNC compiler (only works on CPU for now!).
+
+```py
+>>> from functorch import make_fx, grad
+>>> def f(x):
+>>>     return torch.sin(x).sum()
+>>> x = torch.randn(100)
+>>> grad_f = make_fx(grad(f))(x)
+>>> print(grad_f.code)
+
+def forward(self, x_1):
+    sin = torch.ops.aten.sin(x_1)
+    sum_1 = torch.ops.aten.sum(sin, None);  sin = None
+    cos = torch.ops.aten.cos(x_1);  x_1 = None
+    _tensor_constant0 = self._tensor_constant0
+    mul = torch.ops.aten.mul(_tensor_constant0, cos);  _tensor_constant0 = cos = None
+    return mul
+```
+
+We can also try compiling it with NNC (even more experimental)!.
+
+```py
+>>> from functorch import nnc_jit
+>>> jit_f = nnc_jit(grad(f))
+```
+
+Check `examples/nnc` for some example benchmarks.
+
 
 ## Debugging
 `functorch._C.dump_tensor`: Dumps dispatch keys on stack
