@@ -13,6 +13,7 @@
 
 #include <array>
 #include <algorithm>
+#include <cmath>
 
 namespace at {
 
@@ -155,6 +156,12 @@ void TensorIteratorBase::reorder_dimensions() {
 
   // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm_.rbegin(), perm_.rend(), 0);
+
+  // Reordering dimensions changes iteraton order
+  if (enforce_linear_iteration_) {
+    permute_dimensions(perm_);
+    return;
+  }
 
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
@@ -1120,12 +1127,14 @@ int TensorIteratorBase::get_dim_to_split() const {
   int64_t max_extent = -1;
   int dim_to_split = -1;
   for (int dim = ndim() - 1; dim >= 0; dim--) {
-    if (shape_[dim] == 0) {
+    const int64_t size = shape_[dim];
+    if (size == 0) {
       continue;
     }
-    int64_t size = shape_[dim];
     for (auto& op : operands_) {
-      int64_t extent = (size - 1) * op.stride_bytes[dim];
+      // std::abs is necessary to handle some special cases where we support negative strides
+      // see the CUDA backend of at::flip
+      const int64_t extent = (size - 1) * std::abs(op.stride_bytes[dim]);
       if (extent > max_extent) {
         max_extent = extent;
         dim_to_split = dim;
@@ -1212,6 +1221,20 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
     return FastSetupType::NONE;
   }
 
+  // For linear iteration, only contiguous tensors can be coalesced
+  // Fast setup of any other format requires changing iteration order
+  if (enforce_linear_iteration_) {
+    for (const auto& op : operands_) {
+      if (op.tensor->defined() && !op.will_resize) {
+        auto is_contiguous = op.tensor->is_contiguous(at::MemoryFormat::Contiguous);
+        if (!is_contiguous) {
+          return FastSetupType::NONE;
+        }
+      }
+    }
+    return FastSetupType::CONTIGUOUS;
+  }
+
   bool is_contiguous = true;
   bool is_channels_last = true;
   bool is_non_overlapping_and_dense = true;
@@ -1264,6 +1287,7 @@ TensorIteratorBase::TensorIteratorBase() = default;
 void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // populate some persistent configuration fields
   is_reduction_ = config.is_reduction_;
+  enforce_linear_iteration_ = config.enforce_linear_iteration_;
 
   // fill in operands_ based on configuration
   populate_operands(config);

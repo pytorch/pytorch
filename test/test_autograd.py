@@ -2725,7 +2725,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor)
+                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_cat_negdim_1(self):
         f_args_variable = (torch.randn(S, S, 1, dtype=torch.double, requires_grad=True),
@@ -2735,7 +2735,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_negdim_1", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor)
+                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_cat_negdim_2(self):
         f_args_variable = (torch.randn(S, 1, S, dtype=torch.double, requires_grad=True),
@@ -2745,7 +2745,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_negdim_2", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor)
+                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_cat_empty_legacy(self):
         f_args_variable = (torch.randn(0, dtype=torch.double, requires_grad=True),
@@ -2755,7 +2755,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_empty_legacy", "cat",
                               lambda a, b: torch.cat((a, b)),
-                              False, f_args_variable, f_args_tensor)
+                              False, f_args_variable, f_args_tensor, check_forward_ad=True)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
 
     def test_cat_empty(self):
@@ -2764,7 +2764,7 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_empty", "cat",
                               lambda a, b: torch.cat((a, b)),
-                              True, f_args_variable, f_args_tensor)
+                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_trapz(self):
         f_args_variable = (torch.randn(2, 3, dtype=torch.double, requires_grad=True),
@@ -4279,7 +4279,7 @@ class TestAutograd(TestCase):
                 gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
             def basic_mul(x):
-                return torch.view_as_real(x * 1j)
+                return torch.view_as_real(torch.resolve_conj(x * 1j))
             gradcheck(basic_mul, x, check_forward_ad=True, fast_mode=fast_mode)
 
             # Test for one input and one output being complex
@@ -5412,9 +5412,10 @@ def gradgradcheck_method_precision_override(test_name):
     return override
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
-                                 input_variables, run_gradgradcheck=True, check_batched_grad=True):
+                                 input_variables, run_gradgradcheck=True, check_batched_grad=True,
+                                 check_forward_ad=False):
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION,
-                                   check_batched_grad=check_batched_grad))
+                                   check_batched_grad=check_batched_grad, check_forward_ad=check_forward_ad))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -5431,12 +5432,12 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
 
 
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
-                          f_args_variable, f_args_tensor):
+                          f_args_variable, f_args_tensor, *, check_forward_ad=False):
     output_variable = apply_fn(*f_args_variable)
 
     if run_grad_checks:
         run_grad_and_gradgrad_checks(test_case, name, test_name, apply_fn,
-                                     output_variable, f_args_variable)
+                                     output_variable, f_args_variable, check_forward_ad=check_forward_ad)
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
@@ -5458,7 +5459,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'zero_',
                 '__radd__', 'mul', '__rmul__', 'diagonal', 'fill_', 'sub', 'narrow',
-                'swapaxes', 'swapdims', 'tensor_split'] + separate_complex_tests
+                'swapaxes', 'swapdims', 'tensor_split', 'select', 'clone'] + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
@@ -5590,7 +5591,9 @@ def add_test(
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
                                 output_variable = (output_variable,)
+
                             inplace_self_variable = deepcopy(self_variable)
+                            self.assertEqual(inplace_self_variable, self_variable)
                             inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                                for i in (inplace_self_variable,))
                             inplace_args_variable = deepcopy(args_variable)
@@ -8488,7 +8491,7 @@ class TestAutogradInferenceMode(TestCase):
         for requires_grad in (True, False):
             c = torch.ones(1, 2, 3, requires_grad=requires_grad)
             d = func(c)
-            self.assertTrue(self._is_inference_tensor(d))
+            self.assertTrue(torch.is_inference(d))
             self.assertFalse(d.requires_grad)
 
     def test_inference_mode_tensor_creation(self):
@@ -8496,16 +8499,16 @@ class TestAutogradInferenceMode(TestCase):
             # new tensors created through constructors are inference tensors
             c = torch.ones(1, 2, 3)
             self.assertFalse(c.requires_grad)
-            self.assertTrue(self._is_inference_tensor(c))
+            self.assertTrue(torch.is_inference(c))
 
             # requires_grad doesn't change inference tensor behavior in InferenceMode
             tmp = torch.ones(1, 2, 3, requires_grad=True)
             self.assertTrue(tmp.requires_grad)
-            self.assertTrue(self._is_inference_tensor(tmp))
+            self.assertTrue(torch.is_inference(tmp))
 
             tmp = torch.ones(1, 2, 3).requires_grad_(False)
             self.assertFalse(tmp.requires_grad)
-            self.assertTrue(self._is_inference_tensor(tmp))
+            self.assertTrue(torch.is_inference(tmp))
 
     def test_inference_mode_existing_autograd_session(self):
         s = torch.ones(1, 2, 3, requires_grad=True)
@@ -8516,7 +8519,7 @@ class TestAutogradInferenceMode(TestCase):
         with torch.inference_mode():
             a.add_(2)
 
-        self.assertFalse(self._is_inference_tensor(a))
+        self.assertFalse(torch.is_inference(a))
         # tensors created outside of inference mode aren't
         # inference tensors, so they will still have their
         # version counters tracked
@@ -8536,7 +8539,7 @@ class TestAutogradInferenceMode(TestCase):
                 # performing a non-view operation produces a inference tensor
                 # that does not require grad
                 func_out = functional_op(c)
-                self.assertTrue(self._is_inference_tensor(func_out))
+                self.assertTrue(torch.is_inference(func_out))
                 self.assertFalse(func_out.requires_grad)
 
     def test_inference_mode_inf_tensor_in_inf_mode_inplace_op(self):
@@ -8547,7 +8550,7 @@ class TestAutogradInferenceMode(TestCase):
                 # after perform inplace operation, tensor is still
                 # an inference tensor
                 c.add_(2)
-                self.assertTrue(self._is_inference_tensor(c))
+                self.assertTrue(torch.is_inference(c))
                 self.assertEqual(c.requires_grad, requires_grad)
 
     def test_inference_mode_inf_tensor_in_inf_mode_view_op(self):
@@ -8558,7 +8561,7 @@ class TestAutogradInferenceMode(TestCase):
                 # perform view operation produces inference tensor
                 # that does not require grad
                 view_out = c.view(-1)
-                self.assertTrue(self._is_inference_tensor(view_out))
+                self.assertTrue(torch.is_inference(view_out))
                 self.assertFalse(view_out.requires_grad)
 
     def test_inference_mode_inf_tensor_in_normal_mode_functional_op(self):
@@ -8570,7 +8573,7 @@ class TestAutogradInferenceMode(TestCase):
                 c = torch.ones(1, 2, 3, requires_grad=requires_grad)
 
         func_out = functional_op(c)
-        self.assertFalse(self._is_inference_tensor(func_out))
+        self.assertFalse(torch.is_inference(func_out))
         self.assertFalse(func_out.requires_grad)
         self.assertTrue(func_out.is_leaf)
 
@@ -8594,7 +8597,7 @@ class TestAutogradInferenceMode(TestCase):
                 c = torch.ones(1, 2, 3, requires_grad=requires_grad)
 
             out = c.view(-1)
-            self.assertTrue(self._is_inference_tensor(out))
+            self.assertTrue(torch.is_inference(out))
             self.assertFalse(out.requires_grad)
             self.assertFalse(out._is_view())
             self.assertTrue(out.is_leaf)
@@ -8606,17 +8609,17 @@ class TestAutogradInferenceMode(TestCase):
 
             with torch.inference_mode():
                 a.add_(2)
-                self.assertFalse(self._is_inference_tensor(a))
+                self.assertFalse(torch.is_inference(a))
                 self.assertEqual(a.requires_grad, requires_grad)
 
                 # inplace -> inplace
                 a.add_(2)
-                self.assertFalse(self._is_inference_tensor(a))
+                self.assertFalse(torch.is_inference(a))
                 self.assertEqual(a.requires_grad, requires_grad)
 
                 # inplace -> inplace -> view
                 view_out = a.view(-1)
-                self.assertFalse(self._is_inference_tensor(view_out))
+                self.assertFalse(torch.is_inference(view_out))
                 self.assertEqual(view_out.requires_grad, requires_grad)
 
     def test_normal_tensor_inplace_output_in_normal_mode(self):
@@ -8626,21 +8629,21 @@ class TestAutogradInferenceMode(TestCase):
 
             with torch.inference_mode():
                 a.add_(2)
-                self.assertFalse(self._is_inference_tensor(a))
+                self.assertFalse(torch.is_inference(a))
                 self.assertEqual(a.requires_grad, requires_grad)
 
             a.add_(2)
-            self.assertFalse(self._is_inference_tensor(a))
+            self.assertFalse(torch.is_inference(a))
             self.assertEqual(a.requires_grad, requires_grad)
 
             # inplace -> inplace
             a.add_(2)
-            self.assertFalse(self._is_inference_tensor(a))
+            self.assertFalse(torch.is_inference(a))
             self.assertEqual(a.requires_grad, requires_grad)
 
             # inplace -> inplace -> view
             view_out = a.view(-1)
-            self.assertFalse(self._is_inference_tensor(view_out))
+            self.assertFalse(torch.is_inference(view_out))
             self.assertEqual(view_out.requires_grad, requires_grad)
 
     def test_normal_tensor_view_output_in_inference_mode(self):
@@ -8650,13 +8653,13 @@ class TestAutogradInferenceMode(TestCase):
 
             with torch.inference_mode():
                 out = a.view(-1)
-                self.assertFalse(self._is_inference_tensor(out))
+                self.assertFalse(torch.is_inference(out))
                 self.assertEqual(out.requires_grad, requires_grad)
                 self.assertTrue(out._is_view())
 
                 # view -> view
                 tmp = out.view(-1)
-                self.assertFalse(self._is_inference_tensor(tmp))
+                self.assertFalse(torch.is_inference(tmp))
                 self.assertEqual(tmp.requires_grad, requires_grad)
                 self.assertTrue(tmp._is_view())
                 self.assertTrue(tmp.is_leaf)
@@ -8664,7 +8667,7 @@ class TestAutogradInferenceMode(TestCase):
                 # view -> view -> inplace
                 self.assertTrue(torch.is_inference_mode_enabled())
                 tmp.add_(2)
-                self.assertFalse(self._is_inference_tensor(tmp))
+                self.assertFalse(torch.is_inference(tmp))
                 self.assertEqual(tmp.requires_grad, requires_grad)
                 # Accessing is_leaf in python tries to update grad_fn and raises:
                 # A view was created in inference mode and its base or
@@ -8682,13 +8685,13 @@ class TestAutogradInferenceMode(TestCase):
 
             with torch.inference_mode():
                 out = a.view(-1)
-                self.assertFalse(self._is_inference_tensor(out))
+                self.assertFalse(torch.is_inference(out))
                 self.assertEqual(out.requires_grad, requires_grad)
                 self.assertTrue(out._is_view())
                 self.assertTrue(out.is_leaf)
 
             tmp = functional_op(out)
-            self.assertFalse(self._is_inference_tensor(tmp))
+            self.assertFalse(torch.is_inference(tmp))
             self.assertEqual(tmp.requires_grad, requires_grad)
 
             if requires_grad:
@@ -8700,7 +8703,7 @@ class TestAutogradInferenceMode(TestCase):
                 out.add_(2)
 
             tmp = out.view(2, 3)
-            self.assertFalse(self._is_inference_tensor(tmp))
+            self.assertFalse(torch.is_inference(tmp))
             self.assertEqual(tmp.requires_grad, requires_grad)
 
     def test_mix_inference_and_normal_tensor_functional_op(self):
@@ -8712,7 +8715,7 @@ class TestAutogradInferenceMode(TestCase):
 
             # add is safe since it doesn't save any variable for backward
             out = c.add(s)
-            self.assertFalse(self._is_inference_tensor(out))
+            self.assertFalse(torch.is_inference(out))
             self.assertEqual(out.requires_grad, requires_grad)
             if requires_grad:
                 # leaf inference tensor with requires_grad=True can still have gradient
@@ -8738,7 +8741,7 @@ class TestAutogradInferenceMode(TestCase):
             with torch.inference_mode():
                 c = torch.ones(1, 2, 3)
 
-            self.assertTrue(self._is_inference_tensor(c))
+            self.assertTrue(torch.is_inference(c))
             if requires_grad:
                 err_msg = "Inference tensors cannot be saved for backward"
                 with self.assertRaisesRegex(RuntimeError, err_msg):
@@ -8766,13 +8769,13 @@ class TestAutogradInferenceMode(TestCase):
             # tensor argument. So there isn't a mixed inference and normal
             # tensor inputs for view ops
             tmp1 = c.view_as(s)
-            self.assertTrue(self._is_inference_tensor(tmp1))
+            self.assertTrue(torch.is_inference(tmp1))
             self.assertFalse(tmp1.requires_grad)
 
             # this is fine since its equivalent as s.view(c.sizes()) which
             # isn't a mixed input scenario
             tmp2 = s.view_as(c)
-            self.assertFalse(self._is_inference_tensor(tmp2))
+            self.assertFalse(torch.is_inference(tmp2))
             self.assertEqual(tmp2.requires_grad, requires_grad)
 
     def test_inference_mode_handle_direct_view_on_rebase(self):
@@ -8968,8 +8971,8 @@ class TestMultithreadAutograd(TestCase):
         def fn(x1, x2):
             return torch.cat((x1, x2), dim=-1)
 
-        torch.autograd.gradcheck(fn, [inp_r, inp_c])
-        torch.autograd.gradcheck(fn, [inp_c, inp_r])
+        torch.autograd.gradcheck(fn, [inp_r, inp_c], check_forward_ad=True)
+        torch.autograd.gradcheck(fn, [inp_c, inp_r], check_forward_ad=True)
 
 for test in method_tests():
     add_test(*test)
