@@ -11,7 +11,9 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/xnnpack/OpContext.h>
 
 namespace torch {
 namespace jit {
@@ -248,6 +250,165 @@ TEST(ExternalCall, Addmm_float) {
   nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
+
+#ifdef USE_XNNPACK
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ExternalCall, Prepacked_Linear_float) {
+  using namespace at::native::xnnpack;
+
+  KernelScope kernel_scope;
+
+  Placeholder Input("Input", kFloat, {100, 200});
+  Placeholder Weight("Weight", kFloat, {300, 200});
+  Placeholder Bias("Bias", kFloat, {300});
+  BufHandle ResultBuf("Result", {100, 300}, kFloat);
+
+  // Calculate reference result using at::linear.
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::ones({100, 200}, options) * 5.f;
+  at::Tensor weight = at::ones({300, 200}, options) * 6.f;
+  at::Tensor bias = at::ones({300}, options) * 11.f;
+  at::Tensor ref = at::linear(input, weight, bias);
+
+  // Create prepacked xnnpack context object.
+  auto linear_clamp_prepack_op = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("prepacked::linear_clamp_prepack", "")
+      .typed<c10::intrusive_ptr<LinearOpContext> (
+          at::Tensor,
+          c10::optional<at::Tensor>,
+          const c10::optional<at::Scalar>&,
+          const c10::optional<at::Scalar>&)>();
+  auto prepacked = linear_clamp_prepack_op.call(
+      weight,
+      bias,
+      c10::optional<at::Scalar>(),
+      c10::optional<at::Scalar>());
+
+  Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
+  Tensor* Result = new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_prepacked_linear_clamp_run",
+          {BufHandle(Input.data()),
+           BufHandle(DummyPrepacked.data())},
+          {}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(100 * 200, 5.f);
+  std::vector<float> result_buf(100 * 300, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  llvm_codegen.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  ir_eval.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ExternalCall, Prepacked_Conv2d_float) {
+  using namespace at::native::xnnpack;
+
+  KernelScope kernel_scope;
+
+  Placeholder Input("Input", kFloat, {1, 3, 224, 224});
+  Placeholder Weight("Weight", kFloat, {16, 3, 3, 3});
+  Placeholder Bias("Bias", kFloat, {16});
+  BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
+  int64_t stride = 2;
+  int64_t pad = 1;
+  int64_t dilation = 1;
+  int64_t groups = 1;
+
+  // Calculate reference result using at::conv2d.
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::ones({1, 3, 224, 224}, options) * 5.f;
+  at::Tensor weight = at::ones({16, 3, 3, 3}, options) * 6.f;
+  at::Tensor bias = at::ones({16}, options) * 11.f;
+  at::Tensor ref = at::conv2d(
+      input,
+      weight,
+      bias,
+      {stride, stride},
+      {pad, pad},
+      {dilation, dilation},
+      groups);
+
+  // Create prepacked xnnpack context object.
+  auto conv2d_clamp_prepack_op = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("prepacked::conv2d_clamp_prepack", "")
+      .typed<c10::intrusive_ptr<Conv2dOpContext> (
+          at::Tensor,
+          c10::optional<at::Tensor>,
+          std::vector<int64_t>,
+          std::vector<int64_t>,
+          std::vector<int64_t>,
+          int64_t,
+          const c10::optional<at::Scalar>&,
+          const c10::optional<at::Scalar>&)>();
+  auto prepacked = conv2d_clamp_prepack_op.call(
+      weight,
+      bias,
+      {stride, stride},
+      {pad, pad},
+      {dilation, dilation},
+      groups,
+      c10::optional<at::Scalar>(),
+      c10::optional<at::Scalar>());
+
+  Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
+  Tensor* Result = new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_prepacked_conv2d_clamp_run",
+          {BufHandle(Input.data()),
+           BufHandle(DummyPrepacked.data())},
+          {}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(1 * 3 * 224 * 224, 5.f);
+  std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  llvm_codegen.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  ir_eval.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+#endif // USE_XNNPACK
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, BinaryFloat) {
