@@ -9,9 +9,9 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests)
+    (op_db,)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
@@ -19,11 +19,8 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 from collections.abc import Sequence
 
-# Get names of all the operators which have entry in `method_tests` (legacy testing infra)
-method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
 
 # Tests that apply to all operators
-
 class TestOpInfo(TestCase):
     exact_dtype = True
 
@@ -38,12 +35,8 @@ class TestOpInfo(TestCase):
         # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
             samples = op.sample_inputs(device, dtype)
-            if len(samples) == 0:
-                self.skipTest("Skipped! No sample inputs!")
-
-            # NOTE: only tests on first sample
-            sample = samples[0]
-            op(sample.input, *sample.args, **sample.kwargs)
+            for sample in samples:
+                op(sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
@@ -77,12 +70,6 @@ class TestOpInfo(TestCase):
                 result = sample.output_process_fn_grad(result)
             result.sum().backward()
 
-    # Verifies that ops do not have an entry in
-    # `method_tests` (legacy testing infra).
-    @onlyCPU
-    @ops(op_db, allowed_dtypes=[torch.float32])
-    def test_duplicate_method_tests(self, device, dtype, op):
-        self.assertFalse(op.name in method_tested_operators)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
