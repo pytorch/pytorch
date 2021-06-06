@@ -3,6 +3,7 @@ import torch
 import numpy as np
 
 import contextlib
+import gc
 import io
 import inspect
 import math
@@ -17,6 +18,7 @@ import types
 import pickle
 import textwrap
 import subprocess
+import weakref
 import sys
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes
@@ -2398,7 +2400,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             # Check for zero strided, size 1 axis, in non-contiguous storage (gh-33812)
             c = torch.randn(10).as_strided([2, 1, 5], [1, 0, 2])
+            self.assertEqual(torch._debug_has_internal_overlap(c), OVERLAP_NO)
+            c = torch.randn(2, 1, 10)[::2].as_strided((2, 1, 5), (10, 0, 2))
             self.assertEqual(torch._debug_has_internal_overlap(c), OVERLAP_TOO_HARD)
+
 
         def test_allow_tensor_metadata_change(self):
             def do_test(t):
@@ -3850,7 +3855,7 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad1d_backward_cuda', 'cuda')
+        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', 'cuda')
         def backward_func(slf, device):
             res.backward(grad)
 
@@ -4085,9 +4090,13 @@ else:
 
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
-        weight = torch.tensor(1.0)
-        with self.assertRaisesRegex(RuntimeError, "'weight' must be at least 1-D"):
-            torch.embedding(weight, indices)
+        weights = [
+            torch.tensor(1.0, device=device),
+            torch.tensor(1.0, device=device).reshape(1, 1, 1),
+        ]
+        for weight in weights:
+            with self.assertRaisesRegex(RuntimeError, "'weight' must be 2-D"):
+                torch.embedding(weight, indices)
 
     def test_dist(self, device):
         def run_test(x, y):
@@ -4198,6 +4207,10 @@ else:
 
     def test_repeat_interleave(self, device):
         y = torch.tensor([[1, 2], [3, 4]], device=device)
+        # exercise single argument function signature
+        temp = y.repeat_interleave(2)
+        self.assertEqual(torch.Size([8]), temp.size())
+
         for dtype in [torch.int, torch.long]:
             lengths = torch.tensor([1, 2], dtype=dtype, device=device)
             output_size = torch.sum(lengths)
@@ -5698,12 +5711,31 @@ else:
                 dest_ones.masked_scatter_(mask, src_ones)
                 self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
 
-                # make src smaller. this should fail
-                src = torch.zeros(num_copy - 1, dtype=dt, device=device)
-                with self.assertRaises(RuntimeError):
-                    dest.masked_scatter_(mask, src)
+                # Bound checking in CUDA is done inside a kernel
+                # in order to avoid synchronization, but this means
+                # we can not clear the failures. So there is no way
+                # to test it then recover.
+                if self.device_type != 'cuda':
+                    # make src smaller. this should fail
+                    src = torch.zeros(num_copy - 1, dtype=dt, device=device)
+                    with self.assertRaises(RuntimeError):
+                        dest.masked_scatter_(mask, src)
 
-        self.assertEqual(len(w), 3)
+                # empty tensor
+                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+                mask = torch.ones_like(dest, dtype=maskType, device=device)
+                src = torch.empty((0,), dtype=dt, device=device)
+                dest.masked_scatter_(mask, src)
+
+                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+                mask = torch.ones((5, 1, 5), dtype=maskType, device=device)
+                src = torch.empty((0,), dtype=dt, device=device)
+                dest.masked_scatter_(mask, src)
+
+        if self.device_type != 'cuda':
+            self.assertEqual(len(w), 5)
+        else:
+            self.assertEqual(len(w), 4)
 
         warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
         for wi in w:
@@ -5720,6 +5752,15 @@ else:
         mask = torch.tensor([True, False, True], device=device)
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
+
+    @onlyCUDA
+    @largeTensorTest('30GB')
+    def test_masked_scatter_large_tensor(self, device):
+        t_cpu = torch.empty(2**31 + 1, dtype=torch.bool).random_()
+        t = t_cpu.to(device)
+        result_cpu = t_cpu.masked_scatter(t_cpu, t_cpu)
+        result = t.masked_scatter(t, t)
+        self.assertEqual(result, result_cpu)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_masked_select(self, device, dtype):
@@ -8055,10 +8096,6 @@ tensor_op_tests = [
     ('unsqueeze', 'neg_dim', _new_t((2, 3, 4)), lambda t, d: [-2], ),
     ('zero_', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('new_zeros', '', _small_3d, lambda t, d: [1, 2, 3, 4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('flip', 'd0', _small_3d, lambda t, d: [0], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('flip', 'd02', _small_3d, lambda t, d: [0, 2], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('flip', 'd20', _small_3d, lambda t, d: [2, 0], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('flip', 'neg_d', _small_3d, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('__lshift__', '',
         lambda t, d: torch.pow(2, torch.arange(1, 5).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
@@ -8206,8 +8243,38 @@ def generate_tensor_op_tests(cls) -> None:
 class TestTensorDeviceOps(TestCase):
     exact_dtype = True
 
+# we implemented custom deallocation for subclasses, so it behooves
+# us to make sure all of these bits work.  We'll use __del__ to
+# track if objects die or not
+class Tracker:
+    def __init__(self, marker):
+        self.marker = marker
+
+    @staticmethod
+    def make():
+        marker = [False]
+        return marker, Tracker(marker)
+
+    def __del__(self):
+        self.marker[0] = True
+
+@contextlib.contextmanager
+def disable_gc():
+    if gc.isenabled():
+        try:
+            gc.disable()
+            yield
+        finally:
+            gc.enable()
+    else:
+        yield
+
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
+
+    def test_tensor_ctor_scalar(self):
+        x = torch.Tensor(torch.tensor(1.0))
+        self.assertEqual(x, torch.tensor(1.0))
 
     def test_deepcopy_gradient(self):
         from copy import deepcopy
@@ -8243,6 +8310,214 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
 
         x = torch.ones(5)
         test_tensor = TestTensor(x)
+
+    def test_pyobj_preserved(self):
+        x = torch.empty(2)
+        x.foo = 2  # put something on __dict__
+        y = torch.empty(2)
+        y.grad = x
+        del x  # x is dead in Python
+        self.assertEqual(y.grad.foo, 2)
+        z = y.grad  # it's live
+        del z  # it's dead again
+        self.assertEqual(y.grad.foo, 2)
+
+    def test_subclass_preserved(self):
+        class MyTensor(torch._C._TensorBase):
+            pass
+
+        x = MyTensor(torch.empty(2))
+        y = torch.empty(2)
+        y.grad = x
+        del x  # x is dead in Python
+        self.assertEqual(type(y.grad), MyTensor)
+        z = y.grad  # it's live
+        del z  # it's dead again
+        self.assertEqual(type(y.grad), MyTensor)
+
+    def test_tensor_slot_dealloc(self):
+
+        class SlotTensor1(torch._C._TensorBase):
+            __slots__ = ['slot1']
+
+        class SlotTensor2(SlotTensor1):
+            __slots__ = ['slot2']
+
+        m1, t1 = Tracker.make()
+        m2, t2 = Tracker.make()
+        slot_tensor = SlotTensor2(torch.empty(2))
+        slot_tensor.slot1 = t1
+        slot_tensor.slot2 = t2
+        del t1
+        del t2
+        self.assertFalse(m1[0])
+        self.assertFalse(m2[0])
+        del slot_tensor
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
+    def test_tensor_dict_dealloc(self):
+        m, t = Tracker.make()
+        x = torch.empty(2)
+        x.arf = t
+        del t
+        self.assertFalse(m[0])
+        del x
+        self.assertTrue(m[0])
+
+    def test_tensor_finalizer_dealloc(self):
+        m = [False]
+
+        class FinalizerTensor(torch._C._TensorBase):
+            def __del__(self):
+                m[0] = True
+
+        fin_tensor = FinalizerTensor(torch.empty(2))
+        self.assertFalse(m[0])
+        del fin_tensor
+        self.assertTrue(m[0])
+
+    def test_tensor_weakref_dealloc(self):
+
+        x = torch.empty(2)
+        m = [False]
+
+        def cb(r):
+            m[0] = True
+
+        wref = weakref.ref(x, cb)
+        del x
+        self.assertTrue(m[0])
+        self.assertEqual(wref(), None)
+
+    def test_tensor_cycle_via_dict(self):
+        m1, t1 = Tracker.make()
+        x = torch.empty(2)
+        x._tracker = t1
+        del t1
+
+        m2, t2 = Tracker.make()
+        y = torch.empty(2)
+        y._tracker = t2
+        del t2
+
+        x._loop = y
+        y._loop = x
+
+        # C++ reference should keep the cycle live!
+        # This exercise THPVariable_subtype_traverse
+        # NB: Because z.grad is a reference done entirely in C++, cycles
+        # involving it directly are NOT broken by Python GC; you've
+        # set up a good old C++ reference cycle which we cannot safely
+        # break (because C++ references are allowed to be accessed
+        # multithreaded-ly) (TODO: except maybe if you can prove that
+        # only Python has access to the C++ object, in which case you can
+        # also prove that no multithreaded access occurs)
+        z = torch.empty(2)
+        z.grad = x
+
+        del x
+        del y
+
+        gc.collect()
+        self.assertFalse(m1[0])
+        self.assertFalse(m2[0])
+
+        with disable_gc():
+            del z
+            self.assertFalse(m1[0])
+            self.assertFalse(m2[0])
+
+        gc.collect()
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
+    def test_tensor_cycle_via_slots(self):
+        m1 = [False]
+        m2 = [False]
+
+        class SlotTensor1(torch._C._TensorBase):
+            __slots__ = ['slot1']
+
+            def __del__(self):
+                m1[0] = True
+
+        class SlotTensor2(SlotTensor1):
+            __slots__ = ['slot2']
+
+            def __del__(self):
+                m2[0] = True
+
+        x = SlotTensor1(torch.empty(2))
+        y = SlotTensor2(torch.empty(2))
+
+        x.slot1 = y
+        y.slot2 = x
+
+        del x
+        with disable_gc():
+            del y
+            self.assertFalse(m1[0])
+            self.assertFalse(m2[0])
+
+        gc.collect()
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
+    def test_backward_hooks_traverse(self):
+        m1, t1 = Tracker.make()
+        m2, t2 = Tracker.make()
+        x = torch.empty(2, requires_grad=True)
+        x._tracker = t1
+        y = torch.empty(2, requires_grad=True)
+        y._tracker = t2
+        del t1
+        del t2
+
+        # this hits a special setter, it's not just a __dict__ entry
+        x._backward_hooks = y
+        y._backward_hooks = x
+
+        del x
+        with disable_gc():
+            del y
+            self.assertFalse(m1[0])
+            self.assertFalse(m2[0])
+
+        gc.collect()
+
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
+    def test_dead_weak_ref(self):
+        x = torch.empty(2)
+        w_x = weakref.ref(x)
+        y = torch.empty(2)
+        y.grad = x
+        del x
+
+        x = w_x()
+        # Ideally, x would keep the tensor live.  But CPython doesn't
+        # provide enough hooks to do this.  So it will go dead and x
+        # will transmute into an undefined tensor.  Not great, but the
+        # best we can do.
+        del y
+
+        self.assertRaises(RuntimeError, lambda: x.sigmoid())
+
+    def test_resurrected_weak_ref(self):
+        x = torch.empty(2)
+        w_x = weakref.ref(x)
+        y = torch.empty(2)
+        y.grad = x
+        del x
+
+        x = w_x()
+        # Use this to manually fix weak references after dereferencing them
+        x._fix_weakref()
+        del y
+        x.sigmoid()
+
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed

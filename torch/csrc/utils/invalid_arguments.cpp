@@ -1,8 +1,9 @@
 #include <torch/csrc/utils/invalid_arguments.h>
 
+#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <torch/csrc/utils/memory.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <unordered_map>
@@ -61,7 +62,7 @@ struct TupleType: public Type {
     if (!PyTuple_Check(object)) return false;
     auto num_elements = PyTuple_GET_SIZE(object);
     if (num_elements != (long)types.size()) return false;
-    for (int i = 0; i < num_elements; i++) {
+    for(const auto i : c10::irange(num_elements)) {
       if (!types[i]->is_matching(PyTuple_GET_ITEM(object, i)))
         return false;
     }
@@ -78,7 +79,7 @@ struct SequenceType: public Type {
   bool is_matching(PyObject *object) override {
     if (!PySequence_Check(object)) return false;
     auto num_elements = PySequence_Length(object);
-    for (int i = 0; i < num_elements; i++) {
+    for(const auto i : c10::irange(num_elements)) {
       if (!type->is_matching(PySequence_GetItem(object, i)))
         return false;
     }
@@ -250,7 +251,7 @@ std::string _formattedArgDesc(
 
   auto num_args = arguments.size() + kwargs.size();
   std::string result = "(";
-  for (size_t i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     bool is_kwarg = i >= arguments.size();
     PyObject *arg = is_kwarg ? kwargs.at(option.arguments[i].name) : arguments[i];
 
@@ -330,7 +331,7 @@ std::string format_invalid_args(
   error_msg += " received an invalid combination of arguments - ";
 
   Py_ssize_t num_args = PyTuple_Size(given_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(given_args, i);
     args.push_back(arg);
   }
