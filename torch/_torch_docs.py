@@ -3894,7 +3894,7 @@ Example::
 
 add_docstr(torch.histogram,
            r"""
-histogram(input, bins, *, min=None, max=None, weight=None, density=False) -> (Tensor, Tensor)
+histogram(input, bins, *, min=None, max=None, weight=None, density=False, out=None) -> (Tensor, Tensor)
 
 Computes the histogram of the values in a tensor.
 
@@ -3911,7 +3911,7 @@ Keyword args:
     density (bool): If False, the result will contain the count (or total weight) in each bin.
                     If True, the result is the value of the probability density function over the bins,
                     normalized such that the integral over the range of the bins is 1.
-    {out}
+    {out} (tuple, optional): The result tuple of two output tensors (hist, bin_edges).
 
 Returns:
     hist (Tensor): 1D Tensor containing the values of the histogram.

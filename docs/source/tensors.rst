@@ -382,6 +382,7 @@ Tensor class reference
     Tensor.hardshrink
     Tensor.heaviside
     Tensor.histc
+    Tensor.histogram
     Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_

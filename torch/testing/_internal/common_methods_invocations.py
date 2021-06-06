@@ -1570,7 +1570,7 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_histogram(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S))
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
 
     sample_inputs = []
     for size, bin_ct, weighted, density in product(sizes, range(1, 5), [False, True], [False, True]):
@@ -1578,11 +1578,11 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
         weight_tensor = make_arg(size) if weighted else None
 
         sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
-                kwargs=dict(weight=weight_tensor, density=density)))
+                    kwargs=dict(weight=weight_tensor, density=density)))
 
         bins_tensor = make_arg((bin_ct + 1,))
         sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
-                kwargs=dict(weight=weight_tensor, density=density)))
+                    kwargs=dict(weight=weight_tensor, density=density)))
 
     return sample_inputs
 
@@ -6614,7 +6614,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hypot,
            ),
     OpInfo('histogram',
-           dtypes=_dispatch_dtypes(), # histogram is only implemented on CPU
+           dtypes=_dispatch_dtypes(),  # histogram is only implemented on CPU
            dtypesIfCPU=floating_types(),
            sample_inputs_func=sample_inputs_histogram,
            supports_autograd=False,

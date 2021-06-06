@@ -4891,25 +4891,27 @@ else:
             scalar = torch.tensor(2, device=device, dtype=dtype)
             torch.diff(scalar)
 
+    """
+    Runs torch.histogram and numpy.histogram on the specified input parameters
+    and asserts that their output is equal.
+    """
     def _test_histogram_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
             if not torch.is_tensor(t):
                 return t
-            if t.dtype == torch.bfloat16:
-                return t.to(dtype=torch.float, device="cpu").numpy()
             else:
                 return t.cpu().numpy()
+
+        # Wrapper around numpy.histogram performing conversions between torch tensors and numpy arrays.
+        def reference_histogram(self, t, bins, bin_range, weights, density):
+            (np_t, np_bins, np_weights) = map(to_np, [t, bins, weights])
+            (np_hist, np_bin_edges) = np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density)
+            return (torch.from_numpy(np_hist).to(actual_dtype), torch.from_numpy(np_bin_edges).to(actual_dtype))
 
         (minv, maxv) = bin_range if bin_range else (None, None)
         (actual_hist, actual_bin_edges) = torch.histogram(t, bins, min=minv, max=maxv, weight=weights, density=density)
 
         actual_dtype = actual_hist.dtype
-
-        # Helper for test_histogram to compare with NumPy reference implementation
-        def reference_histogram(self, t, bins, bin_range, weights, density):
-            (np_t, np_bins, np_weights) = map(to_np, [t, bins, weights])
-            (np_hist, np_bin_edges) = np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density)
-            return (torch.from_numpy(np_hist).to(actual_dtype), torch.from_numpy(np_bin_edges).to(actual_dtype))
 
         (expected_hist, expected_bin_edges) = reference_histogram(self, t, bins, bin_range, weights, density)
 
@@ -4933,6 +4935,7 @@ else:
     @dtypes(torch.float32, torch.float64)
     def test_histogram(self, device, dtype):
         shapes = (
+            (),
             (1,),
             (1, 5),
             (3, 5),
@@ -4962,8 +4965,8 @@ else:
         for bin_ct, shape in product(range(1, 10), shapes):
             values = make_tensor(shape, device, dtype, low=-9, high=9)
             (actual_hist, actual_bin_edges) = torch.histogram(values, bin_ct)
-            (expected_hist, expected_bin_edges) = torch.histogram(values, bin_ct, \
-                    min=None, max=None, weight=None, density=False)
+            (expected_hist, expected_bin_edges) = torch.histogram(values, bin_ct,
+                        min=None, max=None, weight=None, density=False)
             self.assertEqual(actual_hist, expected_hist)
             self.assertEqual(actual_bin_edges, expected_bin_edges)
 
