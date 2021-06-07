@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <chrono>
 #include <iostream>
 #include <list>
@@ -560,3 +562,5 @@ class ProcessGroupNCCL : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL

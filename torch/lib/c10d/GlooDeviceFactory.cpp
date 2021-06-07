@@ -1,5 +1,7 @@
 #include <c10d/GlooDeviceFactory.hpp>
 
+#ifdef USE_C10D_GLOO
+
 #include <stdlib.h>
 
 #include <c10/util/Exception.h>
@@ -162,3 +164,5 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO

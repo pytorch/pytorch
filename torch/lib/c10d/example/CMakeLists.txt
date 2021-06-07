@@ -1,6 +1,6 @@
 add_executable(allreduce allreduce.cpp)
 target_include_directories(allreduce PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(allreduce pthread c10d_cpu)
+target_link_libraries(allreduce pthread torch_cpu_library)
 if(USE_CUDA)
-  target_link_libraries(allreduce c10d_cuda)
+  target_link_libraries(allreduce torch_cuda_library)
 endif()

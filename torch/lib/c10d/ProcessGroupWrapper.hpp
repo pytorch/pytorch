@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_GLOO
+
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/Types.hpp>
@@ -124,3 +126,5 @@ class ProcessGroupWrapper : public ProcessGroup {
       const std::vector<at::Tensor>& tensors) const;
 };
 } // namespace c10d
+
+#endif // USE_C10D_GLOO

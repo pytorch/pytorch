@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroupMPI.hpp>
 
+#ifdef USE_C10D_MPI
+
 #include <limits>
 #include <map>
 
@@ -919,3 +921,5 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::_allgather_base(
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_MPI

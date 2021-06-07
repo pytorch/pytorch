@@ -2,6 +2,8 @@
 #include <c10/util/Optional.h>
 #include <c10d/ProcessGroupNCCL.hpp>
 
+#ifdef USE_C10D_NCCL
+
 #include <exception>
 #include <map>
 #include <stdexcept>
@@ -1925,3 +1927,5 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL

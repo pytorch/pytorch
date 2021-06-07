@@ -358,8 +358,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h"
       )
-      target_link_libraries(process_group_agent PRIVATE torch c10d_cpu fmt::fmt-header-only)
-      add_dependencies(process_group_agent torch c10d_cpu)
+      target_link_libraries(process_group_agent PRIVATE torch fmt::fmt-header-only)
+      add_dependencies(process_group_agent torch)
 
       if(USE_TENSORPIPE)
         add_library(tensorpipe_agent
@@ -371,8 +371,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
           )
-        target_link_libraries(tensorpipe_agent PRIVATE torch c10d_cpu tensorpipe fmt::fmt-header-only)
-        add_dependencies(tensorpipe_agent torch c10d_cpu)
+        target_link_libraries(tensorpipe_agent PRIVATE torch tensorpipe fmt::fmt-header-only)
+        add_dependencies(tensorpipe_agent torch)
         if(USE_CUDA)
           target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
         endif()
@@ -654,6 +654,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       list(APPEND Caffe2_GPU_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
     endif()
+    if(USE_DISTRIBUTED AND NOT WIN32)
+      if(BUILD_SPLIT_CUDA)
+        append_filelist("libtorch_cuda_distributed_sources" Caffe2_GPU_SRCS_CPP)
+      else()
+        append_filelist("libtorch_cuda_distributed_sources" Caffe2_GPU_SRCS)
+      endif()
+    endif()
     set_source_files_properties(
       ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
@@ -670,6 +677,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     if(USE_NCCL)
       list(APPEND Caffe2_HIP_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+    endif()
+    if(USE_DISTRIBUTED AND NOT WIN32)
+      append_filelist("libtorch_cuda_distributed_sources" Caffe2_HIP_SRCS)
     endif()
     # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
     # See NOTE [ ATen NVRTC Stub and HIP ]
@@ -1211,9 +1221,29 @@ endif()
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
 # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
 if(USE_DISTRIBUTED)
-  target_compile_definitions(torch_cpu PRIVATE
-    USE_DISTRIBUTED
-  )
+  target_compile_definitions(torch_cpu PRIVATE USE_DISTRIBUTED)
+  if(USE_GLOO AND USE_C10D_GLOO)
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
+  endif()
+  if(USE_NCCL AND USE_C10D_NCCL)
+    if(USE_ROCM)
+      target_compile_definitions(torch_hip PUBLIC USE_C10D_NCCL)
+    elseif(USE_CUDA)
+      if(BUILD_SPLIT_CUDA)
+        target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_NCCL)
+      else()
+        target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+      endif()
+    endif()
+  endif()
+  if(USE_MPI AND USE_C10D_MPI)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      set_source_files_properties(
+        "${TORCH_SRC_DIR}/lib/c10d/ProcessGroupMPI.cpp
+        PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    endif()
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
+  endif()
   # Pass USE_RPC in order to reduce use of
   # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
   # need to be removed when RPC is supported
@@ -1277,7 +1307,7 @@ if($ENV{TH_BINARY_BUILD})
   endif()
 endif()
 
-target_link_libraries(torch_cpu PUBLIC c10 c10d_cpu)
+target_link_libraries(torch_cpu PUBLIC c10)
 target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
@@ -1461,8 +1491,8 @@ endif()
 if(BUILD_SPLIT_CUDA)
   target_link_libraries(torch_cuda_cu INTERFACE torch::cudart)
   target_link_libraries(torch_cuda_cpp INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda_cu PUBLIC c10_cuda c10d_cuda torch::nvtoolsext)
-  target_link_libraries(torch_cuda_cpp PUBLIC c10_cuda c10d_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda_cu PUBLIC c10_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda_cpp PUBLIC c10_cuda torch::nvtoolsext)
 
   target_include_directories(
       torch_cuda_cu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1485,7 +1515,7 @@ if(BUILD_SPLIT_CUDA)
   target_link_libraries(torch_cuda_cu PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 elseif(USE_CUDA)
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda c10d_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)

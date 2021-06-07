@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -200,3 +202,5 @@ class NCCLComm {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL

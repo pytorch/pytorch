@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_GLOO
+
 #include <string>
 
 #include <c10/util/Registry.h>
@@ -26,3 +28,5 @@ C10_DECLARE_SHARED_REGISTRY(
     const std::string& /* hostname */);
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO

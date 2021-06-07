@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_GLOO
+
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -357,3 +359,5 @@ class ProcessGroupGloo : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO
