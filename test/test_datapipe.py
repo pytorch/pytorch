@@ -440,7 +440,6 @@ class TestFunctionalIterDataPipe(TestCase):
             for a, b in zip(x, y):
                 self.assertEqual(a, b - 1.0)
 
-
     def test_collate_datapipe(self):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         input_dp = IDP(arrs)
@@ -486,6 +485,49 @@ class TestFunctionalIterDataPipe(TestCase):
         batch_dp_nl = input_dp_nl.batch(batch_size=2)
         with self.assertRaises(NotImplementedError):
             len(batch_dp_nl)
+
+    def test_unbatch_datapipe(self):
+
+        target_length = 6
+        prebatch_dp = IDP(range(target_length))
+
+        input_dp = prebatch_dp.batch(3)
+        unbatch_dp = input_dp.unbatch()
+        self.assertEqual(len(list(zip(prebatch_dp, unbatch_dp))), target_length)
+        for i, res in zip(prebatch_dp, unbatch_dp):
+            self.assertEqual(i, res)
+
+        input_dp = IDP([[0, 1, 2], [3, 4, 5]])
+        unbatch_dp = input_dp.unbatch()
+        self.assertEqual(len(list(zip(prebatch_dp, unbatch_dp))), target_length)
+        for i, res in zip(prebatch_dp, unbatch_dp):
+            self.assertEqual(i, res)
+
+        input_dp = IDP([[[0, 1], [2, 3]], [[4, 5], [6, 7]]])
+
+        unbatch_dp = input_dp.unbatch()
+        expected_dp = [[0, 1], [2, 3], [4, 5], [6, 7]]
+        self.assertEqual(len(list(zip(expected_dp, unbatch_dp))), 4)
+        for i, res in zip(expected_dp, unbatch_dp):
+            self.assertEqual(i, res)
+
+        unbatch_dp = input_dp.unbatch(unbatch_level=2)
+        expected_dp = [0, 1, 2, 3, 4, 5, 6, 7]
+        self.assertEqual(len(list(zip(expected_dp, unbatch_dp))), 8)
+        for i, res in zip(expected_dp, unbatch_dp):
+            self.assertEqual(i, res)
+
+        input_dp = IDP([[0, 1, 2], [3, 4, 5]])
+        with self.assertRaises(ValueError):
+            unbatch_dp = input_dp.unbatch(unbatch_level=-2)
+            for i in unbatch_dp:
+                print(i)
+
+        with self.assertRaises(IndexError):
+            unbatch_dp = input_dp.unbatch(unbatch_level=5)
+            for i in unbatch_dp:
+                print(i)
+
 
     def test_bucket_batch_datapipe(self):
         input_dp = IDP(range(20))
