@@ -5739,7 +5739,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.triu(x, diagonal=-1)
 
         x = torch.randn(2, 3, 4)
-        self.run_test(triuModelwithDiagonal(), (x))            
+        self.run_test(triuModelwithDiagonal(), (x))
 
     def test_mish(self):
         class MishModel(torch.nn.Module):
