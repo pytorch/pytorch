@@ -211,7 +211,7 @@ inline Tensor ndtr(const Tensor& self) {
   return torch::special_ndtr(self);
 }
 
-inline Tensor& ndtr_out(Tensor& result, const Tensor& self) {
+inline const Tensor& ndtr_out(const Tensor& result, const Tensor& self) {
   return torch::special_ndtr_out(result, self);
 }
 
