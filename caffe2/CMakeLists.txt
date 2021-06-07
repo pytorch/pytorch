@@ -1239,7 +1239,7 @@ if(USE_DISTRIBUTED)
   if(USE_MPI AND USE_C10D_MPI)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       set_source_files_properties(
-        "${TORCH_SRC_DIR}/lib/c10d/ProcessGroupMPI.cpp
+        "${TORCH_SRC_DIR}/lib/c10d/ProcessGroupMPI.cpp"
         PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
