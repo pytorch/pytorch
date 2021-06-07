@@ -2,7 +2,7 @@ set(Aten_TH_AVX_extra_src)
 
 set(hdr
   THGeneral.h THHalf.h THAllocator.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
-  THLapack.h THVector.h )
+  THVector.h )
 
 set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THGeneral.cpp
@@ -10,9 +10,7 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorLapack.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
   )
 # Remember that PARENT_SCOPE variables are not in the current scope
 set(ATen_TH_SRCS ${ATen_TH_SRCS} PARENT_SCOPE)
@@ -63,7 +61,6 @@ install(FILES
   THGenerateQInt8Type.h
   THGenerateQInt32Type.h
   THGenerateQTypes.h
-  THLapack.h
   THStorage.h
   THStorageFunctions.h
   THTensor.h
@@ -78,8 +75,6 @@ install(FILES
 install(FILES
   generic/THBlas.cpp
   generic/THBlas.h
-  generic/THLapack.cpp
-  generic/THLapack.h
   generic/THStorage.cpp
   generic/THStorage.h
   generic/THStorageCopy.cpp
@@ -87,8 +82,6 @@ install(FILES
   generic/THTensor.cpp
   generic/THTensor.h
   generic/THTensor.hpp
-  generic/THTensorLapack.cpp
-  generic/THTensorLapack.h
   generic/THTensorMath.h
   generic/THVector.h
   # See Note [TH abstraction violation]
