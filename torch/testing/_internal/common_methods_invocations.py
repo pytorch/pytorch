@@ -20,7 +20,7 @@ from torch.testing import \
      integral_types_and, all_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (dtypesIfCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
