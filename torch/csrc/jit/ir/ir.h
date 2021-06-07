@@ -1563,6 +1563,9 @@ struct OperatorMap {
       std::initializer_list<std::pair<std::shared_ptr<Operator>, T>> init) {
     insert(init);
   }
+  explicit OperatorMap(std::initializer_list<std::pair<const char*, T>> init) {
+    insert(init);
+  }
 
   void insert(const std::shared_ptr<Operator>& op, T val) {
     // Remove if exists before insert
@@ -1575,6 +1578,12 @@ struct OperatorMap {
       std::initializer_list<std::pair<std::shared_ptr<Operator>, T>> v) {
     for (auto& el : v) {
       insert(el.first, el.second);
+    }
+  }
+
+  void insert(std::initializer_list<std::pair<const char*, T>> v) {
+    for (auto& el : v) {
+      insert(getOperatorForLiteral(el.first), el.second);
     }
   }
 
@@ -1618,6 +1627,18 @@ struct OperatorMap {
       }
     }
     return c10::nullopt;
+  }
+
+  // TODO: return iterator
+  std::vector<OpMapType> getAllKeysAndValues() const {
+    std::vector<OpMapType> keys_values;
+    for (auto& symbol_mapping : map) {
+      auto& vec = symbol_mapping.second;
+      for (auto& pair : vec) {
+        keys_values.push_back(pair);
+      }
+    }
+    return keys_values;
   }
 
  private:
