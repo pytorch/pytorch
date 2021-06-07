@@ -57,8 +57,8 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
     auto col_indices_accessor = col_indices.accessor<index_t, 1>();
 
     auto values_accessor = values.accessor<scalar_t, 1>();
-    scalar_t* dense_ptr = dense.data<scalar_t>();
-    scalar_t* r_ptr = r.data<scalar_t>();
+    scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
+    scalar_t* r_ptr = r.data_ptr<scalar_t>();
 
     int64_t dense_stride0 = dense.stride(0);
     int64_t dense_stride1 = dense.stride(1);
@@ -97,16 +97,16 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
   Tensor t = *expand_size(self, {sparse.size(0), dense.size(1)}, "addmm_out_sparse_csr");
 
-  TORCH_INTERNAL_ASSERT(t.device().type() == kCPU);
+  TORCH_CHECK(!t.is_cuda(),  "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(
-      r.device().type() == kCPU,
-      "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
+      !r.is_cuda(),
+      "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(
-      sparse.device().type() == kCPU,
-      "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
+      !sparse.is_cuda(),
+      "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   TORCH_CHECK(
-      dense.device().type() == kCPU,
-      "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+      !dense.is_cuda(),
+      "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(
       sparse.dim() == 2,
@@ -135,21 +135,19 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
       dim_j,
       ", got ",
       dense.size(0));
-  TORCH_CHECK(
-      sparse.size(1) == dim_j,
-      "addmm: Expected sparse matrix (op1) size(1)=",
-      dim_j,
-      ", got ",
-      sparse.size(1));
+
   resize_output(r, {dim_i, dim_k});
   auto col_indices = sparse.col_indices();
   auto crow_indices = sparse.crow_indices();
   auto values = sparse.values();
   int64_t nnz        = sparse._nnz();
-
+  if (nnz == 0) {
+    at::mul_out(r, t, at::scalar_tensor(beta, r.options()));
+    return r;
+  }
   // Do not use MKL for Windows due to linking issues with sparse MKL routines.
   if (at::hasMKL() && is_mkl_supported() && is_square_or_vec(dim_i, dim_j, dim_k)) {
-    AT_DISPATCH_FLOATING_TYPES(values.type(), "addmm_sparse_dense", [&] {
+    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_dense", [&] {
         scalar_t cast_beta = beta.to<scalar_t>();
         if (cast_beta == 0) {
           r.zero_();
@@ -165,14 +163,14 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     });
   } else {
     // r = beta * t + alpha * sparse * dense
-    AT_DISPATCH_FLOATING_TYPES(values.type(), "addmm_sparse_dense", [&] {
+    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, crow_indices, col_indices, values, dense);
     });
   }
   return r;
 }
 
-Tensor addmm_sparse_csr_dense_cpu(
+Tensor addmm_sparse_csr_dense(
     const Tensor& self,
     const SparseCsrTensor& sparse,
     const Tensor& dense,

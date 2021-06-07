@@ -89,8 +89,6 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
-    "torch/csrc/autograd/profiler_legacy.cpp",
-    "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/autograd/profiler_utils.cpp",
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
@@ -110,6 +108,12 @@ core_sources_common = [
 ]
 
 libtorch_sources_common = core_sources_common
+
+# The profilers are not needed in the lite interpreter build.
+libtorch_profiler_sources = [
+    "torch/csrc/autograd/profiler_legacy.cpp",
+    "torch/csrc/autograd/profiler_kineto.cpp",
+]
 
 core_trainer_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
@@ -182,6 +186,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/concat_opt.cpp",
     "torch/csrc/jit/passes/constant_pooling.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",
+    "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
@@ -296,7 +301,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
-]
+] + libtorch_profiler_sources
 
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
@@ -548,6 +553,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
+    "torch/csrc/utils/crash_handler.cpp",
 ]
 
 libtorch_python_cuda_core_sources = [
@@ -643,7 +649,6 @@ libtorch_python_core_sources = [
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
-    "torch/csrc/utils/crash_handler.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
     "torch/csrc/utils/python_dispatch.cpp",
@@ -704,6 +709,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     return _libtorch_python_sources
 
 aten_cpu_source_non_codegen_list = [
+    "aten/src/ATen/AccumulateType.cpp",
     "aten/src/ATen/BatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
     "aten/src/ATen/Context.cpp",
@@ -827,6 +833,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
     "aten/src/ATen/native/cpu/ReduceAllOpsKernel.cpp",
     "aten/src/ATen/native/cpu/ReduceOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/RenormKernel.cpp",
     "aten/src/ATen/native/cpu/ScatterGatherKernel.cpp",
     "aten/src/ATen/native/cpu/SoftMaxKernel.cpp",
     "aten/src/ATen/native/cpu/SortingKernel.cpp",
@@ -1029,12 +1036,8 @@ aten_native_source_non_codegen_list = [
     "aten/src/TH/THAllocator.cpp",
     "aten/src/TH/THBlas.cpp",
     "aten/src/TH/THGeneral.cpp",
-    "aten/src/TH/THLapack.cpp",
     "aten/src/TH/THStorageFunctions.cpp",
     "aten/src/TH/THTensor.cpp",
-    "aten/src/TH/THTensorEvenMoreMath.cpp",
-    "aten/src/TH/THTensorLapack.cpp",
-    "aten/src/TH/THTensorMath.cpp",
     "aten/src/TH/THTensorMoreMath.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
