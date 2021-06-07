@@ -1106,6 +1106,7 @@ void initJitScriptBindings(PyObject* module) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
             auto typed_inputs = toTraceableStack(input_tuple);
+            std::cout << "HERE\n";
 
             std::shared_ptr<Graph> graph =
                 std::get<0>(tracer::createGraphByTracing(
@@ -1116,10 +1117,23 @@ void initJitScriptBindings(PyObject* module) {
                     force_outplace,
                     &self,
                     argument_names));
+
             const auto method_name = QualifiedName(*self.type()->name(), name);
-            auto fn = self._ivalue()->compilation_unit()->create_function(
-                method_name, graph);
-            self.type()->addMethod(fn);
+
+            auto prev_fn =
+                self._ivalue()->compilation_unit()->find_function(method_name);
+            if (prev_fn) {
+              std::cout << "HERE2\n";
+              auto new_fn =
+                  self._ivalue()->compilation_unit()->replace_function(
+                      method_name, graph);
+              std::cout << "HI\n";
+              self.type()->replaceMethod(new_fn);
+            } else {
+              auto fn = self._ivalue()->compilation_unit()->create_function(
+                  method_name, graph);
+              self.type()->addMethod(fn);
+            }
             didFinishEmitModule(self);
           },
           py::arg("name"),

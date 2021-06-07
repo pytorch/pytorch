@@ -2161,6 +2161,7 @@ struct TORCH_API ClassType : public NamedType {
       const FunctionSchema& hook_schema) const;
 
   void addMethod(torch::jit::Function* method);
+  void replaceMethod(torch::jit::Function* method);
   torch::jit::Function* findMethod(const std::string& name) const;
   torch::jit::Function& getMethod(const std::string& name) const;
   torch::jit::Function* findHook(const std::string& name) const;

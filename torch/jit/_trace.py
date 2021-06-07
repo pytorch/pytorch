@@ -316,6 +316,7 @@ def _check_trace(
     force_outplace,
     is_trace_module,
     _module_class,
+    module,
 ):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -335,6 +336,7 @@ def _check_trace(
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
+                _module=module,
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
@@ -799,6 +801,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
+                None,
             )
         else:
             _check_trace(
@@ -810,6 +813,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
+                None,
             )
 
     return traced
@@ -829,6 +833,7 @@ def trace_module(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
+    _module=None,
 ):
     """
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
@@ -933,7 +938,10 @@ def trace_module(
         torch.jit._trace._trace_module_map = trace_module_map
         register_submods(mod, "__module")
 
-        module = make_module(mod, _module_class, _compilation_unit)
+        if not _module:
+            module = make_module(mod, _module_class, _compilation_unit)
+        else:
+            module = _module
 
         for method_name, example_inputs in inputs.items():
             if method_name == "forward":
@@ -972,6 +980,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
+                        module,
                     )
                 else:
                     _check_trace(
@@ -983,6 +992,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
+                        module,
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map

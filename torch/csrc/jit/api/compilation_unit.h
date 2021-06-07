@@ -124,6 +124,23 @@ struct TORCH_API CompilationUnit {
       ResolverPtr rcb,
       bool is_module = false);
 
+  Function* replace_function(
+      c10::QualifiedName name,
+      std::shared_ptr<Graph> graph,
+      bool shouldMangle = false) {
+    auto index = dict_.find(name)->second;
+    unsafeRemoveMethod(name);
+    if (shouldMangle) {
+      name = mangle(name);
+    }
+    auto new_fn = torch::make_unique<GraphFunction>(
+        std::move(name), std::move(graph), nullptr);
+    auto ret = new_fn.get();
+    functions_[index] = std::move(new_fn);
+    dict_[functions_[index]->qualname()] = index;
+    return ret;
+  }
+
   Function* create_function(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
