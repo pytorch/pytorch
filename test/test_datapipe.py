@@ -23,8 +23,7 @@ from torch.utils.data import (
     IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
     argument_validation, runtime_validation_disabled, runtime_validation)
 from torch.utils.data.datapipes.utils.decoder import (
-    basichandlers as decoder_basichandlers,
-    imagehandler as decoder_imagehandler)
+    basichandlers as decoder_basichandlers)
 
 try:
     import torchvision.transforms
