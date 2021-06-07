@@ -49,6 +49,7 @@ torch::nn::Hardshrink|Yes|No
 torch::nn::Hardtanh|Yes|No
 torch::nn::LeakyReLU|Yes|No
 torch::nn::LogSigmoid|Yes|No
+torch::nn::Mish|Yes|No
 torch::nn::MultiheadAttention|No|No
 torch::nn::PReLU|Yes|No
 torch::nn::ReLU|Yes|No
@@ -187,6 +188,7 @@ F::rrelu|Yes|No
 F::glu|Yes|No
 F::gelu|Yes|No
 F::silu|Yes|No
+F::mish|Yes|No
 F::logsigmoid|Yes|No
 F::hardshrink|Yes|No
 F::tanhshrink|Yes|No
