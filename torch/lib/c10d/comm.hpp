@@ -110,7 +110,7 @@ class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
   }
 
  protected:
-  T state_; // Not owned.
+  T state_;
 };
 
 } // namespace c10d
