@@ -1316,14 +1316,19 @@ class TestCuda(TestCase):
 
     @contextlib.contextmanager
     def _get_external_stream(self, device):
-        lib = ctypes.cdll.LoadLibrary(None)
-        p = ctypes.c_void_p()
+        cudart = torch.cuda.cudart()
+        stream = ctypes.c_ulonglong(0)
+        stream_p = ctypes.POINTER(ctypes.c_void_p)(stream)
+        stream_p_int = ctypes.cast(stream_p, ctypes.c_void_p).value
         with device:
             try:
-                out = lib.cudaStreamCreate(ctypes.byref(p))
-                yield p.value
+                out = cudart.cudaStreamCreate(stream_p_int)
+                self.assertEqual(out, 0)
+                self.assertNotEqual(stream.value, 0)
+                yield stream.value
             finally:
-                out = lib.cudaStreamDestroy(ctypes.c_ulonglong(p.value))
+                out = cudart.cudaStreamDestroy(stream.value)
+                self.assertEqual(out, 0)
 
     @skipIfRocm
     def test_external_streams(self):
