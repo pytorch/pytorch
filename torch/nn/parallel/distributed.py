@@ -567,7 +567,6 @@ class DistributedDataParallel(Module):
         (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
-        self.num_iterations = 0
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -803,7 +802,6 @@ class DistributedDataParallel(Module):
             grad_enabled = torch.is_grad_enabled()
             if grad_enabled and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
-                self.num_iterations += 1
                 self.reducer.prepare_for_forward()
             if self.ddp_uneven_inputs_config.ddp_join_enabled:
                 ones = torch.ones(1, device=self.device)
@@ -857,7 +855,6 @@ class DistributedDataParallel(Module):
         state_dict = {
             'static_graph': self.static_graph,
             'find_unused': self.find_unused_parameters,
-            'num_iterations': self.num_iterations,
             'grad_enabled': grad_enabled,
             'require_backward_grad_sync': self.require_backward_grad_sync,
         }
