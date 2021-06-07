@@ -47,7 +47,7 @@ jobs:
         run: |
           echo "Make sure the machine is tuned."
           pushd benchmark
-          pip install py-cpuinfo psutil distro
+          pip install -U py-cpuinfo psutil distro
           sudo python3 torchbenchmark/util/machine_config.py
           popd
       - name: Run MNist
