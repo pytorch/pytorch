@@ -42,7 +42,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.eager_transforms import make_functional_with_buffers
+from functorch import make_functional_with_buffers_v2, vmap, grad
 
 import higher
 
@@ -105,7 +105,7 @@ def main():
         nn.Linear(64, args.n_way)).to(device)
 
     net.train()
-    params, buffers, fnet, _, _, = make_functional_with_buffers(net)
+    fnet, params, buffers = make_functional_with_buffers_v2(net)
 
     # We will use Adam to (meta-)optimize the initial parameters
     # to be adapted.
@@ -147,7 +147,7 @@ def train(db, net, device, meta_opt, epoch, log):
             # This adapts the model's meta-parameters to the task.
             new_params = params
             for _ in range(n_inner_iter):
-                spt_logits = fnet(new_params, buffers, (x_spt[i],))
+                spt_logits = fnet(new_params, buffers, x_spt[i])
                 spt_loss = F.cross_entropy(spt_logits, y_spt[i])
                 grads = torch.autograd.grad(spt_loss, new_params, create_graph=True)
                 new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
@@ -155,7 +155,7 @@ def train(db, net, device, meta_opt, epoch, log):
             # The final set of adapted parameters will induce some
             # final loss and accuracy on the query dataset.
             # These will be used to update the model's meta-parameters.
-            qry_logits = fnet(new_params, buffers, (x_qry[i],))
+            qry_logits = fnet(new_params, buffers, x_qry[i])
             qry_loss = F.cross_entropy(qry_logits, y_qry[i])
             qry_losses.append(qry_loss.detach())
             qry_acc = (qry_logits.argmax(
@@ -209,13 +209,13 @@ def test(db, net, device, epoch, log):
         for i in range(task_num):
             new_params = params
             for _ in range(n_inner_iter):
-                spt_logits = fnet(new_params, buffers, (x_spt[i],))
+                spt_logits = fnet(new_params, buffers, x_spt[i])
                 spt_loss = F.cross_entropy(spt_logits, y_spt[i])
                 grads = torch.autograd.grad(spt_loss, new_params)
                 new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
 
             # The query loss and acc induced by these parameters.
-            qry_logits = fnet(new_params, buffers, (x_qry[i],)).detach()
+            qry_logits = fnet(new_params, buffers, x_qry[i]).detach()
             qry_loss = F.cross_entropy(
                 qry_logits, y_qry[i], reduction='none')
             qry_losses.append(qry_loss.detach())

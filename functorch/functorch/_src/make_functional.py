@@ -73,7 +73,8 @@ def extract_buffers(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     # Remove all the parameters in the model
     names = []
     for name, p in list(mod.named_buffers()):
-        _del_nested_attr(mod, name.split("."))
+        replacement = torch.empty_like(p, device='meta')
+        _set_nested_attr(mod, name.split("."), replacement)
         names.append(name)
 
     # Make params regular Tensors instead of nn.Parameter
@@ -81,8 +82,8 @@ def extract_buffers(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     return params, names
 
 
-def load_buffers(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], as_params=False) -> None:
-    for name, p in zip(names, params):
+def load_buffers(mod: nn.Module, names: List[str], buffers: Tuple[Tensor, ...], as_params=False) -> None:
+    for name, p in zip(names, buffers):
         _set_nested_attr(mod, name.split("."), p)
 
 
@@ -199,14 +200,14 @@ class FunctionalModuleWithBuffers(nn.Module):
             buffers,
         )
 
-    def to_stateful(self, params, buffers):
+    def with_state(self, params, buffers):
         stateful_model = copy.deepcopy(self.stateless_model)
         load_weights(stateful_model, self.param_names, params)
-        load_buffers(stateful_model, self.buffer_names, params)
+        load_buffers(stateful_model, self.buffer_names, buffers)
         return stateful_model
 
     def forward(self, params, buffers, *args, **kwargs):
-        stateful_model = self.to_stateful(params, buffers)
+        stateful_model = self.with_state(params, buffers)
         return stateful_model(*args, **kwargs)
 
 
@@ -223,13 +224,13 @@ class FunctionalModule(nn.Module):
         params, param_names = extract_weights(model_copy)
         return FunctionalModule(model_copy, param_names), params
 
-    def to_stateful(self, params):
+    def with_state(self, params):
         stateful_model = copy.deepcopy(self.stateless_model)
         load_weights(stateful_model, self.param_names, params)
         return stateful_model
 
     def forward(self, params, *args, **kwargs):
-        stateful_model = self.to_stateful(params)
+        stateful_model = self.with_state(params)
         return stateful_model(*args, **kwargs)
 
 
@@ -316,6 +317,49 @@ def make_functional_with_buffers_v2(model: nn.Module):
     ```
     """
     return FunctionalModuleWithBuffers._create_from(model)
+
+
+def transpose_stack(tuple_of_tuple_of_tensors):
+    tuple_of_tuple_of_tensors = tuple(zip(*tuple_of_tuple_of_tensors))
+    results = tuple(torch.stack(shards).detach() for shards in tuple_of_tuple_of_tensors)
+    return results
+
+
+def combine_state_for_ensemble(models):
+    """combine_state_for_ensemble(models) -> func, params, buffers
+
+    Given a list of `M` nn.Modules of the same class, stacks all of their
+    parameters and buffers together to make `params` and `buffers`.
+    Each parameter and buffer in the result will have an additional dimension
+    of size `M`.
+
+    `combine_state_for_ensemble` also returns `func`, a functional version
+    of one of the models in `models`. One cannot directly run
+    `func(params, buffers, *args, **kwargs)` directly, you probably want to
+    use vmap(func, ...)(params, buffers, *args, **kwargs)
+    """
+    funcs, params, buffers = zip(*[make_functional_with_buffers_v2(model)
+                                   for model in models])
+    params = transpose_stack(params)
+    buffers = transpose_stack(buffers)
+    return funcs[0], params, buffers
+
+
+# class Ensemble(nn.Module):
+#     def __init__(self, models, in_dims, out_dims=0):
+#         super(Ensemble, self).__init__()
+#         func_model, params, buffers = combine_state_for_ensemble(models)
+#         self.func_model = func_model
+#         self.params = params
+#         self.buffers = buffers if len(buffers) > 0 else None
+# 
+#         in_dims_start = (0, 0) if self.buffers is not None else (0,)
+#         self.in_dims = in_dims_start + in_dims
+#         self.out_dims = out_dims
+#         self._vmap_func = vmap(func_model, self.in_dims, self.out_dims)
+# 
+#     def forward(self, *args, **kwargs):
+#         return self._vmap_func(self.params, self.buffers, *args, **kwargs)
 
 
 def functional_init(model_class, ensemble_shape=(), device='cpu'):

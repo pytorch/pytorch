@@ -95,10 +95,8 @@ Right now, we support the following transforms:
 - `vmap`
 
 Furthermore, we have some utilities for working with PyTorch modules.
-- `make_functional(model)` takes a model and returns its weights and a function
-version of the model that has no state.
-- `make_functional_with_buffers(model)` takes a model and returns its weights
-and buffers and a function version of the model that has no state.
+- `make_functional_v2(model)`
+- `make_functional_with_buffers_v2(model)`
 
 ### vmap
 
@@ -227,6 +225,45 @@ We can also try compiling it with NNC (even more experimental)!.
 
 Check `examples/nnc` for some example benchmarks.
 
+### Working with NN modules: make_functional_v2 and friends
+
+Sometimes you may want to perform a transform with respect to the parameters
+and/or buffers of an nn.Module. This can happen for example in:
+- model ensembling, where all of your weights and buffers have an additional
+dimension
+- per-sample-gradient computation where you want to compute per-sample-grads
+of the loss with respect to the model parameters
+
+Our solution to this right now is an API that, given an nn.Module, creates a
+stateless version of it that can be called like a function.
+
+- `make_functional_v2(model)` returns a functional version of `model` and the
+`model.parameters()`
+- `make_functional_with_buffers_v2(model)` returns a functional version of
+`model` and the `model.parameters()` and `model.buffers()`.
+
+Here's an example where we compute per-sample-gradients using an nn.Linear
+layer:
+
+```py
+import torch
+from functorch import make_functional_v2, vmap, grad
+
+model = torch.nn.Linear(3, 3)
+data = torch.randn(64, 3)
+targets = torch.randn(64, 3)
+
+func_model, params = make_functional_v2(model)
+
+def compute_loss(params, data, targets):
+    preds = func_model(params, data)
+    return torch.mean((preds - targets) ** 2)
+
+per_sample_grads = vmap(compute_loss, (None, 0, 0))(params, data, targets)
+```
+
+If you're making an ensemble of models, you may find
+`combine_state_for_ensemble` useful.
 
 ## Debugging
 `functorch._C.dump_tensor`: Dumps dispatch keys on stack
