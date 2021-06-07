@@ -2644,6 +2644,7 @@ class TestOperatorSignatures(JitTestCase):
                            'resize_',
                            'resize_as_',
                            'stack',
+                           'to_sparse',
                            'view',
                            'view_as',
                            'nn.functional.hardshrink',
