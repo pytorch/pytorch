@@ -425,7 +425,7 @@ class Tracer(TracerBase):
                     nonlocal cnt
                     cnt += 1
                     param = sig.parameters[name]
-                    default = () if param.default is inspect.Parameter.empty else (x if x != PH else param.default,)
+                    default = () if param.default is inspect.Parameter.empty else (param.default,)
                     out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', default, {})
                     if x == PH:
                         return out
