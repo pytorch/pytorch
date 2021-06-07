@@ -276,6 +276,9 @@ Tensor class reference
     Tensor.contiguous
     Tensor.copy_
     Tensor.conj
+    Tensor.conj_physical
+    Tensor.conj_physical_
+    Tensor.resolve_conj
     Tensor.copysign
     Tensor.copysign_
     Tensor.cos
@@ -410,6 +413,7 @@ Tensor class reference
     Tensor.isnan
     Tensor.is_contiguous
     Tensor.is_complex
+    Tensor.is_conj
     Tensor.is_floating_point
     Tensor.is_inference
     Tensor.is_leaf

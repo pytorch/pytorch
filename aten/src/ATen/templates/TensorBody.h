@@ -136,6 +136,17 @@ class TORCH_API Tensor {
     }
   }
 
+  Tensor conj() const {
+    if (!this->is_complex()) {
+      return *this;
+    } else {
+      if (this->is_sparse()) {
+        return this->conj_physical();
+      }
+      return this->_conj();
+    }
+  }
+
   /// Should be used if *this can reasonably be expected to be contiguous and
   /// performance is important.
   /// Compared to contiguous, it saves a reference count
@@ -361,6 +372,18 @@ class TORCH_API Tensor {
   C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
     return !at::impl::variable_excluded_from_dispatch();
+  }
+
+  inline bool is_conj() const {
+    return impl_->is_conj();
+  }
+
+  // sets the conjugate bit of a tensor.
+  // NOTE: Conjugate bit is supposed to be a read-only field. Only change this, if you are extremely sure
+  // that's what you want. Changing this might lead to incorrect behavior since conjugation is
+  // a lazy operation and we rely on this bit to determine if a conjugation needs to be materialized.
+  inline void _set_conj(bool conjugate) const {
+    impl_->_set_conj(conjugate);
   }
 
   /// Returns a `Tensor`'s layout.

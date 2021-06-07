@@ -30,6 +30,10 @@ bool is_signed(const Tensor &self) {
   return self.is_signed();
 }
 
+bool is_conj(const Tensor& self) {
+  return self.is_conj();
+}
+
 bool is_sparse(const Tensor& self) {
   return self.is_sparse();
 }

@@ -1,8 +1,6 @@
 from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
-import contextlib
-import ctypes
 import gc
 import io
 import os
@@ -1316,37 +1314,6 @@ class TestCuda(TestCase):
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
-    @contextlib.contextmanager
-    def _get_external_stream(self, device):
-        lib = ctypes.cdll.LoadLibrary(None)
-        p = ctypes.c_void_p()
-        with device:
-            try:
-                out = lib.cudaStreamCreate(ctypes.byref(p))
-                yield p.value
-            finally:
-                out = lib.cudaStreamDestroy(ctypes.c_ulonglong(p.value))
-
-    @skipIfRocm
-    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
-    def test_external_streams(self):
-        device = torch.cuda.device(0)
-        with self._get_external_stream(device) as stream_v:
-            ext_stream = torch.cuda.streams.ExternalStream(stream_v)
-            self.assertEqual(stream_v, ext_stream.cuda_stream)
-            self.assertEqual(ext_stream.device.index, device.idx)
-
-    @skipIfRocm
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
-    def test_external_streams_multi_device(self):
-        device = torch.cuda.device(1)
-        with self._get_external_stream(device) as stream_v:
-            ext_stream = torch.cuda.streams.ExternalStream(
-                stream_v, device=device)
-            self.assertEqual(stream_v, ext_stream.cuda_stream)
-            self.assertEqual(ext_stream.device.index, device.idx)
-
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
         x = torch.arange(0, 10).view((2, 5))
@@ -2489,6 +2456,8 @@ torch.cuda.synchronize()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
+    # Test is flaky on Windows (https://github.com/pytorch/pytorch/issues/57401)
+    @unittest.skipIf(IS_WINDOWS, 'Test is flaky on Windows (see issue 57401)')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
