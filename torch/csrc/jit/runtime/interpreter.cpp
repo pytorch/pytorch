@@ -5,6 +5,7 @@
 #include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
@@ -22,6 +23,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #ifdef USE_RPC
@@ -229,6 +231,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // std::cout << "RUNNING ";
         // frames.back().function->dump(std::cout, frame.pc);
         Instruction inst = frame.function->instructions_[frame.pc];
+        profiling::InstructionSpan instSpan{
+            *frame.function->instructions_source()[frame.pc]};
         switch (inst.op) {
           case ENTER: {
             const auto& obj = peek(stack, 0, 1);

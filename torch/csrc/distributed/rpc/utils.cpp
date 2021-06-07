@@ -23,6 +23,8 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#include <c10/util/irange.h>
+
 using namespace torch::autograd::profiler;
 
 namespace torch {
@@ -377,7 +379,7 @@ std::string wireSerialize(
     pickler.stop();
     tensorData = pickler.tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
-    for (size_t i = 0; i < tensorData.size(); i++) {
+    for (const auto i : c10::irange(tensorData.size())) {
       // Construct WritableTensorData for each tensor in the pickler tensorData
       // Since tensorData is in function scope, and getWritableTensorData just
       // record the tensors, the data() pointers stay valid for CPU tensors
