@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -168,6 +169,25 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       C10_CUDA_CHECK(err);
     }
     return (err == cudaSuccess);
+  }
+
+  // Stream-related functions
+  bool queryStream(const Stream& stream) const override {
+    DeviceGuard guard{stream.device()};
+    cudaError_t err = cudaStreamQuery(CUDAStream(stream));
+
+    if (err == cudaSuccess) {
+      return true;
+    } else if (err != cudaErrorNotReady) {
+      C10_CUDA_CHECK(err);
+    }
+
+    return false;
+  }
+
+  void synchronizeStream(const Stream& stream) const override {
+    DeviceGuard guard{stream.device()};
+    C10_CUDA_CHECK(cudaStreamSynchronize(CUDAStream(stream)));
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)

@@ -57,6 +57,14 @@ struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   void destroyEvent(void* event, const DeviceIndex device_index) const
       noexcept override {}
+
+  // Stream-related functions
+  bool queryStream(const Stream& stream) const override {
+    return true;
+  }
+  void synchronizeStream(const Stream& stream) const override {
+    // Don't wait for anything.
+  }
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

@@ -71,6 +71,13 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
   void destroyEvent(void* event, const DeviceIndex device_index)
       const noexcept override {}
 
+  bool queryStream(const Stream& stream) const override {
+    return true;
+  }
+  void synchronizeStream(const Stream& stream) const override {
+    // Don't wait for anything.
+  }
+
   // Convenience methods for testing
   static DeviceIndex getDeviceIndex() {
     return current_device_;

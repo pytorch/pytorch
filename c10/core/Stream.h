@@ -107,6 +107,14 @@ class Stream final {
     event.block(*this);
   }
 
+  // Return whether all asynchronous work previously enqueued on this stream
+  // has completed running on the device.
+  bool query() const;
+
+  // Wait (by blocking the calling thread) until all asynchronous work enqueued
+  // on this stream has completed running on the device.
+  void synchronize() const;
+
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole
   // class with two fields (device and stream id); with packing I can just
