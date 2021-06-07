@@ -358,15 +358,15 @@ c10::optional<TypePtr> unifyTypeList(
   // Set of possible parent types
   std::unordered_set<TypePtr, torch::jit::HashType, torch::jit::EqualType> seen;
 
-  for (const TypePtr type : elements) {
+  for (const auto& type : elements) {
     seen.insert(type);
 
     // We'll modify `seen` during this loop, so we need to make a copy
     // of the values that we want to iterate over
     std::vector<TypePtr> to_iterate{seen.begin(), seen.end()};
 
-    for (const TypePtr comparison : to_iterate) {
-      // Don't bother compare if it's already in our set of
+    for (const auto& comparison : to_iterate) {
+      // Don't bother comparing if it's already in our set of
       // possible supertypes
       if (*type == *comparison) {
         continue;
@@ -377,14 +377,17 @@ c10::optional<TypePtr> unifyTypeList(
       // This logic covers the case in which `unifyTypes` returns a
       // completely new type (e.g. `unifyTypes(T, None)` produces
       // `Optional[T]`)
-      if (maybe_parent && type->isSubtypeOf(*maybe_parent)) {
-        seen.erase(type);
+      if (maybe_parent) {
         seen.insert(*maybe_parent);
-      };
-      if (maybe_parent && comparison->isSubtypeOf(*maybe_parent)) {
-        seen.erase(comparison);
-        seen.insert(*maybe_parent);
-      };
+
+        if (type->isSubtypeOf(*maybe_parent)) {
+          seen.erase(type);
+        }
+
+        if (comparison->isSubtypeOf(*maybe_parent)) {
+          seen.erase(comparison);
+        }
+      }
 
     }
   }
