@@ -18,6 +18,10 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// TODO: we frequently use pairwise root mapping from consumers to producers.
+// This information is implicitly in the computeAtMaps, but there's no isolated
+// container for this information that we can reuse. Would be nice to generate
+// such a structure and propagate it through lowering.
 class TORCH_CUDA_CU_API GpuLower {
   class KernelIrMapper;
 
