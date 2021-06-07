@@ -153,7 +153,7 @@ class TestEqualizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
         # Test specific case: should insert a InputEqualizationObserver as an output observer
-        output_obs = _InputEqualizationObserver()
+        output_obs = _InputEqualizationObserver
         new_input_equalization_observer = _InputEqualizationObserver.with_args(
             dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, output_obs=output_obs)
         equalization_qconfig = QConfig(activation=new_input_equalization_observer,

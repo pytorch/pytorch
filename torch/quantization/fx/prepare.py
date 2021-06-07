@@ -463,7 +463,7 @@ def maybe_insert_output_observer_for_node(
 
             observer = act_post_process_ctr()
             if isinstance(observer, _InputEqualizationObserver):
-                observer = observer.output_obs
+                observer = observer.output_obs()
             new_obs = insert_observer(node, observer, model, modules, graph)
             # set the type, so the next node can read it
             node_name_to_target_dtype[new_obs.name] = \
