@@ -230,6 +230,10 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._fix_weakref,
         Tensor._conj,
         Tensor._conj_physical,
+        Tensor._noop_unary,
+        Tensor._noop_unary_manual,
+        Tensor._noop_binary,
+        Tensor._noop_binary_manual,
     }
 
 
