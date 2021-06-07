@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functorch import make_functional, grad_and_value, vmap, functional_init
+from functorch import make_functional_v2, grad_and_value, vmap, combine_state_for_ensemble
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html
 # The original code comes with the following citation:
@@ -58,11 +58,11 @@ loss_fn = nn.NLLLoss()
 # Step 3: Make the model functional(!!) and define a training function.
 # NB: this mechanism doesn't exist in PyTorch today, but we want it to:
 # https://github.com/pytorch/pytorch/issues/49171
-weights, func_model, _ = make_functional(MLPClassifier().to(DEVICE))
+func_model, weights = make_functional_v2(MLPClassifier().to(DEVICE))
 
 def train_step_fn(weights, batch, targets, lr=0.2):
     def compute_loss(weights, batch, targets):
-        output = func_model(weights, (batch,))
+        output = func_model(weights, batch)
         loss = loss_fn(output, targets)
         return loss
 
@@ -92,8 +92,9 @@ step4()
 # Step 5: We're ready for multiple models. Let's define an init_fn
 # that, given a number of models, returns to us all of the weights.
 def init_fn(num_models):
-    weights, _, _ = functional_init(MLPClassifier, (num_models,))()
-    return weights
+    models = [MLPClassifier() for _ in range(num_models)]
+    _, params, _ = combine_state_for_ensemble(models)
+    return params
 
 # Step 6: Now, can we try multiple models at the same time?
 # The answer is: yes! `loss` is a 2-tuple, and we can see that the value keeps
