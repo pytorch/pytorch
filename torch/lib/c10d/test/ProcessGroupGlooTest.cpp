@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/cuda.h>
 
+#include <c10/util/irange.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -509,7 +510,7 @@ void testMonitoredBarrier(const std::string& path) {
   };
   std::vector<std::thread> threads;
   threads.reserve(size);
-  for (int r = 0; r < size; r++) {
+  for(const auto r : c10::irange(size)) {
     threads.emplace_back(std::thread([=]() { runMonitoredBarrier(r); }));
   }
   for (auto & t : threads) {
@@ -530,7 +531,7 @@ void testMonitoredBarrier(const std::string& path) {
       }
   };
   threads.clear();
-  for (int r = 0; r < size; r++) {
+  for(const auto r : c10::irange(size)) {
       threads.emplace_back(std::thread([=]() { runMonitoredBarrierWithException(r); }));
   }
   for (auto & t : threads) {

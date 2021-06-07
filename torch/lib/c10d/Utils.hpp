@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <c10d/Types.hpp>
 
 #ifdef _WIN32
@@ -447,7 +448,7 @@ size_t computeLengthsAndOffsets(
     equal_splits = true;
     split_size = tensor.size(0) / group_size;
   }
-  for (int i = 0; i < group_size; i++) {
+  for(const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
     TORCH_INTERNAL_ASSERT(
         length <= std::numeric_limits<int>::max() &&
@@ -467,7 +468,7 @@ size_t computeLengthsAndOffsets(
     std::vector<T>* offsets) {
   size_t group_size = lengths->size();
   size_t offset = 0;
-  for (int i = 0; i < group_size; i++) {
+  for(const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
     TORCH_INTERNAL_ASSERT(
         length <= std::numeric_limits<int>::max() &&
