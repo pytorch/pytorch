@@ -272,35 +272,6 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
   return getAllocPoint(tv, loops, {}, false);
 }
 
-IterDomainMap p2cRootMap(const std::vector<Expr*>& exprs) {
-  IterDomainMap p2c_root_map;
-
-  const auto gpu_lower = GpuLower::current();
-
-  for (auto expr : exprs) {
-    auto out_tv = ir_utils::getTVOutput(expr);
-    for (auto in_tv : ir_utils::filterByType<TensorView>(expr->inputs())) {
-      const auto root_p2c =
-          PairwiseRootDomainMap(in_tv, out_tv)
-              .mapProducerToConsumer(in_tv->domain(), out_tv->domain());
-      for (auto entry : root_p2c) {
-        auto p_id = entry.first;
-        auto c_id = entry.second;
-        // Careful we don't allow circular references
-        if (p_id != c_id) {
-          const auto kir_p_id =
-              gpu_lower->lowerValue(p_id)->as<kir::IterDomain>();
-          const auto kir_c_id =
-              gpu_lower->lowerValue(c_id)->as<kir::IterDomain>();
-          p2c_root_map[kir_p_id] = kir_c_id;
-        }
-      }
-    }
-  }
-
-  return p2c_root_map;
-}
-
 } // namespace loop_utils
 } // namespace cuda
 } // namespace fuser

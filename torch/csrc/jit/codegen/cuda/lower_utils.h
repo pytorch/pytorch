@@ -124,15 +124,6 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
 std::pair<kir::ForLoop*, int64_t> getAllocPoint(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops);
-
-// Go through exprs mapping root domains from producer to consumer. Provides a
-// ground truth for how root domains map through our expressions. Needed for
-// unrolling.
-//
-// TODO(kir): this is only used by UnrollPass, move it there
-//
-IterDomainMap p2cRootMap(const std::vector<Expr*>& exprs);
-
 } // namespace loop_utils
 } // namespace cuda
 } // namespace fuser

@@ -21,11 +21,7 @@ namespace {
 
 class ConditionalFromPredicateModifier {
  public:
-  ConditionalFromPredicateModifier(Fusion* fusion) {
-    p2c_root_map_ = loop_utils::p2cRootMap(fusion->exprs());
-  }
-
-  void process(const std::vector<kir::Expr*>& exprs) {
+  ConditionalFromPredicateModifier(const std::vector<kir::Expr*>& exprs) {
     FUSER_PERF_SCOPE("ConditionalFromPredicateModifier::process");
     for (auto* expr : exprs) {
       handle(expr);
@@ -112,12 +108,11 @@ class ConditionalFromPredicateModifier {
         }
         TORCH_INTERNAL_ASSERT(
             vectorized_loop != nullptr, "Should be unreachable.");
-        return UnswitchPredicate::get(
-            outer_loops, vectorized_loop, p2c_root_map_);
+        return UnswitchPredicate::get(outer_loops, vectorized_loop);
       }
       case PredicateType::Unswitch: {
         return UnswitchPredicate::get(
-            for_loops_structure_, pred->unrolled_loop(), p2c_root_map_);
+            for_loops_structure_, pred->unrolled_loop());
       }
       case PredicateType::Shift: {
         kir::TensorView* out_tv = ir_utils::getTVOutput(pred->expr());
@@ -159,8 +154,6 @@ class ConditionalFromPredicateModifier {
   // A depth-first ordering of nested for loops
   // It is used for indexing and predicate generation
   std::vector<kir::ForLoop*> for_loops_structure_;
-
-  IterDomainMap p2c_root_map_;
 };
 
 } // namespace
@@ -170,8 +163,7 @@ std::vector<kir::Expr*> generateConditionalFromPredicate(
     const std::vector<kir::Expr*>& exprs) {
   FUSER_PERF_SCOPE("generateConditionalFromPredicate");
 
-  ConditionalFromPredicateModifier p2cm(fusion);
-  p2cm.process(exprs);
+  ConditionalFromPredicateModifier p2cm(exprs);
 
   std::vector<kir::Expr*> mutated_exprs;
   mutated_exprs.reserve(exprs.size());

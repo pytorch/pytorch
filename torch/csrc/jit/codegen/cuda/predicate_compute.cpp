@@ -40,16 +40,6 @@ bool isTensorIndexOp(kir::Expr* expr) {
   return outputs.size() >= 1 && outputs[0]->isA<kir::TensorIndex>();
 }
 
-kir::IterDomain* getTermIterDomainInMap(
-    kir::IterDomain* root_iter_domain,
-    const IterDomainMap& p2c_root_map) {
-  auto iter_domain = root_iter_domain;
-  while (p2c_root_map.find(iter_domain) != p2c_root_map.end()) {
-    iter_domain = p2c_root_map.at(iter_domain);
-  }
-  return iter_domain;
-}
-
 } // namespace
 
 std::vector<kir::Bool*> PredicateCompute::computePredicates(
@@ -275,13 +265,12 @@ kir::Bool* PredicateCompute::getInlinePredicate(
 
 kir::Bool* UnswitchPredicate::get(
     const std::vector<kir::ForLoop*>& outer_loops,
-    kir::ForLoop* unrolled_loop,
-    const IterDomainMap& p2c_root_map) {
+    kir::ForLoop* unrolled_loop) {
   FUSER_PERF_SCOPE("UnswitchPredicate::get");
 
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
-  UnswitchPredicate up(outer_loops, unrolled_loop, p2c_root_map);
+  UnswitchPredicate up(outer_loops, unrolled_loop);
 
   std::unordered_set<kir::Bool*> pred_set;
   for (auto entry : up.predicates_) {
@@ -313,6 +302,8 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     return;
   }
 
+  const auto gpu_lower = GpuLower::current();
+
   auto out_tv = firstTensorViewOutput(tv_expr);
 
   // For the case of generating predicates, it's safe to assume all
@@ -341,8 +332,9 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     if (all_preds[i]->isConst() && all_preds[i]->value().value()) {
       continue;
     }
-    const auto term_id = getTermIterDomainInMap(root_dom[i], p2c_root_map_);
-    predicates_[term_id] = all_preds[i];
+
+    predicates_[gpu_lower->caLoopMap().getConcreteMappedID(root_dom[i])] =
+        all_preds[i];
   }
 }
 
@@ -381,9 +373,8 @@ void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
 
 UnswitchPredicate::UnswitchPredicate(
     std::vector<kir::ForLoop*> outer_loops,
-    kir::ForLoop* unrolled_loop,
-    const IterDomainMap& _p2c_root_map)
-    : for_loops_(std::move(outer_loops)), p2c_root_map_(_p2c_root_map) {
+    kir::ForLoop* unrolled_loop)
+    : for_loops_(std::move(outer_loops)) {
   openLoop(unrolled_loop);
 }
 

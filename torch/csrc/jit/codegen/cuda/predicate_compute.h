@@ -54,14 +54,12 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
  public:
   static kir::Bool* get(
       const std::vector<kir::ForLoop*>& outer_loops,
-      kir::ForLoop* unrolled_loop,
-      const IterDomainMap& p2c_root_map);
+      kir::ForLoop* unrolled_loop);
 
  private:
   UnswitchPredicate(
       std::vector<kir::ForLoop*> outer_loops,
-      kir::ForLoop* unrolled_loop,
-      const IterDomainMap& _p2c_root_map);
+      kir::ForLoop* unrolled_loop);
 
   void predicateOn(kir::Expr*);
 
@@ -72,8 +70,6 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
  private:
   std::unordered_map<kir::IterDomain*, kir::Bool*> predicates_;
   std::vector<kir::ForLoop*> for_loops_;
-
-  const IterDomainMap& p2c_root_map_;
 };
 
 } // namespace cuda

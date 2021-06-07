@@ -59,9 +59,8 @@ class TORCH_CUDA_CU_API UnrollPass {
       const std::vector<kir::Expr*>& exprs);
 
  private:
-  UnrollPass(Fusion* fusion) {
-    p2c_root_map_ = loop_utils::p2cRootMap(fusion->exprs());
-  }
+  // Generate the for Expr replacement map
+  UnrollPass(const std::vector<kir::Expr*>& exprs);
 
   // Wrapper to access thread_predicates_ based on an output TV
   kir::Bool* getThreadPredicate(const kir::TensorView*);
@@ -69,9 +68,6 @@ class TORCH_CUDA_CU_API UnrollPass {
   const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
     return expr_replacement_map_;
   }
-
-  // Generate the for Expr replacement map
-  void computeMap(const std::vector<kir::Expr*>& exprs);
 
   void handle(kir::ForLoop* fl);
 
@@ -85,8 +81,6 @@ class TORCH_CUDA_CU_API UnrollPass {
 
   // Keep all for loops conveniently to make unrolling easier
   std::vector<kir::ForLoop*> for_loops_;
-
-  IterDomainMap p2c_root_map_;
 
   // keep track if we're within an unrolled loop
   bool look_for_unroll_ = true;
