@@ -243,7 +243,7 @@ REGISTER_OPERATOR_FUNCTOR(
         const size_t size = p_node->inputs().size();
         c10::List<IValue> vals(type.getElementType());
         vals.reserve(size);
-        for (size_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           vals.push_back(p_node->Input(i));
         }
         p_node->Output(0) = std::move(vals);
@@ -265,7 +265,7 @@ REGISTER_OPERATOR_FUNCTOR(
         const size_t size = p_node->inputs().size();
         std::vector<IValue> vals;
         vals.reserve(size);
-        for (size_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           vals.push_back(p_node->Input(i));
         }
         p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
@@ -1035,7 +1035,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -1055,7 +1055,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -1088,7 +1088,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -1105,7 +1105,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -1582,7 +1582,7 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
 
-        if (!packed_weight) {
+        if (packed_weight) {
           packed_weight->apply_out(
               input, output_scale, output_zero_point, out_t);
         } else {

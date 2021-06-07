@@ -3207,6 +3207,14 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_inv_ex_info_device(self, device, dtype):
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        info = torch.linalg.inv_ex(A).info
+        self.assertTrue(info.device == A.device)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @skipCUDAIfRocm
     def test_inv_ex_singular(self, device, dtype):
         # if the input matrix is not invertible, info with positive integer is returned
@@ -4999,22 +5007,6 @@ class TestLinalg(TestCase):
         res2 = torch.tensor((), dtype=dtype, device=device)
         torch.cross(x, y, out=res2)
         self.assertEqual(res1, res2)
-
-    # TODO: This test should be removed and OpInfo should enable complex
-    #       types after this PR is merged:
-    #       https://github.com/pytorch/pytorch/pull/55483
-    @dtypes(torch.cdouble)
-    def test_cross_autograd(self, device, dtype):
-        x = torch.rand(100, 3, dtype=dtype, device=device, requires_grad=True)
-        y = torch.rand(100, 3, dtype=dtype, device=device, requires_grad=True)
-
-        if torch.device(device).type == 'cuda' and dtype.is_complex:
-            # TODO: Remove this error when cross CUDA supports complex
-            with self.assertRaisesRegex(RuntimeError, r'_th_cross_kernel_out not supported on CUDAType for Complex'):
-                gradcheck(torch.cross, [x, y])
-        else:
-            gradcheck(torch.cross, [x, y])
-            gradgradcheck(torch.cross, [x, y], atol=1e-3, check_batched_grad=False)
 
     @onlyCPU
     @dtypes(torch.float)
