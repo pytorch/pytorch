@@ -760,7 +760,7 @@ def _set_input_and_output_names(graph, input_names, output_names):
                 "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
         for name, node in zip(name_list, node_list):
-            if node.debugName() != name:
+            if node.displayName() != name:
                 node.setDebugName(name)
     set_names(list(graph.inputs()), input_names, "input")
     set_names(list(graph.outputs()), output_names, "output")
@@ -1219,9 +1219,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     if(hasattr(model, "graph")):
         # Extracting set of valid input/output names that shall be used for dynamic_axes
         if (input_names is None) or len(input_names) == 0:
-            input_names = [x.debugName() for x in model.graph.inputs()]
+            input_names = [x.displayName() for x in model.graph.inputs()]
         if (output_names is None) or len(output_names) == 0:
-            output_names = [y.debugName() for y in model.graph.outputs()]
+            output_names = [y.displayName() for y in model.graph.outputs()]
 
     valid_names = set((input_names or []) + (output_names or []))
 

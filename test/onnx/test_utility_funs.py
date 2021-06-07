@@ -818,7 +818,7 @@ class TestUtilityFuns(TestCase):
                                             operator_export_type=OperatorExportTypes.ONNX,
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2, 3]})
 
-        graph_input_params = [param.debugName() for param in graph.inputs()]
+        graph_input_params = [param.displayName() for param in graph.inputs()]
         assert all(item in graph_input_params for item in dict(model.named_parameters())), \
             "Graph parameter names does not match model parameters."
 

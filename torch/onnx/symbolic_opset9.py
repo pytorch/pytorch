@@ -1372,8 +1372,8 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         res, new_running_mean, new_running_var, saved_mean, saved_var = out
         new_running_mean.setType(running_mean.type())
         new_running_var.setType(running_var.type())
-        saved_mean.setDebugName("batch_norm_dead_output-" + saved_mean.debugName())
-        saved_var.setDebugName("batch_norm_dead_output-" + saved_var.debugName())
+        saved_mean.setDebugName("batch_norm_dead_output-" + saved_mean.displayName())
+        saved_var.setDebugName("batch_norm_dead_output-" + saved_var.displayName())
         return res
 
 

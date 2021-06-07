@@ -7937,7 +7937,7 @@ dedent """
                 return len(node.findAllNodes("prim::If")) * 2 + len(node.findAllNodes("prim::Loop"))
             for node in ifs + loops:
                 outs = list(node.outputs())
-                out_name = [x.debugName() for x in outs]
+                out_name = [x.displayName() for x in outs]
                 if len(out_name) == 0:
                     continue
                 fc = FileCheck()
