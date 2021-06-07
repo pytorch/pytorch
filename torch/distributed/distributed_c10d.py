@@ -558,6 +558,10 @@ def init_process_group(
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
+            # Use a PrefixStore to avoid accidental overrides of keys used by
+            # different systems (e.g. RPC) in case the store is multi-tenant.
+            store = PrefixStore("default_pg", store)
+
         default_pg = _new_process_group_helper(
             world_size,
             rank,

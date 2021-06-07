@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
+import os
+import zipfile
 from sys import version_info
 from tempfile import TemporaryDirectory
+from textwrap import dedent
 from unittest import skipIf
 
-from textwrap import dedent
 import torch
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import (
@@ -12,8 +14,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
 )
-import os
-import zipfile
 
 try:
     from torchvision.models import resnet18
@@ -85,7 +85,7 @@ class DirectoryReaderTest(PackageTestCase):
         """
         Test DirectoryReader's has_record().
         """
-        import package_a
+        import package_a  # noqa: F401
 
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as e:
