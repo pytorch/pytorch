@@ -160,7 +160,7 @@ class EnumerableShardingSpec(ShardingSpec):
 
     Args:
         shards(List[ShardMetadata]): List of :class:`ShardMetadata` objects representing
-            each shard.
+            each shard. Note that none of the shards should overlap.
     """
 
     shards: List[ShardMetadata]
