@@ -22,7 +22,7 @@ from functools import partial
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_functional, make_functional_with_buffers, make_fx, nnc_jit
+    make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1, make_fx, nnc_jit
 )
 
 # NB: numpy is a testing dependency!
