@@ -610,7 +610,7 @@ TEST(InferenceModeTest, TestCustomFunction) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestLegacyAutoNonVariableTypeModeWarning) {
-  c10::Warning::WarnAlways guard(true);
+  c10::Warning::WarnAlways warn_always(true);
   WarningCapture warnings;
   at::AutoNonVariableTypeMode guard;
   ASSERT_TRUE(

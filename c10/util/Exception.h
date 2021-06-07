@@ -170,7 +170,7 @@ C10_API bool get_warnAlways(void) noexcept(true);
 // construction, and sets it back to the original value upon destruction.
 struct C10_API WarnAlways {
  public:
-  explicit WarnAlways(bool);
+  explicit WarnAlways(bool setting = true);
   ~WarnAlways();
 
  private:
