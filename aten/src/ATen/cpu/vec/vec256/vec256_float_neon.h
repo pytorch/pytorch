@@ -479,23 +479,12 @@ public:
         vsqrtq_f32(values.val[1]));
   }
   Vectorized<float> reciprocal() const {
-    float32x4_t r0 = vrecpeq_f32(values.val[0]);
-    float32x4_t r1 = vrecpeq_f32(values.val[1]);
-    // Run two more Netwon's method iterations to get more accurate results
-    r0 = vmulq_f32(vrecpsq_f32(values.val[0], r0), r0);
-    r0 = vmulq_f32(vrecpsq_f32(values.val[0], r0), r0);
-    r1 = vmulq_f32(vrecpsq_f32(values.val[1], r1), r1);
-    r1 = vmulq_f32(vrecpsq_f32(values.val[1], r1), r1);
+    auto r0 = vdivq_f32(vdupq_n_f32(1.0f), values.val[0]);
+    auto r1 = vdivq_f32(vdupq_n_f32(1.0f), values.val[1]);
     return Vectorized<float>(r0, r1);
   }
   Vectorized<float> rsqrt() const {
-    float32x4_t r0 =  vrsqrteq_f32(values.val[0]);
-    float32x4_t r1 =  vrsqrteq_f32(values.val[1]);
-    r0 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[0], r0), r0), r0);
-    r0 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[0], r0), r0), r0);
-    r1 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[1], r1), r1), r1);
-    r1 = vmulq_f32(vrsqrtsq_f32(vmulq_f32(values.val[1], r1), r1), r1);
-    return Vectorized<float>(r0, r1);
+    return this->sqrt().reciprocal();
   }
   Vectorized<float> pow(const Vectorized<float> &exp) const {
     __at_align32__ float tmp[size()];
