@@ -162,20 +162,31 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
       "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
       "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
-      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       // TODO: enable other min/max variants, operators that can be both
       // elementwise or reductions:
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
 
-      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
-      "aten::matmul(Tensor self, Tensor other) -> Tensor",
+      // NOTE: Do not add any non-element-wise ops in this list. This set
+      // should be exclusively for element-wise ops. There are some
+      // optimizations whose correctness depend on this invariant.
   };
   // clang-format on
 
   return supported_eltwise_set;
 }
+
+static const OperatorSet& supported_non_eltwise_set() {
+  // clang-format off
+  static const OperatorSet supported_non_eltwise_set{
+      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
+  };
+  // clang-format on
+  return supported_non_eltwise_set;
+};
 
 bool isSupported(Node* node) {
   // For Block codegen we allow limited ops.
@@ -196,6 +207,7 @@ bool isSupported(Node* node) {
   // clang-format on
 
   if (node->isMemberOf(supported_eltwise_set()) ||
+      node->isMemberOf(supported_non_eltwise_set()) ||
       node->isMemberOf(supported_misc_set) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
@@ -525,9 +537,11 @@ class TensorExprFuser {
         continue;
       }
 
-      // we only support shape calculations for elementwise and
+      // we only support shape calculations for elementwise, some
+      // non-elementwise like batch_norm, conv, matmul, and
       // a few exceptions (e.g. prim::ConstantChunk, etc) listed above
-      if (!n->isMemberOf(tensorexpr::supported_eltwise_set())) {
+      if (!n->isMemberOf(tensorexpr::supported_eltwise_set()) &&
+          !n->isMemberOf(tensorexpr::supported_non_eltwise_set())) {
         continue;
       }
 
