@@ -95,8 +95,8 @@ Right now, we support the following transforms:
 - `vmap`
 
 Furthermore, we have some utilities for working with PyTorch modules.
-- `make_functional_v2(model)`
-- `make_functional_with_buffers_v2(model)`
+- `make_functional(model)`
+- `make_functional_with_buffers(model)`
 
 ### vmap
 
@@ -225,7 +225,7 @@ We can also try compiling it with NNC (even more experimental)!.
 
 Check `examples/nnc` for some example benchmarks.
 
-### Working with NN modules: make_functional_v2 and friends
+### Working with NN modules: make_functional and friends
 
 Sometimes you may want to perform a transform with respect to the parameters
 and/or buffers of an nn.Module. This can happen for example in:
@@ -237,9 +237,9 @@ of the loss with respect to the model parameters
 Our solution to this right now is an API that, given an nn.Module, creates a
 stateless version of it that can be called like a function.
 
-- `make_functional_v2(model)` returns a functional version of `model` and the
+- `make_functional(model)` returns a functional version of `model` and the
 `model.parameters()`
-- `make_functional_with_buffers_v2(model)` returns a functional version of
+- `make_functional_with_buffers(model)` returns a functional version of
 `model` and the `model.parameters()` and `model.buffers()`.
 
 Here's an example where we compute per-sample-gradients using an nn.Linear
@@ -247,13 +247,13 @@ layer:
 
 ```py
 import torch
-from functorch import make_functional_v2, vmap, grad
+from functorch import make_functional, vmap, grad
 
 model = torch.nn.Linear(3, 3)
 data = torch.randn(64, 3)
 targets = torch.randn(64, 3)
 
-func_model, params = make_functional_v2(model)
+func_model, params = make_functional(model)
 
 def compute_loss(params, data, targets):
     preds = func_model(params, data)

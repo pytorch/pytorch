@@ -22,7 +22,7 @@ from functools import partial
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_functional_v2, make_functional_with_buffers_v2,
+    make_functional, make_functional_with_buffers,
     functional_init, functional_init_with_buffers,
 )
 
@@ -553,7 +553,7 @@ class TestVmapOfGrad(TestCase):
         net = SampleNet(vocab_size).to(device=device)
         criterion = nn.CrossEntropyLoss()
 
-        net_func, weights = make_functional_v2(net)
+        net_func, weights = make_functional(net)
 
         def compute_loss(weights, data, target):
             output = net_func(weights, data)
@@ -721,7 +721,7 @@ class TestExamplesCorrectness(TestCase):
         def mse_loss(x, y):
             return torch.mean((x - y) ** 2)
 
-        net, params = make_functional_v2(ThreeLayerNet().to(device))
+        net, params = make_functional(ThreeLayerNet().to(device))
         K = 20
         losses = []
         num_tasks = 4
@@ -811,7 +811,7 @@ class TestExamplesCorrectness(TestCase):
             Flatten(),
             nn.Linear(64, n_way)).to(device).to(dtype)
 
-        fnet, params, buffers = make_functional_with_buffers_v2(net)
+        fnet, params, buffers = make_functional_with_buffers(net)
         net = (params, buffers, fnet)
 
         def loss_for_task(net, n_inner_iter, use_transform, x_spt, y_spt, x_qry, y_qry):
@@ -955,7 +955,7 @@ class TestExamplesCorrectness(TestCase):
 
         loss_fn = nn.NLLLoss()
 
-        func_model, weights = make_functional_v2(MLPClassifier().to(device))
+        func_model, weights = make_functional(MLPClassifier().to(device))
 
         def train_step_fn(use_transform, weights, batch, targets, lr=0.2):
             def compute_loss(weights, batch, targets):
@@ -981,7 +981,7 @@ class TestExamplesCorrectness(TestCase):
 
         def init_fn(num_models):
             models = tuple(MLPClassifier().to(device) for _ in range(num_models))
-            weights = tuple(make_functional_v2(model)[1] for model in models)
+            weights = tuple(make_functional(model)[1] for model in models)
             weights = tuple(zip(*weights))
             weights = tuple(torch.stack(shards).detach() for shards in weights)
             return weights
@@ -1045,7 +1045,7 @@ class TestExamplesCorrectness(TestCase):
         model = convert_batchnorm_modules(models.resnet18(num_classes=10)).to(device)
         criterion = nn.CrossEntropyLoss()
 
-        func_model, weights = make_functional_v2(model)
+        func_model, weights = make_functional(model)
 
         def compute_loss(weights, image, target):
             images = image.unsqueeze(0)
