@@ -227,7 +227,7 @@ class OpInfo(object):
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
-                 gradcheck_atol=0.0,  # absolute tolerance for gradcheck
+                 gradcheck_atol=1e-5,  # TODO(soulitzer): avoid repeating default value here
                  inplace_variant=_NOTHING,  # explicitly pass the inplace variant of the operator if required
                  method_variant=_NOTHING,  # explicitly pass the method variant of the operator if required
                  test_conjugated_samples=True,
