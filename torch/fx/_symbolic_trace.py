@@ -424,7 +424,9 @@ class Tracer(TracerBase):
                 def replace_ph(x):
                     nonlocal cnt
                     cnt += 1
-                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
+                    param = sig.parameters[name]
+                    default = () if param.default is inspect.Parameter.empty else (x if x != PH else param.default,)
+                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', default, {})
                     if x == PH:
                         return out
                     # Union[int, bool] == bool in Python <= 3.6
