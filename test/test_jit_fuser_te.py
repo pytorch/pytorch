@@ -164,6 +164,9 @@ class TestTEFuser(JitTestCase):
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
 
+    def test_nop(self):
+        pass
+
     def test_sum_dim(self):
         def func(x):
             return x.sum((0, )) * 2
@@ -1262,6 +1265,7 @@ class TestTEFuser(JitTestCase):
             torch.atan,
             torch.tanh,
             F.hardtanh,
+            F.hardsigmoid,
             F.hardswish,
             torch.sqrt,
             torch.rsqrt,
@@ -1810,6 +1814,40 @@ class TestTEFuser(JitTestCase):
         z = 2
         script = self.checkScript(eager, (x, y, z))
 
+    def _test_fwd_bwd(self, fn):
+        x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
+        xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
+        script = torch.jit.script(fn)
+        for i in range(11):
+            y = fn(x)
+            g0 = torch.rand_like(y)
+            y.backward(g0)
+
+            ys = script(xs)
+            ys.backward(g0)
+
+            with torch.no_grad():
+                x -= 0.1 * x.grad
+                xs -= 0.1 * xs.grad
+                x.grad = None
+                xs.grad = None
+        torch.testing.assert_allclose(y, ys)
+
+    def test_relu_fwd_bwd(self):
+        def eager(x):
+            return torch.relu(x * 1.01)
+        self._test_fwd_bwd(eager)
+
+    def test_hardswish_fwd_bwd(self):
+        def eager(x):
+            return F.hardswish(x) * 1.01
+        self._test_fwd_bwd(eager)
+
+    def test_hardsigmoid_fwd_bwd(self):
+        def eager(x):
+            return F.hardsigmoid(x) * 1.01
+        self._test_fwd_bwd(eager)
+
     def test_dynamic_cat(self):
         with inline_fusion_groups():
             @torch.jit.script
@@ -1827,11 +1865,19 @@ class TestTEFuser(JitTestCase):
                 zs = [torch.ones(i) for i in range(N)]
                 repro(xs, ys, zs)
 
+    def test_scalar_only_inputs(self):
+        def eager(b: float):
+            a = torch.ones(1)
+            return a * b
+
+        script = self.checkScript(eager, (1.0,))
+
 
 works_list = [
     '__radd__',
     '__rdiv__',
     '__rmul__',
+    '__rmod__',
     'abs',
     'acos',
     'add',
@@ -1875,6 +1921,7 @@ works_list = [
     'neg',
     'nn.functional.gelu',
     'nn.functional.hardshrink',
+    'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
     'nn.functional.hardtanh',
     'nn.functional.leaky_relu',
@@ -1911,6 +1958,10 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
+    # Causing SIGSEGV
+    # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
+    't',
+    'conj'
 ]
 
 def get_name(op):
