@@ -3536,7 +3536,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
-        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
+        scale_factor (float or Tuple[float]): multiplier for spatial size. If `scale_factor` is a tuple,
+            its length has to match `input.dim()`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
@@ -3551,14 +3552,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
-            interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
-            to compute the `output_size`.  If `recompute_scale_factor` is ``False`` or not specified,
-            the passed-in `scale_factor` will be used in the interpolation computation.
-            Otherwise, a new `scale_factor` will be computed based on the output and input sizes for
-            use in the interpolation computation (i.e. the computation will be identical to if the computed
-            `output_size` were passed-in explicitly).  Note that when `scale_factor` is floating-point,
-            the recomputed scale_factor may differ from the one passed in due to rounding and precision
-            issues.
+            interpolation calculation. If `recompute_scale_factor` is ``True``, then
+            `scale_factor` must be passed in and `scale_factor` is used to compute the
+            output `size`. The computed output `size` will be used to infer new scales for
+            the interpolation. Note that when `scale_factor` is floating-point, it may differ
+            from the recomputed `scale_factor` due to rounding and precision issues.
+            If `recomputed_scale_factor` is ``False``, then `size` or `scale_factor` will
+            be used directly for interpolation.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
