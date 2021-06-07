@@ -1133,8 +1133,8 @@ def main():
         ]
         sys.path.remove('test')
 
-
-    selected_tests = reorder_tests(selected_tests)
+    if bool(os.environ.get('IN_CI')):
+        selected_tests = reorder_tests(selected_tests)
 
     has_failed = False
     failure_messages = []
