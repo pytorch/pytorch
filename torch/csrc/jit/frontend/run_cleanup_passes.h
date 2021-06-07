@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void runCleanupPasses(std::shared_ptr<Graph>& graph);
+TORCH_API void runCleanupPasses(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch
