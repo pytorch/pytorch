@@ -254,9 +254,9 @@ template<typename scalar_t>
 inline scalar_t __device__ curand_uniform_type(curandStatePhilox4_32_10_t *state);
 
 template <>
-inline THHalf __device__ curand_uniform_type<THHalf>(curandStatePhilox4_32_10_t *state) {
+inline at::Half __device__ curand_uniform_type<at::Half>(curandStatePhilox4_32_10_t *state) {
   auto rand = curand_uniform4(state);
-  return ScalarConvert<float, THHalf>::to(rand.x);
+  return rand.x;
 }
 
 template <>
@@ -293,14 +293,14 @@ __global__ void rrelu_with_noise_cuda_kernel(
     if (input[i] <= 0)
     {
       scalar_t r = curand_uniform_type<scalar_t>(&state);
-      r = ScalarConvert<double, scalar_t>::to(r * (b - a) + a);
+      r = scalar_t(r * (b - a) + a);
       output[i] = input[i] * r;
       noise[i] = r;
     }
     else
     {
       output[i] = input[i];
-      noise[i] = ScalarConvert<int, scalar_t>::to(1);
+      noise[i] = scalar_t(1);
     }
   }
 }
