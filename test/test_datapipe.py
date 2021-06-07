@@ -13,13 +13,15 @@ from unittest import skipIf
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import \
-    (IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
-     argument_validation, runtime_validation_disabled, runtime_validation)
+from torch.utils.data import (
+    IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
+    argument_validation, runtime_validation_disabled, runtime_validation
+)
 
-from typing import \
-    (Any, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple, Type,
-     TypeVar, Set, Union)
+from typing import (
+    Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
+    Type, TypeVar, Set, Union
+)
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -786,7 +788,7 @@ class TestTyping(TestCase):
         dp2 = DP1(5)
         self.assertEqual(dp1.type, dp2.type)
 
-        with self.assertRaisesRegex(TypeError, r"Can not subclass a DataPipe"):
+        with self.assertRaisesRegex(TypeError, r"is not a generic class"):
             class InvalidDP5(DP1[tuple]):  # type: ignore[type-arg]
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0, )
@@ -833,7 +835,8 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP5, IterDataPipe))
         dp = DP5()  # type: ignore[assignment]
-        self.assertTrue(dp.type.param == Any)
+        from torch.utils.data._typing import issubtype
+        self.assertTrue(issubtype(dp.type.param, Any) and issubtype(Any, dp.type.param))
 
         class DP6(IterDataPipe[int]):
             r""" DataPipe with plain Iterator"""
@@ -843,6 +846,19 @@ class TestTyping(TestCase):
         self.assertTrue(issubclass(DP6, IterDataPipe))
         dp = DP6()  # type: ignore[assignment]
         self.assertTrue(dp.type.param == int)
+
+        class DP7(IterDataPipe[Awaitable[T_co]]):
+            r""" DataPipe with abstract base class"""
+
+        self.assertTrue(issubclass(DP6, IterDataPipe))
+        self.assertTrue(DP7.type.param == Awaitable[T_co])
+
+        class DP8(DP7[str]):
+            r""" DataPipe subclass from a DataPipe with abc type"""
+
+        self.assertTrue(issubclass(DP8, IterDataPipe))
+        self.assertTrue(DP8.type.param == Awaitable[str])
+
 
     def test_construct_time(self):
         class DP0(IterDataPipe[Tuple]):
