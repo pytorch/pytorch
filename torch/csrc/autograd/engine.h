@@ -345,7 +345,7 @@ struct TORCH_API Engine {
 
  protected:
   Engine();
-  bool compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr);
+  void compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr);
 
   // initialize the thread local ready queue with the ready queue that is created
   // elsewhere (i.e. thread_init, Engine::execute, etc), or create a new

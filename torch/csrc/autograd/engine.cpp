@@ -924,7 +924,7 @@ inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
   return min_topo_nr;
 }
 
-auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr) -> bool {
+auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr) -> void {
   // Computes the number of dependencies for each function which requires grad
   std::unordered_set<Node*> seen;
   std::vector<Node*> queue { root };
@@ -951,7 +951,11 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
     }
   }
 
-  return might_use_cuda && will_use_cuda;
+  if (might_use_cuda && will_use_cuda) {
+    // Collects current and default streams for devices where this process has a context,
+    // so GraphTask::exec_post_processing can sync them with leaf_streams.
+    task->stash_current_streams();
+  }
 }
 
 auto Engine::execute(const edge_list& roots,
@@ -986,12 +990,7 @@ auto Engine::execute(const edge_list& roots,
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
-  auto will_use_cuda = compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
-  if (will_use_cuda) {
-    // Collects current and default streams for devices where this process has a context,
-    // so GraphTask::exec_post_processing can sync them with leaf_streams.
-    graph_task->stash_current_streams();
-  }
+  compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
   if (!outputs.empty()) {
     graph_task->init_to_execute(*graph_root, outputs, accumulate_grad, min_topo_nr);
