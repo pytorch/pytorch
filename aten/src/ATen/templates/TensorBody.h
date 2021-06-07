@@ -136,6 +136,17 @@ class TORCH_API Tensor {
     }
   }
 
+  Tensor conj() const {
+    if (!this->is_complex()) {
+      return *this;
+    } else {
+      if (this->is_sparse()) {
+        return this->conj_physical();
+      }
+      return this->_conj();
+    }
+  }
+
   /// Should be used if *this can reasonably be expected to be contiguous and
   /// performance is important.
   /// Compared to contiguous, it saves a reference count
@@ -363,6 +374,18 @@ class TORCH_API Tensor {
     return !at::impl::variable_excluded_from_dispatch();
   }
 
+  inline bool is_conj() const {
+    return impl_->is_conj();
+  }
+
+  // sets the conjugate bit of a tensor.
+  // NOTE: Conjugate bit is supposed to be a read-only field. Only change this, if you are extremely sure
+  // that's what you want. Changing this might lead to incorrect behavior since conjugation is
+  // a lazy operation and we rely on this bit to determine if a conjugation needs to be materialized.
+  inline void _set_conj(bool conjugate) const {
+    impl_->_set_conj(conjugate);
+  }
+
   /// Returns a `Tensor`'s layout.
   Layout layout() const noexcept {
     return impl_->layout();
@@ -460,6 +483,11 @@ class TORCH_API Tensor {
   /// also have other designations.
   bool is_meta() const {
     return impl_->is_meta();
+  }
+
+  /// Returns if a `Tensor` is an inference tensor.
+  bool is_inference() const {
+    return impl_->is_inference();
   }
 
   /// If a tensor is a quantized tensor, returns its quantizer
