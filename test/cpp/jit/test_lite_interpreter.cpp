@@ -496,8 +496,7 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
     }
   }
 
-  std::unordered_set<std::string> expected_result({"top(M)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(M).aten::mul"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -559,8 +558,9 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
     }
   }
 
-  std::set<std::string> expected_result({"top(B)", "top(B).A0(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::mul"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -594,7 +594,6 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() &&
           (module_info.find("debug_handle") == std::string::npos)) {
-        std::cout << "Module info:" << module_info << std::endl;
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -603,15 +602,16 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
     }
   }
 
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
 
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
-      runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
+      runtime_bytecode_version ==
+      caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
@@ -625,6 +625,34 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
 }
 
 namespace {
+
+void compareModelOutput(
+    const std::vector<IValue>& actual_result_list,
+    const std::vector<Tensor>& expect_result_list) {
+  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
+  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
+  AT_ASSERT(
+      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
+  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+}
+
+void runAndCheckTorchScriptModel(
+    std::stringstream& input_model_stream,
+    const std::vector<IValue>& input_data,
+    const std::vector<Tensor>& expect_result_list,
+    const int64_t expect_version) {
+  auto actual_version = _get_model_bytecode_version(input_model_stream);
+  AT_ASSERT(actual_version == expect_version);
+
+  // Load and run the backport model, then compare the result with expect
+  // result
+  Module m_mobile = load(input_model_stream);
+
+  auto actual_result = m_mobile.forward(input_data);
+  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  compareModelOutput(actual_result_list, expect_result_list);
+}
+
 void runAndCheckBytecodeModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
@@ -635,16 +663,12 @@ void runAndCheckBytecodeModel(
 
   // Load and run the backport model, then compare the result with expect
   // result
-  mobile::Module m_mobile = _load_for_mobile(input_model_stream);
+  Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
   std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
 
-  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
-  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
-  AT_ASSERT(
-      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
-  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+  compareModelOutput(actual_result_list, expect_result_list);
 }
 
 void backportAllVersionCheck(
@@ -659,29 +683,33 @@ void backportAllVersionCheck(
   constexpr int64_t minimum_to_version = 4;
   int64_t current_to_version = from_version - 1;
 
-  std::ostringstream oss;
   // Verify all candidate to_version work as expected. All backport to version
   // larger than minimum_to_version should success.
   while (current_to_version >= minimum_to_version) {
-    oss.clear();
+    // Do not declare std::stringstream oss outside of the while loop as
+    // oss.clear() doesn't reset the stream content, only clears out error state
+    // flag in stringstream causing a problematic stream. Instead, it's cleaner
+    // and safer to just declare a new std::stringstream one and swap them.
+    std::stringstream oss;
     bool backPortSuccess =
         _backport_for_mobile(test_model_file_stream, oss, current_to_version);
     AT_ASSERT(backPortSuccess);
 
     // Check backport model version
-    std::stringstream iss(oss.str());
-    auto backport_version = _get_model_bytecode_version(iss);
+    auto backport_version = _get_model_bytecode_version(oss);
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
-        iss, input_data, expect_result_list, current_to_version);
+        oss, input_data, expect_result_list, current_to_version);
+    runAndCheckTorchScriptModel(
+        oss, input_data, expect_result_list, current_to_version);
 
     current_to_version--;
   }
   //  backport to minimum version - 1 should fail
-  oss.clear();
+  std::stringstream oss;
   bool backPortSuccess =
       _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
   AT_ASSERT(!backPortSuccess);
@@ -719,6 +747,13 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       input_data,
       expect_result_list,
       caffe2::serialize::kProducedBytecodeVersion);
+}
+
+TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
+  auto runtime_ops = _get_runtime_ops_and_info();
+  // Ballpark estimate of the minimal number of ops; just used to
+  // verify API returns a reasonably large number.
+  AT_ASSERT(runtime_ops.size() > 2900);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -783,9 +818,9 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //   def forward(self, x):
   //     return self.A0.forward(self.B0.forward(x))
 
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).prim::Return"));
+  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -831,9 +866,9 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).B0(B)", "top(C).B0(B).A0(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).A0(A).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -891,9 +926,9 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   // "top(B).A0(A).forward": for the add operator in A0.
   // "top(B).A1(A).forward": for the add operator in A1.
 
-  std::set<std::string> expected_result(
-      {"top(B)", "top(B).A0(A)", "top(B).A1(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1099,6 +1134,235 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   };
   EXPECT_EQ(operator_names, expected_operator_names)
       << "Expected the root operator lists to be the same";
+}
+
+TEST(LiteInterpreterTest, DefaultArgsConv) {
+  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+  if (s && strcmp(s, "1") == 0)
+    return;
+
+  std::vector<torch::jit::IValue> inputs;
+
+  Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
+  )");
+
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
+
+  auto outputref = m.forward(inputs).toTensor();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 1; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(output.equal(outputref));
+}
+
+namespace {
+void testLiteModuleCompareResultTensors(
+    Module& m,
+    const std::vector<torch::jit::IValue>& inputs) {
+  auto outputref = m.forward(inputs).toTensor();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(output.equal(outputref));
+}
+
+void testDefaultArgsPinv(int num_args) {
+  Module m("m");
+  if (num_args == 1) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input)
+    )");
+  } else if (num_args == 2) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5)
+    )");
+  } else if (num_args == 3) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, True)
+    )");
+  }
+
+  std::vector<torch::jit::IValue> inputs;
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 1; // a more stable matrix
+  input = input.view({N, N});
+  inputs.push_back(input);
+  testLiteModuleCompareResultTensors(m, inputs);
+}
+} // namespace
+
+TEST(LiteInterpreterTest, DefaultArgsPinv) {
+  // Test with different number of specified arguments.
+  // Arguments not specified take default value.
+  for (int num_args = 1; num_args <= 3; ++num_args) {
+    testDefaultArgsPinv(num_args);
+  }
+
+  //  bytecode with one specified argument:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 1),)),
+  //              ('constants', (False, 1e-15)), # default constants are not
+  //              used
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
+
+  //  bytecode with 2 specified argument:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('LOADC', 1, 0), # added LOADC for specified argument
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 2),)),
+  //              ('constants', (False, 1e-05)), # updated constant table
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
+
+  //  bytecode with 3 specified arguments:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('LOADC', 1, 0),
+  //                  ('LOADC', 0, 0),
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 3),)),
+  //              ('constants', (True, 1e-05)),
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
+}
+
+TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
+  // The second argument is specified, but the value is the same as the default
+  // value. It's treated as "not specified" since the value can be fetched from
+  // schema.
+  Module m("m");
+  m.define(R"(
+    def forward(self, input):
+      return torch.linalg_pinv(input, 1e-15)
+  )");
+  torch::jit::MobileCode code(m.get_method("forward").graph(), "forward");
+  auto arg_nums = code.op_to_num_specified_args();
+  ASSERT_EQ(arg_nums.size(), 1);
+  ASSERT_EQ(arg_nums["aten::linalg_pinv"], 1);
+  std::vector<torch::jit::IValue> inputs;
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 1; // a more stable matrix
+  input = input.view({N, N});
+  inputs.push_back(input);
+  testLiteModuleCompareResultTensors(m, inputs);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
+  Module a("A");
+  a.define(R"(
+    def bar(self, x, y):
+      return x + y
+  )");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"(
+    def foo(self, x, y):
+      return self.A0.bar(x, y) + 2
+  )");
+  Module c("C");
+  c.register_module("B0", b);
+  c.define(R"(
+    def forward(self, x, y):
+      return self.B0.foo(x, y) + 3
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({2, 4}));
+  inputs.emplace_back(torch::rand({13, 9}));
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, ExtraFilesMap(), true);
+  auto lite_m = _load_for_mobile(ss);
+  std::string error_pattern = R"(
+  Module hierarchy:top(C).B0(B).A0(A).aten::add
+Traceback of TorchScript (most recent call last):
+  File "<string>", line 3, in FunctionName_UNKNOWN
+
+    def forward(self, x, y):
+      return self.B0.foo(x, y) + 3
+             ~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in foo
+
+    def foo(self, x, y):
+      return self.A0.bar(x, y) + 2
+             ~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in bar
+
+    def bar(self, x, y):
+      return x + y
+             ~~~~~ <--- HERE
+  )";
+  ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
 }
 
 namespace {

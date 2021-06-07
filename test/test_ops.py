@@ -9,21 +9,18 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests)
+    (op_db,)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
+from collections.abc import Sequence
 
-
-# Get names of all the operators which have entry in `method_tests` (legacy testing infra)
-method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
 
 # Tests that apply to all operators
-
 class TestOpInfo(TestCase):
     exact_dtype = True
 
@@ -38,12 +35,8 @@ class TestOpInfo(TestCase):
         # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
             samples = op.sample_inputs(device, dtype)
-            if len(samples) == 0:
-                self.skipTest("Skipped! No sample inputs!")
-
-            # NOTE: only tests on first sample
-            sample = samples[0]
-            op(sample.input, *sample.args, **sample.kwargs)
+            for sample in samples:
+                op(sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
@@ -73,14 +66,10 @@ class TestOpInfo(TestCase):
             result = op(sample.input, *sample.args, **sample.kwargs)
             if not isinstance(result, torch.Tensor):
                 continue
+            if sample.output_process_fn_grad is not None:
+                result = sample.output_process_fn_grad(result)
             result.sum().backward()
 
-    # Verifies that ops do not have an entry in
-    # `method_tests` (legacy testing infra).
-    @onlyCPU
-    @ops(op_db, allowed_dtypes=[torch.float32])
-    def test_duplicate_method_tests(self, device, dtype, op):
-        self.assertFalse(op.name in method_tested_operators)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
@@ -99,7 +88,7 @@ class TestGradients(TestCase):
 
         return _fn
 
-    def _check_helper(self, device, dtype, op, variant, check):
+    def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False):
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
         if not op.supports_dtype(dtype, torch.device(device).type):
@@ -110,7 +99,9 @@ class TestGradients(TestCase):
                 return variant.__wrapped__ is op.get_inplace()
             return variant is op.get_inplace()
 
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
+        samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs)
+
         for sample in samples:
             if sample.broadcasts_input and is_inplace(variant):
                 continue
@@ -139,8 +130,10 @@ class TestGradients(TestCase):
                                           check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True,
                                           nondet_tol=op.gradcheck_nondet_tol,
-                                          fast_mode=op.gradcheck_fast_mode))
+                                          fast_mode=op.gradcheck_fast_mode,
+                                          check_forward_ad=check_forward_ad))
             elif check == 'gradgradcheck':
+                self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
@@ -156,8 +149,8 @@ class TestGradients(TestCase):
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
-    def _grad_test_helper(self, device, dtype, op, variant):
-        return self._check_helper(device, dtype, op, variant, 'gradcheck')
+    def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False):
+        return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad)
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
@@ -221,6 +214,19 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
+    @_gradcheck_ops(op_db)
+    def test_forward_mode_AD(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        if op.supports_forward_ad:
+            self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+        else:
+            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            hint_msg = ("Running forward AD for an OP that has does not support it did not "
+                        "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
+            with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
+                self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+
 
 # Tests operators for consistency between JIT and eager, also checks
 #   correctness of JIT specific alias schemas and intended
@@ -265,7 +271,8 @@ class TestCommon(JitCommonTestCase):
         _requires_grad = (op.supports_autograd and
                           (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type)))
 
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=include_conjugated_inputs)
 
         def _test_consistency_helper(samples, variants):
             for sample in samples:
@@ -276,6 +283,9 @@ class TestCommon(JitCommonTestCase):
                 tensor.grad = None
                 expected_forward = op(sample.input, *sample.args, **sample.kwargs)
                 expected_grad = None
+
+                output_process_fn_grad = sample.output_process_fn_grad if sample.output_process_fn_grad \
+                    else lambda x: x
 
                 # Skips inplace variants if the output dtype is not the same as
                 #   the input dtype
@@ -291,7 +301,7 @@ class TestCommon(JitCommonTestCase):
                 #   derived from each tensor output
                 if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
                         and (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type))):
-                    expected_forward.sum().backward()
+                    output_process_fn_grad(expected_forward).sum().backward()
                     expected_grad = tensor.grad
 
                 # Test eager consistency
@@ -306,7 +316,10 @@ class TestCommon(JitCommonTestCase):
                     cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
 
                     if variant in inplace_ops and sample.broadcasts_input:
-                        with self.assertRaises(RuntimeError):
+                        with self.assertRaises(RuntimeError,
+                                               msg=('inplace variant either incorrectly allowed '
+                                                    'resizing or you have marked the sample {}'
+                                                    ' incorrectly with `broadcasts_self=True'.format(sample.summary()))):
                             variant_forward = variant(cloned,
                                                       *sample.args,
                                                       **sample.kwargs)
@@ -320,7 +333,7 @@ class TestCommon(JitCommonTestCase):
                     # Compares variant's backward
                     if expected_grad is not None and \
                             (variant not in inplace_ops or op.supports_inplace_autograd):
-                        variant_forward.sum().backward()
+                        output_process_fn_grad(variant_forward).sum().backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
         _test_consistency_helper(samples, variants)
@@ -362,11 +375,9 @@ class TestCommon(JitCommonTestCase):
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
-        # TODO: fix this
-        if _requires_grad and not op.supports_gradgrad:
-            self.skipTest("skipped! This test does not handle ops that don't support gragrad properly")
 
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=include_conjugated_inputs)
 
         for sample in samples:
             # Acquires variants to test
@@ -404,7 +415,7 @@ class TestCommon(JitCommonTestCase):
                                             out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
@@ -414,7 +425,7 @@ class TestCommon(JitCommonTestCase):
                                             out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
@@ -718,6 +729,103 @@ class TestCommon(JitCommonTestCase):
                         f"{expected.dtype} into an out= with dtype torch.long")
             with self.assertRaises(RuntimeError, msg=msg_fail):
                 op_out(out=out)
+
+    # Tests that
+    # 1. The operator's output for physically conjugated tensors and conjugate view tensors
+    # produces the same value
+    # 2. The gradients are same in both cases mentioned in (1)
+    # 3. If the operator's inplace variant is supported, tests that the inplace operation
+    #    produces the correct value when called on a conjugate view tensor and that the output
+    #    has its conj bit set to true
+    # This test only runs for C -> R and C -> C functions
+    # TODO: add tests for `R->C` functions
+    # Note: This test runs for functions that take both tensors and tensorlists as input.
+    @ops(op_db, allowed_dtypes=(torch.cfloat,))
+    def test_conj_view(self, device, dtype, op):
+        if not op.test_conjugated_samples:
+            self.skipTest("Operation doesn't support conjugated inputs.")
+        _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        inplace_variant = op.inplace_variant
+
+        # helper function to physically conjugate the tensor
+        def conjugate_physical(input):
+            if isinstance(input, torch.Tensor):
+                tensor_requires_grad = input.requires_grad
+                with torch.no_grad():
+                    input = input.conj_physical()
+                return input.requires_grad_(tensor_requires_grad)
+
+            if isinstance(input, Sequence):
+                out = list(map(clone_input_helper, input))
+                out[0] = conjugate_physical(out[0])
+                return tuple(out)
+
+        # helper function to clone and conjugate the input if its a tensor
+        # else clone the sequence and conjugate the first element in the sequence
+        # If a requires_grad argument is provided the tensor being conjugated will
+        # have its requires_grad set to that value.
+        def clone_conj_input_helper(input, **kwargs):
+            if isinstance(input, torch.Tensor):
+                requires_grad = kwargs.get('requires_grad', input.requires_grad)
+                with torch.no_grad():
+                    input = input.clone()
+                # Note: .conj() is not called under no_grad mode since it's not allowed to modify a
+                # view created in no_grad mode. Here it's ok to do so, so as a workaround we call conj
+                # before resetting the requires_grad field for input
+                input = input.conj()
+                assert input.is_leaf
+                return input.requires_grad_(requires_grad)
+
+            if isinstance(input, Sequence):
+                out = list(map(clone_input_helper, input))
+                out[0] = clone_conj_input_helper(out[0])
+                return tuple(out)
+
+        for sample in samples:
+            tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
+            cloned1 = clone_conj_input_helper(sample.input)
+            sample.input = conjugate_physical(sample.input)
+
+            # Computes function forward value with a physically conjugated tensor and
+            # a conj view tensor and verifies that the output in both case are equal.
+            expected_forward = op(sample.input, *sample.args, **sample.kwargs)
+            forward_with_conjview = op(cloned1, *sample.args, **sample.kwargs)
+            self.assertEqual(expected_forward, forward_with_conjview)
+
+            # If the op has an inplace variant, and the input doesn't require broadcasting
+            # and has the same dtype as output, verify that the inplace operation on a conjugated
+            # input produces correct output, and the output tensor has the conj bit set to True
+            if inplace_variant is not None and not sample.broadcasts_input:
+                cloned2 = clone_conj_input_helper(tensor, requires_grad=False)
+                if (isinstance(expected_forward, torch.Tensor) and
+                        expected_forward.dtype is tensor.dtype):
+                    inplace_forward = inplace_variant(cloned2, *sample.args, **sample.kwargs)
+                    self.assertTrue(inplace_forward.is_conj())
+                    self.assertEqual(inplace_forward, expected_forward)
+
+            # TODO: backward consistency only supported for single tensor outputs
+            # TODO: backward consistency only checked on sample.input, not all
+            #   tensor inputs
+            # TODO: update to handle checking grads of all tensor inputs as
+            #   derived from each tensor output
+            if isinstance(expected_forward, torch.Tensor) and expected_forward.requires_grad:
+                tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
+                expected_forward.sum().backward(retain_graph=True)
+                forward_with_conjview.sum().backward(retain_graph=True)
+                if tensor.grad is not None:
+                    cloned1_tensor = cloned1 if isinstance(cloned1, torch.Tensor) else cloned1[0]
+                    self.assertEqual(tensor.grad, cloned1_tensor.grad)
+
+                    tensor.grad, cloned1_tensor.grad = None, None
+
+                    # a repeat of the above test if output is not complex valued
+                    if (expected_forward.is_complex()):
+                        grad = torch.randn_like(expected_forward)
+                        expected_forward.backward(grad.conj_physical())
+                        forward_with_conjview.backward(grad.conj())
+
+                        self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
 
 instantiate_device_type_tests(TestOpInfo, globals())

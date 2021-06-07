@@ -88,9 +88,16 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
 
 def supported_activities():
     """
-    Returns a set of supported profiler activities
+    Returns a set of supported profiler tracing activities.
+
+    Note: profiler uses CUPTI library to trace on-device CUDA kernels.
+    In case when CUDA is enabled but CUPTI is not available, passing
+    ``ProfilerActivity.CUDA`` to profiler results in using the legacy CUDA
+    profiling code (same as in the legacy ``torch.autograd.profiler``).
+    This, in turn, results in including CUDA time in the profiler table output,
+    but not in the JSON trace.
     """
-    return torch.autograd.supported_kineto_activities()
+    return torch.autograd._supported_kineto_activities()
 
 
 class profile(object):
@@ -136,6 +143,9 @@ class profile(object):
 
     .. note::
         Enabling shape and stack tracing results in additional overhead.
+        When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
+        that may further prevent certain optimizations that depend on the reference count and introduce
+        extra tensor copies.
 
     Examples:
 
