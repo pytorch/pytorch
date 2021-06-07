@@ -2435,7 +2435,7 @@ def bernoulli(g, input, generator=None, out=None):
     return g.op("Cast", output, to_i=sym_help.cast_pytorch_to_onnx[dtype])
 
 
-@parse_args("v")
+@parse_args('v')
 def log_sigmoid(g, input):
     p = g.op("Sigmoid", input)
     return g.op("Log", p)
