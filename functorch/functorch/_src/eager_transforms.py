@@ -15,7 +15,7 @@ from collections import namedtuple
 import gc
 
 from .vmap import vmap
-from .make_functional import make_functional, make_functional_with_buffers
+from .make_functional import make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1
 
 from functorch._C import (
     _wrap_for_grad,

@@ -20,7 +20,7 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 
-from functorch import grad, vmap, make_functional_v2
+from functorch import grad, vmap, make_functional
 
 class ThreeLayerNet(nn.Module):
     def __init__(self):
@@ -43,7 +43,7 @@ class ThreeLayerNet(nn.Module):
 def mse_loss(x, y):
     return torch.mean((x - y) ** 2)
 
-net, params = make_functional_v2(ThreeLayerNet())
+net, params = make_functional(ThreeLayerNet())
 opt = torch.optim.Adam(params, lr=1e-3)
 alpha = 0.1
 

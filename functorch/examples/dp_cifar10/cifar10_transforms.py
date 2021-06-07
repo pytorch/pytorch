@@ -27,7 +27,7 @@ from tqdm import tqdm
 from functools import partial
 import functorch
 from functorch import vmap, grad_and_value
-from functorch import make_functional_v2
+from functorch import make_functional
 
 # disable warning spam
 functorch._C._set_vmap_fallback_warning_enabled(False)
@@ -89,7 +89,7 @@ def train(args, model, train_loader, optimizer, epoch, device):
 
         # In order to use functional vmap+grad, we need to be able to
         # pass the weights to a model.
-        func_model, weights = make_functional_v2(model)
+        func_model, weights = make_functional(model)
 
         # To use vmap+grad to compute per-sample-grads, the forward pass
         # must be re-formulated on a single example.

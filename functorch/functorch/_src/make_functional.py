@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch import Tensor
 from typing import List, Tuple
 import copy
+import warnings
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
@@ -94,7 +95,7 @@ def load_state(
     """load_state(model, weights, weight_names, buffers=(), buffer_names=()) -> model
 
     load_state takes `weights` and `buffers` and assigns them to the model.
-    This is the inverse operation of `make_functional`.
+    This is the inverse operation of `make_functional_deprecated_v1`.
     """
     assert len(weight_names) == len(weights)
     load_weights(model, weight_names, weights)
@@ -104,10 +105,10 @@ def load_state(
     return model
 
 
-def make_functional(model: nn.Module):
-    """make_functional(model) -> weights, func, weight_names
+def make_functional_deprecated_v1(model: nn.Module):
+    """make_functional_deprecated_v1(model) -> weights, func, weight_names
 
-    Given an nn.Module, make_functional extracts the state (weights)
+    Given an nn.Module, make_functional_deprecated_v1 extracts the state (weights)
     and returns a functional version of the model, `func`. This makes
     it so that it is possible use transforms over the parameters of
     `model`.
@@ -116,7 +117,7 @@ def make_functional(model: nn.Module):
     ```
     x = torch.randn(4, 3)
     model = nn.Linear(3, 3)
-    weights, func, _ = make_functional(model)
+    weights, func, _ = make_functional_deprecated_v1(model)
     func(weights, (x,))
     ```
 
@@ -124,7 +125,7 @@ def make_functional(model: nn.Module):
     ```
     x = torch.randn(4, 3)
     model = nn.Linear(3, 3)
-    weights, _, func = make_functional(model)
+    weights, _, func = make_functional_deprecated_v1(model)
     grad_weights = grad(func)(weights, (x,))
     ```
 
@@ -132,8 +133,8 @@ def make_functional(model: nn.Module):
     """
     buffers = list(model.buffers())
     if len(buffers) > 0:
-        raise RuntimeError('make_functional(model): `model` has buffers. Please use '
-                           'make_functional_with_buffers(model) instead.')
+        raise RuntimeError('make_functional_deprecated_v1(model): `model` has buffers. Please use '
+                           'make_functional_with_buffers_deprecated_v1(model) instead.')
     weights, descriptors = extract_weights(model)
 
     def fun(weights, data):
@@ -144,17 +145,17 @@ def make_functional(model: nn.Module):
     return weights, fun, descriptors
 
 
-def make_functional_with_buffers(model: nn.Module):
-    """make_functional_with_buffers(model) -> weights, buffers, func, weight_names, buffer_names
+def make_functional_with_buffers_deprecated_v1(model: nn.Module):
+    """make_functional_with_buffers_deprecated_v1(model) -> weights, buffers, func, weight_names, buffer_names
 
-    Given an nn.Module, make_functional_with_buffers extracts the state (weights and buffers)
+    Given an nn.Module, make_functional_with_buffers_deprecated_v1 extracts the state (weights and buffers)
     and returns a functional version of the model, `func`.
 
     `func` can be invoked as follows:
     ```
     x = torch.randn(4, 3)
     model = nn.Linear(3, 3)
-    weights, buffers, func, _, _ = make_functional_with_buffers(model)
+    weights, buffers, func, _, _ = make_functional_with_buffers_deprecated_v1(model)
     func(weights, buffers, (x,))
     ```
 
@@ -162,7 +163,7 @@ def make_functional_with_buffers(model: nn.Module):
     ```
     x = torch.randn(4, 3)
     model = nn.Linear(3, 3)
-    weights, buffers, func, _, _ = make_functional_with_buffers(model)
+    weights, buffers, func, _, _ = make_functional_with_buffers_deprecated_v1(model)
     func(weights, buffers, (x,))
     grad_weights = grad(func)(weights, buffers, (x,))
     ```
@@ -234,10 +235,10 @@ class FunctionalModule(nn.Module):
         return stateful_model(*args, **kwargs)
 
 
-def make_functional_v2(model: nn.Module):
-    """make_functional_v2(model) -> func, weights
+def make_functional(model: nn.Module):
+    """make_functional(model) -> func, weights
 
-    Given an nn.Module, make_functional_v2 extracts the state (weights)
+    Given an nn.Module, make_functional extracts the state (weights)
     and returns a functional version of the model, `func`. This makes
     it so that it is possible use transforms over the parameters of
     `model`.
@@ -246,11 +247,11 @@ def make_functional_v2(model: nn.Module):
     ```
     import torch
     import torch.nn as nn
-    from functorch import make_functional_v2
+    from functorch import make_functional
 
     x = torch.randn(4, 3)
     model = nn.Linear(3, 3)
-    func, params = make_functional_v2(model)
+    func, params = make_functional(model)
     func(params, x)
     ```
 
@@ -258,12 +259,12 @@ def make_functional_v2(model: nn.Module):
     ```
     import torch
     import torch.nn as nn
-    from functorch import make_functional_v2, grad
+    from functorch import make_functional, grad
 
     x = torch.randn(4, 3)
     t = torch.randn(4, 3)
     model = nn.Linear(3, 3)
-    func, params = make_functional_v2(model)
+    func, params = make_functional(model)
 
     def compute_loss(params, x, t):
         y = func(params, x)
@@ -272,17 +273,22 @@ def make_functional_v2(model: nn.Module):
     grad_weights = grad(compute_loss)(params, x, t)
     ```
     """
+    warnings.warn('If this is your first time using make_functional, please '
+                  'ignore this warning. Otherwise, we recently made a '
+                  'backwards incompatible change to make_functional: '
+                  'please try make_functional_deprecated_v1 if you want the '
+                  'previous behavior.', stacklevel=2)
     buffers = list(model.buffers())
     if len(buffers) > 0:
-        raise RuntimeError('make_functional_v2(model): `model` has buffers. Please use '
-                           'make_functional_with_buffers_v2(model) instead.')
+        raise RuntimeError('make_functional(model): `model` has buffers. Please use '
+                           'make_functional_with_buffers(model) instead.')
     return FunctionalModule._create_from(model)
 
 
-def make_functional_with_buffers_v2(model: nn.Module):
-    """make_functional_with_buffers_v2(model) -> func, params, buffers
+def make_functional_with_buffers(model: nn.Module):
+    """make_functional_with_buffers(model) -> func, params, buffers
 
-    Given an nn.Module, make_functional_with_buffers_v2 extracts the state
+    Given an nn.Module, make_functional_with_buffers extracts the state
     (params and buffers) and returns a functional version of the model `func`
     that can be invoked like a function.
 
@@ -290,11 +296,11 @@ def make_functional_with_buffers_v2(model: nn.Module):
     ```
     import torch
     import torch.nn as nn
-    from functorch import make_functional_with_buffers_v2
+    from functorch import make_functional_with_buffers
 
     x = torch.randn(4, 3)
     model = nn.Linear(3, 3)
-    func, params, buffers = make_functional_with_buffers_v2(model)
+    func, params, buffers = make_functional_with_buffers(model)
     func(params, buffers, x)
     ```
 
@@ -302,12 +308,12 @@ def make_functional_with_buffers_v2(model: nn.Module):
     ```
     import torch
     import torch.nn as nn
-    from functorch import make_functional_with_buffers_v2, grad
+    from functorch import make_functional_with_buffers, grad
 
     x = torch.randn(4, 3)
     t = torch.randn(4, 3)
     model = nn.Linear(3, 3)
-    func, params, buffers = make_functional_with_buffers_v2(model)
+    func, params, buffers = make_functional_with_buffers(model)
 
     def compute_loss(params, buffers, x, t):
         y = func(params, buffers, x)
@@ -316,6 +322,11 @@ def make_functional_with_buffers_v2(model: nn.Module):
     grad_weights = grad(compute_loss)(params, buffers, x, t)
     ```
     """
+    warnings.warn('If this is your first time using make_functional_with_buffers, please '
+                  'ignore this warning. Otherwise, we recently made a '
+                  'backwards incompatible change to make_functional_with_buffers: '
+                  'please try make_functional_with_buffers_deprecated_v1 if you want the '
+                  'previous behavior.', stacklevel=2)
     return FunctionalModuleWithBuffers._create_from(model)
 
 
@@ -338,7 +349,7 @@ def combine_state_for_ensemble(models):
     `func(params, buffers, *args, **kwargs)` directly, you probably want to
     use vmap(func, ...)(params, buffers, *args, **kwargs)
     """
-    funcs, params, buffers = zip(*[make_functional_with_buffers_v2(model)
+    funcs, params, buffers = zip(*[make_functional_with_buffers(model)
                                    for model in models])
     params = transpose_stack(params)
     buffers = transpose_stack(buffers)
@@ -368,15 +379,15 @@ def functional_init(model_class, ensemble_shape=(), device='cpu'):
             raise ValueError('NYI: ensemble_shape with more than 1 element')
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
-            return make_functional(model)
+            return make_functional_deprecated_v1(model)
         num_models = ensemble_shape[0]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
         models = tuple(model_class(*args, **kwargs).to(device)
                        for _ in range(num_models))
-        _, fn, names = make_functional(model_class(*args, **kwargs))
-        weights = tuple(make_functional(model)[0] for model in models)
+        _, fn, names = make_functional_deprecated_v1(model_class(*args, **kwargs))
+        weights = tuple(make_functional_deprecated_v1(model)[0] for model in models)
         weights = tuple(zip(*weights))
         weights = tuple(torch.stack(shards).detach() for shards in weights)
         return weights, fn, names
@@ -389,7 +400,7 @@ def functional_init_with_buffers(model_class, ensemble_shape=(), device='cpu'):
             raise ValueError('NYI: ensemble_shape with more than 1 element')
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
-            return make_functional(model)
+            return make_functional_deprecated_v1(model)
         num_models = ensemble_shape[0]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
@@ -397,8 +408,8 @@ def functional_init_with_buffers(model_class, ensemble_shape=(), device='cpu'):
         models = tuple(model_class(*args, **kwargs).to(device)
                        for _ in range(num_models))
         _, _, fn, weight_names, buffer_names = \
-            make_functional_with_buffers(model_class(*args, **kwargs))
-        weights, buffers = zip(*tuple(make_functional_with_buffers(model)[:2]
+            make_functional_with_buffers_deprecated_v1(model_class(*args, **kwargs))
+        weights, buffers = zip(*tuple(make_functional_with_buffers_deprecated_v1(model)[:2]
                                       for model in models))
         weights = tuple(zip(*weights))
         weights = tuple(torch.stack(shards).detach() for shards in weights)
