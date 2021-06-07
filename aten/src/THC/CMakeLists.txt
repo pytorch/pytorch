@@ -58,7 +58,6 @@ install(FILES
           THCTensorCopy.hpp
           THCTensorMath.h
           THCApply.cuh
-          THCReduce.cuh
           THCReduceApplyUtils.cuh
           THCTensorMathReduce.cuh
           THCAsmUtils.cuh
