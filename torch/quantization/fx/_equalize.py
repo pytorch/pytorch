@@ -65,7 +65,7 @@ class _InputEqualizationObserver(nn.Module):
     def forward(self, x_orig):
         # TODO: Allow for convoluational layers
         if not (x_orig.ndim == 2):
-            raise ValueError("InputEqualObserver only supports Linear layers")
+            raise ValueError("InputEqualizationObserver only supports Linear layers")
 
         return self.input_obs(x_orig)
 
@@ -152,7 +152,7 @@ class _WeightEqualizationObserver(nn.Module):
     def forward(self, w_orig):
         # TODO: Allow for convoluational layers
         if not (w_orig.ndim == 2):
-            raise ValueError("WeightEqualObserver only supports Linear layers")
+            raise ValueError("WeightEqualizationObserver only supports Linear layers")
 
         return self._forward(w_orig)
 
@@ -243,7 +243,7 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
 
 
 input_equalization_observer = _InputEqualizationObserver.with_args(
-    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
+    dtype=torch.quint8, qscheme=torch.per_tensor_symmetric)
 weight_equalization_observer = _WeightEqualizationObserver.with_args(
     dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
 default_equalization_qconfig = QConfig(activation=input_equalization_observer,

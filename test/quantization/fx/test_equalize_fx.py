@@ -125,7 +125,7 @@ class TestEqualizeFx(QuantizationTestCase):
         self.assertTrue(torch.allclose(weight_qparams[1], torch.tensor(
             ref_zero_points, dtype=weight_qparams[1].dtype), atol=1))
 
-    def test_input_equalization_prepare(self):
+    def test_input_weight_equalization_prepare(self):
         """ Tests that on one linear layer, the InputEqualizationObserver is
         inserted correctly, and the output observer is default set as a MinMaxObserver.
         """
