@@ -54,7 +54,7 @@ using StreamId = int32_t;
  * functionality (e.g., get the cudaStream_t of a CUDA stream.)  There are
  * wrapper classes which provide this functionality, e.g., CUDAStream.
  */
-class Stream final {
+class C10_API Stream final {
  private:
   Device device_;
   StreamId id_;
