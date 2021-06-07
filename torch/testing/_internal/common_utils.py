@@ -1120,7 +1120,10 @@ class TestCase(expecttest.TestCase):
         if isinstance(tensor_like, torch.Tensor):
             assert device is None
             assert dtype is None
-            a = tensor_like.detach().cpu().numpy()
+            t_cpu = tensor_like.detach().cpu()
+            if t_cpu.dtype is torch.bfloat16:
+                t_cpu = t_cpu.float()
+            a = t_cpu.numpy()
             t = tensor_like
         else:
             d = copy.copy(torch_to_numpy_dtype_dict)
@@ -1139,7 +1142,7 @@ class TestCase(expecttest.TestCase):
                 # NOTE: copying an array before conversion is necessary when,
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
-            if dtype is torch.bfloat16 and torch_result.dtype is torch.bfloat16 and np_result.dtype is torch.float:
+            if t.dtype is torch.bfloat16 and torch_result.dtype is torch.bfloat16 and np_result.dtype is torch.float:
                 torch_result = torch_result.to(torch.float)
 
         self.assertEqual(np_result, torch_result, **kwargs)
@@ -1789,9 +1792,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         else:
             assert dtype in complex_types()
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
-            real = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
-            imag = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=dtype)
-            replace_with = torch.complex(real, imag)
+            float_eps = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=float_dtype)
+            replace_with = torch.complex(float_eps, float_eps)
         result[result == 0] = replace_with
 
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
@@ -2285,3 +2287,14 @@ def coalescedonoff(f):
         f(self, *args, **kwargs, coalesced=True)
         f(self, *args, **kwargs, coalesced=False)
     return wrapped
+
+@contextlib.contextmanager
+def disable_gc():
+    if gc.isenabled():
+        try:
+            gc.disable()
+            yield
+        finally:
+            gc.enable()
+    else:
+        yield

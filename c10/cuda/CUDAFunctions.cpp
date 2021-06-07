@@ -141,17 +141,16 @@ void device_synchronize() {
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-const char* get_cuda_check_prefix() noexcept {
+const char* get_cuda_check_suffix() noexcept {
   static char* device_blocking_flag = getenv("CUDA_LAUNCH_BLOCKING");
   static bool blocking_enabled =
       (device_blocking_flag && atoi(device_blocking_flag));
   if (blocking_enabled) {
-    return "CUDA error: ";
+    return "";
   } else {
-    return "CUDA kernel errors might be "
-           "asynchronously reported at some other API call,so the "
-           "stacktrace below might be incorrect. For debugging "
-           "consider passing CUDA_LAUNCH_BLOCKING=1. CUDA error: ";
+    return "\nCUDA kernel errors might be asynchronously reported at some"
+           " other API call,so the stacktrace below might be incorrect."
+           "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1.";
   }
 }
 
