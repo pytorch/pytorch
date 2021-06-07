@@ -629,6 +629,10 @@ Tensor& remainder_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
+Tensor remainder(const Scalar& self, const Tensor& other) {
+  return at::remainder(wrapped_scalar_tensor(self), other);
+}
+
 Tensor rsub(const Tensor& self, const Scalar& other, const Scalar& alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
 }
