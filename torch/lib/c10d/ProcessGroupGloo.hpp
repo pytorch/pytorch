@@ -16,11 +16,6 @@
 
 #include <c10/util/hash.h>
 
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
-
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <c10d/Types.hpp>

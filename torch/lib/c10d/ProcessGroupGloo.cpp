@@ -33,15 +33,6 @@
 
 #include <ATen/SparseTensorUtils.h>
 
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/Exceptions.h>
-#include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
-
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
@@ -309,18 +300,14 @@ void setOutput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
   opts.setOutput(getDataPointer<T>(tensor), counts);
 }
 
-#ifdef USE_CUDA
-
 at::Tensor pinnedLike(at::Tensor& tensor) {
-  auto* allocator = at::cuda::getPinnedMemoryAllocator();
-  auto storage = c10::Storage(
-      c10::Storage::use_byte_size_t(),
-      at::detail::computeStorageNbytes(
-          tensor.sizes(), tensor.strides(), tensor.dtype().itemsize()),
-      allocator,
-      /*resizable=*/false);
-  return at::empty({0}, tensor.options().device(at::kCPU))
-      .set_(storage, 0, tensor.sizes(), tensor.strides());
+  return at::empty_like(
+      tensor,
+      /*dtype=*/c10::nullopt,
+      /*layout=*/c10::nullopt,
+      /*device=*/c10::kCPU,
+      /*pin_memory=*/true,
+      /*memory_format=*/c10::nullopt);
 }
 
 // This function initializes a vector of CUDA streams, one for every
@@ -330,20 +317,19 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
 // on the tensors.
 void initializeStreamsEvents(
     const std::vector<at::Tensor>& tensors,
-    std::vector<at::cuda::CUDAStream>& streams,
-    std::vector<at::cuda::CUDAEvent>& events) {
-  at::cuda::OptionalCUDAGuard guard;
+    std::vector<c10::Stream>& streams,
+    std::vector<c10::Event>& events) {
+  c10::impl::VirtualGuardImpl impl(c10::kCUDA);
   streams.reserve(tensors.size());
   events.resize(tensors.size());
   for(const auto i : c10::irange(tensors.size())) {
-    guard.set_index(tensors[i].device().index());
+    c10::Device device = tensors[i].device();
     // Record event on current stream
-    events[i].record(at::cuda::getCurrentCUDAStream());
+    events[i].record(impl.getStream(device));
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this device. This ensures that the default stream used
     // by the caller is not occupied by c10d related operations.
-    streams.push_back(at::cuda::getStreamFromPool(
-        /* isHighPriority */ true, tensors[i].device().index()));
+    streams.push_back(impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
@@ -351,18 +337,15 @@ void initializeStreamsEvents(
     // new streams in this Work to prevent being freed before the Work finishes.
     if (tensors[i].is_sparse()) {
       if (tensors[i].is_coalesced()) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].indices().storage().data_ptr(), streams[i]);
-        c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].values().storage().data_ptr(), streams[i]);
+        impl.recordDataPtrOnStream(tensors[i].indices().storage().data_ptr(), streams[i]);
+        impl.recordDataPtrOnStream(tensors[i].values().storage().data_ptr(), streams[i]);
       } else {
         // We will need to coalesce first, which means new tensors will
         // be allocated on the streams we just allocated, and there
         // is no need to record them separately.
       }
     } else {
-      c10::cuda::CUDACachingAllocator::recordStream(
-          tensors[i].storage().data_ptr(), streams[i]);
+      impl.recordDataPtrOnStream(tensors[i].storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -373,8 +356,8 @@ void initializeStreamsEvents(
 // on the same device.
 void initializeStreamsEvents(
     std::vector<std::vector<at::Tensor>>& tensors,
-    std::vector<at::cuda::CUDAStream>& streams,
-    std::vector<at::cuda::CUDAEvent>& events) {
+    std::vector<c10::Stream>& streams,
+    std::vector<c10::Event>& events) {
   // Ensure that the tensors in the nested tensor vectors are on the same
   // device.
   for (const auto& tensorgroup : tensors) {
@@ -388,18 +371,17 @@ void initializeStreamsEvents(
     }
   }
 
-  at::cuda::OptionalCUDAGuard guard;
+  c10::impl::VirtualGuardImpl impl(c10::kCUDA);
   streams.reserve(tensors.size());
   events.resize(tensors.size());
   for(const auto i : c10::irange(tensors.size())) {
-    guard.set_index(tensors[i][0].device().index());
+    c10::Device device = tensors[i][0].device();
     // Record event on current stream
-    events[i].record(at::cuda::getCurrentCUDAStream());
+    events[i].record(impl.getStream(device));
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this output. This ensures that the default stream used
     // by the caller is not occupied by c10d related operations.
-    streams.push_back(at::cuda::getStreamFromPool(
-        /* isHighPriority */ true, tensors[i][0].device().index()));
+    streams.push_back(impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
@@ -407,13 +389,10 @@ void initializeStreamsEvents(
       // `tensors` are created on a different stream. Hence, they must record
       // new streams in this Work to prevent being freed before the Work
       // finishes.
-      c10::cuda::CUDACachingAllocator::recordStream(
-          tensor.storage().data_ptr(), streams[i]);
+      impl.recordDataPtrOnStream(tensor.storage().data_ptr(), streams[i]);
     }
   }
 }
-
-#endif
 
 const auto kLoopbackAddress = "127.0.0.1";
 
@@ -844,8 +823,6 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
  public:
   AsyncBroadcastCUDAWork(
@@ -859,7 +836,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
     // Create pinned host side tensors.
     tmp = pinnedLike(inputs[rootTensor]);
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     if (context->rank == rootRank) {
       guard.reset_stream(streams[rootTensor]);
       tmp.copy_(inputs[rootTensor], /* non_blocking */ true);
@@ -867,18 +844,16 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   void run() override {
-    at::cuda::OptionalCUDAStreamGuard guard;
-
     // Synchronize with copy operation if applicable.
     if (context->rank == rootRank) {
-      guard.reset_stream(streams[rootTensor]);
-      AT_CUDA_CHECK(cudaStreamSynchronize(streams[rootTensor]));
+      streams[rootTensor].synchronize();
     }
 
     // Run broadcast on host side tensors.
     broadcast(tmp);
 
     // Kick off copy back to the CUDA tensors.
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp, /* non_blocking */ true);
@@ -887,21 +862,17 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   void synchronize() override {
-    at::cuda::OptionalCUDAGuard guard;
-
+    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
     for(const auto i : c10::irange(inputs.size())) {
-      guard.set_index(inputs[i].device().index());
-      events[i].block(at::cuda::getCurrentCUDAStream());
+      events[i].block(impl.getStream(inputs[i].device()));
     }
   }
 
   at::Tensor tmp;
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
-
-#endif
 
 } // namespace
 
@@ -920,10 +891,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
-    case at::kCUDA:
-#endif
       break;
+    case at::kCUDA:
+      if (c10::impl::hasDeviceGuardImpl(c10::kCUDA)) {
+        break;
+      }
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
@@ -934,11 +906,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncBroadcastWork>(
         std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncBroadcastCUDAWork>(
         std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
-#endif
   } else {
     throw std::runtime_error("Invalid backend");
   }
@@ -1294,8 +1264,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
  public:
   AsyncAllreduceCUDAWork(
@@ -1308,7 +1276,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
@@ -1317,35 +1285,32 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
     for(const auto i : c10::irange(inputs.size())) {
-      device_guard.set_index(inputs[i].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+      streams[i].synchronize();
     }
 
     // Run allreduce on host side tensors.
     allreduce(tmp);
 
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
-      stream_guard.reset_stream(streams[i]);
+      guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
+    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
-      guard.set_index(inputs[i].device().index());
-      events[i].block(at::cuda::getCurrentCUDAStream());
+      events[i].block(impl.getStream(inputs[i].device()));
     }
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
 
 class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
@@ -1361,7 +1326,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     // Note that both coalescing the sparse tensor and copying it to CPU
     // memory must be performed asynchronously, or we block the caller.
     tmp.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(
@@ -1371,39 +1336,34 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
     for(const auto i : c10::irange(inputs.size())) {
-      device_guard.set_index(inputs[i].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+      streams[i].synchronize();
     }
 
     // Run allreduce on host side tensors.
     auto output = allreduce(tmp);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
-      stream_guard.reset_stream(streams[i]);
+      guard.reset_stream(streams[i]);
       inputs[i].copy_(output, /*non_blocking=*/true);
       events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
+    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
-      guard.set_index(inputs[i].device().index());
-      events[i].block(at::cuda::getCurrentCUDAStream());
+      events[i].block(impl.getStream(inputs[i].device()));
     }
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
-
-#endif
 
 } // namespace
 
@@ -1421,10 +1381,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
-    case at::kCUDA:
-#endif
       break;
+    case at::kCUDA:
+      if (c10::impl::hasDeviceGuardImpl(c10::kCUDA)) {
+        break;
+      }
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
@@ -1449,7 +1410,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     } else {
       invalidArgument("unsupported layout");
     }
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     if (layout == c10::kStrided) {
       work = c10::make_intrusive<AsyncAllreduceCUDAWork>(
@@ -1460,7 +1420,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     } else {
       invalidArgument("unsupported layout");
     }
-#endif
   } else {
     throw std::runtime_error("Invalid backend");
   }
@@ -1584,8 +1543,6 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncReduceCUDAWork : public AsyncReduceWork {
  public:
   AsyncReduceCUDAWork(
@@ -1600,7 +1557,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
@@ -1609,39 +1566,34 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
     for(const auto i : c10::irange(inputs.size())) {
-      device_guard.set_index(inputs[i].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+      streams[i].synchronize();
     }
 
     // Run reduce on host side tensors.
     reduce(tmp);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
-      stream_guard.reset_stream(streams[i]);
+      guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
+    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
-      guard.set_index(inputs[i].device().index());
-      events[i].block(at::cuda::getCurrentCUDAStream());
+      events[i].block(impl.getStream(inputs[i].device()));
     }
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
-
-#endif
 
 } // namespace
 
@@ -1660,10 +1612,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
-    case at::kCUDA:
-#endif
       break;
+    case at::kCUDA:
+      if (c10::impl::hasDeviceGuardImpl(c10::kCUDA)) {
+        break;
+      }
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
@@ -1679,7 +1632,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
         opts.rootTensor,
         opts.reduceOp,
         tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncReduceCUDAWork>(
         std::move(context),
@@ -1688,7 +1640,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
         opts.rootTensor,
         opts.reduceOp,
         tag);
-#endif
   } else {
     throw std::runtime_error("Invalid backend");
   }
@@ -1747,8 +1698,6 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 // Note: current CUDA implementation holds the assumption that the
 // tensors in the nested output tensor vectors are on the same device.
 class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
@@ -1764,7 +1713,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
@@ -1781,24 +1730,21 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
     for(const auto i : c10::irange(inputs.size())) {
-      device_guard.set_index(inputs[i].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
+      inputStreams[i].synchronize();
     }
 
     for(const auto i : c10::irange(outputs.size())) {
-      device_guard.set_index(outputs[i][0].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
+      outputStreams[i].synchronize();
     }
 
     // Run allgather on host side tensors.
     allgather(tmpOutputs, tmpInputs);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(outputs.size())) {
-      stream_guard.reset_stream(outputStreams[i]);
+      guard.reset_stream(outputStreams[i]);
       for(const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
@@ -1807,24 +1753,21 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   }
 
   void synchronize() override {
+    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
     for(const auto i : c10::irange(outputs.size())) {
-      guard.set_index(outputs[i][0].device().index());
-      outputEvents[i].block(at::cuda::getCurrentCUDAStream());
+      outputEvents[i].block(impl.getStream(outputs[i][0].device()));
     }
   }
 
   std::vector<at::Tensor> tmpInputs;
-  std::vector<at::cuda::CUDAStream> inputStreams;
-  std::vector<at::cuda::CUDAEvent> inputEvents;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 
   std::vector<std::vector<at::Tensor>> tmpOutputs;
-  std::vector<at::cuda::CUDAStream> outputStreams;
-  std::vector<at::cuda::CUDAEvent> outputEvents;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 };
-
-#endif
 
 } // namespace
 
@@ -1871,10 +1814,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
-    case at::kCUDA:
-#endif
       break;
+    case at::kCUDA:
+      if (c10::impl::hasDeviceGuardImpl(c10::kCUDA)) {
+        break;
+      }
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
@@ -1885,11 +1829,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncAllgatherWork>(
         std::move(context), outputs, inputs, tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncAllgatherCUDAWork>(
         std::move(context), outputs, inputs, tag);
-#endif
   } else {
     throw std::runtime_error("Invalid backend");
   }
@@ -2085,8 +2027,6 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 // Note: current CUDA implementation holds the assumptions:
 //     - inputs.size() is 1
 //     - outputs.size() is 1
@@ -2106,7 +2046,7 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
@@ -2123,24 +2063,21 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
     for(const auto i : c10::irange(inputs.size())) {
-      device_guard.set_index(inputs[i].get_device());
-      AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
+      inputStreams[i].synchronize();
     }
 
     for(const auto i : c10::irange(outputs.size())) {
-      device_guard.set_index(outputs[i][0].get_device());
-      AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
+      outputStreams[i].synchronize();
     }
 
     // Run gather on host side tensors.
     gather(tmpOutputs, tmpInputs);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(outputs.size())) {
-      stream_guard.reset_stream(outputStreams[i]);
+      guard.reset_stream(outputStreams[i]);
       for(const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
@@ -2149,24 +2086,21 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
   }
 
   void synchronize() override {
+    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
     for(const auto i : c10::irange(outputs.size())) {
-      guard.set_index(static_cast<at::DeviceIndex>(outputs[i][0].get_device()));
-      outputEvents[i].block(at::cuda::getCurrentCUDAStream());
+      outputEvents[i].block(impl.getStream(outputs[i][0].device()));
     }
   }
 
   std::vector<at::Tensor> tmpInputs;
-  std::vector<at::cuda::CUDAStream> inputStreams;
-  std::vector<at::cuda::CUDAEvent> inputEvents;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 
   std::vector<std::vector<at::Tensor>> tmpOutputs;
-  std::vector<at::cuda::CUDAStream> outputStreams;
-  std::vector<at::cuda::CUDAEvent> outputEvents;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 };
-
-#endif
 
 } // namespace
 
@@ -2208,10 +2142,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
-    case at::kCUDA:
-#endif
       break;
+    case at::kCUDA:
+      if (c10::impl::hasDeviceGuardImpl(c10::kCUDA)) {
+        break;
+      }
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
@@ -2222,11 +2157,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncGatherWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncGatherCUDAWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
-#endif
   } else {
     throw std::runtime_error("Invalid backend");
   }
@@ -2285,8 +2218,6 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncScatterCUDAWork : public AsyncScatterWork {
  public:
   AsyncScatterCUDAWork(
@@ -2301,7 +2232,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.resize(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs[i].reserve(inputs[i].size());
@@ -2319,47 +2250,41 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
     for(const auto i : c10::irange(inputs.size())) {
-      device_guard.set_index(inputs[i][0].get_device());
-      AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
+      inputStreams[i].synchronize();
     }
     for(const auto i : c10::irange(outputs.size())) {
-      device_guard.set_index(outputs[i].get_device());
-      AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
+      outputStreams[i].synchronize();
     }
 
     // Run scatter on host side tensors.
     scatter(tmpOutputs, tmpInputs);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    c10::OptionalStreamGuard guard;
     for(const auto i : c10::irange(outputs.size())) {
-      stream_guard.reset_stream(outputStreams[i]);
+      guard.reset_stream(outputStreams[i]);
       outputs[i].copy_(tmpOutputs[i], /* non_blocking */ true);
       outputEvents[i].record(outputStreams[i]);
     }
   }
 
   void synchronize() override {
+    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
     for(const auto i : c10::irange(outputs.size())) {
-      guard.set_index(static_cast<at::DeviceIndex>(outputs[i].get_device()));
-      outputEvents[i].block(at::cuda::getCurrentCUDAStream());
+      outputEvents[i].block(impl.getStream(outputs[i].device()));
     }
   }
 
   std::vector<at::Tensor> tmpOutputs;
-  std::vector<at::cuda::CUDAStream> outputStreams;
-  std::vector<at::cuda::CUDAEvent> outputEvents;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 
   std::vector<std::vector<at::Tensor>> tmpInputs;
-  std::vector<at::cuda::CUDAStream> inputStreams;
-  std::vector<at::cuda::CUDAEvent> inputEvents;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 };
-
-#endif
 
 } // namespace
 
@@ -2400,10 +2325,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   const auto& device = outputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
-    case at::kCUDA:
-#endif
       break;
+    case at::kCUDA:
+      if (c10::impl::hasDeviceGuardImpl(c10::kCUDA)) {
+        break;
+      }
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
@@ -2414,11 +2340,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncScatterWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncScatterCUDAWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
-#endif
   } else {
     throw std::runtime_error("Invalid backend");
   }
@@ -2496,8 +2420,6 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
  public:
   AsyncAlltoallCUDAWork(
@@ -2518,7 +2440,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
     initializeStreamsEvents({outputTensor}, outputStreams, outputEvents);
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     guard.reset_stream(inputStreams.front());
     cpuInput = pinnedLike(inputTensor).copy_(inputTensor, true);
 
@@ -2528,39 +2450,33 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
-    device_guard.set_index(inputTensor.get_device());
-    AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams.front()));
-    device_guard.set_index(outputTensor.get_device());
-    AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams.front()));
+    inputStreams.front().synchronize();
+    outputStreams.front().synchronize();
 
     // Run alltoall on host side tensors.
     alltoall(cpuOutput, cpuInput);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
-    stream_guard.reset_stream(outputStreams.front());
+    c10::OptionalStreamGuard guard;
+    guard.reset_stream(outputStreams.front());
     outputTensor.copy_(cpuOutput, /* non_blocking */ true);
     outputEvents.front().record(outputStreams.front());
   }
 
   void synchronize() override {
+    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
-    guard.set_index(static_cast<at::DeviceIndex>(outputTensor.get_device()));
-    outputEvents.front().block(at::cuda::getCurrentCUDAStream());
+    outputEvents.front().block(impl.getStream(outputTensor.device()));
   }
 
   at::Tensor cpuOutput;
-  std::vector<at::cuda::CUDAStream> outputStreams;
-  std::vector<at::cuda::CUDAEvent> outputEvents;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 
   at::Tensor cpuInput;
-  std::vector<at::cuda::CUDAStream> inputStreams;
-  std::vector<at::cuda::CUDAEvent> inputEvents;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 };
-
-#endif
 
 } // namespace
 
@@ -2593,7 +2509,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
         outputCounts,
         inputCounts,
         tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncAlltoallCUDAWork>(
         std::move(context),
@@ -2602,7 +2517,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
         outputCounts,
         inputCounts,
         tag);
-#endif
   } else {
     invalidArgument(c10::str("unsupported device type ", device.type()));
   }
