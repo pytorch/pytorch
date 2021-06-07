@@ -133,6 +133,8 @@ class Reducer {
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
 
+  bool static_graph_first_bwd();
+
   // Weak reference to associated DDP logger. The reference is weak to avoid
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
@@ -456,7 +458,6 @@ class Reducer {
   // get current cuda stream
   const c10::Stream get_current_stream();
   bool dynamic_graph_find_unused();
-  bool static_graph_first_bwd();
   bool static_graph_after_first_bwd();
 
   // comm_hook_ is used to access the DDP communication hook if registered.

@@ -6689,7 +6689,6 @@ class DistributedTest:
                     loss_fn(outputs[str(i)], labels).backward()
                     loss_fn(outputs_local[str(i)], labels).backward()
 
-                # All gather grads to compare them.
                 dist_grad_tensor = torch.cat(
                     [param.grad for param in ddp_model.module.parameters()]
                 )
@@ -6723,3 +6722,39 @@ class DistributedTest:
             self._test_ddp_bwd_with_retain_graph(
                 static_graph=True, find_unused_parameters=True
             )
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_static_ddp_with_retain_graph_single_fwd(self):
+            # Ensures that if we do 1 forward pass immediately followed by 2
+            # backward passes, there is no issue. In particular, verifies that
+            # delay allreduce is enqueued only once.
+            rank = self.rank
+            model = TwoLinLayerNet().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank]
+            )
+            model_ddp._set_static_graph()
+            model_local = copy.deepcopy(model)
+            inp = torch.randn(2, 10, device=rank)
+            # Run single forward pass followed by 2 calls to backward with
+            # retain_graph=True.
+            out_ddp = model_ddp(inp)
+            out_ddp = torch.add(out_ddp[0], out_ddp[1]).sum()
+            out_local = model_local(inp)
+            out_local = torch.add(out_local[0], out_local[1]).sum()
+            out_ddp.backward(retain_graph=True)
+            out_ddp.backward()
+            out_local.backward(retain_graph=True)
+            out_local.backward()
+            dist_grad_tensor = torch.cat(
+                [param.grad for param in model_ddp.module.parameters()]
+            )
+            local_grad_tensor = torch.cat(
+                [param.grad for param in model_local.parameters()]
+            )
+            self.assertEqual(dist_grad_tensor, local_grad_tensor)

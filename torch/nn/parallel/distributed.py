@@ -126,12 +126,10 @@ class _DDPSink(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         state_dict = ctx.state_dict
-        static_graph_training = ctx.state_dict['static_graph']
-        if static_graph_training and ctx.state_dict['num_iterations'] == 1:
-            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
 
         grad_enabled = state_dict['grad_enabled']
         require_backward_grad_sync = state_dict['require_backward_grad_sync']
+        static_graph_training = ctx.state_dict['static_graph']
         if grad_enabled and require_backward_grad_sync:
             if static_graph_training or not state_dict['find_unused']:
                 ctx.reducer.prepare_for_backward([])
@@ -147,6 +145,13 @@ class _DDPSink(Function):
                 # DDP takes care of undefined grads in this case to ensure the .grad
                 # field of the param is not touched.
                 ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
+
+        # Note that we enqueue delay allreduce after prepare_for_backward in
+        # static graph training as prepare_for_backward sets the
+        # num_backwards_call counter in the reducer.
+        static_graph_first_bwd = ctx.reducer._static_graph_first_bwd()
+        if static_graph_first_bwd:
+            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
 
         return (None, None, *grad_outputs)
 
