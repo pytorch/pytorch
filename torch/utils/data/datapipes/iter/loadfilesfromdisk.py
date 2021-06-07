@@ -17,6 +17,10 @@ class LoadFilesFromDiskIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
             means open for reading in binary mode. Another option is
             't' for text mode
         length: a nominal length of the datapipe
+
+    Note:
+        The opened file handles will be closed by Python's GC periodly. Users can choose
+        to close them explicityly.
     """
 
     def __init__(

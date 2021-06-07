@@ -33,13 +33,6 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
-try:
-    from PIL import Image
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
-skipIfNoPIL = skipIf(not HAS_PIL, "no Pillow")
-
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -144,6 +137,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
+            rec[1].close()
         # read extracted files after reaching the end of the tarfile
         data_refs = list(datapipe3)
         self.assertEqual(len(data_refs), len(self.temp_files))
@@ -151,6 +145,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(data_ref[1].read(), f.read())
+            data_ref[1].close()
 
 
     def test_readfilesfromzip_iterable_datapipe(self):
@@ -169,6 +164,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
+            rec[1].close()
         # read extracted files before reaching the end of the zipile
         data_refs = list(datapipe3)
         self.assertEqual(len(data_refs), len(self.temp_files))
@@ -176,19 +172,27 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(data_ref[1].read(), f.read())
+            data_ref[1].close()
 
 
-    @skipIfNoPIL
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
-        img = Image.new('RGB', (2, 2), color='red')
-        img.save(temp_pngfile_pathname)
+        png_data = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
+        np.save(temp_pngfile_pathname, png_data)
         datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
         datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
 
-        def _helper(dp, channel_first=False):
-            for rec in dp:
+        def _png_decoder(extension, data):
+            if extension != 'png':
+                return None
+            return np.load(data)
+
+        def _helper(prior_dp, dp, channel_first=False):
+            # Byte stream is not closed
+            for inp in prior_dp:
+                self.assertFalse(inp[1].closed)
+            for inp, rec in zip(prior_dp, dp):
                 ext = os.path.splitext(rec[0])[1]
                 if ext == '.png':
                     expected = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
@@ -198,13 +202,18 @@ class TestIterableDataPipeBasic(TestCase):
                 else:
                     with open(rec[0], 'rb') as f:
                         self.assertEqual(rec[1], f.read().decode('utf-8'))
+                # Corresponding byte stream is closed by Decoder
+                self.assertTrue(inp[1].closed)
 
-        datapipe3 = dp.iter.RoutedDecoder(datapipe2, decoder_imagehandler('rgb'))
+        cached = list(datapipe2)
+        datapipe3 = dp.iter.RoutedDecoder(cached, _png_decoder)
         datapipe3.add_handler(decoder_basichandlers)
-        _helper(datapipe3)
+        _helper(cached, datapipe3)
 
-        datapipe4 = dp.iter.RoutedDecoder(datapipe2)
-        _helper(datapipe4, channel_first=True)
+        cached = list(datapipe2)
+        datapipe4 = dp.iter.RoutedDecoder(cached, decoder_basichandlers)
+        datapipe4.add_handler(_png_decoder)
+        _helper(cached, datapipe4, channel_first=True)
 
 
     def test_groupbykey_iterable_datapipe(self):
@@ -234,8 +243,9 @@ class TestIterableDataPipeBasic(TestCase):
             count = count + 1
             self.assertEqual(os.path.basename(rec[0][0]), expected[0])
             self.assertEqual(os.path.basename(rec[1][0]), expected[1])
-            self.assertEqual(rec[0][1].read(), b'12345abcde')
-            self.assertEqual(rec[1][1].read(), b'12345abcde')
+            for i in [0, 1]:
+                self.assertEqual(rec[i][1].read(), b'12345abcde')
+                rec[i][1].close()
         self.assertEqual(count, 8)
 
 
@@ -336,7 +346,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(concat_dp)
 
-        self.assertEqual(list(d for d in concat_dp), list(range(10)) + list(range(5)))
+        self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
     def test_map_datapipe(self):
         input_dp = IDP(range(10))
@@ -488,7 +498,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         filter_dp = input_ds.filter(filter_fn=_non_bool_fn)
         with self.assertRaises(ValueError):
-            temp = list(d for d in filter_dp)
+            temp = list(filter_dp)
 
     def test_sampler_datapipe(self):
         input_dp = IDP(range(10))
@@ -518,14 +528,14 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(len(shuffle_dp), len(input_ds))
 
             random.seed(123)
-            res = list(d for d in shuffle_dp)
+            res = list(shuffle_dp)
             self.assertEqual(sorted(res), exp)
 
             # Test Deterministic
             for num_workers in (0, 1):
                 random.seed(123)
                 dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn)
-                dl_res = list(d for d in dl)
+                dl_res = list(dl)
                 self.assertEqual(res, dl_res)
 
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
@@ -582,7 +592,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
-        self.assertEqual(list(d for d in zipped_dp), exp)
+        self.assertEqual(list(zipped_dp), exp)
 
         zipped_dp = dp.iter.Zip(IDP(range(10)), IDP(range(5)))
         self.assertEqual(len(zipped_dp), 5)
@@ -895,9 +905,9 @@ class TestTyping(TestCase):
                [(1, 1), (2, '2')])
         for ds in dss:
             dp = DP(ds)  # type: ignore[var-annotated]
-            self.assertEqual(list(d for d in dp), ds)
+            self.assertEqual(list(dp), ds)
             # Reset __iter__
-            self.assertEqual(list(d for d in dp), ds)
+            self.assertEqual(list(dp), ds)
 
         dss = ([(1, 1), ('2', 2)],  # type: ignore[assignment, list-item]
                [[1, '1'], [2, '2']],  # type: ignore[list-item]
@@ -905,15 +915,15 @@ class TestTyping(TestCase):
         for ds in dss:
             dp = DP(ds)
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
-                list(d for d in dp)
+                list(dp)
 
             with runtime_validation_disabled():
-                self.assertEqual(list(d for d in dp), ds)
+                self.assertEqual(list(dp), ds)
                 with runtime_validation_disabled():
-                    self.assertEqual(list(d for d in dp), ds)
+                    self.assertEqual(list(dp), ds)
 
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
-                list(d for d in dp)
+                list(dp)
 
 
 if __name__ == '__main__':
