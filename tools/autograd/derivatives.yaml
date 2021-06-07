@@ -380,15 +380,22 @@
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
   real: at::real(grad)
-  imag: at::imag(grad)
+  imag: at::imag(grad.resolve_conj())
   result: at::complex(real_t, imag_t)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs, angle: polar_backward(grad, result)
 
-- name: _conj(Tensor self) -> Tensor
+- name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
   result: self_t.conj()
+
+- name: _conj_physical(Tensor self) -> Tensor
+  self: grad.conj_physical()
+  result: self_t.conj_physical()
+
+- name: conj_physical_(Tensor(a!) self) -> Tensor(a!)
+  self: grad.conj_physical()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
@@ -1306,12 +1313,16 @@
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
   output_differentiability: [False]
 
+# If the conj bit for self is set, this is effectively a fused conj() and view_as_real
+- name: _view_as_real_physical(Tensor(a) self) -> Tensor(a)
+  self: "self.is_conj() ? at::view_as_complex(grad.contiguous()) : at::view_as_complex(grad.contiguous()).conj()"
+
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
   result: at::view_as_real(self_t)
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous()) # [gx, gy]
+  self: at::view_as_real(grad.contiguous().resolve_conj()) # [gx, gy]
   result: at::view_as_complex(self_t)
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
@@ -1361,9 +1372,11 @@
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
+  target: binary_cross_entropy_target_backward(grad, self, target, weight, reduction)
 
 - name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
+  target: not_implemented("binary_cross_entropy_backward wrt `target`")
   grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor

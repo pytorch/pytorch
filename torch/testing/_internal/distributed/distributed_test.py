@@ -4182,6 +4182,7 @@ class DistributedTest:
             def parse_env(var):
                 return os.environ[var] if var in os.environ else "N/A"
 
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=False)
 
@@ -4212,6 +4213,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("bucket_sizes"), str(param_size))
             self.assertEqual(ddp_logging_data.get("master_port"), parse_env("MASTER_PORT"))
             self.assertEqual(ddp_logging_data.get("master_addr"), parse_env("MASTER_ADDR"))
+            self.assertEqual(ddp_logging_data.get("torch_distributed_debug"), parse_env("TORCH_DISTRIBUTED_DEBUG"))
             self.assertEqual(ddp_logging_data.get("cuda_visible_devices"), parse_env("CUDA_VISIBLE_DEVICES"))
             if ddp_logging_data.get("backend_name") == "gloo":
                 self.assertEqual(ddp_logging_data.get("gloo_socket_ifname"), parse_env("GLOO_SOCKET_IFNAME"))
