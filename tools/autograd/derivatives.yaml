@@ -298,6 +298,7 @@
   self: maybe_multiply(grad, beta.conj())
   batch1: grad.bmm(batch2.transpose(1, 2).conj()) * alpha.conj()
   batch2: batch1.transpose(1, 2).conj().bmm(grad) * alpha.conj()
+  result: maybe_multiply(self_t, beta) + maybe_multiply(batch1_t.bmm(batch2_p), alpha) + maybe_multiply(batch1_p.bmm(batch2_t), alpha)
 
 - name: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
   self: zeros_like(grad)
@@ -312,19 +313,23 @@
 - name: bmm(Tensor self, Tensor mat2) -> Tensor
   self: grad.bmm(mat2.transpose(1, 2).conj())
   mat2: self.transpose(1, 2).conj().bmm(grad)
+  result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
 
 - name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
   self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
   mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
+  result: at::_bmm(self_t, mat2_p, deterministic) + at::_bmm(self_p, mat2_t, deterministic)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
+  result: cat_jvp(tensors, dim)
 
 - name: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
 
 - name: ceil(Tensor self) -> Tensor
   self: zeros_like(grad)
+  result: auto_element_wise
 
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
@@ -346,20 +351,25 @@
 
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
+  result: auto_element_wise
 
 - name: clamp_min(Tensor self, Scalar min) -> Tensor
   self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+  result: auto_element_wise
 
 - name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
   self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
   min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
+  result: where(self_p >= min_p, self_t, at::scalar_tensor(0., self_p.options())) + where(self_p < min_p, min_t, at::scalar_tensor(0., self_p.options()))
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+  result: auto_element_wise
 
 - name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
   self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
   max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
+  result: where(self_p <= max_p, self_t, at::scalar_tensor(0., self_p.options())) + where(self_p > max_p, max_t, at::scalar_tensor(0., self_p.options()))
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
@@ -370,27 +380,39 @@
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
   real: at::real(grad)
-  imag: at::imag(grad)
+  imag: at::imag(grad.resolve_conj())
+  result: at::complex(real_t, imag_t)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs, angle: polar_backward(grad, result)
 
-- name: _conj(Tensor self) -> Tensor
+- name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
   result: self_t.conj()
+
+- name: _conj_physical(Tensor self) -> Tensor
+  self: grad.conj_physical()
+  result: self_t.conj_physical()
+
+- name: conj_physical_(Tensor(a!) self) -> Tensor(a!)
+  self: grad.conj_physical()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
   other: zeros_like(other)
+  result: copysign_tensor_self_backward(self_t, self_p, result)
 
 - name: copysign.Scalar(Tensor self, Scalar other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: cos(Tensor self) -> Tensor
   self: grad * -self.sin().conj()
+  result: auto_element_wise
 
 - name: cosh(Tensor self) -> Tensor
   self: grad * self.sinh().conj()
+  result: auto_element_wise
 
 - name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   output_differentiability: [False]
@@ -401,15 +423,18 @@
 - name: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   self: other.conj().cross(grad, dim)
   other: grad.cross(self.conj(), dim)
+  result: "at::cross(self_t, other_p, dim) + at::cross(self_p, other_t, dim)"
 
 - name: logcumsumexp(Tensor self, int dim) -> Tensor
   self: logcumsumexp_backward(grad, self, result, dim)
 
 - name: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumprod_backward(grad.to(self.scalar_type()), self, dim, result)
+  result: "cumprod_jvp(self_t, self_p, result, dim).to(dtype.has_value() ? *dtype : self_p.scalar_type())"
 
 - name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumsum_backward(grad.to(self.scalar_type()), dim)
+  result: auto_linear
 
 - name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
   self: cummaxmin_backward(grad, self, indices, dim)
@@ -1288,12 +1313,16 @@
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
   output_differentiability: [False]
 
+# If the conj bit for self is set, this is effectively a fused conj() and view_as_real
+- name: _view_as_real_physical(Tensor(a) self) -> Tensor(a)
+  self: "self.is_conj() ? at::view_as_complex(grad.contiguous()) : at::view_as_complex(grad.contiguous()).conj()"
+
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
   result: at::view_as_real(self_t)
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous()) # [gx, gy]
+  self: at::view_as_real(grad.contiguous().resolve_conj()) # [gx, gy]
   result: at::view_as_complex(self_t)
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
@@ -1343,9 +1372,11 @@
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
+  target: binary_cross_entropy_target_backward(grad, self, target, weight, reduction)
 
 - name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
+  target: not_implemented("binary_cross_entropy_backward wrt `target`")
   grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
