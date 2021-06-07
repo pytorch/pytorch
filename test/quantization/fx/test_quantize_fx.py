@@ -16,7 +16,7 @@ from torch.quantization.quantize_fx import (
 
 from torch.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
 
-from torch.quantization.fx.pattern_utils import (
+from torch.quantization.fx.match_utils import (
     is_match,
     MatchAllNode,
 )
@@ -1434,7 +1434,7 @@ class TestQuantizeFx(QuantizationTestCase):
             "dynamic": (default_dynamic_qconfig, DynamicQuantCustomModule, 0)
         }
 
-        for quant_type in [QuantType.DYNAMIC]:
+        for quant_type in [QuantType.STATIC, QuantType.DYNAMIC]:
             key = quant_type_to_str(quant_type)
             qconfig, quantized_module_class, num_observers = test_configs[key]
             qconfig_dict = {"": qconfig}

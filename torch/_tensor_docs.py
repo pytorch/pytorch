@@ -893,6 +893,27 @@ conj() -> Tensor
 See :func:`torch.conj`
 """)
 
+add_docstr_all('conj_physical',
+               r"""
+conj_physical() -> Tensor
+
+See :func:`torch.conj_physical`
+""")
+
+add_docstr_all('conj_physical_',
+               r"""
+conj_physical_() -> Tensor
+
+In-place version of :meth:`~Tensor.conj_physical`
+""")
+
+add_docstr_all('resolve_conj',
+               r"""
+resolve_conj() -> Tensor
+
+See :func:`torch.resolve_conj`
+""")
+
 add_docstr_all('copysign',
                r"""
 copysign(other) -> Tensor
@@ -1968,6 +1989,20 @@ add_docstr_all('is_complex',
 is_complex() -> bool
 
 Returns True if the data type of :attr:`self` is a complex data type.
+""")
+
+add_docstr_all('is_inference',
+               r"""
+is_inference() -> bool
+
+See :func:`torch.is_inference`
+""")
+
+add_docstr_all('is_conj',
+               r"""
+is_conj() -> bool
+
+Returns True if the conjugate bit of :attr:`self` is set to true.
 """)
 
 add_docstr_all('is_signed',

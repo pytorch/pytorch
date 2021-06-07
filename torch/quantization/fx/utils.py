@@ -12,7 +12,14 @@ from torch.fx.graph import (
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
 import operator
-from .quantization_types import QuantizerCls
+
+# A dictionary for querying the weight index for a given op
+WEIGHT_INDEX_DICT = {
+    torch.nn.functional.conv1d : [1],
+    torch.nn.functional.conv2d : [1],
+    torch.nn.functional.conv3d : [1],
+    torch.nn.functional.linear : [1],
+}
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
@@ -96,7 +103,7 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Optional[Union[Callable, str]], Dict[str, Any]]:
+def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Union[Callable, str], Dict[str, Any]]:
     ''' Given an activation_post_process module,
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
@@ -119,9 +126,19 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
+    else:
+        raise Exception("Unsupported dtype in get_quantize_node_info:" + str(dtype))
+    assert quantize_op is not None
     return node_type, quantize_op, qparams
 
-def quantize_node(quantizer: QuantizerCls, in_node: Node, obs_module: torch.nn.Module, obs_node: Node, is_input: bool) -> Node:
+def quantize_node(
+        in_node: Node,
+        obs_module: torch.nn.Module,
+        obs_node: Node,
+        modules: Dict[str, torch.nn.Module],
+        quantized_graph: Graph,
+        node_name_to_scope: Dict[str, Tuple[str, type]],
+        is_input: bool) -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
     The observer node (obs_node) is used to find the FQN of the user of act_post_process.
@@ -150,15 +167,15 @@ def quantize_node(quantizer: QuantizerCls, in_node: Node, obs_module: torch.nn.M
         first_linear_use_or_first_use = in_node
         prefix = "_output"
 
-    if first_linear_use_or_first_use and first_linear_use_or_first_use.name in quantizer.node_name_to_scope:
-        module_path, _ = quantizer.node_name_to_scope[first_linear_use_or_first_use.name]
+    if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
+        module_path, _ = node_name_to_scope[first_linear_use_or_first_use.name]
     else:
         # TODO: it's not used, so actually we can skip quantization
         # but this requires changing return type of quantize_node
         # we can fix it later if needed
         module_path = ""
-    root_module = quantizer.modules['']
-    graph = quantizer.quantized_graph
+    root_module = modules['']
+    graph = quantized_graph
     node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
     inputs = [in_node]
 
@@ -323,7 +340,7 @@ def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
 
-def create_getattr_from_value(module: GraphModule, graph: Graph, prefix: str, value: Any) -> Node:
+def create_getattr_from_value(module: torch.nn.Module, graph: Graph, prefix: str, value: Any) -> Node:
     """
     Given a value of any type, creates a getattr node corresponding to the value and
     registers the value as a buffer to the module.
@@ -335,15 +352,22 @@ def create_getattr_from_value(module: GraphModule, graph: Graph, prefix: str, va
     attr_node = graph.create_node("get_attr", attr_name)
     return attr_node
 
-def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zero_point: Any) -> Tuple[Node, Node]:
+def create_qparam_nodes(
+        node_name: str,
+        scale: Any,
+        zero_point: Any,
+        modules: Dict[str, torch.nn.Module],
+        quantized_graph: Graph,
+        node_name_to_scope: Dict[str, Tuple[str, type]]
+) -> Tuple[Node, Node]:
     """
-    Create getattr nodes in the quantizer graph for scale and zero point values.
+    Create getattr nodes in the quantized graph for scale and zero point values.
     The nodes are registered with the root_module of the model.
     """
-    root_module = quantizer.modules['']
-    module_path, _ = quantizer.node_name_to_scope[node_name]
-    scale_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_scale_"), scale)
-    zero_point_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_zero_point_"), zero_point)
+    root_module = modules['']
+    module_path, _ = node_name_to_scope[node_name]
+    scale_node = create_getattr_from_value(root_module, quantized_graph, (module_path + "_scale_"), scale)
+    zero_point_node = create_getattr_from_value(root_module, quantized_graph, (module_path + "_zero_point_"), zero_point)
     return (scale_node, zero_point_node)
 
 
