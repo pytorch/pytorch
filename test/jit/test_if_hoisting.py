@@ -1,10 +1,7 @@
-import unittest
-from typing import List
 
 import torch
-from torch import nn
 from torch.testing import FileCheck
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
+from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == "__main__":
     raise RuntimeError(

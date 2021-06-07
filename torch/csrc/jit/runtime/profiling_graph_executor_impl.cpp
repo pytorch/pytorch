@@ -443,7 +443,8 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   GRAPH_DEBUG(
       "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
   EliminateCommonSubexpression(graph);
-  GRAPH_DEBUG("After HoistCommonExpression, before ConstantPooling\n", *graph);
+  GRAPH_DEBUG(
+      "After ElimiateCommonSubexpression, before ConstantPooling\n", *graph);
   ConstantPooling(graph);
   GRAPH_DEBUG("After ConstantPooling, before PeepholeOptimize\n", *graph);
   PeepholeOptimize(graph);
