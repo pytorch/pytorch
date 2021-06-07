@@ -18,6 +18,7 @@
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
+#include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/ltc_util.h"
@@ -632,6 +633,7 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_memory_info", [](const std::string& device) -> py::object {
     return GetMemoryInfo(device);
   });
+  m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
 }
 
 }  // namespace
