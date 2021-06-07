@@ -4961,6 +4961,16 @@ else:
             self.assertEqual(bin_edges.is_contiguous(), bins_contig)
             self._test_histogram_numpy(values, bin_edges, bin_range, weights, density)
 
+            # Tests with input tensor in which all elements are equal
+            elt = random.uniform(-9, 9)
+            values = make_tensor(shape, device, dtype, low=elt, high=elt, noncontiguous=not contig)
+            self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
+            self._test_histogram_numpy(values, bin_edges, bin_range, weights, density)
+
+            # Tests with input equal to bin_edges
+            weights = make_tensor(bin_ct + 1, device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            self._test_histogram_numpy(bin_edges, bin_edges, bin_range, weights, density)
+
         # Tests values of default args
         for bin_ct, shape in product(range(1, 10), shapes):
             values = make_tensor(shape, device, dtype, low=-9, high=9)
