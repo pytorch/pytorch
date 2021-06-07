@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import List
 
 import torch
@@ -11,24 +12,16 @@ from torch.distributed._sharding_spec._internals import is_valid_device
 from torch.distributed.utils import _parse_remote_device
 
 
+@dataclass
 class Shard(object):
     """
     Container which holds the data for a shard as a Tensor and also
     the associated metadata for that shard.
     """
-    __slots__ = ['_tensor', '_metadata']
+    __slots__ = ['tensor', 'metadata']
 
-    def __init__(self, tensor: torch.Tensor, metadata: ShardMetadata):
-        self._tensor = tensor
-        self._metadata = metadata
-
-    @property
-    def tensor(self) -> torch.Tensor:
-        return self._tensor
-
-    @property
-    def metadata(self) -> ShardMetadata:
-        return self._metadata
+    tensor: torch.Tensor
+    metadata: ShardMetadata
 
 
 class ShardedTensor(object):

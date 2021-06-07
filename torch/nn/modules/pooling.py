@@ -105,7 +105,7 @@ class MaxPool2d(_MaxPoolNd):
                                                    \text{stride[1]} \times w + n)
         \end{aligned}
 
-    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    If :attr:`padding` is non-zero, then the input is implicitly padded with negative infinity on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
     It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
@@ -179,7 +179,7 @@ class MaxPool3d(_MaxPoolNd):
                                                              \text{stride[1]} \times h + m, \text{stride[2]} \times w + n)
         \end{aligned}
 
-    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    If :attr:`padding` is non-zero, then the input is implicitly padded with negative infinity on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
     It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 

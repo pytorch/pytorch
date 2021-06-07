@@ -1,8 +1,3 @@
-#include <array>
-#include <unordered_map>
-#include <thread>
-#include <chrono>
-#include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -12,6 +7,7 @@
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
+#include <c10/util/irange.h>
 
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/CudaIPCTypes.h>
@@ -22,6 +18,12 @@
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/python_headers.h>
+
+#include <array>
+#include <unordered_map>
+#include <thread>
+#include <chrono>
+#include <sstream>
 
 #ifndef WIN32
 #include <pthread.h>
@@ -512,7 +514,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
-  for(int i = 0; i < num_gpus; i++) {
+  for(const auto i : c10::irange(num_gpus)) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
     auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
