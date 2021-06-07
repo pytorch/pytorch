@@ -1637,30 +1637,30 @@ class TestBinaryUfuncs(TestCase):
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod_remainder(self, device, dtype):
         # Use numpy as reference
-        def _helper(x, mod):
-            fns_list = ((torch.fmod, torch.Tensor.fmod_, np.fmod),
-                        (torch.remainder, torch.Tensor.remainder_, np.remainder))
+        def _helper(x, mod, fns_list):
             for fn, inplace_fn, ref_fn in fns_list:
-                np_x = x.cpu().numpy()
+                np_x = x.cpu().numpy() if torch.is_tensor(x) else x
                 np_mod = mod.cpu().numpy() if torch.is_tensor(mod) else mod
                 exp = ref_fn(np_x, np_mod)
                 exp = torch.from_numpy(exp)
                 res = fn(x, mod)
 
                 self.assertEqual(res, exp, exact_dtype=False)
-                # out
-                out = torch.empty(0, device=device, dtype=res.dtype)
-                fn(x, mod, out=out)
-                self.assertEqual(out, exp, exact_dtype=False)
-                self.assertEqual(out.size(), torch.Size([10, 10]))
-                # in-place (Type cast runtime error)
-                try:
-                    inplace_fn(x, mod)
-                    self.assertEqual(x, exp, exact_dtype=False)
-                except RuntimeError as e:
-                    self.assertRegex(str(e), "result type (Half|Float|Double) "
-                                             "can't be cast to the desired output "
-                                             "type (Byte|Char|Short|Int|Long)")
+
+                if torch.is_tensor(x):
+                    # out
+                    out = torch.empty(0, device=device, dtype=res.dtype)
+                    fn(x, mod, out=out)
+                    self.assertEqual(out, exp, exact_dtype=False)
+                    self.assertEqual(out.size(), torch.Size([10, 10]))
+                    # in-place (Type cast runtime error)
+                    try:
+                        inplace_fn(x, mod)
+                        self.assertEqual(x, exp, exact_dtype=False)
+                    except RuntimeError as e:
+                        self.assertRegex(str(e), "result type (Half|Float|Double) "
+                                                 "can't be cast to the desired output "
+                                                 "type (Byte|Char|Short|Int|Long)")
 
         x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
         # mod with same dtype as x
@@ -1677,7 +1677,15 @@ class TestBinaryUfuncs(TestCase):
             mods.append(mod_float)
 
         for dividend, mod in product([x, x.t()], mods):
-            _helper(dividend, mod)
+            _helper(dividend, mod,
+                    ((torch.fmod, torch.Tensor.fmod_, np.fmod),
+                     (torch.remainder, torch.Tensor.remainder_, np.remainder),))
+
+        # Tests for torch.remainder(scalar, tensor)
+        for dividend, mod in product([5, 3.14], mods):
+            if torch.is_tensor(mod):
+                _helper(dividend, mod,
+                        ((torch.remainder, torch.Tensor.remainder_, np.remainder),))
 
     @dtypes(torch.float, torch.double)
     def test_remainder_fmod_large_dividend(self, device, dtype):
@@ -2764,7 +2772,7 @@ tensor_binary_ops = [
     '__matmul__', '__rmatmul__',
     '__truediv__', '__rtruediv__', '__itruediv__',
     '__floordiv__', '__rfloordiv__', '__ifloordiv__',
-    '__mod__', '__imod__',
+    '__mod__', '__rmod__', '__imod__',
     '__pow__', '__rpow__', '__ipow__',
     '__lshift__', '__ilshift__',
     '__rshift__', '__irshift__',
@@ -2773,7 +2781,7 @@ tensor_binary_ops = [
     '__or__', '__ior__',
 
     # Unsupported operators
-    # '__rmod__', '__imatmul__',
+    # '__imatmul__',
     # '__divmod__', '__rdivmod__', '__idivmod__',
     # '__rand__', '__ror__', '__rxor__', '__rlshift__', '__rrshift__',
 ]

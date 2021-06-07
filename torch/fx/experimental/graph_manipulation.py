@@ -365,6 +365,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         node_rep["op_code"] = node.op
         node_rep["name"] = node.name
 
+        def get_user_info(user_node: Argument) -> Any:
+            return {"is_node": True, "name": str(user_node)}
+
         def get_arg_info(arg: Argument) -> Any:
             if isinstance(arg, torch.fx.Node):
                 return {"is_node": True, "name": str(arg)}
@@ -392,6 +395,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
             node_rep["args"] = map_aggregate(node.args, get_arg_info)
 
         node_rep["kwargs"] = map_aggregate(node.kwargs, get_arg_info)
+        node_rep["users"] = map_aggregate(list(node.users.keys()), get_user_info)
         serialized_dict["nodes"] += [node_rep]
 
     return serialized_dict
