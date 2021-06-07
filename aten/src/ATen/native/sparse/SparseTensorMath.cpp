@@ -1645,15 +1645,15 @@ const Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, c
   return result;
 }
 
-Tensor conj_sparse(const Tensor& input) {
-  if (!input.is_complex()) {
-    return input;
-  }
-  Tensor result = at::native::empty_like(input);
-  return conj_out_sparse(input, result);
-}
+// Tensor conj_physical_sparse(const Tensor& input) {
+//   if (!input.is_complex()) {
+//     return input;
+//   }
+//   Tensor result = at::native::empty_like(input);
+//   return conj_physical_out_sparse(input, result);
+// }
 
-Tensor& conj_out_sparse(const Tensor& input, Tensor& result) {
+Tensor& conj_physical_out_sparse(const Tensor& input, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.is_sparse());
   if (input.numel() == 0) {
     return result;
@@ -1665,7 +1665,7 @@ Tensor& conj_out_sparse(const Tensor& input, Tensor& result) {
     return result;
   }
   Tensor result_values = result._values();
-  at::conj_out(result_values, input._values());
+  at::conj_physical_out(result_values, input._values());
   return result;
 }
 
