@@ -1,5 +1,5 @@
-#include <c10d/reducer.hpp>
 #include <c10d/default_comm_hooks.hpp>
+#include <c10d/reducer.hpp>
 
 #include <functional>
 
@@ -814,7 +814,8 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec);
   if (comm_hook_ == nullptr) {
-    _AllReduceCommHookWithDivFactorState state(process_group_.get(), divFactor_);
+    _AllReduceCommHookWithDivFactorState state(
+        process_group_.get(), divFactor_);
     _AllReduceCommHookWithDivFactor allreduce_hook(state);
     bucket.future_work = allreduce_hook.runHook(grad_bucket);
   } else {
@@ -1381,7 +1382,7 @@ void Reducer::finalize_backward() {
         "This may indicate that communication hook was not properly installed.");
     bucket.future_work->wait();
     auto future_result = comm_hook_ == nullptr
-        ? _parseCppCommHookResult(bucket.future_work->value())
+        ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
     for (const auto i : c10::irange(future_result.size())) {
       auto& replica = bucket.replicas[i];
