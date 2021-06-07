@@ -12,8 +12,26 @@ add_custom_command(
 )
 
 add_library(torch_deploy libtorch_deployinterpreter.o ${DEPLOY_DIR}/deploy.cpp)
-target_link_libraries(torch_deploy PUBLIC "-Wl,--no-as-needed" shm torch protobuf::libprotobuf-lite)
 
+if(USE_DISTRIBUTED)
+  # Wrap linked dependencies as interface libraries.
+  #
+  # This ensures that the linker will not throw away any symbols that we may
+  # need from `libtorch_deployinterpreter`. See the comment above the
+  # definition of `caffe2_interface_library` for more info.
+  #
+  # For those coming from buck, this is the equivalent of setting
+  # `link_whole=True` on the target library.
+  caffe2_interface_library(c10d c10d_library)
+  caffe2_interface_library(tensorpipe tensorpipe_library)
+
+  target_link_libraries(torch_deploy PRIVATE c10d_library)
+  if(USE_TENSORPIPE)
+    target_link_libraries(torch_deploy PRIVATE tensorpipe_library)
+  endif()
+endif()
+
+target_link_libraries(torch_deploy PUBLIC "-Wl,--no-as-needed" shm torch protobuf::libprotobuf-lite)
 
 set(INTERPRETER_TEST_SOURCES
   ${DEPLOY_DIR}/test_deploy.cpp

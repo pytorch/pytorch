@@ -211,6 +211,28 @@ add_custom_command(
     "${TORCH_ROOT}"
 )
 
+if(USE_DISTRIBUTED)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
+    if(WIN32)
+      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
+    else()
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
+      append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
+    endif()
+    # Disable certain warnings for GCC-9.X
+    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+    endif()
+    if(USE_TENSORPIPE)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+    endif()
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+endif()
+
 # WARNING- any TORCH_PYTHON_COMPILE_DEFINITIONS above this line
 #          affect both torch_python and DEPLOY interpreter.
 if(USE_DEPLOY)
@@ -229,6 +251,18 @@ if(USE_DEPLOY)
   # need to specify the dependency so the generated headers exist,
   # missing dependency since torch_python_obj doesn't link onnx, the interpreter lib does.
   add_dependencies(torch_python_obj onnx)
+
+  if(USE_TENSORPIPE)
+    # Need to specify the dependency so that CMake will properly generate headers.
+    add_dependencies(torch_python_obj tensorpipe)
+    # We do not directly link against tensorpipe here (definitions will be later
+    # provided by linking libtorch_deploy with tensorpipe), but we need to add the headers.
+
+    # The non-generated headers live in the source tree.
+    target_include_directories(torch_python_obj PUBLIC ../third_party/tensorpipe)
+    # The generated headers live in the build tree.
+    target_include_directories(torch_python_obj PUBLIC ${CMAKE_BINARY_DIR}/third_party/tensorpipe)
+  endif()
 
   if(HAVE_SOVERSION)
     set_target_properties(torch_python_obj PROPERTIES
@@ -258,28 +292,6 @@ endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-endif()
-
-if(USE_DISTRIBUTED)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if(WIN32)
-      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
-    else()
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
-      append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
-    endif()
-    # Disable certain warnings for GCC-9.X
-    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-    endif()
-    if(USE_TENSORPIPE)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
-      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
-    endif()
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 endif()
 
 if(USE_NCCL AND NOT WIN32)
