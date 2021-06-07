@@ -935,6 +935,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__neg__: lambda self: -1,
         Tensor.__invert__: lambda self: -1,
         Tensor.__mod__: lambda self, other: -1,
+        Tensor.__rmod__: lambda self, other: -1,
         Tensor.__imod__: lambda self, other: -1,
         Tensor.__array_wrap__: lambda self, array: -1,
         Tensor.__getitem__: lambda self, idx: -1,
