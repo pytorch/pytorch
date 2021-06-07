@@ -384,5 +384,141 @@ TEST(TEFuserPass, FuserPass_WhereList) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TEFuserPass, OptimizeCat) {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%x : Float(10, strides=[1], device=cpu),
+          %y : Float(20, strides=[1], device=cpu),
+          %z : Float(30, strides=[1], device=cpu)):
+      %dim : int = prim::Constant[value=0]()
+      %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
+      %cat : Float(60, strides=[1], device=cpu) = aten::cat(%xyz_list, %dim)
+      %5 : Float(60, strides=[1], device=cpu) = aten::log(%cat)
+      return (%5))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // The `aten::log` op must be moved to the inputs of `aten::cat`.
+  // Also, the fallback graph should not be modified.
+  testing::FileCheck()
+      .check("prim::TensorExprGroup_")
+      ->check("aten::log")
+      ->check("aten::log")
+      ->check("aten::log")
+      ->check("aten::cat")
+      ->check("prim::FallbackGraph_1")
+      ->check("aten::cat")
+      ->check("aten::log")
+      ->run(*g);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TEFuserPass, OptimizeCat2) {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%x : Float(10, strides=[1], device=cpu),
+          %y : Float(20, strides=[1], device=cpu),
+          %z : Float(30, strides=[1], device=cpu)):
+      %dim : int = prim::Constant[value=0]()
+      %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
+      %cat : Float(60, strides=[1], device=cpu) = aten::cat(%xyz_list, %dim)
+      %5 : Float(60, strides=[1], device=cpu) = aten::log(%cat)
+      %6 : Float(60, strides=[1], device=cpu) = aten::tanh(%5)
+      return (%6))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // The `aten::log` and `aten::tanh` ops must be moved to the inputs of
+  // `aten::cat`. Also, the fallback graph should not be modified.
+  testing::FileCheck()
+      .check("prim::TensorExprGroup_")
+      ->check("aten::log")
+      ->check("aten::log")
+      ->check("aten::log")
+      ->check("aten::tanh")
+      ->check("aten::tanh")
+      ->check("aten::tanh")
+      ->check("aten::cat")
+      ->check("prim::FallbackGraph_1")
+      ->check("aten::cat")
+      ->check("aten::log")
+      ->check("aten::tanh")
+      ->run(*g);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TEFuserPass, OptimizeCatNoSingleInputElementwiseOps) {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%0 : Float(60, strides=[1], device=cpu),
+          %x : Float(10, strides=[1], device=cpu),
+          %y : Float(20, strides=[1], device=cpu),
+          %z : Float(30, strides=[1], device=cpu)):
+      %dim : int = prim::Constant[value=0]()
+      %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
+      %cat : Float(60, strides=[1], device=cpu) = aten::cat(%xyz_list, %dim)
+      %5 : Float(60, strides=[1], device=cpu) = aten::mul(%0, %cat)
+      return (%5))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // No transformation is expected since the consumers of cat are not
+  // single-input element-wise ops.
+  testing::FileCheck()
+      .check("prim::TensorExprGroup_")
+      ->check("aten::cat")
+      ->check("aten::mul")
+      ->check("prim::FallbackGraph_1")
+      ->check("aten::cat")
+      ->check("aten::mul")
+      ->run(*g);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TEFuserPass, OptimizeCatNoSingleInputElementwiseOps2) {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%0 : Float(60, strides=[1], device=cpu),
+          %1 : Float(60, strides=[1], device=cpu),
+          %x : Float(10, strides=[1], device=cpu),
+          %y : Float(20, strides=[1], device=cpu),
+          %z : Float(30, strides=[1], device=cpu)):
+      %one : int = prim::Constant[value=1]()
+      %dim : int = prim::Constant[value=0]()
+      %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
+      %cat : Float(60, strides=[1], device=cpu) = aten::cat(%xyz_list, %dim)
+      %5 : Float(60, strides=[1], device=cpu) = aten::mul(%0, %cat)
+      %6 : Float(60, strides=[1], device=cpu) = aten::add(%5, %1, %one)
+      return (%6))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // No transformation is expected since the consumers of cat are not
+  // single-input element-wise ops.
+  testing::FileCheck()
+      .check("prim::TensorExprGroup_")
+      ->check("aten::cat")
+      ->check("aten::mul")
+      ->check("aten::add")
+      ->check("prim::FallbackGraph_1")
+      ->check("aten::cat")
+      ->check("aten::mul")
+      ->check("aten::add")
+      ->run(*g);
+}
+
 } // namespace jit
 } // namespace torch

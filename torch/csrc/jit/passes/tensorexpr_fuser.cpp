@@ -1197,6 +1197,113 @@ class TensorExprFuser {
   }
 #undef REQ
 
+  // Move the given user of `aten::cat` op to its inputs.
+  Node* moveCatAfterUse(
+      Node* cat,
+      Node* user,
+      std::shared_ptr<Graph> subgraph) {
+    // Example IR:
+    //   %1 = ...
+    //   %2 = ...
+    //   %3 = prim::ListConstruct(%1, %2)
+    //   %4 = aten::cat(%3, ...)
+    //   %5 = aten::relu(%4)
+    //   return (%5)
+    //
+    // To be transformed to:
+    //   %1 = ...
+    //   %2 = ...
+    //   %5.1 = aten::relu(%1)
+    //   %5.2 = aten::relu(%2)
+    //   %3 = prim::ListConstruct(%5.1, %5.2)
+    //   %4 = aten::cat(%3, ...)
+    //   return (%4)
+
+    TORCH_INTERNAL_ASSERT(cat->output()->hasUses());
+    TORCH_INTERNAL_ASSERT(cat->output()->uses().size() == 1);
+    TORCH_INTERNAL_ASSERT(cat->input(0)->node()->kind() == prim::ListConstruct);
+    auto cat_list = cat->input(0)->node();
+    auto cat_inputs = cat_list->inputs();
+
+    std::unordered_map<Value*, Value*> new_cat_inputs;
+    for (auto inp : cat_inputs) {
+      auto new_cat_input = subgraph->createClone(
+          user, [&](Value* k) { return (k == cat->output()) ? inp : k; });
+      new_cat_input->output()->setType(inp->type());
+      new_cat_input->insertBefore(cat_list);
+      new_cat_inputs[inp] = new_cat_input->output();
+    }
+    auto new_cat_list = subgraph->createClone(
+        cat_list, [&](Value* k) { return new_cat_inputs[k]; });
+    new_cat_list->insertBefore(cat);
+    auto new_cat = subgraph->createClone(cat, [&](Value* k) {
+      return (k == cat_list->output()) ? new_cat_list->output() : k;
+    });
+    new_cat->insertBefore(cat);
+
+    user->output()->replaceAllUsesWith(new_cat->output());
+    user->destroy();
+
+    TORCH_INTERNAL_ASSERT(!cat->output()->hasUses());
+    cat->destroy();
+
+    if (!cat_list->output()->hasUses()) {
+      cat_list->destroy();
+    }
+
+    return new_cat;
+  }
+
+  // Move the users of the given `aten::cat` op to its inputs.
+  // The following constraints need to be satisfied on the cat op and its user.
+  //   * the cat op should have only one use.
+  //   * the user should be an element-wise op.
+  //   * the user should have only one tensor input.
+  //   * the user should belong to the given subgraph.
+  void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
+    auto num_tensor_inputs = [](Node* node) -> int {
+      int count = 0;
+      for (auto v : node->inputs()) {
+        if (v->type()->cast<c10::TensorType>() != nullptr) {
+          ++count;
+        }
+      }
+      return count;
+    };
+
+    TORCH_INTERNAL_ASSERT(cat->kind() == aten::cat);
+    if (cat->output()->hasUses()) {
+      if (cat->output()->uses().size() == 1) {
+        auto use = cat->output()->uses().front();
+        if (use.user->isMemberOf(tensorexpr::supported_eltwise_set()) &&
+            num_tensor_inputs(use.user) == 1) {
+          if (use.user->output()->owningGraph() == subgraph.get()) {
+            auto new_cat = moveCatAfterUse(cat, use.user, subgraph);
+            moveCatOpToEnd(new_cat, subgraph);
+          }
+        }
+      }
+    }
+  }
+
+  // Moves the users of `aten::cat` ops to its inputs whenever possible
+  // in the given fusion group subgraph.
+  void moveCatOpsToEnd(Node* fusion_group) {
+    if (fusion_group->kind() != prim::TensorExprGroup) {
+      return;
+    }
+    auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
+    std::vector<Node*> cat_nodes;
+    for (Node* n : subgraph->nodes()) {
+      if (n->kind() == aten::cat) {
+        cat_nodes.push_back(n);
+      }
+    }
+    for (auto cat : cat_nodes) {
+      moveCatOpToEnd(cat, subgraph);
+    }
+  }
+
   void prepareFusionGroupAndGuardOutputs(Block* block) {
     std::vector<Node*> fusion_groups;
     for (Node* n : block->nodes()) {
@@ -1213,6 +1320,7 @@ class TensorExprFuser {
           fusion_group,
           [](const TensorTypePtr& t) { return t; },
           prim::TypeCheck);
+      moveCatOpsToEnd(fusion_group);
     }
   }
 
