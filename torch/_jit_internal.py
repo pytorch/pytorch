@@ -822,13 +822,11 @@ def is_optional(ann):
                 ann.__module__ == 'typing' and
                 (getattr(ann, '__origin__', None) is Optional))
 
-    def args_contains_None(ann):
-        if sys.version_info >= (3, 8):
-            from typing import get_args
-            return None in get_args(ann)
-        return "None" in str(ann)
+    def is_union_as_optional(ann):
+        ann_args = ann.__args__
+        return len(ann_args) == 2 and None in ann_args
 
-    return _is_optional(ann) or (is_union(ann) and args_contains_None(ann))
+    return _is_optional(ann) or (is_union(ann) and is_union_as_optional(ann))
 
 def is_future(ann) -> bool:
     if ann is Future:
