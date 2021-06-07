@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functorch import make_functional_v2, grad_and_value, vmap, combine_state_for_ensemble
+from functorch import make_functional, grad_and_value, vmap, combine_state_for_ensemble
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html
 # The original code comes with the following citation:
@@ -58,7 +58,7 @@ loss_fn = nn.NLLLoss()
 # Step 3: Make the model functional(!!) and define a training function.
 # NB: this mechanism doesn't exist in PyTorch today, but we want it to:
 # https://github.com/pytorch/pytorch/issues/49171
-func_model, weights = make_functional_v2(MLPClassifier().to(DEVICE))
+func_model, weights = make_functional(MLPClassifier().to(DEVICE))
 
 def train_step_fn(weights, batch, targets, lr=0.2):
     def compute_loss(weights, batch, targets):

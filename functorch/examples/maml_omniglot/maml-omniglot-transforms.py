@@ -45,7 +45,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import functorch
-from functorch import make_functional_with_buffers_v2, vmap, grad
+from functorch import make_functional_with_buffers, vmap, grad
 
 # Squash the warning spam
 functorch._C._set_vmap_fallback_warning_enabled(False)
@@ -114,7 +114,7 @@ def main():
     # Given this module we've created, rip out the parameters and buffers
     # and return a functional version of the module. `fnet` is stateless
     # and can be called with `fnet(params, buffers, args, kwargs)`
-    fnet, params, buffers = make_functional_with_buffers_v2(net)
+    fnet, params, buffers = make_functional_with_buffers(net)
 
     # We will use Adam to (meta-)optimize the initial parameters
     # to be adapted.
