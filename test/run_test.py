@@ -2,6 +2,7 @@
 
 import argparse
 import copy
+import csv
 from datetime import datetime
 import json
 import modulefinder
@@ -393,7 +394,7 @@ JIT_EXECUTOR_TESTS = [
 # options.run_specified_test_cases is enabled.
 # For example:
 # {
-#   test_nn -> ([test_doubletensor_avg_pool3d, test_share_memory, test_hook_requires_grad]),
+#   "test_nn": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
 #   ...
 # }
 # For test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
@@ -532,8 +533,8 @@ def get_slow_tests_based_on_S3() -> List[str]:
 
 def get_test_case_args(test_module, using_pytest) -> List[str]:
     if test_module not in SPECIFIED_TEST_CASES_DICT:
-        print('Warning! This should not happen as this should be checked before entering the function.')
-        return
+        sys.exit(f'Warning! Test module {test_module} is not found in the specified tests dict. This should never'
+                 'happen as we make a check for that before entering this function.')
     args = []
 
     if using_pytest:
@@ -918,6 +919,10 @@ def get_selected_tests(options):
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
 
+    if options.run_specified_test_cases:
+        # Filter out any unspecified test modules.
+        selected_tests = [t for t in selected_tests if t in SPECIFIED_TEST_CASES_DICT]
+
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == 'win32' and not options.ignore_win_blocklist:
@@ -1071,10 +1076,6 @@ def determine_target(target_det_list, test, touched_files, options):
 def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
     test_module = parse_test_module(test)
 
-    if options.run_specified_test_cases and test_module not in SPECIFIED_TEST_CASES_DICT:
-        # Skip any test files not specified in SPECIFIED_TEST_CASES_DICT
-        return None
-
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
     handler = CUSTOM_HANDLERS.get(test_module, run_test)
@@ -1106,7 +1107,7 @@ def load_specified_test_cases(filename: str) -> None:
         print(f'Could not find specified tests file: {filename}. Proceeding with default behavior.')
         return
 
-    import csv
+    # The below encoding is utf-8-sig because utf-8 doesn't properly handle the byte-order-mark character
     with open(filename, mode='r', encoding="utf-8-sig") as csv_file:
         csv_reader = csv.DictReader(csv_file)
         line_count = 0
