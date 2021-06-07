@@ -783,6 +783,7 @@ Value* Value::setDebugName(const std::string& name) {
     throw std::runtime_error("Invalid name: '" + name + "'");
   }
 
+  static const char SUFFIX_SEP = '_';
   auto& names = node()->owningGraph()->unique_names_;
 
   // clear any old name from the map
@@ -801,7 +802,7 @@ Value* Value::setDebugName(const std::string& name) {
   if (old_owner_of_name != names.end()) {
     size_t suffix = 1;
     std::string name_base = name;
-    auto last_dot_pos = name.find_last_of('.');
+    auto last_dot_pos = name.find_last_of(SUFFIX_SEP);
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
           std::string::npos) {
@@ -821,7 +822,7 @@ Value* Value::setDebugName(const std::string& name) {
     std::string replacement_name;
     do {
       std::stringstream ss;
-      ss << name_base << "." << suffix++;
+      ss << name_base << SUFFIX_SEP << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
 
