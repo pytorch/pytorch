@@ -1752,10 +1752,13 @@ class _NnapiSerializer(object):
 
         self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
 
-    def get_optional_bias(self, jit_bias, weight_tensor):
+    def get_optional_bias(self, jit_bias, weight_tensor, transpose=False):
         ctype, value = self.get_constant_value(jit_bias)
         if ctype.kind() == "NoneType":
-            nnapi_bias_tensor = torch.zeros(weight_tensor.size()[0], dtype=weight_tensor.dtype)
+            if transpose:
+                nnapi_bias_tensor = torch.zeros(weight_tensor.size()[0], dtype=weight_tensor.dtype)
+            else:
+                nnapi_bias_tensor = torch.zeros(weight_tensor.size()[1], dtype=weight_tensor.dtype)
             bias_id = self.add_tensor_operand_for_weight(nnapi_bias_tensor)
             bias_oper = self.operands[bias_id]
             return bias_id, bias_oper
@@ -1813,10 +1816,10 @@ class _NnapiSerializer(object):
             _,
         ) = node.inputs()
 
-        # XXX check jit_transpose
 
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
         bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor)
+        _, transpose = self.get_constant_value(jit_transpose)
         args = self.get_conv_pool_args_2d_from_jit(
             weight_tensor.shape[2:4], jit_stride, jit_pad, jit_dilation, jit_groups)
 
@@ -1828,7 +1831,7 @@ class _NnapiSerializer(object):
             weight_tensor,
             bias_id,
             args,
-            False,  # transpose
+            transpose,
             NNAPI_FuseCode.FUSED_NONE,
         )
 
@@ -1910,7 +1913,10 @@ class _NnapiSerializer(object):
         if args.group == 1:
             # Full convolution
             depthwise = False
-            weight_permutation = (0, 2, 3, 1)
+            if transpose:
+                weight_permutation = (1, 2, 3, 0)
+            else:
+                weight_permutation = (0, 2, 3, 1)
         elif args.group == in_c:
             # Depthwise convolution
             depthwise = True
@@ -1952,8 +1958,7 @@ class _NnapiSerializer(object):
             assert out_c == in_c
         else:
             # Full convolution
-            kern_nf, kern_h, kern_w, kern_d = weight_oper.shape
-            out_c = kern_nf
+            out_c, kern_h, kern_w, kern_d = weight_oper.shape
             assert kern_d == in_c
 
         assert out_c == bias_oper.shape[0]

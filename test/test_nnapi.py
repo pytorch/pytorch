@@ -496,6 +496,59 @@ class TestNNAPI(TestCase):
                         limit=limit
                     )
 
+    def test_conv2d_transpose(self):
+        weight = torch.randn((128, 256, 2, 2))
+        input_dim = (30, 128, 7, 7)
+        inp_float = torch.randn(input_dim)
+
+        convert_dims = input_dim[:2] + (0, 0)
+        convert_arg = torch.zeros(*convert_dims)
+        convert_args = dict(self.float_and_quant_and_nhwc(convert_arg, 0.03, 128))
+        weights = dict(self.float_and_quant_and_nhwc(weight, 0.03, 128))
+
+        class ConvTransposeMod(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return torch.nn.functional.conv_transpose2d(x, self.weight)
+
+        for kind, inp in self.float_and_quant_and_nhwc(inp_float, 0.03, 128):
+            print(kind, inp.shape, weights[kind].shape)
+            with self.subTest(kind):
+                model = ConvTransposeMod(weights[kind])
+                output_size = model(inp).numel()
+                atol_rtol = (0.0001, 0)
+                limit = None
+
+                if "quant" in kind:
+                    # FIXME quantized fails with:
+                    # return torch.nn.functional.conv_transpose2d(x, self.weight)
+                    # NotImplementedError: Could not run 'aten::slow_conv_transpose2d' with arguments from the 'QuantizedCPU' backend. This could be because the operator doesn't exist for this backend, or was omitted during the selective/custom build process (if using custom build). If you are a Facebook employee using PyTorch on mobile, please visit https://fburl.com/ptmfixes for possible resolutions. 'aten::slow_conv_transpose2d' is only available for these backends: [CPU, BackendSelect, Named, InplaceOrView, AutogradOther, AutogradCPU, AutogradCUDA, AutogradXLA, UNKNOWN_TENSOR_TYPE_ID, AutogradMLC, AutogradNestedTensor, AutogradPrivateUse1, AutogradPrivateUse2, AutogradPrivateUse3, Tracer, Autocast, Batched, VmapMode].
+                    continue
+                    model = torch.nn.Sequential(model)
+                    model.eval()
+                    model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+                    model = torch.quantization.prepare(model)
+                    model(inp)
+                    model = torch.quantization.convert(model)
+                    # I've seen numerical differences between QNNPACK and NNAPI,
+                    # but never more than 1 quantum, and never more than ~1% of
+                    # the output in this test.
+                    atol_rtol = (1, 0)
+                    limit = output_size * 0.03
+
+                self.check(model, inp, atol_rtol=atol_rtol, limit=limit)
+                self.check(
+                    model,
+                    inp,
+                    convert_args=[convert_args[kind]],
+                    atol_rtol=atol_rtol,
+                    limit=limit
+                )
+
+
     def test_qadd(self):
         func = torch.nn.quantized.QFunctional()
         func.scale = 0.5
