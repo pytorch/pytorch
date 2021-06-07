@@ -39,7 +39,7 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 }
 
 template <typename scalar_t>
-void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& csr, const Tensor& col_indices, const Tensor& values, const Tensor& dense) {
+void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, const Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& csr, const Tensor& col_indices, const Tensor& values, const Tensor& dense) {
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
   scalar_t cast_beta = beta.to<scalar_t>();
@@ -213,8 +213,8 @@ const Tensor& add_sparse_csr_(const Tensor& self, const Tensor& other, const Sca
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 
-Tensor& add_out_dense_sparse_csr_cpu(
-    Tensor& out,
+const Tensor& add_out_dense_sparse_csr_cpu(
+    const Tensor& out,
     const Tensor& dense,
     const SparseCsrTensor& src,
     const Scalar& alpha) {
