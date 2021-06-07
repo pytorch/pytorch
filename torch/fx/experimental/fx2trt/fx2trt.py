@@ -1,3 +1,4 @@
+import warnings
 from typing import List, NamedTuple, Iterable, Any, Optional
 
 import torch
@@ -56,7 +57,7 @@ def torch_device_from_trt(device):
 
 
 class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None):
+    def __init__(self, engine=None, input_names=None, output_names=None, fp16_output=False):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         self.engine = engine
@@ -65,10 +66,14 @@ class TRTModule(torch.nn.Module):
         self.input_names = input_names
         self.output_names = output_names
 
+        # Indicate output is in fp16
+        self.fp16_output = fp16_output
+
     def _on_state_dict(self, state_dict, prefix, local_metadata):
         state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
         state_dict[prefix + "input_names"] = self.input_names
         state_dict[prefix + "output_names"] = self.output_names
+        state_dict[prefix + "fp16_output"] = self.fp16_output
 
     def _load_from_state_dict(
         self,
@@ -149,12 +154,18 @@ class InputTensorSpec(NamedTuple):
 class TRTInterpreter(torch.fx.Interpreter):
     def __init__(self, module : torch.fx.GraphModule, input_shapes : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
         # Preprocess the model
-        module = copy.copy(module)
+        module = copy.deepcopy(module)
+        module = module.cpu().float()
         module = NormalizeArgs(module).transform()
         super().__init__(module)
 
         self.logger = trt.Logger(logger_level)
         self.builder = trt.Builder(self.logger)
+
+        # TODO: explicit batching
+        # EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+        # self.network = self.builder.create_network(EXPLICIT_BATCH)
+
         self.network = self.builder.create_network()
 
         self.input_shape_itr = iter(input_shapes)
@@ -169,33 +180,40 @@ class TRTInterpreter(torch.fx.Interpreter):
         *args,
         max_batch_size=64,
         max_workspace_size=1 << 25,
-        fp16_mode=False,
+        fp16_mode=True,
         int8_mode=False,
-        strict_type_constraints=False
+        strict_type_constraints=True
     ):
+        # TODO hack, should check contents of args and remove fp16_mode probably
+        self.fp16_mode = fp16_mode
+
+        if int8_mode and not self.builder.platform_has_fast_int8:
+            warnings.warn("Current platform doesn't support fast native int8!")
+
+        if fp16_mode and not self.builder.platform_has_fast_fp16:
+            warnings.warn("Current platform doesn't support fast native fp16!")
+
         super().run(*args)
 
-        if int8_mode:
-            assert self.builder.platform_has_fast_int8, "Current platform doesn't support int8 inference!"
-
-        if fp16_mode:
-            assert self.builder.platform_has_fast_fp16, "Current platform doesn't support fp16 inference!"
-
         self.builder.max_batch_size = max_batch_size
-        self.builder.max_workspace_size = max_workspace_size
-        self.builder.strict_type_constraints = strict_type_constraints
-        self.builder.fp16_mode = fp16_mode
-        self.builder.int8_mode = int8_mode
+        builder_config = self.builder.create_builder_config()
+        builder_config.max_workspace_size = max_workspace_size
+        if fp16_mode:
+            builder_config.set_flag(trt.BuilderFlag.FP16)
 
-        return self.builder.build_cuda_engine(self.network), self._input_names, self._output_names
+        if int8_mode:
+            builder_config.set_flag(trt.BuilderFlag.INT8)
+
+        if strict_type_constraints:
+            builder_config.set_flag(trt.BuilderFlag.STRICT_TYPES)
+
+        engine = self.builder.build_engine(self.network, builder_config)
+        assert(engine)
+        return engine, self._input_names, self._output_names
 
     def run_node(self, n):
         self._cur_node_name = str(n)
-
-        try:
-            return super().run_node(n)
-        finally:
-            self._cur_node_metadata = None
+        return super().run_node(n)
 
     def placeholder(self, target, args, kwargs):
         shape, dtype = next(self.input_shape_itr)
@@ -205,7 +223,6 @@ class TRTInterpreter(torch.fx.Interpreter):
     def call_module(self, target, args, kwargs):
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
-
         converter = CONVERTERS.get(type(submod))
 
         if not converter:
@@ -223,7 +240,6 @@ class TRTInterpreter(torch.fx.Interpreter):
 
     def call_method(self, target, args, kwargs):
         assert isinstance(target, str)
-
         converter = CONVERTERS.get(target)
 
         if not converter:
@@ -234,6 +250,7 @@ class TRTInterpreter(torch.fx.Interpreter):
     def output(self, target, args, kwargs):
         assert len(args) == 1
         outputs = args[0] if isinstance(args[0], tuple) else (args[0],)
+
         if not all(isinstance(output, trt.tensorrt.ITensor) for output in outputs):
             raise RuntimeError('TensorRT requires all outputs to be Tensor!')
 
@@ -241,5 +258,9 @@ class TRTInterpreter(torch.fx.Interpreter):
             # TODO: set location and dtype?
             name = f'output{i}'
             output.name = name
+            if self.fp16_mode:
+                output.dtype = trt.float16
+            else:
+                output.dtype = trt.float32
             self.network.mark_output(output)
             self._output_names.append(name)

@@ -20,9 +20,6 @@ namespace cuda {
 
 Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, const Scalar& value);
 Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, const Scalar& value);
-Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result);
-Tensor _th_renorm(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm);
-Tensor & _th_renorm_(Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm);
 Tensor & _th_cross_kernel_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim);
 Tensor _th_cross_kernel(const Tensor & self, const Tensor & other, int64_t dim);
 std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A, Tensor & res1, Tensor & res2);
