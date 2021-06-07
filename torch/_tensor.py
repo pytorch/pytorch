@@ -3,7 +3,6 @@ import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
-import weakref
 
 import torch
 import torch._C as _C
