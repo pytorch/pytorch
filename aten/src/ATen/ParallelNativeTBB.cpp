@@ -70,11 +70,12 @@ int get_num_threads() {
 }
 
 int get_thread_num() {
-  return tbb::this_task_arena::current_thread_index();
+  auto tid = tbb::this_task_arena::current_thread_index();
+  return std::max(tid, 0);
 }
 
 bool in_parallel_region() {
-  return tbb::this_task_arena::current_thread_index() != -1;
+  return tbb::this_task_arena::current_thread_index() >= 0;
 }
 
 void intraop_launch(std::function<void()> func) {
