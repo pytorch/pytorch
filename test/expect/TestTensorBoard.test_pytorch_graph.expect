@@ -50,7 +50,7 @@ node {
   }
 }
 node {
-  name: "myLinear/Linear[l]/bias/16"
+  name: "myLinear/Linear[l]/bias/bias"
   op: "prim::GetAttr"
   input: "myLinear/Linear[l]/weight/13"
   attr {
@@ -76,7 +76,7 @@ node {
   op: "aten::linear"
   input: "input/x"
   input: "myLinear/Linear[l]/weight/17"
-  input: "myLinear/Linear[l]/bias/16"
+  input: "myLinear/Linear[l]/bias/bias"
   attr {
     key: "_output_shapes"
     value {
