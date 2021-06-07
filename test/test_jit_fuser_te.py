@@ -153,6 +153,8 @@ class TestTEFuser(JitTestCase):
         # we would compute the wrong result silently
         self.assertEqual(scripted(a, a), fused_kernel(a, a))
 
+
+    @unittest.skipIf(not RUN_CUDA, "test requires CUDA codegen")
     def test_invalid_input_names(self):
 
         code = '''
@@ -180,7 +182,7 @@ class TestTEFuser(JitTestCase):
         m(x, x, x, x)
         m(x, x, x, x)
 
-
+    @unittest.skipIf(not RUN_CUDA, "test requires CUDA codegen")
     def test_inlined_module_names(self):
         class Sub(torch.nn.Module):
             def __init__(self):

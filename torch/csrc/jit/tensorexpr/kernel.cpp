@@ -3018,27 +3018,6 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
   return backendType;
 }
 
-
-
-// we use the debug names in printing cuda code, they need to be removed
-// of characters that can't be used in a variable identifier
-void TensorExprKernel::genInputDebugNames() {
-  std::unordered_map<std::string, const torch::jit::Value*> name_to_value;
-  std::unordered_set<std::string> name_set;
-  std::unordered_map<const torch::jit::Value*, std::string> value_to_name;
-  for (const torch::jit::Value* input : graph_->inputs()) {
-    std::string name = input->debugName();
-    // we could get fancier here, but name conflict is extremely unlikely
-    while (name_set.count(name)) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      name = name + "_";
-    }
-    value_to_name[input] = name;
-    name_set.insert(name);
-  }
-  input_name_map_ = std::move(value_to_name);
-}
-
 Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
   Tensor* result = nullptr;
@@ -3051,7 +3030,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
         throw malformed_input(msg);
       }
       Placeholder inBuffer(
-          "t" + input_name_map_[input],
+          "t" + input->debugName(),
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),
           {0});
       std::vector<DimArg> inputTensorDims;
@@ -3077,19 +3056,19 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     case TypeKind::FloatType: {
-      VarHandle v("v" + input_name_map_[input], kDouble);
+      VarHandle v("v" + input->debugName(), kDouble);
       bufferArgs_.emplace_back(v);
       scalars_.emplace(input, v);
       break;
     }
     case TypeKind::BoolType: {
-      VarHandle v("v" + input_name_map_[input], kBool);
+      VarHandle v("v" + input->debugName(), kBool);
       bufferArgs_.emplace_back(v);
       scalars_.emplace(input, v);
       break;
     }
     case TypeKind::IntType: {
-      VarHandle v("v" + input_name_map_[input], kLong);
+      VarHandle v("v" + input->debugName(), kLong);
       bufferArgs_.emplace_back(v);
       scalars_.emplace(input, v);
       break;

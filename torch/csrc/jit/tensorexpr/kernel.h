@@ -220,7 +220,6 @@ class TORCH_API TensorExprKernel {
   std::unordered_set<const Buf*> bufOutputs_;
   std::unordered_map<const torch::jit::Value*, const Buf*> bufs_;
   std::unordered_map<const torch::jit::Value*, VarHandle> scalars_;
-  std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;
   KernelArena kernelArena_;
