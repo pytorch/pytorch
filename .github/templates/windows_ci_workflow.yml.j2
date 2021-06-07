@@ -45,10 +45,6 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
-      - name: Install Windows 10 SDK
-        shell: powershell
-        run: |
-          .\.github\scripts\install_windows_sdk.ps1
 {%- if cuda_version != "cpu" %}
       - name: Install Cuda
         shell: bash
