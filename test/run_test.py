@@ -341,6 +341,9 @@ TARGET_DET_LIST = [
 # the JSON file to store the S3 test stats
 TEST_TIMES_FILE = '.pytorch-test-times'
 
+# test case list
+TEST_CASES_FILE = '.pytorch-test-cases'
+
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
 
@@ -444,6 +447,14 @@ def pull_job_times_from_S3() -> Dict[str, float]:
         return dict()
 
     return calculate_job_times(s3_reports)
+
+
+def get_test_cases_list() -> List[str]:
+    test_cases_json: List[str] = list()
+    if os.path.exists(TEST_CASES_FILE):
+        with open(TEST_CASES_FILE) as file:
+            test_cases_json = json.load(file)
+    return test_cases_json
 
 
 def get_past_job_times() -> Dict[str, float]:
@@ -708,6 +719,12 @@ def parse_args():
         action='count',
         default=0,
         help='print verbose information and test-by-test results')
+    parser.add_argument(
+        '--load_test_cases_file',
+        choices=['include', 'bring-to-front'],
+        type=str,
+        help='load a test cases file, in JSON format',
+    )
     parser.add_argument(
         '--jit',
         '--jit',
@@ -1097,6 +1114,12 @@ def reorder_tests(tests: List[str]) -> List[str]:
 
 def main():
     options = parse_args()
+    if options.load_test_cases_file:
+        test_cases_filter_list = get_test_cases_list()
+        if options.load_test_cases_file == 'include':
+            options.include = test_cases_filter_list
+        else:
+            options.bring_to_front = test_cases_filter_list
 
     test_times_filename = options.export_past_test_times
     if test_times_filename:
