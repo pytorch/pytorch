@@ -1,7 +1,7 @@
-from torch.quantization.observer import MinMaxObserver
 import torch
 import torch.nn as nn
 from torch.quantization import default_qconfig
+from torch.quantization.observer import MinMaxObserver
 from torch.quantization.qconfig import QConfig
 from torch.quantization.quantize_fx import prepare_fx
 from torch.quantization.fx._equalize import (
@@ -125,7 +125,7 @@ class TestEqualizeFx(QuantizationTestCase):
         self.assertTrue(torch.allclose(weight_qparams[1], torch.tensor(
             ref_zero_points, dtype=weight_qparams[1].dtype), atol=1))
 
-    def test_input_weight_equalization_prepare(self):
+    def test_input_weight_equalization_prepare_linear(self):
         """ Tests that on one linear layer, the InputEqualizationObserver is
         inserted correctly, and the output observer is default set as a MinMaxObserver.
         """
@@ -135,8 +135,7 @@ class TestEqualizeFx(QuantizationTestCase):
                 self.linear = nn.Linear(1, 1)
 
             def forward(self, x):
-                x = self.linear(x)
-                return x
+                return self.linear(x)
 
         m = M().eval()
 
@@ -159,13 +158,112 @@ class TestEqualizeFx(QuantizationTestCase):
         equalization_qconfig = QConfig(activation=new_input_equalization_observer,
                                        weight=weight_equalization_observer)
 
+    def test_input_weight_equalization_prepare_linear_quantized_op(self):
+        """ Tests that on one linear layer, the InputEqualizationObserver is
+        inserted correctly, and the output observer is default set as a MinMaxObserver.
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.linear = nn.Linear(5, 5)
+                self.conv = nn.Conv2d(3, 3, 1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.conv(x)
+                return x
+
+        m = M().eval()
+
+        # Test default case: should insert a MinMaxObserver as an output observer
         qconfig_dict = {
             "": default_qconfig,
-            "object_type": [(nn.Linear, equalization_qconfig)]}
+            "object_type": [(nn.Linear, default_equalization_qconfig)]}
         prepared = prepare_fx(m, qconfig_dict)
 
         node_occurrence = {
-            ns.call_module(_InputEqualizationObserver): 2,
-            ns.call_module(MinMaxObserver): 0,
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(MinMaxObserver): 2,
+        }
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+
+    def test_input_weight_equalization_prepare_functional_linear(self):
+        """ Tests that on one functional linear layer, the
+        InputEqualizationObserver is inserted correctly, and the output observer
+        is default set as a MinMaxObserver.
+        """
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = Linear()
+                self.linear2 = Linear()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                return x
+
+        m = M().eval()
+
+        # Test default case: should insert a MinMaxObserver as an output observer
+        qconfig_dict = {
+            "": default_qconfig,
+            "object_type": [(Linear, default_equalization_qconfig)]}
+        prepared = prepare_fx(m, qconfig_dict)
+
+        node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(_WeightEqualizationObserver): 2,
+            ns.call_module(MinMaxObserver): 2,
+        }
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+
+    def test_input_weight_equalization_prepare_functional_linear_op(self):
+        """ Tests that on one functional linear layer, the
+        InputEqualizationObserver is inserted correctly, and the output observer
+        is default set as a MinMaxObserver.
+        """
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = Linear()
+                self.linear2 = Linear()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = x * 5
+                x = self.linear2(x)
+                return x
+
+        m = M().eval()
+
+        # Test default case: should insert a MinMaxObserver as an output observer
+        qconfig_dict = {
+            "": default_qconfig,
+            "object_type": [(Linear, default_equalization_qconfig)]}
+        prepared = prepare_fx(m, qconfig_dict)
+
+        node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(_WeightEqualizationObserver): 2,
+            ns.call_module(MinMaxObserver): 2,
         }
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
