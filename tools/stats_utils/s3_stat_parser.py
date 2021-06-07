@@ -44,6 +44,7 @@ class ReportMetaMeta(TypedDict):
     build_pr: str
     build_tag: str
     build_sha1: Commit
+    build_base_commit: Commit
     build_branch: str
     build_job: str
     build_workflow_id: str
