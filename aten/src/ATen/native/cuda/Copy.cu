@@ -25,7 +25,8 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   // We can memcpy the memory if both tensors have the same type AND both
   // tensors are contiguous after dimension coalescing and reordering.
   bool same_type = iter.dtype(0) == iter.dtype(1);
-  bool memcpy_eligible = same_type && iter.is_contiguous();
+  bool same_conj = iter.tensor(0).is_conj() == iter.tensor(1).is_conj();
+  bool memcpy_eligible = same_type && same_conj && iter.is_contiguous();
 
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
@@ -71,10 +72,17 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
       });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-          kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-            gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-          });
+      if (!same_conj && same_type) {
+        AT_DISPATCH_COMPLEX_TYPES(
+            dtype, "copy_conj_", [&] {
+              gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
+            });
+      } else {
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+            kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+              gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+            });
+      }
     }
   }
 
@@ -152,6 +160,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 
+    // propagate the correct conjugate bit
+    dst_contig._set_conj(dst.is_conj());
+    src_contig._set_conj(iter.tensor(1).is_conj());
+
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
     TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
@@ -200,6 +212,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 #endif
+  }
+
+  if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
+     iter.tensor(0).conj_physical_();
   }
 }
 

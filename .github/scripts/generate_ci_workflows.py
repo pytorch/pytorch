@@ -71,6 +71,7 @@ WINDOWS_WORKFLOWS = [
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cpu-py3",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
+        on_pull_request=True
     )
 ]
 
@@ -200,8 +201,8 @@ if __name__ == "__main__":
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
     )
     template_and_workflows = [
-        (jinja_env.get_template("linux_ci_workflow.yml.in"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.in"), WINDOWS_WORKFLOWS)
+        (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
+        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS)
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:
