@@ -769,7 +769,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     now = datetime.datetime.utcnow().isoformat()
     if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
         pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
-        key = f'test_time/{pr}/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+        key = f'pr_test_time/{pr}/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
     else:
         key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
