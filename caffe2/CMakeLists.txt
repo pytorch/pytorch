@@ -358,8 +358,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h"
       )
-      target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
-      add_dependencies(process_group_agent torch c10d)
+      target_link_libraries(process_group_agent PRIVATE torch c10d_cpu fmt::fmt-header-only)
+      add_dependencies(process_group_agent torch c10d_cpu)
 
       if(USE_TENSORPIPE)
         add_library(tensorpipe_agent
@@ -371,8 +371,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
           )
-        target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
-        add_dependencies(tensorpipe_agent torch c10d)
+        target_link_libraries(tensorpipe_agent PRIVATE torch c10d_cpu tensorpipe fmt::fmt-header-only)
+        add_dependencies(tensorpipe_agent torch c10d_cpu)
         if(USE_CUDA)
           target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
         endif()
@@ -1277,7 +1277,7 @@ if($ENV{TH_BINARY_BUILD})
   endif()
 endif()
 
-target_link_libraries(torch_cpu PUBLIC c10)
+target_link_libraries(torch_cpu PUBLIC c10 c10d_cpu)
 target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
@@ -1461,8 +1461,8 @@ endif()
 if(BUILD_SPLIT_CUDA)
   target_link_libraries(torch_cuda_cu INTERFACE torch::cudart)
   target_link_libraries(torch_cuda_cpp INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda_cu PUBLIC c10_cuda torch::nvtoolsext)
-  target_link_libraries(torch_cuda_cpp PUBLIC c10_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda_cu PUBLIC c10_cuda c10d_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda_cpp PUBLIC c10_cuda c10d_cuda torch::nvtoolsext)
 
   target_include_directories(
       torch_cuda_cu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1485,7 +1485,7 @@ if(BUILD_SPLIT_CUDA)
   target_link_libraries(torch_cuda_cu PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 elseif(USE_CUDA)
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda PUBLIC c10_cuda c10d_cuda torch::nvtoolsext)
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)

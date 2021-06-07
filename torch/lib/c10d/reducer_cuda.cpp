@@ -1,7 +1,5 @@
 #include <c10d/reducer.hpp>
 
-#ifdef USE_CUDA
-
 #include <c10/core/DeviceGuard.h>
 #include <ATen/cuda/CUDAEvent.h>
 
@@ -81,5 +79,3 @@ C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCUDA, CudaTimer);
 
 } // namespace
 } // namespace c10d
-
-#endif
