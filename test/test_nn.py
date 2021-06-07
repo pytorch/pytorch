@@ -2424,15 +2424,22 @@ class TestNN(NNTestCase):
         self.assertEqual(model.weight, X)
         self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
 
-    def test_errors_parametrization(self):
+    def test_wrong_dtype_size_parametrization(self):
         # A correct parametrization
         class Basic(nn.Module):
             def forward(self, x):
                 return 2 * x
 
         # A parametrization that changes the size
-        class ChangeSize(nn.Module):
+        class ChangeShapeForward(nn.Module):
             def forward(self, x):
+                return x[:-1]
+
+        class ChangeShapeInverse(nn.Module):
+            def forward(self, x):
+                return x
+
+            def right_inverse(self, x):
                 return x[:-1]
 
         # A parametrization that changes the dtype
@@ -2448,6 +2455,49 @@ class TestNN(NNTestCase):
             def right_inverse(self, x):
                 return x.float()
 
+        module = nn.Linear(3, 4)
+        weight_init = module.weight.clone()
+        with self.assertRaisesRegex(ValueError, "a parametrization may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShapeForward())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        with self.assertRaisesRegex(ValueError, "it may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShapeInverse())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        with self.assertRaisesRegex(ValueError, "a parametrization may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        with self.assertRaisesRegex(ValueError, "it may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Same tests with a parametrized module
+        parametrize.register_parametrization(module, "weight", Basic())
+
+        with self.assertRaisesRegex(ValueError, "a parametrization may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShapeForward())
+
+        with self.assertRaisesRegex(ValueError, "may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShapeInverse())
+
+        with self.assertRaisesRegex(ValueError, "a parametrization may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
+
+        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
+
+        self.assertEqual(len(module.parametrizations.weight), 1)
+        self.assertIsInstance(module.parametrizations.weight[0], Basic)
+
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+
+        # None of the operations above should have altered the weight
+        self.assertFalse(parametrize.is_parametrized(module))
+        self.assertTrue(torch.allclose(module.weight, weight_init))
+
+    def test_errors_parametrization(self):
         # A parametrization with an incorrect number of outputs
         class WrongNumberRight(nn.Module):
             def forward(self, x, y, z):
@@ -2482,26 +2532,15 @@ class TestNN(NNTestCase):
 
         module = nn.Linear(3, 4)
         weight_init = module.weight.clone()
-        with self.assertRaisesRegex(ValueError, "may not change the shape"):
-            parametrize.register_parametrization(module, "weight", ChangeSize())
-        self.assertFalse(parametrize.is_parametrized(module))
 
-        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
-            parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        with self.assertRaisesRegex(ValueError, "right_inverse"):
-            parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
+        # Register a parametrization on a non-existing parameter throws
+        with self.assertRaisesRegex(ValueError, "does not have a parameter"):
+            parametrize.register_parametrization(module, "foo", Sum())
         self.assertFalse(parametrize.is_parametrized(module))
 
         # Removing a parametrization from an unparametrized tensor throws
         with self.assertRaisesRegex(ValueError, "does not have a parametrization"):
             parametrize.remove_parametrizations(module, "bias")
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # Register a parametrization on a non-existing parameter throws
-        with self.assertRaisesRegex(ValueError, "does not have a parameter"):
-            parametrize.register_parametrization(module, "foo", Basic())
         self.assertFalse(parametrize.is_parametrized(module))
 
         parametrize.register_parametrization(module, "weight", Sum())
@@ -2516,17 +2555,6 @@ class TestNN(NNTestCase):
 
         with self.assertRaisesRegex(ValueError, "Got a sequence"):
             parametrize.register_parametrization(module, "weight", WrongRightInverseSequence())
-
-        # We check that the forward is correct if it is parametrized:
-        parametrize.register_parametrization(module, "weight", Basic())
-        with self.assertRaisesRegex(ValueError, "may not change the shape"):
-            parametrize.register_parametrization(module, "weight", ChangeSize())
-        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
-            parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
-        self.assertTrue(parametrize.is_parametrized(module, "weight"))
-        self.assertEqual(len(module.parametrizations.weight), 1)
-        self.assertIsInstance(module.parametrizations.weight[0], Basic)
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
 
         # None of the operations above should have altered the weight
         self.assertFalse(parametrize.is_parametrized(module))

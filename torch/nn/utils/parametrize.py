@@ -107,8 +107,10 @@ class ParametrizationList(ModuleList):
         #    # If it has one input, this allows to be able to use set_ to be able to
         #    # move data to/from the original tensor without changing its id (which is what the
         #    # optimiser uses to track parameters)
+        #    # We also require the shape to be the same to avoid the user shooting themselves
+        #    # in the foot. This second requirement may be dropped in the future
         #    if isinstance(Y, Tensor)
-        #      assert X.dtype == Y.dtype
+        #      assert X.dtype == Y.dtype and X.shape == Y.shape
         # Below we use original = X, new = Y
 
         # Compute new
@@ -135,9 +137,15 @@ class ParametrizationList(ModuleList):
         if self.ntensors == 1:
             if original.dtype != new.dtype:
                 raise ValueError(
-                    "'new = right_inverse(original)' may not change the dtype of the tensor.\n"
-                    f"dtype of original: {original.dtype}\n"
-                    f"dtype of new: {new.dtype}"
+                    "When `right_inverse` outputs one tensor, it may not change the dtype.\n"
+                    f"original.dtype: {original.dtype}\n"
+                    f"right_inverse(original).dtype: {new.dtype}"
+                )
+            if original.shape != new.shape:
+                raise ValueError(
+                    "When `right_inverse` outputs one tensor, it may not change the shape.\n"
+                    f"original.shape: {original.shape}\n"
+                    f"right_inverse(original).shape: {new.shape}"
                 )
             # Set the original to original so that the user does not need to re-register the parameter
             # manually in the optimiser
@@ -159,25 +167,27 @@ class ParametrizationList(ModuleList):
                 _register_parameter_or_buffer(self, f"original{i}", originali)
 
         # Consistency checks:
+        # Since f : A -> B, right_inverse : B -> A, Z and original should live in B
+        # Z = forward(right_inverse(original))
         Z = self()
         if Z.dtype != original.dtype:
             raise ValueError(
-                "Registering a parametrization may not change the dtype of the parameter.\n"
-                f"original dtype: {original.dtype}\n"
-                f"new dtype: {Z.dtype}"
+                "Registering a parametrization may not change the dtype of the tensor.\n"
+                f"unparametrized dtype: {original.dtype}\n"
+                f"parametrized dtype: {Z.dtype}"
             )
         if Z.shape != original.shape:
             raise ValueError(
-                "Registering a parametrization may not change the shape of the parameter.\n"
-                f"original shape: {original.shape}\n"
-                f"new shape: {Z.shape}"
+                "Registering a parametrization may not change the shape of the tensor.\n"
+                f"unarametrized shape: {original.shape}\n"
+                f"parametrized shape: {Z.shape}"
             )
 
     def right_inverse(self, value: Tensor) -> None:
         r"""Calls the methods ``right_inverse`` (see :func:`register_parametrization`)
-        of the parametrizations in the inverse order that they have been registered.
-        Then, it stores the result in ``self.original`` if the parametrization has one input
-        or in ``self.original0``, ``self.original1``, ... otherwise.
+        of the parametrizations in the inverse order they were registered in.
+        Then, it stores the result in ``self.original`` if ``right_inverse`` outputs one tensor
+        or in ``self.original0``, ``self.original1``, ... if it outputs several.
 
         Args:
             value (Tensor): Value to which initialize the module
@@ -189,12 +199,7 @@ class ParametrizationList(ModuleList):
                     value = module.right_inverse(value)
                 # else we assume that right_inverse is the identity
             if self.ntensors == 1:
-                if value.dtype != self.original.dtype:
-                    raise ValueError(
-                        "'X = right_inverse(Y)' may not change the dtype of the tensor.\n"
-                        f"dtype of Y: {self.original.dtype}\n"
-                        f"dtype of X: {value.dtype}"
-                    )
+                # We know that the result is going to have the same dtype
                 self.original.set_(value)  # type: ignore[call-overload]
             else:
                 for i, tensor in enumerate(value):
@@ -213,29 +218,9 @@ class ParametrizationList(ModuleList):
             x = module(x)
         return x
 
-    def append(self, module: Module) -> 'ParametrizationList':
-        # Correctness checks
-        # nb. We just check the forward, because we do not know what to feed to right_inverse
-        #     we do the necessary checks for right_inverse in the right_inverse method
-        Y = self()
-        Z = module(Y)
-        if Z.dtype != Y.dtype:
-            raise ValueError(
-                "Registering a parametrization may not change the dtype of the parameter.\n"
-                f"original dtype: {Y.dtype}\n"
-                f"new dtype: {Z.dtype}"
-            )
-        if Z.shape != Y.shape:
-            raise ValueError(
-                "Registering a parametrization may not change the shape of the parameter.\n"
-                f"original shape: {Y.shape}\n"
-                f"new shape: {Z.shape}"
-            )
-        return super().append(module)  # type: ignore[return-value]
-
 
 def _inject_new_class(module: Module) -> None:
-    r"""Sets up the parametrization mechanism used by parametrizations.
+    r"""Sets up a module to be parametrized.
 
     This works by substituting the class of the module by a class
     that extends it to be able to inject a property
@@ -307,12 +292,12 @@ def register_parametrization(
     Assume that ``tensor_name="weight"`` for simplicity. When accessing ``module.weight``,
     the module will return the parametrized version ``parametrization(module.weight)``.
     If the original tensor requires a gradient, the backward pass will differentiate
-    through the :attr:`parametrization`, and the optimizer will update the tensor accordingly.
+    through :attr:`parametrization`, and the optimizer will update the tensor accordingly.
 
     The first time that a module registers a parametrization, this function will add an attribute
     ``parametrizations`` to the module of type :class:`~ParametrizationList`.
 
-    The list of parametrizations on a tensor will be accessible under
+    The list of parametrizations on the tensor ``weight`` will be accessible under
     ``module.parametrizations.weight``.
 
     The original tensor will be accessible under
@@ -321,8 +306,8 @@ def register_parametrization(
     Parametrizations may be concatenated by registering several parametrizations
     on the same attribute.
 
-    The training mode of the registered parametrizations are updated on registration
-    if necessary to match the training mode of the host module
+    The training mode of a registered parametrization is updated on registration
+    to match the training mode of the host module
 
     Parametrized parameters and buffers have an inbuilt caching system that can be activated
     using the context manager :func:`cached`.
@@ -331,7 +316,7 @@ def register_parametrization(
 
     .. code-block:: python
 
-        def right_inverse(self, X: Tensor) -> Tensor
+        def right_inverse(self, X: Tensor) -> Union[Tensor, Sequence[Tensor]]
 
     If this method is not implemented, it defaults to the identity.
     This method is called on the unparametrized tensor when the first parametrization
@@ -341,30 +326,27 @@ def register_parametrization(
     ``forward(right_inverse(X)) == X`` (see
     `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
     Sometimes, when the parametrization is not surjective, it may be reasonable
-    to relax this, as shown in the example below.
-    This may be used to initialize the tensor, as shown in the example.
+    to relax this.
+    This may be used to initialize the tensor, as shown in the example below.
 
-    If the parametrization depends on several inputs, the ``right_inverse`` should
-    return a tuple of tensors:
+    It is possible for the first parametrization to depend on several inputs.
+    This may be implemented returning a tuple of tensors from ``right_inverse``
+    (see the example implementation of a ``RankOne`` parametrization below).
 
-    .. code-block:: python
-
-        def MultipleParametrization(nn.Module):
-            def forward(self, X: Tensor, Y: Tensor) -> Tensor
-                ...
-
-            def right_inverse(self, X: Tensor) -> Tuple[Tensor, Tensor]
-                ...
-
-    In this case, the original are also located under ``module.parametrizations.weight``
+    In this case, the unconstrained tensors are also located under ``module.parametrizations.weight``
     with names ``original0``, ``original1``,...
+
+    .. note::
+
+        Whenever a parametrization is registered, both its forward and backward method will be called
+        once to perform a number of consistency checks.
 
     .. warning::
 
         If a parametrization depends on several inputs, :func:`~register_parametrization`
         will register a number of new parameters. If such parametrization is registered
         after the optimizer is created, these new parameters will need to be added manually
-        to the optimizer. See :`torch.Optimizer.add_param_group`.
+        to the optimizer. See :meth:`torch.Optimizer.add_param_group`.
 
     Args:
         module (nn.Module): module on which to register the parametrization
@@ -372,31 +354,21 @@ def register_parametrization(
             the parametrization
         parametrization (nn.Module): the parametrization to register
 
-    Returns:
-        Module: module
-
     Raises:
-        ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name` or
-        ValueError: if the tensor is not parametrized and for ``X = module[tensor_name]``, ``Y = parametrization.right_inverse(X)``,
-                    ``parametrization(Y).dtype != X.dtype`` or
-                    ``parametrization(Y).shape != X.shape`` or
-                    ``isinstance(Y, Tensor)`` and ``Y.dtype != X.dtype``
-        ValueError: if the tensor is parametrized and for ``X = module[tensor_name]``
-                    ``parametrization(X).dtype != X.dtype`` or
-                    ``parametrization(X).shape != X.shape``
+        ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
 
     Examples:
         >>> import torch
         >>> import torch.nn as nn
         >>> import torch.nn.utils.parametrize as P
-
+        >>>
         >>> class Symmetric(nn.Module):
         >>>     def forward(self, X):
         >>>         return X.triu() + X.triu(1).T  # Return a symmetric matrix
         >>>
         >>>     def right_inverse(self, A):
         >>>         return A.triu()
-
+        >>>
         >>> m = nn.Linear(5, 5)
         >>> P.register_parametrization(m, "weight", Symmetric())
         >>> print(torch.allclose(m.weight, m.weight.T))  # m.weight is now symmetric
@@ -411,14 +383,14 @@ def register_parametrization(
         >>>     def forward(self, x, y):
         >>>         # Form a rank 1 matrix multiplying two vectors
         >>>         return x.unsqueeze(-1) @ y.unsqueeze(-2)
-
-        >>>     def right_inverse(self, Y):
-        >>>         # Project Y onto the rank 1 matrices
-        >>>         U, S, Vh = torch.linalg.svd(Y, full_matrices=False)
-        >>>         # S is ordered in a decreasing way.
+        >>>
+        >>>     def right_inverse(self, Z):
+        >>>         # Project Z onto the rank 1 matrices
+        >>>         U, S, Vh = torch.linalg.svd(Z, full_matrices=False)
+        >>>         # Return rescaled singular vectors
         >>>         s0_sqrt = S[0].sqrt().unsqueeze(-1)
         >>>         return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
-
+        >>>
         >>> linear_rank_one = P.register_parametrization(nn.Linear(4, 4), "weight", RankOne())
         >>> print(torch.linalg.matrix_rank(linear_rank_one.weight).item())
         1
@@ -426,9 +398,41 @@ def register_parametrization(
     """
     parametrization.train(module.training)
     if is_parametrized(module, tensor_name):
-        # Just add the new parametrization to the parametrization list
-        module.parametrizations[tensor_name].append(parametrization)  # type: ignore[index, union-attr]
+        # Correctness checks
+        parametrization_list = module.parametrizations[tensor_name]
+        Y = parametrization_list()
+        Z = parametrization(Y)
+        if Z.dtype != Y.dtype:
+            raise ValueError(
+                "Registering a parametrization may not change the dtype of the parameter.\n"
+                f"self.{tensor_name}.dtype: {Y.dtype}\n"
+                f"parametrization(self.{tensor_name}).dtype: {Z.dtype}"
+            )
+        if Z.shape != Y.shape:
+            raise ValueError(
+                "Registering a parametrization may not change the shape of the parameter.\n"
+                f"self.{tensor_name}.shape: {Y.shape}\n"
+                f"parametrization(self.{tensor_name}).shape: {Z.shape}"
+            )
+        if hasattr(parametrization, "right_inverse"):
+            X = parametrization.right_inverse(Z)
+            # nb. The naming of X / Y / Z in the code vs the errors is different
+            if Z.dtype != X.dtype:
+                raise ValueError(
+                    "parametrization.right_inverse(X) may not change the dtype of X.\n"
+                    f"X.dtype: {Z.dtype}\n"
+                    f"parametrization.right_inverse(X).dtype: {X.dtype}"
+                )
+            if Z.shape != X.shape:
+                raise ValueError(
+                    "parametrization.right_inverse(X) may not change the shape of X.\n"
+                    f"X.shape: {Z.shape}\n"
+                    f"parametrization.right_inverse(X).shape: {X.shape}"
+                )
+        # else right_inverse is considered to be the identity
 
+        # add the new parametrization to the parametrization list
+        parametrization_list.append(parametrization)  # type: ignore[index, union-attr]
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
