@@ -3332,20 +3332,21 @@ class TestRandomTensorCreation(TestCase):
         # n=0 is a special case that we don't need to use generator, thus no error even if
         # device and generator don't match
         torch.randperm(0, device='cuda:0', generator=torch.Generator(device='cuda:1'))
-        torch.randperm(0, device='cuda:1', generator=torch.Generator(device='cuda:0'))
+        if torch.cuda.device_count() > 1:
+            torch.randperm(0, device='cuda:1', generator=torch.Generator(device='cuda:0'))
         torch.randperm(0, device='cuda', generator=torch.Generator(device='cpu'))
         torch.randperm(0, device='cpu', generator=torch.Generator(device='cuda'))
 
         for n in (1, 3, 100, 30000):
             torch.randperm(n, device='cuda', generator=torch.Generator(device='cuda:0'))
             torch.randperm(n, device='cuda:0', generator=torch.Generator(device='cuda'))
+            # For cuda:0 to match cuda:1, we are making consistent device type matching
+            # behavior just like torch.randint. Longer term, generator should ignore
+            # device ordinal, since it's not used anyway.
+            torch.randint(low=0, high=n + 1, size=(1,), device="cuda:0", generator=torch.Generator(device='cuda:1'))
+            torch.randperm(n, device='cuda:0', generator=torch.Generator(device='cuda:1'))
             if torch.cuda.device_count() > 1:
-                # For cuda:0 to match cuda:1, we are making consistent device type matching
-                # behavior just like torch.randint. Longer term, generator should ignore
-                # device ordinal, since it's not used anyway.
-                torch.randint(low=0, high=n + 1, size=(1,), device="cuda:0", generator=torch.Generator(device='cuda:1'))
                 torch.randint(low=0, high=n + 1, size=(1,), device="cuda:1", generator=torch.Generator(device='cuda:0'))
-                torch.randperm(n, device='cuda:0', generator=torch.Generator(device='cuda:1'))
                 torch.randperm(n, device='cuda:1', generator=torch.Generator(device='cuda:0'))
 
             regex = 'Expected a .* device type for generator but found .*'
