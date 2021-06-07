@@ -34,7 +34,7 @@ void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
 
 // entrance of calculations of `inverse` using cusolver getrf + getrs, cublas getrfBatched + getriBatched
 Tensor _inverse_helper_cuda_lib(const Tensor& self);
-Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Tensor& infos_getrs);
+const Tensor& _linalg_inv_out_helper_cuda_lib(const Tensor& result, const Tensor& infos_getrf, const Tensor& infos_getrs);
 
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv);

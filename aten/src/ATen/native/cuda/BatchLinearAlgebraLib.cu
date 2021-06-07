@@ -289,7 +289,7 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, Tenso
 }
 
 // This is a type dispatching helper function for 'apply_batched_inverse_lib' and 'apply_single_inverse_lib'
-Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Tensor& infos_getrs) {
+const Tensor& _linalg_inv_out_helper_cuda_lib(const Tensor& result, const Tensor& infos_getrf, const Tensor& infos_getrs) {
   // assuming result is in column major order and contains the matrices to invert
   Tensor input_working_copy = cloneBatchedColumnMajor(result);
 

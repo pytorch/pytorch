@@ -953,7 +953,7 @@ This is an in-place routine, it overwrites the content of 'self'.
 For more information see LAPACK's documentation for GETRI and GETRF routines.
 */
 template <typename scalar_t>
-static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
+static void apply_inverse(const Tensor& self, const Tensor& infos_lu, const Tensor& infos_getri) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
@@ -1029,7 +1029,7 @@ Tensor& inverse_out(const Tensor &self, Tensor &result) {
 }
 
 // This is a type dispatching helper function for 'apply_inverse'
-Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
+const Tensor& _linalg_inv_out_helper_cpu(const Tensor &result, const Tensor& infos_lu, const Tensor& infos_getri) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
   // the content of result is overwritten by 'apply_inverse'
@@ -1041,7 +1041,7 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
 
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
 // LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
-static const Tensor& linalg_inv_out_info(const Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
+static void linalg_inv_out_info(const Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
   squareCheckInputs(input);
   checkSameDevice("linalg_inv", result, input);
   checkLinalgCompatibleDtype("linalg_inv", result, input);
@@ -1079,7 +1079,7 @@ static const Tensor& linalg_inv_out_info(const Tensor& result, Tensor& infos_lu,
     Tensor infos_lu_tmp = at::zeros({expected_info_shape}, input.options().dtype(kInt));
     Tensor infos_getri_tmp = at::zeros({expected_info_shape}, input.options().dtype(kInt));
 
-    result_tmp = linalg_inv_out_info(result_tmp, infos_lu_tmp, infos_getri_tmp, input);
+    linalg_inv_out_info(result_tmp, infos_lu_tmp, infos_getri_tmp, input);
 
     at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
@@ -1087,7 +1087,7 @@ static const Tensor& linalg_inv_out_info(const Tensor& result, Tensor& infos_lu,
     infos_lu.copy_(infos_lu_tmp);
     at::native::resize_output(infos_getri, infos_getri_tmp.sizes());
     infos_getri.copy_(infos_getri_tmp);
-    return result;
+    return;
   }
   // else  use result's storage directly
 
@@ -1124,16 +1124,18 @@ static const Tensor& linalg_inv_out_info(const Tensor& result, Tensor& infos_lu,
   result.copy_(input);
 
   // TODO: Replace this helper with DECLARE/DEFINE_DISPATCH
-  result = at::_linalg_inv_out_helper_(result, infos_lu, infos_getri);
-  return result;
+
+  // No need to assign to result; _linalg_inv_out_helper_ returns its
+  // first argument per native_functions.yaml
+  at::_linalg_inv_out_helper_(result, infos_lu, infos_getri);
 }
 
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
-const Tensor& linalg_inv_out(const Tensor &input, const Tensor &result) {
+Tensor& linalg_inv_out(const Tensor &input, Tensor &result) {
   auto info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
   auto infos_lu = at::zeros({info_shape}, input.options().dtype(kInt));
   auto infos_getri = at::zeros({info_shape}, input.options().dtype(kInt));
-  result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
+  linalg_inv_out_info(result, infos_lu, infos_getri, input);
 
   // Now check LAPACK/MAGMA/cuSOLVER error codes
   if (result.dim() > 2) {

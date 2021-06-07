@@ -9892,6 +9892,7 @@
     CPU, CUDA: linalg_householder_product_out
 
 - func: _linalg_inv_out_helper_(Tensor(a!) self, Tensor(b!) infos_lu, Tensor(c!) infos_getri) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     CPU: _linalg_inv_out_helper_cpu
@@ -9914,7 +9915,6 @@
   variants: function
 
 - func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: linalg
   variants: function
 
