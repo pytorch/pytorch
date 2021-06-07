@@ -617,43 +617,20 @@ void schedulePersistentNormalization(
     }
   }
 
-  // Make sure we don't make a cache of an input that would turn it into a
-  // persistent buffer. This gave invalid code.
-  // TODO: caching buffers to persistent should work, but was producing invalid
-  // code. Revisit.
   std::vector<TensorView*> cached_inputs;
-  // Inputs if cached would become persistent. We still want to computeWith
-  // their outputs
-  std::vector<TensorView*> dont_cache_inputs;
-  // Inputs to post normalization section of the code. We don't want these
-  // tensors to computeWith their outputs as that could attempt to change them
-  std::vector<TensorView*> post_norm_inputs;
-  // If we're going to unroll, make a cache of the inputs
+
   if (rparams.loop_unroll > 1) {
-    auto persistent_buffers =
-        scheduler_utils::persistentBuffers(fusion).buffers;
-    auto producers_for_persistence =
-        scheduler_utils::producerTvsOf(persistent_buffers);
-    std::unordered_set<TensorView*> dont_cache(
-        producers_for_persistence.begin(), producers_for_persistence.end());
-
-    // Don't cache inputs that are not producers of the reductions, they could
-    // have a different pattern than the reduction and we don't want to use them
-    // to computeWithOutputs
-    auto inputs_to_reduction_vec = scheduler_utils::inputTvsOf(reduction_tvs);
-    std::unordered_set<TensorView*> inputs_to_reductions_set(
-        inputs_to_reduction_vec.begin(), inputs_to_reduction_vec.end());
-
     auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
     for (auto tv : in_tvs) {
-      if (dont_cache.find(tv) == dont_cache.end() &&
-          inputs_to_reductions_set.count(tv)) {
+      auto cached_tv = tv->cache_after();
+      cached_inputs.emplace_back(cached_tv);
+    }
+  } else {
+    auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
+    for (auto tv : in_tvs) {
+      if (tv->uses().size() > 1) {
         auto cached_tv = tv->cache_after();
         cached_inputs.emplace_back(cached_tv);
-      } else if (!inputs_to_reductions_set.count(tv)) {
-        post_norm_inputs.emplace_back(tv);
-      } else {
-        dont_cache_inputs.emplace_back(tv);
       }
     }
   }
@@ -926,65 +903,10 @@ void schedulePersistentNormalization(
           red_tv, -1, ComputeAtMode::BestEffort);
     }
 
-    // Dont cache go through the reduction domains, meaning they must be
-    // strictly scheduled as the reduction domains. We can simply most inline
-    // from these to the outputs
-    for (auto not_cached_input : dont_cache_inputs) {
-      scheduler_utils::computeWithOutputs(
-          not_cached_input, -1, ComputeAtMode::MostInlined);
-    }
-
-    // Post norm inputs are on the fringe of the compute as they do not go
-    // through the normalization. We want to simply compute at these as much as
-    // possible relative to the outputs. We wouldn't want to computeWith their
-    // outputs as it could attempt to reorder the outputs which is not safe.
-    for (auto other_inputs : post_norm_inputs) {
-      auto tv_outputs = scheduler_utils::outputTvsOf(other_inputs);
-      if (tv_outputs.empty()) {
-        // At the moment can have dummy inputs that aren't actually connected to
-        // the graph, just skip them.
-        continue;
-      }
-      other_inputs->computeAt(tv_outputs[0], -1, ComputeAtMode::MostInlined);
-    }
-
     // Compute at should not remove parallelization scheme, but let's just make
     // sure everything is set properly
     scheduler_utils::parallelizeAllLike(
         reference_tv, scheduler_utils::allTvs(fusion));
-
-    // Nasty gotcha which we don't have a better mechanism to fix yet
-    if (
-        // Have an unswitch in the reduction
-        std::any_of(
-            reduction_tv->domain()->domain().begin(),
-            reduction_tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->getParallelType() == ParallelType::Unswitch;
-            }) &&
-        // Have a parallelized reduction
-        std::any_of(
-            reduction_tv->domain()->domain().begin(),
-            reduction_tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && id->isThread();
-            })) {
-      // If we leave unswitch on we could get a predicate around block/grid
-      // reduce which produces wrong result.
-      for (auto red_tv : reduction_tvs) {
-        auto vals_post_reduction = DependencyCheck::getAllUseChains(red_tv);
-        for (const auto& chain : vals_post_reduction) {
-          auto tvs_post_reduction = ir_utils::filterByType<TensorView>(chain);
-          for (auto tv : tvs_post_reduction) {
-            for (auto id : tv->domain()->domain()) {
-              if (id->getParallelType() == ParallelType::Unswitch) {
-                id->parallelize(ParallelType::Serial);
-              }
-            }
-          }
-        }
-      }
-    }
   } else {
     // Want to inline, especially backwards based on reduction_tv, otherwise
     // rfactor tv may not be inlined correctly
@@ -1070,43 +992,26 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
     }
   }
 
-  // Make sure we don't make a cache of an input that would turn it into a
-  // persistent buffer. This gave invalid code.
-  // TODO: caching buffers to persistent should work, but was producing invalid
-  // code. Revisit.
   std::vector<TensorView*> cached_inputs;
-  // Inputs if cached would become persistent. We still want to computeWith
-  // their outputs
-  std::vector<TensorView*> dont_cache_inputs;
-  // Inputs to post normalization section of the code. We don't want these
-  // tensors to computeWith their outputs as that could attempt to change them
-  std::vector<TensorView*> post_norm_inputs;
   // If we're going to unroll, make a cache of the inputs
   if (rparams.loop_unroll > 1) {
     auto persistent_buffers =
         scheduler_utils::persistentBuffers(fusion).buffers;
-    auto producers_for_persistence =
-        scheduler_utils::producerTvsOf(persistent_buffers);
-    std::unordered_set<TensorView*> dont_cache(
-        producers_for_persistence.begin(), producers_for_persistence.end());
-
-    // Don't cache inputs that are not producers of the reductions, they could
-    // have a different pattern than the reduction and we don't want to use them
-    // to computeWithOutputs
-    auto inputs_to_reduction_vec = scheduler_utils::inputTvsOf(reduction_tvs);
-    std::unordered_set<TensorView*> inputs_to_reductions_set(
-        inputs_to_reduction_vec.begin(), inputs_to_reduction_vec.end());
+    TORCH_INTERNAL_ASSERT(
+        persistent_buffers.empty(),
+        "Cannot schedule fusions that can produce persistent buffers in multi reduction scheduler.");
 
     auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
     for (auto tv : in_tvs) {
-      if (dont_cache.find(tv) == dont_cache.end() &&
-          inputs_to_reductions_set.count(tv)) {
+      auto cached_tv = tv->cache_after();
+      cached_inputs.emplace_back(cached_tv);
+    }
+  } else {
+    auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
+    for (auto tv : in_tvs) {
+      if (tv->uses().size() > 1) {
         auto cached_tv = tv->cache_after();
         cached_inputs.emplace_back(cached_tv);
-      } else if (!inputs_to_reductions_set.count(tv)) {
-        post_norm_inputs.emplace_back(tv);
-      } else {
-        dont_cache_inputs.emplace_back(tv);
       }
     }
   }
@@ -1382,63 +1287,9 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
           red_tv, -1, ComputeAtMode::BestEffort);
     }
 
-    // Dont cache go through the reduction domains, meaning they must be
-    // strictly scheduled as the reduction domains. We can simply most inline
-    // from these to the outputs
-    for (auto not_cached_input : dont_cache_inputs) {
-      scheduler_utils::computeWithOutputs(
-          not_cached_input, -1, ComputeAtMode::MostInlined);
-    }
-
-    // Post norm inputs are on the fringe of the compute as they do not go
-    // through the normalization. We want to simply compute at these as much as
-    // possible relative to the outputs. We wouldn't want to computeWith their
-    // outputs as it could attempt to reorder the outputs which is not safe.
-    for (auto other_input : post_norm_inputs) {
-      auto tv_outputs = scheduler_utils::outputTvsOf(other_input);
-      if (tv_outputs.empty()) {
-        // At the moment can have dummy inputs that aren't actually connected to
-        // the graph, just skip them.
-        continue;
-      }
-      other_input->computeAt(tv_outputs[0], -1, ComputeAtMode::MostInlined);
-    }
-
     scheduler_utils::parallelizeAllLike(
         reference_tv, scheduler_utils::allTvs(fusion));
 
-    // Nasty gotcha which we don't have a better mechanism to fix yet
-    if (
-        // Have an unswitch in the reduction
-        std::any_of(
-            reduction_tv->domain()->domain().begin(),
-            reduction_tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->getParallelType() == ParallelType::Unswitch;
-            }) &&
-        // Have a parallelized reduction
-        std::any_of(
-            reduction_tv->domain()->domain().begin(),
-            reduction_tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && id->isThread();
-            })) {
-      // If we leave unswitch on we could get a predicate around block/grid
-      // reduce which produces wrong result.
-      for (auto red_tv : reduction_tvs) {
-        auto vals_post_reduction = DependencyCheck::getAllUseChains(red_tv);
-        for (const auto& chain : vals_post_reduction) {
-          auto tvs_post_reduction = ir_utils::filterByType<TensorView>(chain);
-          for (auto tv : tvs_post_reduction) {
-            for (auto id : tv->domain()->domain()) {
-              if (id->getParallelType() == ParallelType::Unswitch) {
-                id->parallelize(ParallelType::Serial);
-              }
-            }
-          }
-        }
-      }
-    }
   } else {
     // Want to inline, especially backwards based on reduction_tv, otherwise
     // rfactor tv may not be inlined correctly
