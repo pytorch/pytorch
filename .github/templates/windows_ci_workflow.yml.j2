@@ -39,6 +39,8 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -90,14 +92,14 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
 {%- if cuda_version != "cpu" %}
       - name: Install Cuda
-        env:
-          INSTALL_DISPLAY_DRIVER: 1
         shell: bash
         run: |
           .circleci/scripts/windows_cuda_install.sh

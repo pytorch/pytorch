@@ -83,23 +83,6 @@ void nnc_aten_sgn(
   } catch (...) {
   }
 }
-void nnc_aten_conj(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int8_t* buf_dtypes,
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-  at::Tensor& r = tensors[0];
-  const at::Tensor& self = tensors[1];
-  try {
-    at::conj_out(r, self);
-  } catch (...) {
-  }
-}
 void nnc_aten_acos(
     int64_t bufs_num,
     void** buf_data,
@@ -2758,9 +2741,6 @@ const static RegisterNNCExternalFunction nnc_angle(
     "nnc_aten_angle",
     nnc_aten_angle);
 const static RegisterNNCExternalFunction nnc_sgn("nnc_aten_sgn", nnc_aten_sgn);
-const static RegisterNNCExternalFunction nnc_conj(
-    "nnc_aten_conj",
-    nnc_aten_conj);
 const static RegisterNNCExternalFunction nnc_acos(
     "nnc_aten_acos",
     nnc_aten_acos);
