@@ -3,6 +3,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorGeometry.h>
+#include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -118,6 +119,22 @@ c10::optional<at::Device> pickDeviceType(
       device = *tt->device();
     }
   }
+  return device;
+}
+
+c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
+  c10::optional<at::Device> device = c10::nullopt;
+  for (auto const& node : graph->nodes()) {
+    for (auto const& input : node->inputs()) {
+      if (auto tt = input->type()->cast<TensorType>()) {
+        if (auto inputDevice = tt->device()) {
+          TORCH_INTERNAL_ASSERT(!device || *device == *inputDevice);
+          device = inputDevice;
+        }
+      }
+    }
+  }
+  TORCH_INTERNAL_ASSERT(device);
   return device;
 }
 
@@ -502,7 +519,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
-  for (size_t i = 0; i < *shape.size(); i++) {
+  for (const auto i : c10::irange(*shape.size())) {
     dims.push_back(IntImm::make(*shape[i]));
   }
   return dims;
@@ -567,6 +584,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::atan:
     case aten::tanh:
     case aten::hardtanh:
+    case aten::hardsigmoid:
     case aten::hardswish:
     case aten::sqrt:
     case aten::rsqrt:
@@ -603,7 +621,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::remainder:
     case aten::atan2: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 2; idx++) {
+      for (const auto idx : c10::irange(2)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -614,7 +632,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::threshold:
     case aten::where: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 3; idx++) {
+      for (const auto idx : c10::irange(3)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -623,7 +641,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
 
     case aten::addcmul: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 4; idx++) {
+      for (const auto idx : c10::irange(4)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -2255,6 +2273,21 @@ Tensor* tensorexpr::computeOperandValue(
             return CompareSelect::make(mm, max_val, max_val, mm, kGT);
           });
     } break;
+
+    case aten::hardsigmoid: {
+      return computeOneOperand(
+          "aten_hardsigmoid",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            auto zero = Cast::make(a.dtype(), 0.0);
+            auto three = Cast::make(a.dtype(), 3.0);
+            auto six = Cast::make(a.dtype(), 6.0);
+            return clamp(zero, six, a + three) / six;
+          });
+    } break;
+
     case aten::hardswish: {
       return computeOneOperand(
           "aten_hardswish",
@@ -2650,6 +2683,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::relu6:
     case aten::leaky_relu:
     case aten::hardswish:
+    case aten::hardsigmoid:
     case aten::gelu:
     case aten::batch_norm:
     case aten::log:
@@ -3206,7 +3240,7 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
-  device_ = *pickDeviceType(graph_->inputs());
+  device_ = *pickDeviceType(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});

@@ -4,6 +4,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -23,22 +24,37 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
-static constexpr topo_position_t kLowerBound = INT64_MIN;
-static constexpr topo_position_t kUpperBound = INT64_MAX;
-static constexpr topo_position_t kMidPoint = 0;
+constexpr topo_position_t kLowerBound = INT64_MIN;
+constexpr topo_position_t kUpperBound = INT64_MAX;
+constexpr topo_position_t kMidPoint = 0;
 
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
-static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
+constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
-static void printValueRef(std::ostream& out, const Value* n) {
+void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->displayName();
 }
+
+bool isNumber(c10::string_view str) {
+  return str.find_first_not_of("0123456789") == std::string::npos;
+}
+
+std::string normalizeAttrName(c10::string_view field) {
+  if (isNumber(field)) {
+    return "_" + std::string{field};
+  }
+  return std::string{field};
+}
+
+} // namespace
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
 // logging, if they ever intersect.
@@ -761,7 +777,7 @@ bool Value::isValidName(const std::string& name) {
   }
 
   // Numbers are not legal
-  if (name.find_first_not_of("0123456789") == std::string::npos) {
+  if (isNumber(name)) {
     return false;
   }
 
@@ -778,13 +794,18 @@ Value* Value::setDebugName(const std::string& name) {
 }
 
 std::string Value::displayName() const {
-  return unique_name_ + "_" + std::to_string(unique());
+  auto id = std::to_string(unique());
+  if (hasDebugName()) {
+    return unique_name_ + "_" + id;
+  }
+
+  return id;
 }
 
 Value* Value::copyMetadata(Value* from) {
   setType(from->type());
   if (from->hasDebugName()) {
-    setDebugName(from->displayName());
+    setDebugName(from->debugNameBase());
   }
   return this;
 }
@@ -1238,7 +1259,7 @@ void Node::cloneFrom(Node* s) {
 void Node::replaceAllUsesWith(Node* n) {
   AT_ASSERT(outputs().size() == n->outputs().size());
   size_t nOutputs = outputs().size();
-  for (size_t i = 0; i < nOutputs; i++) {
+  for (const auto i : c10::irange(nOutputs)) {
     outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
   }
 }
@@ -1562,7 +1583,7 @@ Value* Graph::insert(
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
   // NB: Node constructor adds node to all_nodes
   auto n = new Node(this, kind);
-  for (size_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
     n->addOutput();
   }
   return n;
@@ -1742,7 +1763,7 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
-  n->output()->setDebugName("attr_" + field);
+  n->output()->setDebugName(normalizeAttrName(field));
   return n;
 }
 
@@ -2044,7 +2065,7 @@ std::vector<Value*> inlineCallTo(
   AT_ASSERT(new_outputs.size() == old_outputs.size());
   for (size_t i = 0; i < old_outputs.size(); ++i) {
     if (old_outputs[i]->hasDebugName()) {
-      new_outputs[i]->setDebugName(old_outputs[i]->displayName());
+      new_outputs[i]->setDebugName(old_outputs[i]->debugNameBase());
     }
     old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
   }

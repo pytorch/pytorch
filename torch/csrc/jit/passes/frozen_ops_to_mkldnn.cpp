@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -193,7 +194,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       // the binary operators (add/mul) are commutative and only take tensor
       // inputs, so we can inplace either the first or second input
       int64_t reusable_value_index = -1;
-      for (size_t i = 0; i < 2; i++) {
+      for (const auto i : c10::irange(2)) {
         TORCH_INTERNAL_ASSERT(node->inputs().at(i)->type()->cast<TensorType>());
         if (!set_liveness[alias_mapping[node->inputs().at(i)]]->isAfter(node)) {
           reusable_value_index = i;
@@ -905,7 +906,7 @@ class MKLDNNSubgraphSlicer {
 
     if (n->kind() == aten::add || n->kind() == aten::mul) {
       // mkldnn doesn't currently support Tensor-Scalar add
-      for (size_t i = 0; i < 2; i++) {
+      for (const auto i : c10::irange(2)) {
         if (!n->inputs().at(i)->type()->cast<TensorType>()) {
           return false;
         }

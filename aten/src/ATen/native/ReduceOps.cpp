@@ -16,6 +16,7 @@
 #include <ATen/core/grad_mode.h>
 
 #include <c10/util/irange.h>
+#include <c10/util/SmallBuffer.h>
 
 #include <algorithm>
 #include <functional>
@@ -1380,6 +1381,56 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
   return at::native::argmin_out(self, dim, keepdims, result);
 }
 
+static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_sqrt) {
+  const auto dtype = self.scalar_type();
+  TORCH_CHECK(dtype == kDouble || dtype == kFloat,
+              "std_var_all: Unsupported dtype ", dtype);
+
+  auto mean = self.mean().item<double>();
+  auto iter = TensorIteratorConfig()
+      .add_input(self)
+      .build();
+
+  auto reduction = [&](int64_t begin, int64_t end, double thread_sum) {
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "std_var_all_cpu", [&] {
+      iter.serial_for_each([&] (char** data, const int64_t* strides, int64_t size0, int64_t size1) {
+        const double local_mean = mean;
+        const int64_t inner_stride = strides[0];
+        const int64_t outer_stride = strides[1];
+
+        double local_sum = 0.0;
+        for (int64_t i = 0; i < size1; ++i) {
+          const char* row_ptr = data[0] + outer_stride * i;
+          for (int64_t j = 0; j < size0; ++j) {
+            const auto ptr = reinterpret_cast<const scalar_t*>(row_ptr + inner_stride * j);
+            auto dx = (static_cast<double>(*ptr) - local_mean);
+            local_sum += dx * dx;
+          }
+        }
+        thread_sum += local_sum;
+      }, {begin, end});
+    });
+
+    return thread_sum;
+  };
+
+  // ((x - mean)**2).sum()
+  const double sum_dx2 = at::parallel_reduce(
+      0, iter.numel(), at::internal::GRAIN_SIZE, 0.0, reduction, std::plus<>{});
+
+  const auto var = [&] () __ubsan_ignore_float_divide_by_zero__ {
+    return sum_dx2 / std::max(int64_t{0}, self.numel() - correction);
+  }();
+  const auto result = take_sqrt ? std::sqrt(var) : var;
+
+  if (dtype == kFloat) {
+    // Convert to infinity if out of range for a float.
+    // Doing it now prevents checked_convert failing later
+    return static_cast<float>(result);
+  }
+  return result;
+}
+
 static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
     c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
@@ -1439,9 +1490,9 @@ static Tensor& std_var_out(
       iter.common_dtype() != kBFloat16 && iter.common_dtype() != kHalf) {
     // NOTE: CPU performance significantly regressed when attempting to port to
     // ATen,
-    //   so all-reduce is still implemented in TH.
+    //   so all-reduce has a custom implementation.
     //   See https://github.com/pytorch/pytorch/pull/43858.
-    result.fill_(legacy::cpu::_th_std_var(self, correction, take_sqrt));
+    result.fill_(std_var_all_cpu(self, correction, take_sqrt));
   } else {
     std_var_stub(iter.device_type(), iter, correction, take_sqrt);
   }
@@ -1747,19 +1798,6 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, Dimname dim, Tensor&
 
 Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
-}
-
-Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
-  auto mask = (self != 0);
-  return mask.sum(dims);
-}
-
-Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
-  if (dim){
-    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
-    return at::count_nonzero(self, IntArrayRef{wrap_dim});
-  }
-  return at::count_nonzero(self, IntArrayRef{});
 }
 
 bool cpu_equal(const Tensor& self, const Tensor& other) {

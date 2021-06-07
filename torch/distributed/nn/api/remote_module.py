@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import collections
+import io
 import sys
 import types
 from typing import (
@@ -208,28 +209,11 @@ class _RemoteModule(nn.Module):
         """
         super().__init__()
 
-        # NOTE: if a new attribute is added to this class, also need to add it
-        # to ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` for pickling/unpickling.
-
-        # Sanity checks.
-        assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
+        enable_moving_cpu_tensors_to_cuda = self._prepare_init(remote_device)
 
         # Default arguments preperation.
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
-
-        self.on, self.device = _parse_remote_device(remote_device)
-        agent = rpc._get_current_rpc_agent()
-        # If the device map of the remote worker is set,
-        # then enable moving any input CPU tensors to the same cuda device.
-        self.is_device_map_set = bool(
-            agent._get_device_map(agent.get_worker_info(self.on))
-        )
-        # ``enable_moving_cpu_tensors_to_cuda`` is less strict than ``is_device_map_set``:
-        # If ``enable_moving_cpu_tensors_to_cuda`` is true, but the device map is not set,
-        # then any CPU tensors can still be moved to a cuda device to run forward,
-        # but the output must be moved back to CPU before being sent over the wire.
-        enable_moving_cpu_tensors_to_cuda = torch.device(self.device).type == "cuda"
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
@@ -242,13 +226,16 @@ class _RemoteModule(nn.Module):
                 (_module_interface_cls, enable_moving_cpu_tensors_to_cuda),
             )
 
-            # Instantiate template on local side.
-            generated_module = (
-                instantiator.instantiate_scriptable_remote_module_template(
-                    _module_interface_cls, enable_moving_cpu_tensors_to_cuda
-                )
+            self._init_template(
+                _module_interface_cls, enable_moving_cpu_tensors_to_cuda
             )
-            self.generated_methods = generated_module._generated_methods
+
+            # Instantiate template on remote side.
+            fut = rpc.rpc_async(
+                self.on,
+                _instantiate_template,
+                (_module_interface_cls, enable_moving_cpu_tensors_to_cuda),
+            )
 
             # Create the module on the remote side.
             fut.wait()  # Ensure remote_module_cls is available on remote side.
@@ -273,22 +260,8 @@ class _RemoteModule(nn.Module):
                 (module_cls, args, kwargs, self.device),
             )
 
-        # Install generated methods.
-        for method in self.generated_methods:
-            method_name = method.__name__
-            method = torch.jit.export(method)
-            setattr(self, method_name, types.MethodType(method, self))
-
-        # Sanity check: whether to be pickled must be explicitly defined for every attribute.
-        for k in self.__dict__.keys():
-            if (
-                k not in _REMOTE_MODULE_PICKLED_ATTRIBUTES
-                and k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
-            ):
-                raise AttributeError(
-                    "Attribute {} must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
-                    "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k)
-                )
+        self._install_generated_methods()
+        self._check_attribute_picklability()
 
     def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
         """
@@ -423,10 +396,10 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
-        _raise_not_supported(self.train.__name__)
+        return self.module_rref.rpc_sync().train()  # type: ignore[operator, union-attr]
 
     def eval(self: T) -> T:  # type: ignore[return]
-        _raise_not_supported(self.eval.__name__)
+        return self.module_rref.rpc_sync().eval()  # type: ignore[operator, union-attr]
 
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
@@ -439,6 +412,150 @@ class _RemoteModule(nn.Module):
 
     def extra_repr(self) -> str:  # type: ignore[return]
         _raise_not_supported(self.extra_repr.__name__)
+
+    def _prepare_init(self, remote_device: str) -> bool:  # type: ignore[return]
+        """
+        Prepares the initializaiton and returns whether to enable automatically moving CPU tensors to CUDA devices.
+        """
+        # Sanity check.
+        assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
+
+        self.on, self.device = _parse_remote_device(remote_device)
+        agent = rpc._get_current_rpc_agent()
+        # If the device map of the remote worker is set,
+        # then enable moving any input CPU tensors to the same cuda device.
+        self.is_device_map_set = bool(
+            agent._get_device_map(agent.get_worker_info(self.on))
+        )
+        # ``enable_moving_cpu_tensors_to_cuda`` is less strict than ``is_device_map_set``:
+        # If ``enable_moving_cpu_tensors_to_cuda`` is true, but the device map is not set,
+        # then any CPU tensors can still be moved to a cuda device to run forward,
+        # but the output must be moved back to CPU before being sent over the wire.
+        enable_moving_cpu_tensors_to_cuda = torch.device(self.device).type == "cuda"
+        return enable_moving_cpu_tensors_to_cuda
+
+    def _init_template(self, module_interface_cls, enable_moving_cpu_tensors_to_cuda):
+        """
+        Instantiates template on local side.
+        """
+        generated_module = instantiator.instantiate_scriptable_remote_module_template(
+            module_interface_cls, enable_moving_cpu_tensors_to_cuda
+        )
+        self.generated_methods = generated_module._generated_methods
+
+    def _check_attribute_picklability(self):
+        """
+        Checks if all the attribute has explicitly defined whether to be pickled (i.e., picklability).
+        """
+        for k in self.__dict__.keys():
+            if (
+                k not in _REMOTE_MODULE_PICKLED_ATTRIBUTES
+                and k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
+            ):
+                raise AttributeError(
+                    "Attribute {} must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
+                    "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k)
+                )
+
+    def _install_generated_methods(self):
+        for method in self.generated_methods:
+            method_name = method.__name__
+            method = torch.jit.export(method)
+            setattr(self, method_name, types.MethodType(method, self))
+
+    @staticmethod
+    def init_from_module_rref(
+        remote_device: str,
+        module_rref: rpc.RRef[nn.Module],
+        _module_interface_cls: Any = None,
+    ):
+        """
+        Besides the constructor, a RemoteModule instance can also be initialized given a module RRef.
+        This alternate initiailization method can be particularly useful if we want to create multiple
+        RemoteModule instances that share the same underlying module and reduce memory consumption.
+
+        Moreover, this also provides a workaround for passing script RemoteModule over RPC,
+        which is not supported. The recommended way is as follows:
+
+            1. the sender creates a RemoteModule;
+            2. the sender sends its ``module_rref`` over RPC;
+            3. the receiver calls this method to initialize another RemoteModule using the same ``module_rref``.
+
+        Example::
+            Run the following code in two different processes:
+
+            >>> # On worker 0:
+            >>> import torch
+            >>> import torch.distributed.rpc as rpc
+            >>> from torch import nn, Tensor
+            >>> from torch.distributed.nn.api.remote_module import RemoteModule
+            >>>
+            >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+            >>> remote_module = RemoteModule(
+            >>>     "worker1/cpu", nn.Linear, args=(20, 30),
+            >>> )
+            >>>
+            >>> remote_module1 = rpc.rpc_sync(
+            >>>     "worker1/cpu",
+            >>>     RemoteModule.init_from_module_rref,
+            >>>     ("worker1/cpu", remote_module1.get_module_rref()),
+            >>> )
+            >>> rpc.shutdown()
+
+            >>> # On worker 1:
+            >>> import torch
+            >>> import torch.distributed.rpc as rpc
+            >>>
+            >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+            >>> rpc.shutdown()
+
+        Args:
+            remote_device (str): Device on the destination worker where we'd like to place this module.
+                The device can be a local device or a remote device specified by one of the following remote
+                formats:
+
+                    1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
+                    2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
+
+                In addition, the device field can be optional and the default value is "cpu".
+            module_rref (RRef[nn.Module]): The module reference shared by both the caller and
+                the created remote module.
+            _module_interface_cls (type, optional): The TorchScript interface type for the module
+                to be created. The type object should be decorated by @torch.jit.interface.
+                If not provided, the generated RemoteModule is not torchscript-able.
+                Warning, this is an experimental API and susceptible to frequent changes.
+
+        Returns:
+            A remote module instance which wraps the :class:`~nn.Module` created by the
+            user-provided ``module_rref``, it has a blocking ``forward`` method and an
+            asynchronous ``forward_async`` method that returns a future of the ``forward`` call
+            on the user-provided module on the remote side.
+        """
+        # NOTE: if a new attribute is added to this class, also need to add it
+        # to ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` for pickling/unpickling.
+
+        remote_module = object.__new__(RemoteModule)
+
+        enable_moving_cpu_tensors_to_cuda = remote_module._prepare_init(remote_device)
+
+        if _module_interface_cls is not None:
+            # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
+            remote_module.is_scriptable = True
+
+            remote_module._init_template(
+                _module_interface_cls, enable_moving_cpu_tensors_to_cuda
+            )
+        else:
+            remote_module.is_scriptable = False
+            remote_module.generated_methods = (
+                _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
+            )
+        remote_module.module_rref = module_rref
+
+        remote_module._install_generated_methods()
+        remote_module._check_attribute_picklability()
+
+        return remote_module
 
 
 class RemoteModule(_RemoteModule):
@@ -565,7 +682,9 @@ def _remote_module_reducer(remote_module):
             print(
                 "The new attribute ``{}`` of RemoteModule is ignored during RPC pickling. "
                 "To pickle this attribute, please add it to ``_REMOTE_MODULE_PICKLED_ATTRIBUTES``. "
-                "Otherwise, please explicitly add it to ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k),
+                "Otherwise, please explicitly add it to ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(
+                    k
+                ),
                 file=sys.stderr,
             )
 
@@ -574,4 +693,35 @@ def _remote_module_reducer(remote_module):
         tuple(pickled_attrs.values()),
     )
 
+
+def _recursive_script_module_receiver(
+    recursive_script_module_serialized,
+):
+    """
+    Deserializes a RecursiveScirptModule that does not contain a script RemoteModule.
+    """
+    f = io.BytesIO(recursive_script_module_serialized)
+    m = torch.jit.load(f)
+    return m
+
+
+def _recursive_script_module_reducer(recursive_script_module):
+    """
+    Serializes a RecursiveScirptModule that does not contain a script RemoteModule,
+    and raises an error otherwise.
+    """
+    if hasattr(recursive_script_module._c, "module_rref"):
+        raise RuntimeError(
+            "Passing a script RemoteModule over RPC is not supported. Please create a RemoteModule in the sender, "
+            "send the `module_rref` to the receiver, and create a new instance on the receiver end by passing this `module_rref`."
+        )
+
+    f = io.BytesIO()
+    torch.jit.save(recursive_script_module, f)
+    return (_recursive_script_module_receiver, (f.getvalue(),))
+
+
 _internal_rpc_pickler._register_reducer(RemoteModule, _remote_module_reducer)
+_internal_rpc_pickler._register_reducer(
+    torch.jit.RecursiveScriptModule, _recursive_script_module_reducer
+)
