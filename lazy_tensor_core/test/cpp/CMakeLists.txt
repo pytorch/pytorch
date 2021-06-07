@@ -41,12 +41,15 @@ ExternalProject_Add(
 ExternalProject_Get_Property(googletest SOURCE_DIR)
 
 set(TORCH_LTC_TEST_SOURCES
+  cpp_test_util.cpp
   main.cpp
   metrics_snapshot.cpp
   test_async_task.cpp
   test_ir.cpp
   test_mayberef.cpp
   test_ltc_util_cache.cpp
+  test_aten_ltc_ts_tensor.cpp
+  torch_ltc_ts_test.cpp
 )
 
 add_executable(test_ptltc ${TORCH_LTC_TEST_SOURCES})

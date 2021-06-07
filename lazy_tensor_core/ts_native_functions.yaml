@@ -1,0 +1,32 @@
+backend: XLA
+cpp_namespace: torch_lazy_tensors
+supported:
+  - add.Tensor
+  - as_strided
+  - as_strided_
+  - constant_pad_nd
+  - _copy_from
+  - empty.memory_format
+  - empty_strided
+  - expand
+  - gelu
+  - gelu_backward
+  - max_pool2d_with_indices
+  - max_pool2d_with_indices_backward
+  - max_pool3d_with_indices
+  - max_pool3d_with_indices_backward
+  - normal_
+  - permute
+  - squeeze_
+  - squeeze_.dim
+  - t
+  - t_
+  - transpose.int
+  - transpose_
+  - unsqueeze
+  - unsqueeze_
+  - view
+  - alias
+autograd:
+  - max_pool2d
+  - max_pool3d

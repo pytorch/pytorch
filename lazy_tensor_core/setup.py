@@ -100,6 +100,15 @@ def create_version_files(base_dir, version, ltc_git_sha, torch_git_sha):
     f.write('}  // namespace torch_lazy_tensors\n')
 
 
+def generate_xla_aten_code(base_dir):
+  generate_code_cmd = [os.path.join(base_dir, 'scripts', 'generate_code.sh')]
+  if subprocess.call(generate_code_cmd) != 0:
+    print(
+        'Failed to generate ATEN bindings: {}'.format(generate_code_cmd),
+        file=sys.stderr)
+    sys.exit(1)
+
+
 def _compile_parallel(self,
                       sources,
                       output_dir=None,
@@ -185,6 +194,9 @@ if build_mode not in ['clean']:
   # Generate version info (lazy_tensor_core.__version__).
   create_version_files(base_dir, version, ltc_git_sha, torch_git_sha)
 
+  # Generate the code before globbing!
+  generate_xla_aten_code(base_dir)
+
   computation_client_src = os.path.join(base_dir, 'third_party', 'computation_client')
   computation_client_dst = os.path.join(base_dir, 'lazy_tensors')
   cmd = ['cp', '-r', '-u', '-p', computation_client_src, computation_client_dst]
@@ -220,9 +232,10 @@ absl_files = list(
 # Fetch the sources to be built.
 torch_ltc_sources = (
     glob.glob('lazy_tensor_core/csrc/*.cpp') + glob.glob('lazy_tensor_core/csrc/ops/*.cpp') +
-    glob.glob('lazy_tensor_core/csrc/compiler/*.cpp') + glob.glob('lazy_tensors/client/*.cc') +
-    glob.glob('lazy_tensors/*.cc') + glob.glob('lazy_tensors/client/lib/*.cc') +
-    glob.glob('lazy_tensors/core/platform/*.cc') + client_files + absl_files)
+    glob.glob('lazy_tensor_core/csrc/compiler/*.cpp') + glob.glob('lazy_tensor_core/csrc/ts_backend/*.cpp') +
+    glob.glob('lazy_tensors/client/*.cc') + glob.glob('lazy_tensors/*.cc') +
+    glob.glob('lazy_tensors/client/lib/*.cc') + glob.glob('lazy_tensors/core/platform/*.cc') +
+    client_files + absl_files)
 
 # Constant known variables used throughout this file.
 lib_path = os.path.join(base_dir, 'lazy_tensor_core/lib')
