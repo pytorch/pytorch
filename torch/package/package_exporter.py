@@ -6,7 +6,7 @@ import pickletools
 import types
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, IntFlag
 from pathlib import Path
 from typing import (
     Any,
@@ -49,6 +49,15 @@ class _ModuleProviderAction(Enum):
     EXTERN = 2
     MOCK = 3
     DENY = 4
+
+
+class VerbosityLevel(IntFlag):
+    """List of different levels of verbosity info to print after PackageExporter closes.
+    """
+
+    NONE = 0
+    PACKAGE_INFO = 1
+    PACKAGE_AND_DEPENDENCY_INFO = 2
 
 
 class PackagingErrorReason(Enum):
@@ -170,8 +179,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        verbose: bool = True,
-        verbosity_lvl: int = 0,
+        verbose: int = VerbosityLevel.NONE,
     ):
         """
         Create an exporter.
@@ -184,7 +192,9 @@ class PackageExporter:
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
             verbosity_lvl: How much information to print out.
-                '0' will print out package contents, '1' will in addition print out dependency information.
+                VerbosityLevel.NONE (0) will print out nothing, VerbosityLevel.PACKAGE_INFO (1) will print
+                out the package contents sorted by category, and VerbosityLevel.PACKAGE_AND_DEPENDENCY_INFO (3)
+                will print out the package contents with dependency information.
         """
         if isinstance(f, (Path, str)):
             f = str(f)
@@ -204,8 +214,6 @@ class PackageExporter:
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
         self.verbose = verbose
-        self.verbosity_lvl = verbosity_lvl
-        self._implicitly_externed: List[str] = []
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
         # These are OrderedDicts for compatibility with RemovableHandle.
@@ -383,9 +391,11 @@ node [shape=box];
             return
 
         if self._can_implicitly_extern(module_name):
-            self._implicitly_externed.append(module_name)
             self.dependency_graph.add_node(
-                module_name, action=_ModuleProviderAction.EXTERN, provided=True
+                module_name,
+                action=_ModuleProviderAction.EXTERN,
+                provided=True,
+                implicitly_externed=True,
             )
             return
 
@@ -825,63 +835,77 @@ node [shape=box];
 
     def _print_debug_info(self):
         """Print out the debugging information based on the verbosity level."""
+
         def print_pretty(
             category: str,
             entries: List[str],
-            indention=0,
+            indentation=0,
             recurse=True,
             bullet_char="-",
         ):
             tab = "    "
-            tabs = ""
-            for _ in range(0, indention):
-                tabs += tab
+            tabs = tab * indentation
             print(f"{tabs}{bullet_char} {category}:")
             tabs += tab
             for item in sorted(entries):
                 print(f"{tabs}{item}")
-                if recurse and self.verbosity_lvl > 0:
+                if recurse and self.verbose > 1:
                     successors = self.dependency_graph._succ[item].keys()
                     if successors:
-                        print_pretty("relies on", successors, 2, False, "*")
+                        print_pretty(
+                            "relies on",
+                            successors,
+                            indentation=2,
+                            recurse=False,
+                            bullet_char="*",
+                        )
                     predecessors = self.dependency_graph._pred[item].keys()
                     if predecessors:
-                        print_pretty("included in", predecessors, 2, False, "*")
+                        print_pretty(
+                            "included in",
+                            predecessors,
+                            indentation=2,
+                            recurse=False,
+                            bullet_char="*",
+                        )
 
         interned_mods = []
-        externed_mods = []
+        explicitly_externed_mods = []
+        implicitly_externed_mods = []
         mocked_mods = []
         pickled_objs = []
         invalid_nodes = []
+        denied_nodes = []
 
         for module_name, attrs in self.dependency_graph.nodes.items():
-            if "action" in attrs.keys():
-                action = attrs["action"]
-            else:
-                action = None
+            action = attrs.get("action")
 
             if action == _ModuleProviderAction.EXTERN:
-                if module_name not in self._implicitly_externed:
-                    externed_mods.append(module_name)
-
+                if attrs.get("implicityly_externed"):
+                    implicitly_externed_mods.append(module_name)
+                else:
+                    explicitly_externed_mods.append(module_name)
             elif action == _ModuleProviderAction.MOCK:
                 mocked_mods.append(module_name)
-
             elif action == _ModuleProviderAction.INTERN:
-                if attrs.get("is_pickle") is True:
+                if attrs.get("is_pickle"):
                     pickled_objs.append(module_name)
                 else:
                     interned_mods.append(module_name)
+            elif action == _ModuleProviderAction.DENY:
+                denied_nodes.append(module_name)
             else:
                 invalid_nodes.append(module_name)
+
         print("Package Contents:")
         print_pretty("interned modules", interned_mods)
-        print_pretty("explicitly externed modules", externed_mods)
-        print_pretty("implicitly externed modules", self._implicitly_externed)
+        print_pretty("explicitly externed modules", explicitly_externed_mods)
+        print_pretty("implicitly externed modules", implicitly_externed_mods)
         print_pretty("mocked modules", mocked_mods)
         print_pretty("pickles", pickled_objs)
+        print_pretty("denied modules which are depended upon", denied_nodes)
         print_pretty("invalid objects", invalid_nodes)
-        if self.verbosity_lvl > 0:
+        if self.verbose > 1:
             print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
 
     def close(self):

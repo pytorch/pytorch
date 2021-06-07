@@ -11,6 +11,7 @@ class DiGraph:
         # Nested dict of node -> successor node -> nothing.
         # (didn't implement edge data)
         self._succ = {}
+        # Nested dict of node -> predecessor node -> nothing.
         self._pred = {}
 
     def add_node(self, n, **kwargs):
