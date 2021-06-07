@@ -6,6 +6,8 @@
 namespace c10d {
 namespace {
 
+const int kMilliSecondToNanosSecond = 1000000;
+
 class CudaTimer : public Timer {
  private:
   c10::Device device;
@@ -45,8 +47,8 @@ class CudaTimer : public Timer {
 
   c10::optional<int64_t> measureDifference(Event start, Event end) override {
     c10::DeviceGuard g(device);
-    at::cuda::CUDAEvent& start_event = getTime(start);
-    at::cuda::CUDAEvent& end_event = getTime(end);
+    at::cuda::CUDAEvent& start_event = getEvent(start);
+    at::cuda::CUDAEvent& end_event = getEvent(end);
     // It is possible users did not call backward or run codes in
     // no-sync mode, in this case, some cudaEvents like "backward_compute_end"
     // or "backward_comm_start" or "backward_comm_end" will not be recorded.

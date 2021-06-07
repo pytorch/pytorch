@@ -674,12 +674,12 @@ libtorch_python_core_sources = [
 ]
 
 libtorch_python_distributed_core_sources = [
+    "torch/lib/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
-    "torch/lib/c10d/frontend.cpp",
     "torch/csrc/distributed/autograd/init.cpp",
     "torch/csrc/distributed/rpc/agent_utils.cpp",
     "torch/csrc/distributed/rpc/init.cpp",
