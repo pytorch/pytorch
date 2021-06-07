@@ -14,12 +14,14 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
@@ -128,7 +130,6 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
@@ -1770,6 +1771,15 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
       });
+  py::class_<OperatorInfo>(m, "OperatorInfo")
+      .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);
+  m.def("_get_model_ops_and_info", [](const std::string& filename) {
+    return _get_model_ops_and_info(filename);
+  });
+  m.def("_get_model_ops_and_info_from_buffer", [](const std::string& buffer) {
+    std::istringstream in(buffer);
+    return _get_model_ops_and_info(in);
+  });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
@@ -2081,6 +2091,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
+
+  initScriptDictBindings(module);
 }
 } // namespace jit
 } // namespace torch

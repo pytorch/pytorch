@@ -10,8 +10,9 @@ import yaml
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
-                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT,
-                                     tensorGeometryT, scalarTypeT, SpecialArgName)
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT, boolT,
+                                     tensorGeometryT, scalarTypeT, SpecialArgName,
+                                     OptionalCType, stringT)
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
@@ -136,7 +137,7 @@ def postprocess_forward_derivatives(
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type == 'TensorList':
+            if arg.type == 'at::TensorList':
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -169,21 +170,23 @@ def postprocess_forward_derivatives(
                                    "forward definition of gradient as element_wise but it does not "
                                    "defines the gradient formula for its argument which is required.")
             # This transformation is based on the observation that for element-wise functions, the Jacobian
-            # matrix is diagonal and thus doing J * v or v * J gives the same result.
+            # matrix is diagonal and thus doing J * v is the same as (v^T J)^T (in practice, we ignore the transpositions)
+            # For the complex case, we use hermitian transpose and get (v.conj() J).conj()
             # So here we are going to re-use the backward formula and replace two things:
-            # 1) all occurrences of "grad" with "foo_t", where foo is the name of the unique differentiable input.
+            # 1) all occurrences of "grad" with "foo_t.conj()", where foo is the name of the unique differentiable input.
             # 2) all usage of an original input "foo" with its primal value "foo_p".
+            # 3) conjugate the final result
             # For example, for abs, the backward formula is:
             #   grad * self.sgn()
             # And this function generates a forward formula that is:
-            #   self_t * self_p.sgn()
+            #   (self_t.conj() * self_p.sgn()).conj()
 
             backward_formula = derivatives[0].original_formula
             input_name = args_with_derivatives[0].name
 
             # Do replacement 1) of the grad
             def repl(m: Any) -> str:
-                return f"{m.group(1)}{input_name}_t{m.group(2)}"
+                return f"{m.group(1)}{input_name}_t.conj(){m.group(2)}"
             fw_formula = re.sub(IDENT_REGEX.format("grad"), repl, backward_formula)
 
             # Do replacement 2) of the input variables
@@ -193,6 +196,9 @@ def postprocess_forward_derivatives(
                 def repl(m: Any) -> str:
                     return f"{m.group(1)}{arg_name}_p{m.group(2)}"
                 fw_formula = re.sub(IDENT_REGEX.format(arg_name), repl, fw_formula)
+
+            # Do the final conjugate 3)
+            fw_formula = f"({fw_formula}).conj()"
 
             # Since there is a single differentiable inputs and we necessarily need its tangent we can
             # simply require all differentiable input's tangent.
@@ -492,6 +498,11 @@ def saved_variables(
             'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
             'expr': stride_expr,
         }),
+        # replace self.is_conj() with self_conjugate
+        (r'{}.is_conj\(\)', {
+            'suffix': '_conjugate',
+            'nctype': lambda name: NamedCType(name, BaseCType(boolT)),
+        })
     ]
 
     # find which arguments need to be saved
@@ -515,6 +526,15 @@ def saved_variables(
                 return name + suffix
 
             formula = re.sub(regex.format(name), repl, formula)
+
+        # c10::optional<std::string> types stored in Backward nodes must be
+        # converted to c10::optional<c10::string_view> before being passed into
+        # the backward function
+        if nctype.type == OptionalCType(BaseCType(stringT)):
+            formula = re.sub(
+                rf'\b{name}\b',
+                f'{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : c10::nullopt',
+                formula)
 
         # Find any variables which remain in the formula and save them
         if re.search(IDENT_REGEX.format(name), formula):

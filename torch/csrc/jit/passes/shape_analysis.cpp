@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -147,12 +148,6 @@ class ShapePropagator {
     return dim;
   }
 
-  // TODO: Would be better to make JIT not assume that CUDA devices
-  // are the only thing that exist.
-  static at::Device jitDeviceIndexToDevice(int device) {
-    return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
-  }
-
   IValue representativeValue(Value* v) {
     TypePtr type_ = v->type();
     // if the value is actually constant, just use it!
@@ -161,13 +156,12 @@ class ShapePropagator {
     }
     if (TensorTypePtr type = type_->cast<TensorType>()) {
       if (type->isComplete()) {
-        auto attype = type->device()->is_cpu() ? at::CPU(*type->scalarType())
-                                               : at::CUDA(*type->scalarType());
         at::DeviceGuard device_guard(*type->device());
         return at::empty_strided(
                    *type->sizes().concrete_sizes(),
                    *type->strides().concrete_sizes(),
-                   attype.options())
+                   at::TensorOptions(*type->device())
+                       .dtype(*type->scalarType()))
             .zero_();
       }
       // fallthrough
@@ -238,7 +232,7 @@ class ShapePropagator {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
     // binary arithmetic ops, more than 2 args is alpha.
-    for (size_t i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       auto dtt = node->inputs()[i]->type()->expect<TensorType>();
       auto inputDtype = dtt->scalarType();
       if (!dtt || !inputDtype) {
@@ -884,7 +878,7 @@ class ShapePropagator {
             "aten::trunc(Tensor self) -> Tensor",
             "aten::rot90(Tensor self, int k, int[] dims) -> Tensor",
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
-            "aten::slice(Tensor self, int dim, int? start=None, int? end=None, int step=1) -> Tensor",
+            "aten::slice(Tensor self, int dim, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
         },
         [](Node* node) -> type_vec_t {

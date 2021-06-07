@@ -1,9 +1,10 @@
 # @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/windows_ci_workflow.yml
+# Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Windows CI (pytorch-win-vs2019-cpu-py3)
 
 on:
+  pull_request:
   push:
     branches:
       - master
@@ -15,6 +16,7 @@ env:
   BUILD_WHEEL: 1
   CUDA_VERSION: "cpu"
   IN_CI: 1
+  INSTALL_WINDOWS_SDK: 1
   JOB_BASE_NAME: test
   PYTHON_VERSION: "3.6"
   SCCACHE_BUCKET: "ossci-compiler-cache"
@@ -23,30 +25,42 @@ env:
   VC_VERSION: ""
   VC_YEAR: "2019"
 
+concurrency:
+  group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: "windows.4xlarge"
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
-          choco install vswhere -y
           .\.circleci\scripts\vs_install.ps1
-      - name: Install Windows 10 SDK
-        shell: powershell
-        run: |
-          .\.github\scripts\install_windows_sdk.ps1
       - name: Build
         shell: bash
         run: |
           .jenkins/pytorch/win-build.sh
-      - name: Upload artifacts
+      # Upload to github so that people can click and download artifacts
+      - name: Upload artifacts to Github
         if: always()
         uses: actions/upload-artifact@v2
+        # Don't fail on upload to GH since it's only for user convenience
+        continue-on-error: true
         with:
-          retention-days: 30
+          retention-days: 14
+          if-no-files-found: error
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          path: C:\w\build-results
+      - name: Upload artifacts to s3
+        if: always()
+        uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        with:
+          retention-days: 14
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\w\build-results
@@ -60,16 +74,13 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
-          choco install vswhere -y
           .\.circleci\scripts\vs_install.ps1
-      - name: Install Windows 10 SDK
-        shell: powershell
-        run: |
-          .\.github\scripts\install_windows_sdk.ps1
-      - uses: actions/download-artifact@v2
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -94,7 +105,7 @@ jobs:
         if: always()
         with:
           name: test-reports
-          retention-days: 30
+          retention-days: 14
           if-no-files-found: error
           path:
             test/**/*.xml

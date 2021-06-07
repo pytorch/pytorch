@@ -70,11 +70,12 @@ int get_num_threads() {
 }
 
 int get_thread_num() {
-  return tbb::this_task_arena::current_thread_index();
+  auto tid = tbb::this_task_arena::current_thread_index();
+  return std::max(tid, 0);
 }
 
 bool in_parallel_region() {
-  return tbb::this_task_arena::current_thread_index() != -1;
+  return tbb::this_task_arena::current_thread_index() >= 0;
 }
 
 void intraop_launch(std::function<void()> func) {
@@ -85,9 +86,9 @@ void intraop_launch(std::function<void()> func) {
   }
 }
 
-std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
-  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
   if (get_num_threads() > 1) {
     tg_.run(
       [func, future]() {

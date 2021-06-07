@@ -6,6 +6,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/EmbeddingBag.h>
+#include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -242,7 +243,7 @@ REGISTER_OPERATOR_FUNCTOR(
         const size_t size = p_node->inputs().size();
         c10::List<IValue> vals(type.getElementType());
         vals.reserve(size);
-        for (size_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           vals.push_back(p_node->Input(i));
         }
         p_node->Output(0) = std::move(vals);
@@ -264,7 +265,7 @@ REGISTER_OPERATOR_FUNCTOR(
         const size_t size = p_node->inputs().size();
         std::vector<IValue> vals;
         vals.reserve(size);
-        for (size_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           vals.push_back(p_node->Input(i));
         }
         p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
@@ -464,9 +465,9 @@ void optimizePointwise(
     int width) {
   using namespace torch::jit::tensorexpr;
   std::vector<For*> loops = ln->getLoopStmtsFor(target);
-  For *outer, *inner, *tail;
+  For *inner, *tail;
   TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
-  ln->splitWithTail(loops[0], width, &outer, &inner, &tail);
+  ln->splitWithTail(loops[0], width, &inner, &tail);
   ln->vectorize(inner);
 }
 
@@ -1034,7 +1035,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -1054,7 +1055,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -1070,6 +1071,10 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
     if (n->inputs().size() != 2) {
       return nullptr;
     }
+    // TODO: make __getitem__ work for other container types
+    if (n->input(0)->type()->castRaw<DictType>() == nullptr) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
       auto dict = p_node->Input(0).toGenericDict();
       auto key = p_node->Input(1);
@@ -1083,7 +1088,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -1100,7 +1105,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -1328,9 +1333,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
-    c10::optional<std::string> rounding_mode = c10::nullopt;
+    c10::optional<c10::string_view> rounding_mode = c10::nullopt;
     if (p_node->inputs().size() > 2) {
-      rounding_mode = p_node->Input(2).toOptional<std::string>();
+      rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
     }
 
     if (p_node->Output(0).isNone()) {
@@ -1577,7 +1582,7 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
 
-        if (!packed_weight) {
+        if (packed_weight) {
           packed_weight->apply_out(
               input, output_scale, output_zero_point, out_t);
         } else {
@@ -1587,6 +1592,33 @@ REGISTER_OPERATOR_FUNCTOR(
           packed_weight_tmp->apply_out(
               input, output_scale, output_zero_point, out_t);
         }
+      };
+    });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    aten::full_like,
+    aten_full_like,
+    [](Node* n) -> SROperator {
+      if (n->inputs().size() != 7) {
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto in1_s = p_node->Input(1).toScalar();
+        if (p_node->Output(0).isNone()) {
+          const auto& in0_t = p_node->Input(0).toTensor();
+          const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+          const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+          const auto device = p_node->Input(4).toOptional<c10::Device>();
+          const auto pin_memory = p_node->Input(5).toOptional<bool>();
+          const auto memory_format =
+              p_node->Input(6).toOptional<c10::MemoryFormat>();
+
+          p_node->Output(0) = at::native::empty_like(
+              in0_t, dtype, layout, device, pin_memory, memory_format);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        at::native::fill_out(out_t, in1_s);
       };
     });
 

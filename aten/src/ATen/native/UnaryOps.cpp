@@ -28,7 +28,8 @@ namespace at {
 namespace meta {
 
 // Unary float operations always produce floating point
-// outputs, even if their inputs are integer
+// outputs for floating point and integral types
+// For complex inputs, the output type should be the same as input type.
 #define CREATE_UNARY_FLOAT_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
     build_unary_float_op(maybe_get_output(), self);   \
@@ -49,6 +50,7 @@ CREATE_UNARY_FLOAT_META_FUNC(erfinv)
 CREATE_UNARY_FLOAT_META_FUNC(exp)
 CREATE_UNARY_FLOAT_META_FUNC(exp2)
 CREATE_UNARY_FLOAT_META_FUNC(expm1)
+CREATE_UNARY_FLOAT_META_FUNC(i0)
 CREATE_UNARY_FLOAT_META_FUNC(lgamma)
 CREATE_UNARY_FLOAT_META_FUNC(log)
 CREATE_UNARY_FLOAT_META_FUNC(log10)
@@ -62,6 +64,8 @@ CREATE_UNARY_FLOAT_META_FUNC(sinc)
 CREATE_UNARY_FLOAT_META_FUNC(sinh)
 CREATE_UNARY_FLOAT_META_FUNC(special_entr)
 CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1e)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
@@ -78,7 +82,6 @@ TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   }
 CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
-CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
 CREATE_UNARY_META_FUNC(sgn)
 
@@ -165,6 +168,8 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_entr)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
@@ -359,7 +364,8 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
+    // real is never affected by conjugate bit, safe to use physical version
+    auto real_tensor = at::_view_as_real_physical(self);
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
@@ -375,17 +381,44 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor& conj_out(const Tensor& self, Tensor& result) {
-  return unary_op_impl_out(result, self, conj_stub);
+Tensor& conj_physical_out(const Tensor& self, Tensor& result) {
+  return unary_op_impl_out(result, self, conj_physical_stub);
 }
 
-Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+Tensor _conj_physical(const Tensor& self) {
+  if (self.is_conj()) {
+    return self.conj().clone();
+  }
+  return unary_op_impl(self, at::conj_physical_out);
+}
+
+Tensor conj_physical(const Tensor& self) {
+  if (!self.is_complex()) return self;
+  return at::_conj_physical(self);
+}
+
+Tensor& conj_physical_(Tensor& self) {
+  if (!self.is_complex()) return self;
+  return unary_op_impl_out(self, self, conj_physical_stub);
+}
+
+Tensor resolve_conj(const Tensor& self) {
+  if (!self.is_conj()) { return self; }
+  // conjugation is handled in `copy_()` that clone ultimately calls into
+  return self.clone(self.suggest_memory_format());
+}
+
+Tensor _conj(const Tensor& self) {
+  Tensor self_ = self.alias();
+  self_._set_conj(!self.is_conj());
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
 
 Tensor conj(const Tensor& self) {
-  if (!self.is_complex()) {
-    return self;
-  }
-  return at::_conj(self);
+  // This might look like an infinite recursion but it's not.
+  // This actually calls into `conj()` defined in the Tensor class.
+  return self.conj();
 }
 
 // special_exp2, alias for exp2
@@ -407,6 +440,44 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
+
+// special_i0, alias for i0
+Tensor& special_i0_out(const Tensor& self, Tensor& result) { return at::i0_out(result, self); }
+Tensor special_i0(const Tensor& self) { return self.i0(); }
+
+namespace {
+
+inline Tensor calc_ndtr(const Tensor& self) {
+  auto x_sqrt_2 = self / std::sqrt(2.);
+  return (1 + at::erf(x_sqrt_2)) * 0.5;
+}
+
+} // namespace
+
+// special_ndtr
+Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
+  TORCH_CHECK(
+      self.device() == result.device(),
+      "Expected all tensors to be on the same device, but found at least two devices, ",
+      self.device(),
+      " and ",
+      result.device(),
+      "!");
+
+  auto ndtr = calc_ndtr(self);
+  TORCH_CHECK(
+      at::can_cast(ndtr.scalar_type(), result.scalar_type()),
+      "result type ",
+      ndtr.scalar_type(),
+      " can't be cast to the desired output type ",
+      result.scalar_type());
+
+  at::native::resize_output(result, ndtr.sizes());
+  return result.copy_(ndtr);
+}
+Tensor special_ndtr(const Tensor& self) {
+  return calc_ndtr(self);
+}
 
 // FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
@@ -647,7 +718,7 @@ DEFINE_DISPATCH(abs_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 DEFINE_DISPATCH(angle_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(real_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(imag_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(conj_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(conj_physical_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(asinh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -671,6 +742,8 @@ DEFINE_DISPATCH(frac_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(frexp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_i0e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log10_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log1p_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
