@@ -512,8 +512,8 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(i, res)
 
         unbatch_dp = input_dp.unbatch(unbatch_level=2)
-        expected_dp = [0, 1, 2, 3, 4, 5, 6, 7]
-        self.assertEqual(len(list(zip(expected_dp, unbatch_dp))), 8)
+        expected_dp2 = [0, 1, 2, 3, 4, 5, 6, 7]
+        self.assertEqual(len(list(zip(expected_dp2, unbatch_dp))), 8)
         for i, res in zip(expected_dp, unbatch_dp):
             self.assertEqual(i, res)
 

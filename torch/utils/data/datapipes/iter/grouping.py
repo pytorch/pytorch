@@ -76,12 +76,12 @@ class UnBatchIterDataPipe(IterDataPipe):
         self.datapipe = datapipe
         self.unbatch_level = unbatch_level
 
-    def __iter__(self) -> Iterator[List[T_co]]:
+    def __iter__(self):
         for element in self.datapipe:
             for i in self._dive(element, unbatch_level=self.unbatch_level):
                 yield i
 
-    def _dive(self, element, unbatch_level) -> Iterator[List[T_co]]:
+    def _dive(self, element, unbatch_level):
         if unbatch_level < -1:
             raise ValueError("unbatch_level must be -1 or >= 0")
         if unbatch_level == -1:
