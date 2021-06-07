@@ -1,9 +1,6 @@
 #pragma once
 
 #include <atomic>
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#endif
 #include <memory>
 #include <mutex>
 #include <tuple>
@@ -28,6 +25,28 @@ constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
 // Forward declaration
 class Logger;
+
+class Timer {
+ public:
+  enum class Event {
+    kForwardStart,
+    kBackwardComputeStart,
+    kBackwardComputeEnd,
+    kBackwardCommStart,
+    kBackwardCommEnd,
+  };
+
+  // Record the current event, i.e., mark it as having occurred now.
+  virtual void record(Event event) = 0;
+
+  // Return the difference between when two events occurred, in nanoseconds.
+  // Or nullopt if one of them hasn't been recorded.
+  virtual c10::optional<int64_t> measureDifference(Event start, Event end) = 0;
+
+  virtual ~Timer() = default;
+};
+
+C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class Reducer {
  public:
@@ -339,37 +358,9 @@ class Reducer {
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
 
-  // CPU timestamp to record event start and end time.
-  struct CPUTimer {
-    // The timestamp of forward call start time in each iteration.
-    int64_t forward_start_time;
-    // The timestamp of backward computation start and end time in each
-    // iteration.
-    int64_t backward_compute_start_time;
-    int64_t backward_compute_end_time;
-    // The timestamp of first communication call start time in each iteration.
-    int64_t backward_comm_start_time;
-    // The timestamp of last communication call end time in each iteration.
-    int64_t backward_comm_end_time;
-  };
-
-  CPUTimer cpu_timer_{};
-
-#ifdef USE_CUDA
-  // GPU events to record event start and end time.
-  struct GPUTimer {
-    at::cuda::CUDAEvent forward_start = at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_compute_start =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_compute_end =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_comm_start =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_comm_end =
-        at::cuda::CUDAEvent(cudaEventDefault);
-  };
-  GPUTimer gpu_timer_;
-#endif
+  // Timing information.
+  int64_t backward_compute_start_time_ = -1;
+  std::unique_ptr<Timer> timer_;
 
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
