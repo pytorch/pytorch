@@ -213,7 +213,7 @@ void DistEngine::computeDependencies(
   }
 
   bool might_use_cuda = at::globalContext().hasCUDA();
-  bool will_use_cuuda = false;
+  bool will_use_cuda = false;
 
   edge_list recvBackwardEdges;
   // Traverse the graph.
