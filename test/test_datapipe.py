@@ -33,13 +33,6 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
-try:
-    from PIL import Image
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
-skipIfNoPIL = skipIf(not HAS_PIL, "no Pillow")
-
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -144,6 +137,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
+            rec[1].close()
         # read extracted files after reaching the end of the tarfile
         data_refs = list(rec for rec in datapipe3)
         self.assertEqual(len(data_refs), len(self.temp_files))
@@ -151,6 +145,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(data_ref[1].read(), f.read())
+            data_ref[1].close()
 
 
     def test_readfilesfromzip_iterable_datapipe(self):
@@ -169,6 +164,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(rec[1].read(), f.read())
+            rec[1].close()
         # read extracted files before reaching the end of the zipile
         data_refs = list(rec for rec in datapipe3)
         self.assertEqual(len(data_refs), len(self.temp_files))
@@ -176,19 +172,27 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
             with open(temp_file, 'rb') as f:
                 self.assertEqual(data_ref[1].read(), f.read())
+            data_ref[1].close()
 
 
-    @skipIfNoPIL
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
-        img = Image.new('RGB', (2, 2), color='red')
-        img.save(temp_pngfile_pathname)
+        png_data = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
+        np.save(temp_pngfile_pathname, png_data)
         datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
         datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
 
-        def _helper(dp, channel_first=False):
-            for rec in dp:
+        def _png_decoder(extension, data):
+            if extension != 'png':
+                return None
+            return np.load(data)
+
+        def _helper(prior_dp, dp, channel_first=False):
+            # Byte stream is not closed
+            for inp in prior_dp:
+                self.assertFalse(inp[1].closed)
+            for inp, rec in zip(prior_dp, dp):
                 ext = os.path.splitext(rec[0])[1]
                 if ext == '.png':
                     expected = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
@@ -198,13 +202,18 @@ class TestIterableDataPipeBasic(TestCase):
                 else:
                     with open(rec[0], 'rb') as f:
                         self.assertEqual(rec[1], f.read().decode('utf-8'))
+                # Corresponding byte stream is closed by Decoder
+                self.assertTrue(inp[1].closed)
 
-        datapipe3 = dp.iter.RoutedDecoder(datapipe2, decoder_imagehandler('rgb'))
+        cached = list(d for d in datapipe2)
+        datapipe3 = dp.iter.RoutedDecoder(cached, _png_decoder)
         datapipe3.add_handler(decoder_basichandlers)
-        _helper(datapipe3)
+        _helper(cached, datapipe3)
 
-        datapipe4 = dp.iter.RoutedDecoder(datapipe2)
-        _helper(datapipe4, channel_first=True)
+        cached = list(d for d in datapipe2)
+        datapipe4 = dp.iter.RoutedDecoder(cached, decoder_basichandlers)
+        datapipe4.add_handler(_png_decoder)
+        _helper(cached, datapipe4, channel_first=True)
 
 
     def test_groupbykey_iterable_datapipe(self):
@@ -234,8 +243,9 @@ class TestIterableDataPipeBasic(TestCase):
             count = count + 1
             self.assertEqual(os.path.basename(rec[0][0]), expected[0])
             self.assertEqual(os.path.basename(rec[1][0]), expected[1])
-            self.assertEqual(rec[0][1].read(), b'12345abcde')
-            self.assertEqual(rec[1][1].read(), b'12345abcde')
+            for i in [0, 1]:
+                self.assertEqual(rec[i][1].read(), b'12345abcde')
+                rec[i][1].close()
         self.assertEqual(count, 8)
 
 
