@@ -34,7 +34,7 @@ static bool isStaticCondition(Node* node) {
       compare_node->kind() == onnx::Less ||
       compare_node->kind() == onnx::GreaterOrEqual ||
       compare_node->kind() == onnx::LessOrEqual) {
-    for (size_t i = 0; i < compare_node->inputs().size(); i++) {
+    for (const auto i : c10::irange(compare_node->inputs().size())) {
       auto sym = compare_node->inputs()[i]
                      ->type()
                      ->castRaw<TensorType>()
@@ -74,7 +74,7 @@ static c10::optional<int> findIndex(
     c10::ArrayRef<torch::jit::Value*> outputs,
     Value* input) {
   c10::optional<int> idx = c10::nullopt;
-  for (size_t i = 0; i < outputs.size(); i++) {
+  for (const auto i : c10::irange(outputs.size())) {
     if (input == outputs[i]) {
       idx = i;
       break;
@@ -122,7 +122,7 @@ static bool constantFoldedConditionValue(Node* node) {
   TORCH_INTERNAL_ASSERT(compare_node != nullptr);
   ScalarTypeAnalysisNodeForONNX(compare_node);
   std::vector<at::Tensor> inputs;
-  for (size_t i = 0; i < compare_node->inputs().size(); i++) {
+  for (const auto i : c10::irange(compare_node->inputs().size())) {
     auto input_node = compare_node->inputs()[i]->node();
     if (input_node->kind() == onnx::Constant) {
       const at::Tensor& val = input_node->t(attr::value);

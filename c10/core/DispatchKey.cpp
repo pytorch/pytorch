@@ -65,6 +65,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::PrivateUse3:
       return "PrivateUse3";
 
+    case DispatchKey::Conjugate:
+      return "Conjugate";
     case DispatchKey::Meta:
       return "Meta";
 
