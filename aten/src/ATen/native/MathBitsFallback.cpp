@@ -10,7 +10,7 @@ namespace at {
 struct MathOpFallback {
   MathOpFallback(DispatchKey key_, string op_name_) : key(key_), op_name(op_name_) {}
   virtual bool is_bit_set(const Tensor&) = 0;
-  virtual void set_bit(const Tensor&, bool) = 0;
+  virtual void _set_bit(const Tensor&, bool) = 0;
   virtual Tensor resolve_bit(const Tensor&) = 0;
   virtual Tensor& math_op_(Tensor&) = 0;
   void linalg_fallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
@@ -132,7 +132,7 @@ struct MathOpFallback {
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
         if (mut_arg) {
           // TODO: This is a waste if the argument is write only
-          set_bit(tensor, false);
+          _set_bit(tensor, false);
           math_op_(tensor);
           mutable_inputs.emplace_back(tensor);
         } else {
@@ -140,22 +140,28 @@ struct MathOpFallback {
         }
         (*stack)[stack_start + i] = std::move(tensor);
       } else if (ivalue.isTensorList()) {
-          auto tensors = std::move(ivalue).toTensorList();
+        auto tensors = std::move(ivalue).toTensorList();
+        if (mut_arg) {
           for(const auto j : c10::irange(tensors.size())) {
-            // At the time of writing this, no operators use tensorlists with mutable tensors.
-            // We could add additional code logic in the future if this changes.
-            TORCH_CHECK(!mut_arg, op_name, " fallback doesn't work for mutable TensorLists.");
+            Tensor t = tensors[j];
+            _set_bit(t, false);
+            math_op_(t);
+            mutable_inputs.emplace_back(t);
+          }
+        } else {
+          for(const auto j : c10::irange(tensors.size())) {
             tensors[j] = resolve_bit(tensors[j]);
           }
-          (*stack)[stack_start + i] = std::move(tensors);
         }
+        (*stack)[stack_start + i] = std::move(tensors);
       }
+    }
 
     op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
 
     for (auto& mutable_input : mutable_inputs) {
       math_op_(mutable_input);
-      set_bit(mutable_input, true);
+      _set_bit(mutable_input, true);
     }
   }
   DispatchKey key;

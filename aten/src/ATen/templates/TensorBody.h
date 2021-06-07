@@ -379,7 +379,7 @@ class TORCH_API Tensor {
   }
 
   // sets the conjugate bit of a tensor.
-  // NOTE: Conjugate bit is supposed to be a read-only field. Only change this, if you are extremely sure
+  // NOTE: Conjugate bit is supposed to be a read-only field. Only change this, if you are sure
   // that's what you want. Changing this might lead to incorrect behavior since conjugation is
   // a lazy operation and we rely on this bit to determine if a conjugation needs to be materialized.
   inline void _set_conj(bool conjugate) const {
@@ -390,8 +390,12 @@ class TORCH_API Tensor {
     return impl_->is_neg();
   }
 
-  inline void set_neg(bool negative) const {
-    impl_->set_neg(negative);
+  // sets the negative bit of a tensor.
+  // NOTE: Negative bit is supposed to be a read-only field. Only change this, if you are sure
+  // that's what you want. Changing this might lead to incorrect behavior since we rely on this
+  // bit to determine if a negation needs to be materialized.
+  inline void _set_neg(bool negative) const {
+    impl_->_set_neg(negative);
   }
 
   /// Returns a `Tensor`'s layout.

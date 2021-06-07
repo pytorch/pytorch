@@ -7,8 +7,8 @@ struct ConjFallback : MathOpFallback {
   bool is_bit_set(const Tensor& tensor) override {
     return tensor.is_conj();
   }
-  void set_bit(const Tensor& tensor, bool value) override {
-    return tensor.set_conj(value);
+  void _set_bit(const Tensor& tensor, bool value) override {
+    return tensor._set_conj(value);
   }
   Tensor resolve_bit(const Tensor& tensor) override {
     return at::resolve_conj(tensor);

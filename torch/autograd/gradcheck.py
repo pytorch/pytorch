@@ -936,7 +936,7 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
         if complex_inp_indices:
             real_fn, imag_fn = _real_and_imag_input(func, complex_inp_indices)
 
-            imag_inputs = [inp.resolve_conj().imag if is_tensor_like(inp) and inp.is_complex() else inp for inp in tupled_inputs]
+            imag_inputs = [inp.imag if is_tensor_like(inp) and inp.is_complex() else inp for inp in tupled_inputs]
             imag_func_out = imag_fn(*imag_inputs)
             diff_imag_func_out = _differentiable_outputs(imag_func_out)
             gradcheck_fn(imag_fn, imag_func_out, imag_inputs, diff_imag_func_out, eps,

@@ -9,9 +9,9 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests)
+    (op_db,)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
@@ -19,11 +19,8 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 from collections.abc import Sequence
 
-# Get names of all the operators which have entry in `method_tests` (legacy testing infra)
-method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
 
 # Tests that apply to all operators
-
 class TestOpInfo(TestCase):
     exact_dtype = True
 
@@ -38,12 +35,8 @@ class TestOpInfo(TestCase):
         # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
             samples = op.sample_inputs(device, dtype)
-            if len(samples) == 0:
-                self.skipTest("Skipped! No sample inputs!")
-
-            # NOTE: only tests on first sample
-            sample = samples[0]
-            op(sample.input, *sample.args, **sample.kwargs)
+            for sample in samples:
+                op(sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
@@ -73,14 +66,10 @@ class TestOpInfo(TestCase):
             result = op(sample.input, *sample.args, **sample.kwargs)
             if not isinstance(result, torch.Tensor):
                 continue
+            if sample.output_process_fn_grad is not None:
+                result = sample.output_process_fn_grad(result)
             result.sum().backward()
 
-    # Verifies that ops do not have an entry in
-    # `method_tests` (legacy testing infra).
-    @onlyCPU
-    @ops(op_db, allowed_dtypes=[torch.float32])
-    def test_duplicate_method_tests(self, device, dtype, op):
-        self.assertFalse(op.name in method_tested_operators)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
@@ -295,6 +284,9 @@ class TestCommon(JitCommonTestCase):
                 expected_forward = op(sample.input, *sample.args, **sample.kwargs)
                 expected_grad = None
 
+                output_process_fn_grad = sample.output_process_fn_grad if sample.output_process_fn_grad \
+                    else lambda x: x
+
                 # Skips inplace variants if the output dtype is not the same as
                 #   the input dtype
                 skip_inplace = False
@@ -309,7 +301,7 @@ class TestCommon(JitCommonTestCase):
                 #   derived from each tensor output
                 if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
                         and (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type))):
-                    expected_forward.sum().backward()
+                    output_process_fn_grad(expected_forward).sum().backward()
                     expected_grad = tensor.grad
 
                 # Test eager consistency
@@ -341,7 +333,7 @@ class TestCommon(JitCommonTestCase):
                     # Compares variant's backward
                     if expected_grad is not None and \
                             (variant not in inplace_ops or op.supports_inplace_autograd):
-                        variant_forward.sum().backward()
+                        output_process_fn_grad(variant_forward).sum().backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
         _test_consistency_helper(samples, variants)
@@ -749,11 +741,7 @@ class TestMathBits(TestCase):
     # This test only runs for C -> R and C -> C functions
     # TODO: add tests for `R->C` functions
     # Note: This test runs for functions that take both tensors and tensorlists as input.
-    @ops(op_db, allowed_dtypes=(torch.cfloat,))
-    def test_conj_view(self, device, dtype, op):
-        if not op.test_conjugated_samples:
-            self.skipTest("Operation doesn't support conjugated inputs.")
-        _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
+    def _test_conj_view(self, device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set):
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         inplace_variant = op.inplace_variant
 
@@ -762,7 +750,7 @@ class TestMathBits(TestCase):
             if isinstance(input, torch.Tensor):
                 tensor_requires_grad = input.requires_grad
                 with torch.no_grad():
-                    input = input.conj_physical()
+                    input = math_op_physical(input)
                 return input.requires_grad_(tensor_requires_grad)
 
             if isinstance(input, Sequence):
@@ -782,7 +770,7 @@ class TestMathBits(TestCase):
                 # Note: .conj() is not called under no_grad mode since it's not allowed to modify a
                 # view created in no_grad mode. Here it's ok to do so, so as a workaround we call conj
                 # before resetting the requires_grad field for input
-                input = input.conj()
+                input = math_op_view(input)
                 assert input.is_leaf
                 return input.requires_grad_(requires_grad)
 
@@ -810,7 +798,7 @@ class TestMathBits(TestCase):
                 if (isinstance(expected_forward, torch.Tensor) and
                         expected_forward.dtype is tensor.dtype):
                     inplace_forward = inplace_variant(cloned2, *sample.args, **sample.kwargs)
-                    self.assertTrue(inplace_forward.is_conj())
+                    self.assertTrue(is_bit_set(inplace_forward))
                     self.assertEqual(inplace_forward, expected_forward)
 
             # TODO: backward consistency only supported for single tensor outputs
@@ -831,10 +819,21 @@ class TestMathBits(TestCase):
                     # a repeat of the above test if output is not complex valued
                     if (expected_forward.is_complex()):
                         grad = torch.randn_like(expected_forward)
-                        expected_forward.backward(grad.conj_physical())
-                        forward_with_conjview.backward(grad.conj())
+                        expected_forward.backward(math_op_physical(grad))
+                        forward_with_conjview.backward(math_op_view(grad))
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
+
+    @ops(op_db, allowed_dtypes=(torch.cfloat,))
+    def test_conj_view(self, device, dtype, op):
+        if not op.test_conjugated_samples:
+            self.skipTest("Operation doesn't support conjugated inputs.")
+        math_op_physical = torch.conj_physical
+        math_op_view = torch.conj
+        _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
+        is_bit_set = torch.is_conj
+        self._test_conj_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set)
+
 
     # Tests that
     # 1. The operator's output for physically negated tensors and negative view tensors
@@ -844,58 +843,58 @@ class TestMathBits(TestCase):
     #    produces the correct value when called on a negative view tensor and that the output
     #    has its negative bit is set to true
     # Note: This test also runs for functions that take tensorlists as input.
-    @ops(op_db, allowed_dtypes=(torch.double,))
-    def test_neg_view(self, device, dtype, op):
-        # update this to op.test_negated_samples
-        # if not op.test_conjugated_samples:
-        #     self.skipTest("Operation doesn't support negative view inputs.")
+    # @ops(op_db, allowed_dtypes=(torch.double,))
+    # def test_neg_view(self, device, dtype, op):
+    #     # update this to op.test_negated_samples
+    #     # if not op.test_conjugated_samples:
+    #     #     self.skipTest("Operation doesn't support negative view inputs.")
 
-        _requires_grad = op.supports_autograd
+    #     _requires_grad = op.supports_autograd
 
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-        inplace_variant = op.inplace_variant
+    #     samples = op.sample_inputs(device, dtype, requires_grad=True)
+    #     inplace_variant = op.inplace_variant
 
-        # helper function to physically negate the tensor
-        def negate_physical(tensor):
-            tensor_requires_grad = tensor.requires_grad
-            with torch.no_grad():
-                tensor = tensor.neg()
-            return tensor.requires_grad_(tensor_requires_grad)
+    #     # helper function to physically negate the tensor
+    #     def negate_physical(tensor):
+    #         tensor_requires_grad = tensor.requires_grad
+    #         with torch.no_grad():
+    #             tensor = tensor.neg()
+    #         return tensor.requires_grad_(tensor_requires_grad)
 
-        # helper function that negates the input if its a tensor
-        # else clone the sequence and negate the first element in the sequence
-        # If a requires_grad argument is provided the tensor being negated will
-        # have its requires_grad set to that value.
-        def clone_neg_input_helper(input, **kwargs):
-            if isinstance(input, torch.Tensor):
-                with torch.no_grad():
-                    # At the time of writing, there was no direct way to set the neg bit
-                    # for tensors
-                    input = (input * -1j).imag
-                requires_grad = kwargs.get('requires_grad', input.requires_grad)
-                return input.requires_grad_(requires_grad)
+    #     # helper function that negates the input if its a tensor
+    #     # else clone the sequence and negate the first element in the sequence
+    #     # If a requires_grad argument is provided the tensor being negated will
+    #     # have its requires_grad set to that value.
+    #     def clone_neg_input_helper(input, **kwargs):
+    #         if isinstance(input, torch.Tensor):
+    #             with torch.no_grad():
+    #                 # At the time of writing, there was no direct way to set the neg bit
+    #                 # for tensors
+    #                 input = (input * -1).imag
+    #             requires_grad = kwargs.get('requires_grad', input.requires_grad)
+    #             return input.requires_grad_(requires_grad)
 
-            if isinstance(input, Sequence):
-                out = list(map(clone_input_helper, input))
-                out[0] = clone_neg_input_helper(out[0])
-                return tuple(out)
-            return input
+    #         if isinstance(input, Sequence):
+    #             out = list(map(clone_input_helper, input))
+    #             out[0] = clone_neg_input_helper(out[0])
+    #             return tuple(out)
+    #         return input
 
-        for sample in samples:
-            cloned1 = clone_neg_input_helper(sample.input)
-            cloned2 = clone_neg_input_helper(sample.input, requires_grad=False)
+    #     for sample in samples:
+    #         cloned1 = clone_neg_input_helper(sample.input)
+    #         cloned2 = clone_neg_input_helper(sample.input, requires_grad=False)
 
-            # Assumes that the input is either a tensor or a tensorlist.
-            if isinstance(sample.input, torch.Tensor):
-                sample.input = negate_physical(sample.input)
-            else:
-                sample.input[0] = negate_physical(sample.input[0])
+    #         # Assumes that the input is either a tensor or a tensorlist.
+    #         if isinstance(sample.input, torch.Tensor):
+    #             sample.input = negate_physical(sample.input)
+    #         else:
+    #             sample.input[0] = negate_physical(sample.input[0])
 
-            # Computes function forward value with a neg view tensor and a physically
-            # conjugated tensor and verify they are equal.
-            expected_forward = op(sample.input, *sample.args, **sample.kwargs)
-            forward_with_negview = op(cloned1, *sample.args, **sample.kwargs)
-            self.assertEqual(expected_forward, forward_with_negview)
+    #         # Computes function forward value with a neg view tensor and a physically
+    #         # conjugated tensor and verify they are equal.
+    #         expected_forward = op(sample.input, *sample.args, **sample.kwargs)
+    #         forward_with_negview = op(cloned1, *sample.args, **sample.kwargs)
+    #         self.assertEqual(expected_forward, forward_with_negview)
 
     #         # if the op has an inplace variant, and the input doesn't require broadcasting
     #         # and has the same dtype as output, verify that the inplace operation on a negated
