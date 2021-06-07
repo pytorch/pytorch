@@ -358,10 +358,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::unordered_map<size_t, std::string>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "initialize_buckets",
-          &::c10d::Reducer::initialize_buckets,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
           py::call_guard<py::gil_scoped_release>())
@@ -411,7 +407,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_delay_all_reduce",
           &::c10d::Reducer::delay_all_reduce,
-          py::call_guard<py::gil_scoped_release>()) ;
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_logger",
+          [](::c10d::Reducer& reducer,
+             const std::shared_ptr<::c10d::Logger> logger) {
+            std::weak_ptr<::c10d::Logger> logger_weakref = logger;
+            reducer.set_logger(logger_weakref);
+          });
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -429,6 +432,12 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "set_runtime_stats_and_log",
           &::c10d::Logger::set_runtime_stats_and_log,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_error_and_log",
+          [](::c10d::Logger& logger, const std::string& error) {
+              logger.set_error_and_log(error);
+          },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_ddp_logging_data",
@@ -862,13 +871,23 @@ Example::
     >>> client_store.get("first_key")
       )")
       .def(
-          py::init<
-              const std::string&,
-              int,
-              int,
-              bool,
-              std::chrono::milliseconds,
-              bool>(),
+          py::init([](const std::string& host,
+                      ::c10d::PortType port,
+                      int worldSize,
+                      bool isServer,
+                      std::chrono::milliseconds timeout,
+                      bool waitWorkers,
+                      bool multiTenant) {
+            c10::optional<std::size_t> numWorkers = c10::nullopt;
+            if (worldSize > -1) {
+              numWorkers = static_cast<std::size_t>(worldSize);
+            }
+
+            ::c10d::TCPStoreOptions opts{
+                port, isServer, numWorkers, waitWorkers, timeout, multiTenant};
+
+            return c10::make_intrusive<::c10d::TCPStore>(host, opts);
+          }),
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size") = -1,
@@ -877,7 +896,8 @@ Example::
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
-          py::arg("wait_for_workers") = true)
+          py::arg("wait_for_workers") = true,
+          py::arg("multi_tenant") = false)
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -1102,6 +1122,14 @@ Arguments:
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "_reduce_scatter_base",
+              &::c10d::ProcessGroup::_reduce_scatter_base,
+              py::arg("outputTensor"),
+              py::arg("inputTensor"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(

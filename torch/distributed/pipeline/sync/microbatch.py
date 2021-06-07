@@ -162,12 +162,6 @@ def check(*inputs) -> None:
         ValueError: input does not contain at least one tensor
 
     """
-    # Handle single Sequence[Tensor] for backward compatibility.
-    if len(inputs) == 1 and isinstance(inputs[0], Sequence):
-        # Validate all tensors
-        if not all(torch.is_tensor(input) for input in inputs[0]):
-            raise TypeError(f'inputs do not consiste of all tensors: {inputs}')
-        return
 
     if not any(torch.is_tensor(input) for input in inputs):
         raise TypeError(f'inputs do not have any tensors: {inputs}')
