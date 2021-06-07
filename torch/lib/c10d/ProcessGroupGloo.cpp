@@ -321,10 +321,11 @@ void initializeStreamsEvents(
     std::vector<c10::Event>& events) {
   c10::impl::VirtualGuardImpl impl(c10::kCUDA);
   streams.reserve(tensors.size());
-  events.resize(tensors.size());
+  events.reserve(tensors.size());
   for(const auto i : c10::irange(tensors.size())) {
     c10::Device device = tensors[i].device();
     // Record event on current stream
+    events.emplace_back(device.type());
     events[i].record(impl.getStream(device));
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this device. This ensures that the default stream used
@@ -373,10 +374,11 @@ void initializeStreamsEvents(
 
   c10::impl::VirtualGuardImpl impl(c10::kCUDA);
   streams.reserve(tensors.size());
-  events.resize(tensors.size());
+  events.reserve(tensors.size());
   for(const auto i : c10::irange(tensors.size())) {
     c10::Device device = tensors[i][0].device();
     // Record event on current stream
+    events.emplace_back(device.type());
     events[i].record(impl.getStream(device));
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this output. This ensures that the default stream used
