@@ -193,6 +193,7 @@ class OpInfo(object):
                  name,  # the string name of the function
                  *,
                  ref=None,  # Just a reference
+                 check=False,  # If dtype argument in numpy call then True, els False
                  sample_kwargs=lambda device, dtype, input: ({}, {}),
                  op=None,  # the function variant of the operation, populated as torch.<name> if None
                  dtypes=floating_types(),  # dtypes this function is expected to work with
@@ -244,6 +245,7 @@ class OpInfo(object):
 
         self.name = name
         self.ref = ref
+        self.check = check
         self.sample_kwargs = sample_kwargs
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
@@ -4022,18 +4024,23 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('add',
            ref=np.add,
+           variant_test_name='test_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
            supports_inplace_autograd=False,
            supports_forward_ad=True),
     OpInfo('mul',
+           ref=np.multiply,
+           variant_test_name='test_mul',
            aliases=('multiply',),
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            assert_autodiffed=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_binary_pwise),
     OpInfo('sub',
+           ref=np.subtract,
+           variant_test_name='test_subtract',
            aliases=('subtract',),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            assert_autodiffed=True,
@@ -4113,6 +4120,8 @@ op_db: List[OpInfo] = [
                         device_type='cuda', active_if=not SM53OrLater)),
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
+           ref=np.dot,
+           variant_test_name='test_dot',
            dtypes=all_types_and_complex_and(torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
@@ -4185,6 +4194,9 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin),
     OpInfo('argmax',
+           ref=np.argmax,
+           check=False,
+           variant_test_name='test_argmax',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_argmax_argmin,),

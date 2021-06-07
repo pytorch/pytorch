@@ -79,6 +79,8 @@ class TestOpInfo(TestCase):
     #   values on given tensors
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
+            # Can float16 be casted to boolean? No, right?
+            # 1.5 - 
             if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
                 exact_dtype = False
 
@@ -97,35 +99,57 @@ class TestOpInfo(TestCase):
             else:
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
 
+        is_dtype_there_in_numpy = op.check
         for sample_input in tensors:
             sample_args = sample_input.args
             sample_kwargs = sample_input.kwargs
             sample_torch_input = sample_input.input
-            torch_kwargs, numpy_kwargs = op.sample_kwargs(sample_input.device, dtype, sample_input)
+            torch_kwargs, numpy_kwargs = op.sample_kwargs(sample_torch_input.device, dtype, sample_torch_input)
             numpy_args = []
+            out_numpy_dtype = None
+            # 1e-5 = 0.000001, exponent bits = 4, mantessa = , number = 
             if dtype is torch.bfloat16:
                 for sample_arg in sample_args:
-                    numpy_arg = sample_arg.cpu().to(torch.float32).numpy() if isinstance(sample_arg, torch.Tensor) else sample_arg
+                    numpy_arg = sample_arg.cpu().to(torch.float32).numpy() if isinstance(sample_arg, torch.Tensor) else torch.tensor(sample_arg).cpu().to(torch.float32).numpy()
                     numpy_args.append(numpy_arg)
                 sample_numpy_input = sample_torch_input.cpu().clone().to(torch.float32).numpy()
+                if is_dtype_there_in_numpy:
+                    out_numpy_dtype = np.float32
             else:
                 for sample_arg in sample_args:
-                    numpy_arg = sample_arg.cpu().numpy() if isinstance(sample_arg, torch.Tensor) else sample_arg
+                    # sample_arg = 3
+                    numpy_arg = sample_arg.cpu().to(dtype).numpy() if isinstance(sample_arg, torch.Tensor) else sample_arg 
                     numpy_args.append(numpy_arg)
-                sample_numpy_input = sample_input.cpu().clone().numpy()
-            actual = op(sample_input, *sample_args, **torch_kwargs)
-            expected = op.ref(sample_numpy_input, *numpy_args, **numpy_kwargs)
+                sample_numpy_input = sample_torch_input.cpu().to(dtype).numpy()  # numpy array
+                if is_dtype_there_in_numpy:
+                    out_numpy_dtype = torch_to_numpy_dtype_dict[dtype] # problem: bfloat16
+            # expected is -2 (numpy), actual is 254 (torch)
+            # according to us, 1 and 3
+            # dtype is uint8
+            # torch.subtract(torch.tensor(1, dtype=uint8), 3) = 254
+            # np.subtract(1, 3)
+            actual = op(sample_torch_input, *sample_args, **torch_kwargs) # op = torch.subtract
+            if is_dtype_there_in_numpy:
+                expected = op.ref(sample_numpy_input, *numpy_args, **numpy_kwargs, dtype=out_numpy_dtype) # op.ref = np.subtract
+            else:
+                try:
+                    expected = op.ref(sample_numpy_input, *numpy_args, **numpy_kwargs)
+                except:
+                    print("Failure:")
+                    print(sample_numpy_input, *numpy_args, **numpy_kwargs)
 
             # Crafts a custom error message for smaller, printable tensors
-            if sample_input.numel() < 10:
+            if sample_torch_input.numel() < 10:
                 msg = ("Failed to produce expected results! Input tensor was"
                         " {0}, torch result is {1}, and reference result is"
-                        " {2}.").format(sample_input, actual, expected)
+                        " {2}.").format(sample_torch_input, actual, expected)
             else:
                 msg = None
 
             exact_dtype = True
             if isinstance(actual, torch.Tensor):
+                print("Type for torch input: ", type(sample_torch_input))
+                print("Torch input: {}, sample args: {}, expected: {}, actual: {}".format(sample_torch_input, sample_args, expected, actual))
                 _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan)
             else:
                 for x, y in zip(expected, actual):
