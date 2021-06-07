@@ -765,7 +765,9 @@ TupleTypePtr TupleType::createNamed(
   std::vector<Argument> arguments;
   for (size_t i = 0; i < fields.size(); ++i) {
     TORCH_CHECK(fields[i].second.tagKind() != "Tensor", "Tensors are "
-                "not supported as default NamedTuple fields");
+                "not supported as default NamedTuple fields. Their "
+                "mutability could lead to potential memory aliasing "
+                "problems");
     arguments.emplace_back(
         /*name=*/fields[i].first,
         /*type=*/field_types[i],

@@ -727,7 +727,7 @@ inline py::object toPyObject(IValue ivalue) {
       const std::vector<Argument>& tuple_args =
           tuple->type()->schema()->arguments();
 
-      std::vector<IValue> defaults;
+      std::vector<pybind11::object> defaults;
       auto it = std::find_if(
           tuple_args.begin(), tuple_args.end(), [](const Argument& arg) {
             return arg.default_value().has_value();
@@ -736,7 +736,7 @@ inline py::object toPyObject(IValue ivalue) {
           it,
           tuple_args.end(),
           std::back_inserter(defaults),
-          [](const Argument& arg) { return *arg.default_value(); });
+          [](const Argument& arg) { return toPyObject(*arg.default_value()); });
 
       std::vector<std::string> fieldNames =
           fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
