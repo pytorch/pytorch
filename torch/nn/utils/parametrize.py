@@ -399,6 +399,7 @@ def register_parametrization(
     parametrization.train(module.training)
     if is_parametrized(module, tensor_name):
         # Correctness checks
+        assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
         parametrization_list = module.parametrizations[tensor_name]
         Y = parametrization_list()
         Z = parametrization(Y)
@@ -415,7 +416,7 @@ def register_parametrization(
                 f"parametrization(self.{tensor_name}).shape: {Z.shape}"
             )
         if hasattr(parametrization, "right_inverse"):
-            X = parametrization.right_inverse(Z)
+            X = parametrization.right_inverse(Z)  # type: ignore[operator]
             # nb. The naming of X / Y / Z in the code vs the errors is different
             if Z.dtype != X.dtype:
                 raise ValueError(
@@ -432,7 +433,7 @@ def register_parametrization(
         # else right_inverse is considered to be the identity
 
         # add the new parametrization to the parametrization list
-        parametrization_list.append(parametrization)  # type: ignore[index, union-attr]
+        parametrization_list.append(parametrization)
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
@@ -451,7 +452,8 @@ def register_parametrization(
         # Add a property into the class
         _inject_property(module, tensor_name)
         # Add a ParametrizationList
-        module.parametrizations[tensor_name] = parametrizations  # type: ignore[assignment, index, operator]
+        assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
+        module.parametrizations[tensor_name] = parametrizations
     else:
         raise ValueError(
             f"Module '{module}' does not have a parameter, a buffer, or a "
@@ -511,8 +513,8 @@ def remove_parametrizations(
         raise ValueError(f"Module {module} does not have a parametrization on {tensor_name}")
 
     # Fetch the original tensor
-    parametrizations = module.parametrizations[tensor_name]  # type: ignore[index, union-attr]
-    assert isinstance(parametrizations, ParametrizationList)  # make mypy happy
+    assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
+    parametrizations = module.parametrizations[tensor_name]
     if parametrizations.ntensors == 1:
         original = parametrizations.original
         if leave_parametrized:
@@ -539,7 +541,7 @@ def remove_parametrizations(
     # Delete the property that manages the parametrization
     delattr(module.__class__, tensor_name)
     # Delete the ParametrizationList
-    del module.parametrizations[tensor_name]  # type: ignore[operator, union-attr]
+    del module.parametrizations[tensor_name]
 
     # Restore the parameter / buffer into the main class
     _register_parameter_or_buffer(module, tensor_name, original)
