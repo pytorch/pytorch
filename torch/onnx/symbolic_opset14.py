@@ -30,6 +30,16 @@ for block_listed_op in block_listed_operators:
 def hardswish(g, self):
     return g.op("HardSwish", self)
 
+@parse_args("v", "i")
+def tril(g, self, diagonal, out=None):
+    k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
+    return g.op("Trilu", self, k, upper_i=0)
+
+@parse_args("v", "i")
+def triu(g, self, diagonal, out=None):
+    k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
+    return g.op("Trilu", self, k, upper_i=1)
+
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     sym_help.assert_training_mode(training, "batch_norm")

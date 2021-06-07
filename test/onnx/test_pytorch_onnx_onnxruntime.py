@@ -5709,6 +5709,38 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(SiLUModel(), (x))
 
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_tril(self):
+        class trilModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.tril(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModel(), (x))
+
+        class trilModelwithDiagonal(torch.nn.Module):
+            def forward(self, x):
+                return torch.tril(x, diagonal=1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModelwithDiagonal(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_triu(self):
+        class triuModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.triu(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(triuModel(), (x))
+
+        class triuModelwithDiagonal(torch.nn.Module):
+            def forward(self, x):
+                return torch.triu(x, diagonal=-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(triuModelwithDiagonal(), (x))            
+
     def test_mish(self):
         class MishModel(torch.nn.Module):
             def __init__(self):
