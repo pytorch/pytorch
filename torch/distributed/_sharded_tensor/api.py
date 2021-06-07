@@ -122,7 +122,7 @@ class ShardedTensor(object):
         memory_format,
     ):
         current_rank = dist.get_rank(self._process_group)
-        sharding_dim = self._sharding_spec.dim
+        sharding_dim = self._sharding_spec.dim  # type: ignore[attr-defined]
 
         # Validate the sharding spec.
         if not isinstance(sharding_dim, int):
@@ -133,7 +133,7 @@ class ShardedTensor(object):
             raise ValueError(f"Invalid sharding dim: {sharding_dim}")
 
         dim_size = self._dims[sharding_dim]
-        devices = self._sharding_spec.placements
+        devices = self._sharding_spec.placements  # type: ignore[attr-defined]
         chunks = len(devices)
         # split_size computed similar to 'torch.chunk'
         split_size = (dim_size + chunks - 1) // chunks
@@ -184,11 +184,11 @@ class ShardedTensor(object):
         memory_format,
     ):
         # Validate the sharding spec is compatible with the tensor.
-        self._sharding_spec.check_tensor(self._dims)
+        self._sharding_spec.check_tensor(self._dims)  # type: ignore[attr-defined]
 
         current_rank = dist.get_rank(self._process_group)
 
-        for shard_metadata in self._sharding_spec.shards:
+        for shard_metadata in self._sharding_spec.shards:  # type: ignore[attr-defined]
             rank, local_device = self._parse_and_validate_remote_device(shard_metadata.placement)
             self._sharding_metadata.append(shard_metadata)
 

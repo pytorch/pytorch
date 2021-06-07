@@ -80,6 +80,15 @@ class ArrayRef final {
   /* implicit */ ArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {}
 
+  /// Construct an ArrayRef from a generic Container.
+  template <
+      typename Container,
+      typename = std::enable_if_t<std::is_same<
+          std::remove_const_t<decltype(std::declval<Container>().data())>,
+          T*>::value>>
+  /* implicit */ ArrayRef(const Container& container)
+      : Data(container.data()), Length(container.size()) {}
+
   /// Construct an ArrayRef from a std::vector.
   // The enable_if stuff here makes sure that this isn't used for
   // std::vector<bool>, because ArrayRef can't work on a std::vector<bool>

@@ -46,9 +46,9 @@ class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
 
         self.activation_post_process = observer(**observer_kwargs)
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, \
-               'quant_min out of bound'
+            'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, \
-               'quant_max out of bound'
+            'quant_max out of bound'
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
         self.ch_axis = self.activation_post_process.ch_axis \

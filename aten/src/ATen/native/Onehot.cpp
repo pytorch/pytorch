@@ -2,10 +2,9 @@
 
 namespace at { namespace native {
 
-Tensor one_hot(const Tensor &self, int64_t num_classes, ScalarType dtype) {
+Tensor one_hot(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
     auto shape = self.sizes().vec();
-    auto output_options = self.options().dtype(dtype);
 
     // empty tensor could be converted to one hot representation,
     // but shape inference is not possible.
@@ -14,7 +13,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes, ScalarType dtype) {
             AT_ERROR("Can not infer total number of classes from empty tensor.");
         } else {
             shape.push_back(num_classes);
-            return at::empty(shape, output_options);
+            return at::empty(shape, self.options());
         }
     }
 
@@ -36,7 +35,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes, ScalarType dtype) {
     }
 
     shape.push_back(num_classes);
-    Tensor ret = at::zeros(shape, output_options);
+    Tensor ret = at::zeros(shape, self.options());
     ret.scatter_(-1, self.unsqueeze(-1), 1);
     return ret;
 }
