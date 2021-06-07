@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 #include <torch/custom_class.h>
 
 namespace c10d {

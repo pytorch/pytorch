@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <c10/util/Optional.h>
+#include <c10/macros/Macros.h>
 
 namespace c10d {
 const int kUnsetSeqNum = 0;
@@ -35,7 +36,7 @@ inline uint64_t fromVec(const std::vector<T>& values) {
   return num;
 }
 
-class SequenceNum {
+class TORCH_API SequenceNum {
  public:
   SequenceNum();
   explicit SequenceNum(const uint64_t num);
