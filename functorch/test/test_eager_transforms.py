@@ -22,7 +22,7 @@ from functools import partial
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_functional, make_functional_with_buffers,
+    make_functional_v2, make_functional_with_buffers_v2,
     functional_init, functional_init_with_buffers,
 )
 
@@ -553,11 +553,10 @@ class TestVmapOfGrad(TestCase):
         net = SampleNet(vocab_size).to(device=device)
         criterion = nn.CrossEntropyLoss()
 
-        params = dict(net.named_parameters())
-        weights, net_func, _ = make_functional(net)
+        net_func, weights = make_functional_v2(net)
 
         def compute_loss(weights, data, target):
-            output = net_func(weights, (data,))
+            output = net_func(weights, data)
             result = criterion(output, target)
             return result
 
@@ -722,7 +721,7 @@ class TestExamplesCorrectness(TestCase):
         def mse_loss(x, y):
             return torch.mean((x - y) ** 2)
 
-        params, net, _ = make_functional(ThreeLayerNet().to(device))
+        net, params = make_functional_v2(ThreeLayerNet().to(device))
         K = 20
         losses = []
         num_tasks = 4
@@ -750,7 +749,7 @@ class TestExamplesCorrectness(TestCase):
 
         def get_loss_for_task(use_transform, x1, y1, x2, y2):
             def inner_loss(params, x1, y1):
-                f = net(params, (x1,))
+                f = net(params, x1)
                 loss = mse_loss(f, y1)
                 return loss
 
@@ -761,7 +760,7 @@ class TestExamplesCorrectness(TestCase):
                 grads = torch.autograd.grad(loss, params, create_graph=True)
             new_params = [(params[i] - alpha*grads[i]) for i in range(len(params))]
 
-            v_f = net(new_params, (x2,))
+            v_f = net(new_params, x2)
             return mse_loss(v_f, y2)
 
         task = sample_tasks(num_tasks, K)
@@ -812,7 +811,7 @@ class TestExamplesCorrectness(TestCase):
             Flatten(),
             nn.Linear(64, n_way)).to(device).to(dtype)
 
-        params, buffers, fnet, _, _, = make_functional_with_buffers(net)
+        fnet, params, buffers = make_functional_with_buffers_v2(net)
         net = (params, buffers, fnet)
 
         def loss_for_task(net, n_inner_iter, use_transform, x_spt, y_spt, x_qry, y_qry):
@@ -820,7 +819,7 @@ class TestExamplesCorrectness(TestCase):
             querysz = x_qry.size(0)
 
             def compute_loss(new_params, buffers, x, y):
-                logits = fnet(new_params, buffers, (x,))
+                logits = fnet(new_params, buffers, x)
                 loss = F.cross_entropy(logits, y)
                 return loss
 
@@ -833,7 +832,7 @@ class TestExamplesCorrectness(TestCase):
                     grads = torch.autograd.grad(res, new_params, create_graph=True)
                 new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
 
-            qry_logits = fnet(new_params, buffers, (x_qry,))
+            qry_logits = fnet(new_params, buffers, x_qry)
             qry_loss = F.cross_entropy(qry_logits, y_qry)
             qry_acc = (qry_logits.argmax(
                 dim=1) == y_qry).sum() / querysz
@@ -956,11 +955,11 @@ class TestExamplesCorrectness(TestCase):
 
         loss_fn = nn.NLLLoss()
 
-        weights, func_model, _ = make_functional(MLPClassifier().to(device))
+        func_model, weights = make_functional_v2(MLPClassifier().to(device))
 
         def train_step_fn(use_transform, weights, batch, targets, lr=0.2):
             def compute_loss(weights, batch, targets):
-                output = func_model(weights, (batch,))
+                output = func_model(weights, batch)
                 loss = loss_fn(output, targets)
                 return loss
 
@@ -982,7 +981,7 @@ class TestExamplesCorrectness(TestCase):
 
         def init_fn(num_models):
             models = tuple(MLPClassifier().to(device) for _ in range(num_models))
-            weights = tuple(make_functional(model)[0] for model in models)
+            weights = tuple(make_functional_v2(model)[1] for model in models)
             weights = tuple(zip(*weights))
             weights = tuple(torch.stack(shards).detach() for shards in weights)
             return weights
@@ -1046,12 +1045,12 @@ class TestExamplesCorrectness(TestCase):
         model = convert_batchnorm_modules(models.resnet18(num_classes=10)).to(device)
         criterion = nn.CrossEntropyLoss()
 
-        weights, func_model, descriptors = make_functional(model)
+        func_model, weights = make_functional_v2(model)
 
         def compute_loss(weights, image, target):
             images = image.unsqueeze(0)
             targets = target.unsqueeze(0)
-            output = func_model(weights, (images,))
+            output = func_model(weights, images)
             loss = criterion(output, targets)
             return loss
 
