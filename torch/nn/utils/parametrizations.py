@@ -20,23 +20,25 @@ class _SpectralNorm(Module):
                              'got n_power_iterations={}'.format(n_power_iterations))
         self.n_power_iterations = n_power_iterations
         self.eps = eps
-        self.register_buffer('u', None)
-        self.register_buffer('v', None)
-
         weight_mat = self._reshape_weight_to_matrix(weight)
-        self._update_vectors(weight_mat)
+        h, w = weight_mat.size()
+
+        self.register_buffer('u',
+            F.normalize(weight_mat.new_empty(h).normal_(0, 1), dim=0, eps=self.eps))
+        self.register_buffer('v',
+            F.normalize(weight_mat.new_empty(w).normal_(0, 1), dim=0, eps=self.eps))
+
+        # Start with u, v initialized to some reasonable values
+        self._update_vectors(weight_mat, 15)
 
     def _reshape_weight_to_matrix(self, weight: torch.Tensor) -> torch.Tensor:
-        weight_mat = weight
         if self.dim != 0:
             # permute dim to front
-            weight_mat = weight_mat.permute(self.dim,
-                                            *[d for d in range(weight_mat.dim()) if d != self.dim])
-        height = weight_mat.size(0)
-        return weight_mat.reshape(height, -1)
+            weight = weight.permute(self.dim, *(d for d in range(weight.dim()) if d != self.dim))
+        return weight.flatten(1)
 
     @torch.autograd.no_grad()
-    def _update_vectors(self, weight_mat: torch.Tensor) -> None:
+    def _update_vectors(self, weight_mat: torch.Tensor, n_power_iterations: int) -> None:
         # See original note at torch/nn/utils/spectral_norm.py
         # NB: If `do_power_iteration` is set, the `u` and `v` vectors are
         #     updated in power iteration **in-place**. This is very important
@@ -67,17 +69,12 @@ class _SpectralNorm(Module):
         #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
         #    complain that variables needed to do backward for the first forward
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.
-        if self.u is None or self.v is None:  # type: ignore[has-type]
-            # randomly initialize `u` and `v`
-            h, w = weight_mat.size()
-            self.u = F.normalize(weight_mat.new_empty(h).normal_(0, 1), dim=0, eps=self.eps)
-            self.v = F.normalize(weight_mat.new_empty(w).normal_(0, 1), dim=0, eps=self.eps)
 
-        for _ in range(self.n_power_iterations):
+        for _ in range(n_power_iterations):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
             # are the first left and right singular vectors.
             # This power iteration produces approximations of `u` and `v`.
-            self.u = F.normalize(torch.mv(weight_mat, self.v),
+            self.u = F.normalize(torch.mv(weight_mat, self.v),      # type: ignore[has-type]
                                  dim=0, eps=self.eps, out=self.u)   # type: ignore[has-type]
             self.v = F.normalize(torch.mv(weight_mat.t(), self.u),  # type: ignore[has-type]
                                  dim=0, eps=self.eps, out=self.v)   # type: ignore[has-type]
@@ -88,7 +85,7 @@ class _SpectralNorm(Module):
     def forward(self, weight: torch.Tensor) -> torch.Tensor:
         weight_mat = self._reshape_weight_to_matrix(weight)
         if self.training:
-            self._update_vectors(weight_mat)
+            self._update_vectors(weight_mat, self.n_power_iterations)
         sigma = torch.dot(self.u, torch.mv(weight_mat, self.v))
         return weight / sigma
 
