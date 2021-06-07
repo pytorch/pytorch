@@ -189,6 +189,12 @@ class TestForeach(TestCase):
             expected = ref(inputs)
             self.assertEqual(actual, expected)
 
+    # note(mkozuki): why `try-except` for both fastpath?
+    # - inputs for fastpath can be integer tensors.
+    #    - this is becase opinfo dtypes are configured for outpulace implementation
+    # - for integer inputs, trigonometric functions and exponential function returns float outputs,
+    #   which causes "result type Float can't be case to the desired type" error.
+    # Thus, `try-except` is used even if `is_fastpath` is `True`.
     def _inplace_unary_test(self, dtype, inplace, inplace_ref, inputs, is_fastpath):
         copied_inputs = [[t.clone().detach() for t in tensors] for tensors in inputs]
         try:
