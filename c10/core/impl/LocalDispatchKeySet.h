@@ -110,7 +110,7 @@ class C10_API ExcludeDispatchKeyGuard {
   DispatchKeySet exclude_;
 };
 
-template<uint64_t exclude>
+template <uint64_t exclude>
 class C10_API ExcludeDispatchKeyGuard_NoOverlap {
  public:
   // If our exclude set does not overlap with c10::default_excluded_set, we can
