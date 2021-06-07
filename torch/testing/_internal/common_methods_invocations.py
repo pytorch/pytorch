@@ -4021,6 +4021,7 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
     OpInfo('add',
+           ref=np.add,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
