@@ -60,7 +60,7 @@ class _InputEqualizationObserver(nn.Module):
     def forward(self, x_orig):
         # TODO: Allow for convoluational layers
         if not (x_orig.ndim == 2):
-            raise ValueError("InputEqualObserver only supports Linear layers")
+            raise ValueError("InputEqualizationObserver only supports Linear layers")
 
         return self.input_obs(x_orig)
 
@@ -143,7 +143,7 @@ class _WeightEqualizationObserver(nn.Module):
     def forward(self, w_orig):
         # TODO: Allow for convoluational layers
         if not (w_orig.ndim == 2):
-            raise ValueError("WeightEqualObserver only supports Linear layers")
+            raise ValueError("WeightEqualizationObserver only supports Linear layers")
 
         return self._forward(w_orig)
 
