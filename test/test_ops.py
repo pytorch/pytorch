@@ -131,6 +131,7 @@ class TestGradients(TestCase):
                                           check_grad_dtypes=True,
                                           nondet_tol=op.gradcheck_nondet_tol,
                                           fast_mode=op.gradcheck_fast_mode,
+                                          atol=op.gradcheck_atol,
                                           check_forward_ad=check_forward_ad))
             elif check == 'gradgradcheck':
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
@@ -139,12 +140,14 @@ class TestGradients(TestCase):
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True,
                                               nondet_tol=op.gradcheck_nondet_tol,
+                                              atol=op.gradcheck_atol,
                                               fast_mode=op.gradcheck_fast_mode))
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=True,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True,
                                               nondet_tol=op.gradcheck_nondet_tol,
+                                              atol=op.gradcheck_atol,
                                               fast_mode=op.gradcheck_fast_mode))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")

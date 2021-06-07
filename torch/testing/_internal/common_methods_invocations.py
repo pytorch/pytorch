@@ -227,6 +227,7 @@ class OpInfo(object):
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
+                 gradcheck_atol=0.0,  # absolute tolerance for gradcheck
                  inplace_variant=_NOTHING,  # explicitly pass the inplace variant of the operator if required
                  method_variant=_NOTHING,  # explicitly pass the method variant of the operator if required
                  test_conjugated_samples=True,
@@ -292,6 +293,7 @@ class OpInfo(object):
         self.check_batched_gradgrad = check_batched_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
         self.gradcheck_fast_mode = gradcheck_fast_mode
+        self.gradcheck_atol = gradcheck_atol
 
         self.supports_sparse = supports_sparse
 
@@ -6712,7 +6714,9 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_renorm),
+           sample_inputs_func=sample_inputs_renorm,
+           gradcheck_atol=4e-3,
+           gradcheck_fast_mode=False),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
