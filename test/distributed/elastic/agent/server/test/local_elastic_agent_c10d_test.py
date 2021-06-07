@@ -15,13 +15,15 @@ import os
 import socket
 import multiprocessing as mp
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import List, Dict, Callable, Optional, Tuple
 
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.agent.server.api import (
     WorkerSpec,
+    RunResult,
 )
 
 from torch.testing._internal.common_utils import (
@@ -91,10 +93,18 @@ class Conf:
 
 
 class LocalElasticAgentTest_c10d(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # start a standalone, single process etcd server to use for all tests
+        cls._etcd_server = EtcdServer()
+        cls._etcd_server.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        # stop the standalone etcd server
+        cls._etcd_server.stop()
+
     def setUp(self):
-        self._host = "localhost"
-        self._port = acquire_available_port()
-        self._endpoint = f"{self._host}:{self._port}"
         self._test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
         self._run_id = str(uuid.uuid4()).split("-")[0]
 
@@ -110,10 +120,10 @@ class LocalElasticAgentTest_c10d(unittest.TestCase):
         min_nodes=1,
         max_nodes=1,
         max_restarts=0,
-        is_host=True
+        is_host=True,
     ):
         rdzv_params = RendezvousParameters(
-            backend="c10d",
+            backend=self._backend,
             endpoint=self._endpoint,
             run_id=self._run_id,
             min_nodes=min_nodes,
@@ -153,12 +163,14 @@ class LocalElasticAgentTest_c10d(unittest.TestCase):
         start_method: str = "spawn",
         max_restarts: int = 0,
         exit_barrier_timeout=5,
+        is_host=True
     ):
         spec = self.get_worker_spec(
             node_config=conf,
             min_nodes=min_nodes,
             max_nodes=max_nodes,
             max_restarts=max_restarts,
+            is_host=is_host,
         )
         agent = self.get_agent(
             spec=spec,
@@ -178,10 +190,127 @@ class LocalElasticAgentTest_c10d(unittest.TestCase):
             if not agent_results:
                 return result
 
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
-    )
-    def test_simple_dist_sum(self):
+    # TODO(neelgandhi) T92476229: This file should be merged with
+    # local_elastic_agent_test.py in a future diff to combine the duplicate
+    # logic into one file. The duplicate logic includes get_agent, run_agent,
+    # get_worker_spec, run_job.
+    def run_job(
+        self,
+        node_configs: List[Conf],
+        exit_barrier_timeout: int = 5,
+    ) -> Dict[str, List[RunResult]]:
+        """
+        Simulates running a distributed job by running multiple agents
+        (one on each process). Agent 0 is run on the main process for
+        test coverage and ease of debugging
+        """
+
+        nnodes = len(node_configs)
+
+        # each element in this queue holds a tuple (role, RunResult) for each agent
+        agent_results = mp.Queue()
+
+        # run first agent of first config on main process for test coverage + ease of debugging
+        # it is important we loop in reverse order b/c running fn on the main process blocks
+        procs = []
+        for node_idx in reversed(range(len(node_configs))):
+            conf = node_configs[node_idx]
+            run_agent_args = {
+                "conf": conf,
+                "agent_results": agent_results,
+                "min_nodes": nnodes,
+                "max_nodes": nnodes,
+                "start_method": "spawn",
+                "max_restarts": 0,
+                "exit_barrier_timeout": exit_barrier_timeout,
+                "is_host": node_idx == 0
+            }
+            p = mp.Process(target=self.run_agent, kwargs=run_agent_args)
+            procs.append(p)
+            p.start()
+        for p in procs:
+            p.join()
+
+        results: Dict[str, List[RunResult]] = {}
+        while not agent_results.empty():
+            role, run_result = agent_results.get()
+            results.setdefault(role, []).append(run_result)
+        return results
+
+    def run_test_with_backend(self, backend: str, test_to_run: Callable):
+        """
+        Sets the backend and determines the endpoint before running the
+        given test.
+
+        Note: This method must be invoked to run any test functions that spawn
+              an agent. This is because this function sets the backend and
+              endpoint parameters.
+        """
+        self._backend = backend
+
+        if self._backend == "etcd-v2":
+            self._endpoint = self._etcd_server.get_endpoint()
+        else:
+            # the default is c10d backend
+            self._endpoint = f"localhost:{acquire_available_port()}"
+
+        test_to_run()
+
+    def simple_dist_sum(self):
         res = self.run_agent(Conf(entrypoint=_dist_sum, local_world_size=2))
         self.assertFalse(res.is_failed())
         # _dist_sum internally checks that the sum computed is valid
+
+    def multiple_agent_dist_sum(self):
+        node_configs = [
+            Conf(role="sum", entrypoint=_dist_sum, local_world_size=4),
+            Conf(role="sum", entrypoint=_dist_sum, local_world_size=4),
+        ]
+        # When the process method is spawn, the coverage collector hangs
+        # due to getting stuck on the _dist_sum in waiting for TCPStore workers
+        # to join the cluster
+        # TODO(aivanou): t83447589 come up with the proper fix
+        res = self.run_job(node_configs)
+        self.assertEqual(2, len(res["sum"]))
+        ranks = set()
+        for run_results in res["sum"]:
+            self.assertFalse(run_results.is_failed())
+            ranks.update(run_results.return_values.keys())
+        self.assertSetEqual(set(range(4 + 4)), ranks)
+
+
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
+    def test_simple_dist_sum_c10d(self):
+        self.run_test_with_backend(
+            backend="c10d",
+            test_to_run=self.simple_dist_sum
+        )
+
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
+    def test_simple_dist_sum_etcd(self):
+        self.run_test_with_backend(
+            backend="etcd-v2",
+            test_to_run=self.simple_dist_sum
+        )
+
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
+    def test_multiple_agent_dist_sum_c10d(self):
+        self.run_test_with_backend(
+            backend="c10d",
+            test_to_run=self.multiple_agent_dist_sum
+        )
+
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
+    def test_multiple_agent_dist_sum_etcd(self):
+        self.run_test_with_backend(
+            backend="etcd-v2",
+            test_to_run=self.multiple_agent_dist_sum
+        )
