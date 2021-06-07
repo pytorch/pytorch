@@ -23,7 +23,7 @@ from common_utils import (
 )
 import types
 
-from functorch import vmap, functional_init_with_buffers, make_functional_with_buffers
+from functorch import vmap, functional_init_with_buffers, make_functional_with_buffers_deprecated_v1
 from functorch._C import reshape_dim_into, reshape_dim_outof
 
 

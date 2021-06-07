@@ -10,10 +10,10 @@ from . import _C
 
 from ._src.vmap import vmap
 from ._src.eager_transforms import grad, grad_and_value, vjp, jacrev
-from ._src.make_functional import make_functional, make_functional_with_buffers, load_state
+from ._src.make_functional import make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1
 from ._src.make_functional import (
-    make_functional_with_buffers_v2,
-    make_functional_v2,
+    make_functional_with_buffers,
+    make_functional,
     combine_state_for_ensemble,
 )
 from ._src.make_functional import functional_init, functional_init_with_buffers
