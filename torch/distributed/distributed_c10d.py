@@ -299,9 +299,7 @@ def _get_group_size(group):
     if group is GroupMember.WORLD or group is None:
         default_pg = _get_default_group()
         return default_pg.size()
-    if group not in _pg_group_ranks:
-        raise RuntimeError("The given group does not exist")
-    return len(_pg_group_ranks[group])
+    return group.size()
 
 
 def _check_single_tensor(param, param_name):
@@ -559,6 +557,10 @@ def init_process_group(
             )
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
+
+            # Use a PrefixStore to avoid accidental overrides of keys used by
+            # different systems (e.g. RPC) in case the store is multi-tenant.
+            store = PrefixStore("default_pg", store)
 
         default_pg = _new_process_group_helper(
             world_size,
@@ -1558,10 +1560,8 @@ def all_gather_object(object_list, obj, group=None):
         return
 
     input_tensor, local_size = _object_to_tensor(obj)
-    group_backend = get_backend(group)
-    is_nccl_backend = group_backend == Backend.NCCL
     current_device = torch.device("cpu")
-    if is_nccl_backend:
+    if is_nccl_available() and isinstance(group or _get_default_group(), ProcessGroupNCCL):
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
         # true.
@@ -2334,6 +2334,46 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
         work = default_pg.reduce_scatter([output], [input_list], opts)
     else:
         work = group.reduce_scatter([output], [input_list], opts)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+def _reduce_scatter_base(output,
+                         input,
+                         op=ReduceOp.SUM,
+                         group=None,
+                         async_op=False):
+    """
+    Reduces, then scatters a flattened tensor to all processes in a group.
+
+    Args:
+        output (Tensor): Output tensor.
+        input (Tensor): Input tensor that is of size output tensor size times world size
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    """
+    _check_single_tensor(output, "output")
+    _check_single_tensor(input, "input")
+
+    if _rank_not_in_group(group):
+        return
+
+    opts = ReduceScatterOptions()
+    opts.reduceOp = op
+
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg._reduce_scatter_base(output, input, opts)
+    else:
+        work = group._reduce_scatter_base(output, input, opts)
 
     if async_op:
         return work
