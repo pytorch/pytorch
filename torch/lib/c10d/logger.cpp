@@ -9,12 +9,6 @@ namespace c10d {
 // stats.
 const int LoggingIterations[] = {10, 20, 100, 1000};
 
-namespace {
-
-const int kMilliSecondToNanosSecond = 1000000;
-
-} // anonymous namespace
-
 std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
 
