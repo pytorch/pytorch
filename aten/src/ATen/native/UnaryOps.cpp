@@ -373,13 +373,8 @@ Tensor real(const Tensor& self) {
 }
 
 Tensor _neg_view(const Tensor& self) {
-  Tensor self_;
-  auto impl = c10::make_intrusive<TensorImpl>(
-    Storage(self.storage()), self.key_set(), self.dtype());
-  impl->set_storage_offset(self.storage_offset());
-  impl->set_sizes_and_strides(self.sizes(), self.strides());
-  impl->set_neg(!self.is_neg());
-  self_ = Tensor(std::move(impl));
+  Tensor self_ = self.alias();
+  self_._set_neg(!self.is_neg());
   namedinference::propagate_names(self_, self);
   return self_;
 }

@@ -179,8 +179,8 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     dst_contig._set_conj(dst.is_conj());
     src_contig._set_conj(iter.tensor(1).is_conj());
 
-    dst_contig.set_neg(dst.is_conj());
-    src_contig.set_neg(iter.tensor(1).is_neg());
+    dst_contig._set_neg(dst.is_neg());
+    src_contig._set_neg(iter.tensor(1).is_neg());
 
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));

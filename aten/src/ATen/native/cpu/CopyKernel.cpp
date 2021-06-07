@@ -36,6 +36,8 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
               [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
         });
       } else if (isComplexType(dtype)) {
+        // This case should never actually happen since currently there's no way to get a complex tensor
+        // with negative bit.
         if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
           AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
               cpu_kernel_vec(

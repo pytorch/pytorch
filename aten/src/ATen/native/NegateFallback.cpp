@@ -7,8 +7,8 @@ struct NegFallback : MathOpFallback {
   bool is_bit_set(const Tensor& tensor) override {
     return tensor.is_neg();
   }
-  void set_bit(const Tensor& tensor, bool value) override {
-    return tensor.set_neg(value);
+  void _set_bit(const Tensor& tensor, bool value) override {
+    return tensor._set_neg(value);
   }
   Tensor resolve_bit(const Tensor& tensor) override {
     return at::resolve_neg(tensor);

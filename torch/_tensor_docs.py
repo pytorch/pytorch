@@ -916,7 +916,7 @@ See :func:`torch.resolve_conj`
 
 add_docstr_all('resolve_neg',
                r"""
-conj() -> Tensor
+resolve_neg() -> Tensor
 
 See :func:`torch.resolve_neg`
 """)

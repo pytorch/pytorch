@@ -968,7 +968,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set whether or not to take the conjugate of the tensor (flip the imaginary bit).
    */
-  void set_neg(bool value) {
+  void _set_neg(bool value) {
     if (value) {
       key_set_ = key_set_.add(DispatchKey::Negative);
     } else {
