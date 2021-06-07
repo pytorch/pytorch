@@ -376,6 +376,30 @@ class TestAutograd(TestCase):
         gradcheck(my_function, (x, y))
         gradgradcheck(my_function, (x, y))
 
+    def test_not_implemented_grad(self):
+        a = torch.rand(2, requires_grad=True)
+        # if grad for nextafter ends up being implemented, this should be changed
+        y = torch.nextafter(a, a).sum()
+        with self.assertRaisesRegex(
+                NotImplementedError,
+                'the derivative for .* is not implemented'):
+            y.backward()
+
+    def test_not_implemented_fwad(self):
+        x = torch.randn(3)
+        v = torch.rand(3)
+        mat = torch.randn(2, 3)
+
+        with fwAD.dual_level():
+            dual_x = fwAD.make_dual(x, v)
+
+            err_msg = r"Trying to use forward AD with .* that does not support it"
+            hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
+
+            with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
+                # if forward AD ends up being implemented for torch.mv, choose a different op
+                res = torch.mv(mat, dual_x)
+
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
 
