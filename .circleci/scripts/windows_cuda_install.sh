@@ -2,13 +2,6 @@
 set -eux -o pipefail
 
 cuda_major_version=${CUDA_VERSION%.*}
-# Used by GHA to specify to install the display driver
-INSTALL_DISPLAY_DRIVER=${INSTALL_DISPLAY_DRIVER:-}
-
-# Used by CircleCI since CUDA 11+ drivers are not installed by default
-if [[ "$cuda_major_version" == "11" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
-    INSTALL_DISPLAY_DRIVER="1"
-fi
 
 if [[ "$cuda_major_version" == "10" ]]; then
     cuda_installer_name="cuda_10.1.243_426.00_win10"
@@ -32,7 +25,7 @@ else
     exit 1
 fi
 
-if [[ -n "${INSTALL_DISPLAY_DRIVER}" ]]; then
+if [[ "$cuda_major_version" == "11" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
     cuda_install_packages="${cuda_install_packages} Display.Driver"
 fi
 

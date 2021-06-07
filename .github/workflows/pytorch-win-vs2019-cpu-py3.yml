@@ -35,6 +35,8 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -76,6 +78,8 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
