@@ -46,6 +46,7 @@ jobs:
       - name: Check machine tuned
         run: |
           echo "Make sure the machine is tuned."
+          . activate reltest
           pushd benchmark
           pip install -U py-cpuinfo psutil distro
           sudo python3 torchbenchmark/util/machine_config.py
