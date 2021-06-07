@@ -4753,6 +4753,7 @@ op_db: List[OpInfo] = [
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool,
                                                     torch.bfloat16, torch.half),
+                   supports_sparse=True,
                    supports_forward_ad=True,
                    supports_out=False),
     UnaryUfuncInfo('conj_physical',
