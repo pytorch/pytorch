@@ -3217,32 +3217,3 @@ def roll(g, self, shifts, dims):
         result = g.op("Concat", *shapes, axis_i=dims[i])
 
     return result
-
-
-def broadcast_tensors(g, self):
-    print('=== Type:', sym_help._is_tensor_list(self))
-    all_tensors = sym_help._unpack_list(self)
-    print('=== Tensors:', all_tensors)
-
-    # self_dim_rank = sym_help._get_tensor_rank(self)
-    # other_dim_rank = sym_help._get_tensor_rank(other)
-
-    # # Construct a new shape. It's almost as same as self except the size of the 'dim'
-    # # dimension is 1, so that we can expand other dimensions as expected.
-    # new_shape_axes = list(range(self_dim_rank))
-    # new_shape_starts = [0 for i in range(self_dim_rank)]
-    # new_shape_ends = [maxsize
-    #                   if (i != dim)
-    #                   else
-    #                   1
-    #                   for i in range(self_dim_rank)]
-
-    # new_shape = sym_help._slice_helper(g,
-    #                                    self,
-    #                                    axes=new_shape_axes,
-    #                                    starts=new_shape_starts,
-    #                                    ends=new_shape_ends)
-    # other = expand_as(g, other, new_shape)
-
-    return self
-
