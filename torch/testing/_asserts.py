@@ -328,6 +328,8 @@ def _check_values_equal(
     actual: Tensor,
     expected: Tensor,
     *,
+    rtol: float = 0.0,
+    atol: float = 0.0,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> Optional[AssertionError]:
     """Checks if the values of two tensors are bitwise equal.
