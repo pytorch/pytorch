@@ -1242,6 +1242,46 @@ Example:
     tensor([ True, False, False])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_left_shift,
+           r"""
+bitwise_left_shift(input, other) -> Tensor
+
+Computes the bitwise shift of :attr:`input` to the left by :attr:`other` bits.
+The input tensor must be of integral types.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+
+Keyword args:
+    {out}
+
+Example:
+
+    >>> torch.bitwise_left_shift(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-2, -2, 24], dtype=torch.int8)
+""".format(**common_args))
+
+add_docstr(torch.bitwise_right_shift,
+           r"""
+bitwise_right_shift(input, other) -> Tensor
+
+Computes the bitwise shift of :attr:`input` to the right by :attr:`other` bits.
+The input tensor must be of integral types.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+
+Keyword args:
+    {out}
+
+Example:
+
+    >>> torch.bitwise_right_shift(torch.tensor([-2, -7, 31], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-1, -7,  3], dtype=torch.int8)
+""".format(**common_args))
+
 add_docstr(torch.broadcast_to,
            r"""
 broadcast_to(input, shape) -> Tensor

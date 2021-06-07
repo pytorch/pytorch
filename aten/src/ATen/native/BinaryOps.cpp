@@ -803,6 +803,30 @@ Tensor& __ilshift__(Tensor& self, const Scalar& other) {
   return self;
 }
 
+Tensor& bitwise_left_shift_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  lshift_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor bitwise_left_shift(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  native::bitwise_left_shift_out(self, other, result);
+  return result;
+}
+
+Tensor& bitwise_left_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  return native::bitwise_left_shift_out(self, wrapped_scalar_tensor(other).toType(self.scalar_type()), result);
+}
+
+Tensor bitwise_left_shift(const Tensor& self, const Scalar& other) {
+  return native::bitwise_left_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+}
+
+Tensor bitwise_left_shift(const Scalar& self, const Tensor& other) {
+  return native::bitwise_left_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
+}
+
 Tensor __rshift__(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -829,6 +853,30 @@ Tensor& __irshift__(Tensor& self, const Scalar& other) {
   auto iter = TensorIterator::binary_op(self, self, wrapper);
   rshift_stub(iter.device_type(), iter);
   return self;
+}
+
+Tensor& bitwise_right_shift_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  rshift_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor bitwise_right_shift(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  native::bitwise_right_shift_out(self, other, result);
+  return result;
+}
+
+Tensor& bitwise_right_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  return native::bitwise_right_shift_out(self, wrapped_scalar_tensor(other).toType(self.scalar_type()), result);
+}
+
+Tensor bitwise_right_shift(const Tensor& self, const Scalar& other) {
+  return native::bitwise_right_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+}
+
+Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
+  return native::bitwise_right_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
 }
 
 template <typename Stub>
