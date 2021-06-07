@@ -1750,6 +1750,15 @@ TEST_F(FunctionalTest, Softsign) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(FunctionalTest, Mish) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x * x.exp().log1p().tanh();
+  auto y = F::mish(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Tanhshrink) {
   auto x = torch::randn(100) * 10;
   auto y_exp = x - x.tanh();

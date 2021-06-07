@@ -49,11 +49,13 @@ c10::IValue readArchive(
   return ivalues;
 }
 
-std::vector<IValue> get_bytecode_values(PyTorchStreamReader& reader) {
+std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
   std::vector<IValue> bytecode_values;
   bytecode_values = readArchive("bytecode", reader).toTuple()->elements();
   return bytecode_values;
 }
+
+/********************** Bytecode **********************/
 
 // Forward declare
 int64_t _get_model_bytecode_version(
@@ -76,7 +78,7 @@ int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
     return -1;
   }
   PyTorchStreamReader reader(std::move(rai));
-  auto bytecode_values = get_bytecode_values(reader);
+  auto bytecode_values = get_bytecode_ivalues(reader);
   return _get_model_bytecode_version(bytecode_values);
 }
 
@@ -88,6 +90,88 @@ int64_t _get_model_bytecode_version(
   }
   TORCH_WARN("Fail to get bytecode version.");
   return -1;
+}
+
+/********************** Operators and Info **********************/
+
+// Forward declare
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    std::vector<IValue> bytecode_ivalues);
+
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    std::istream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _get_model_ops_and_info(std::move(rai));
+}
+
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    const std::string& filename) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _get_model_ops_and_info(std::move(rai));
+}
+
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    std::shared_ptr<ReadAdapterInterface> rai) {
+  if (!check_zip_file(rai)) {
+    TORCH_WARN("Failed to open zip file for model ops.");
+    return std::unordered_map<std::string, OperatorInfo>{};
+  }
+  PyTorchStreamReader reader(std::move(rai));
+  auto bytecode_values = get_bytecode_ivalues(reader);
+  return _get_model_ops_and_info(bytecode_values);
+}
+
+/* A function to retrieve the root (top level) operators of a model and their
+ * corresponding compatibility info. These root operators can call other
+ * operators within them (traced ops), and a root op can call many different
+ * traced ops depending on internal code paths in the root op. These traced ops
+ * are not returned by this function. Those operators are abstracted into the
+ * runtime as an implementation detail (and the traced ops themselves can also
+ * call other operators) making retrieving them difficult and their value from
+ * this api negligible since they will differ between which runtime version the
+ * model is run on. Because of this, there is a false positive this api can't
+ * prevent in a compatibility usecase. All the root ops of a model are present
+ * in a target runtime, but not all the traced ops are which prevents a model
+ * from being able to run.
+ **/
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    std::vector<IValue> bytecode_ivalues) {
+  constexpr uint64_t min_version_with_schema = 6;
+  if (_get_model_bytecode_version(bytecode_ivalues) < min_version_with_schema) {
+    TORCH_WARN(
+        "Only models with bytecode version 6 and above contain operator schema information. Please re-export your model to generate it");
+  }
+  std::unordered_map<std::string, OperatorInfo> result;
+  if (bytecode_ivalues.empty()) {
+    TORCH_WARN("Failed to get model ops and info.");
+    return result;
+  }
+  // loop over all the functions in the bytecode
+  for (int i = 1; i < bytecode_ivalues.size(); i++) {
+    // descend to the operators list
+    auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
+    auto operators_tuple = method_tuple.at(1).toTuple()->elements()[1];
+    auto operators = operators_tuple.toTuple()->elements()[1];
+    for (auto& op_tuple : operators.toTuple()->elements()) {
+      auto op = op_tuple.toTuple()->elements();
+
+      // grab name
+      std::string op_name = op.at(0).toStringRef();
+      std::string op_overload_name = op.at(1).toStringRef();
+      if (op_overload_name != "") {
+        op_name.append(".");
+        op_name.append(op_overload_name);
+      }
+
+      // grab schema size
+      if (op.size() > 2) {
+        result.emplace(op_name, OperatorInfo{(int)op.at(2).toInt()});
+      } else { // no schema information use default
+        result.emplace(op_name, OperatorInfo{});
+      }
+    }
+  }
+  return result;
 }
 
 } // namespace jit

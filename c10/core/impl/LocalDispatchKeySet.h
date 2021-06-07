@@ -53,7 +53,7 @@ struct C10_API PODLocalDispatchKeySet {
 
   // If our exclude set does not overlap with c10::default_excluded_set, we can
   // skip some bookkeeping. (And we know at compile time if this is the case.)
-  template<uint64_t exclude>
+  template <uint64_t exclude>
   uint64_t exclude_non_overlapping() {
     static_assert(!(exclude & c10::default_excluded_set.raw_repr()));
     uint64_t delta = exclude & ~excluded_;
@@ -127,12 +127,12 @@ class C10_API ExcludeDispatchKeyGuard {
   DispatchKeySet exclude_;
 };
 
-template<uint64_t exclude>
+template <uint64_t exclude>
 class C10_API ExcludeNonDefaultDispatchKeyGuard {
  public:
   ExcludeNonDefaultDispatchKeyGuard()
       : tls_(&raw_local_dispatch_key_set),
-      delta_(tls_->exclude_non_overlapping<exclude>()) {}
+        delta_(tls_->exclude_non_overlapping<exclude>()) {}
 
   ~ExcludeNonDefaultDispatchKeyGuard() {
     tls_->excluded_ &= ~delta_;

@@ -1908,13 +1908,16 @@ torch.cuda.synchronize()
                 for grad in grads:
                     self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
 
-        # Passing lists with mismatched devices or dtypes to a raw
-        # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
-        with self.assertRaisesRegex(RuntimeError, r"must have the same dtype"):
-            torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(dtype=torch.float16)],
-                                                             found_inf,
-                                                             inv_scale)
+        # When passing lists with mismatched dtypes to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call,
+        # it's expected to fall back to single-tensor TensorIterator kernel.
+        grads = [g.clone(), g.to(dtype=torch.float16)]
+        torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
+        for grad in grads:
+            self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
 
+        # Passing lists with mismatched devices to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
         if TEST_MULTIGPU:
             with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
                 torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
@@ -2453,6 +2456,8 @@ torch.cuda.synchronize()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
+    # Test is flaky on Windows (https://github.com/pytorch/pytorch/issues/57401)
+    @unittest.skipIf(IS_WINDOWS, 'Test is flaky on Windows (see issue 57401)')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
@@ -2955,6 +2960,7 @@ torch.cuda.synchronize()
         with torch.cuda.stream(s):
             a = torch.full((1000,), 1, device="cuda")
             g = torch.cuda._Graph()
+            torch.cuda.empty_cache()
             g.capture_begin()
             b = a
             for _ in range(10):
@@ -2990,6 +2996,7 @@ torch.cuda.synchronize()
                 torch.cuda.manual_seed(5)
 
                 g = torch.cuda._Graph()
+                torch.cuda.empty_cache()
                 g.capture_begin()
                 graph_out = graph_in
                 for _ in range(2):
@@ -3076,6 +3083,7 @@ torch.cuda.synchronize()
                 torch.cuda.manual_seed(5)
 
                 g = torch.cuda._Graph()
+                torch.cuda.empty_cache()
                 if (module == "torch"):
                     g.capture_begin()
                     t1 = getattr(torch, op)(*args, **kwargs)
@@ -3428,6 +3436,8 @@ torch.cuda.synchronize()
     def test_graph_record_stream(self):
         # Makes sure graph capture defers attempting to reclaim allocations used across streams. See
         # "Q. Why skip process_events if a capture might be underway?" in c10/cuda/CUDACachingAllocator.cpp
+        torch.cuda.empty_cache()
+
         potential_problem = torch.zeros((3,), device="cuda")
         a = torch.zeros((3,), device="cuda")
         s0 = torch.cuda.Stream()
@@ -3473,6 +3483,8 @@ torch.cuda.synchronize()
         # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
         # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
         # avoid syncing noncapturing streams with captured events or vice versa.
+        torch.cuda.empty_cache()
+
         model = torch.nn.LSTM(512, 512, 2, dropout=0.5).cuda()
         x = torch.ones(100, 192, 512, device="cuda")
 
