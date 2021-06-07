@@ -121,7 +121,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
   char* lib_end = nullptr;
   bool cuda_available = torch::cuda::is_available();
 #ifdef FBCODE_CAFFE2
-  if (cuda_available && &_binary_libtorch_deployinterpreter_cuda_so_start &&
+  if (&_binary_libtorch_deployinterpreter_cuda_so_start &&
       &_binary_libtorch_deployinterpreter_cuda_so_end) {
     lib_start = _binary_libtorch_deployinterpreter_cuda_so_start;
     lib_end = _binary_libtorch_deployinterpreter_cuda_so_end;

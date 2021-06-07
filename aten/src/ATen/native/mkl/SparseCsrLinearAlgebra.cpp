@@ -10,8 +10,8 @@
 
 namespace at {
 namespace sparse_csr {
-Tensor& _sparse_mm_mkl_(
-    Tensor& self,
+const Tensor& _sparse_mm_mkl_(
+    const Tensor& self,
     const SparseCsrTensor& sparse_,
     const Tensor& dense,
     const Tensor& t,
@@ -181,7 +181,7 @@ class SparseCsrMKLInterface {
 
 template <typename scalar_t>
 static inline void sparse_mm_mkl_template(
-    Tensor& res,
+    const Tensor& res,
     const Tensor& col_indices,
     const Tensor& crow_indices,
     const Tensor& values,
@@ -215,8 +215,8 @@ static bool inline constexpr is_mkl_int32_index() {
 #endif
 }
 
-Tensor& _sparse_mm_mkl_(
-    Tensor& self,
+const Tensor& _sparse_mm_mkl_(
+    const Tensor& self,
     const SparseCsrTensor& sparse_,
     const Tensor& dense,
     const Tensor& t,
