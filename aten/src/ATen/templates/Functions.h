@@ -216,4 +216,12 @@ inline bool is_inference(const Tensor& tensor) {
   return tensor.is_inference();
 }
 
+inline bool is_conj(const Tensor& tensor) {
+  return tensor.is_conj();
+}
+
+inline Tensor conj(const Tensor& tensor) {
+  return tensor.conj();
+}
+
 }
