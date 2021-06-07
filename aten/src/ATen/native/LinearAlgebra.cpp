@@ -1257,13 +1257,49 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
     if (is_bmm_out) {
-      for (int64_t b = 0; b < bs; b++) {
-        auto r = self_or_result.select(0, b);
-        addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+      /*
+       * Inference mode multithreading is done because various thread local
+       * state is not appropriately propagated through at::parallel_for.
+       * e.g. RecordFunction related state, dispatchKeySet
+       * Big concern with this is that if we at::parallel_for where state
+       * is not propagated then dispatch machinery may work differently, leading
+       * to undefined behavior.
+       * Thus it is recommended to not use at::parallel_for where lambdas do
+       * ops that go through dispatcher.
+       * For now we circument this by InferenceMode guard in order to unlock
+       * performance.
+       * Longer term we probably want a separate API that explicitly calls out
+       * the TLS that it propagates.
+       */
+      if (c10::InferenceMode::is_enabled()) {
+        auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
+          c10::InferenceMode guard;
+          for (int64_t b = start; b < end; b++) {
+            auto r = self_or_result.select(0, b);
+            addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+          }
+        };
+        at::parallel_for(0, bs, 1, bmm_out_fn);
+      } else {
+        for (int64_t b = 0; b < bs; b++) {
+          auto r = self_or_result.select(0, b);
+          addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+        }
       }
     } else {
-      for (int64_t b = 0; b < bs; b++) {
-        self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+      if (c10::InferenceMode::is_enabled()) {
+        auto bmm_fn = [&](uint64_t start, uint64_t end) {
+          c10::InferenceMode guard;
+          for (int64_t b = start; b < end; b++) {
+            self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+          }
+        };
+        at::parallel_for(0, bs, 1, bmm_fn);
+      }
+      else {
+        for (int64_t b = 0; b < bs; b++) {
+          self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+        }
       }
     }
   }
