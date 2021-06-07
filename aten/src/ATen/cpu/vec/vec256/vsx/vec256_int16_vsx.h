@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/cpu/vec/Vectorized/intrinsics.h>
-#include <ATen/cpu/vec/Vectorized/Vectorized_base.h>
-#include <ATen/cpu/vec/Vectorized/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec256/intrinsics.h>
+#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 namespace at {
 namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
@@ -193,7 +193,7 @@ class Vectorized<int16_t> {
       const Vectorized<int16_t>& a,
       const Vectorized<int16_t>& b,
       const Vectorized<int16_t>& mask) {
-    // the mask used here returned by comparision of Vectorized
+    // the mask used here returned by comparision of vec256
     // assuming this we can use the same mask directly with vec_sel
     // warning intel style mask will not work properly
     return {
