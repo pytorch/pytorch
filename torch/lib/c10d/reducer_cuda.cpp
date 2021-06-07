@@ -34,7 +34,11 @@ class CudaTimer : public Timer {
         return backward_comm_start;
       case Event::kBackwardCommEnd:
         return backward_comm_end;
-    };
+      default:
+        TORCH_INTERNAL_ASSERT(false);
+    }
+    // In case the compiler doesn't get it.
+    return forward_start;
   }
 
  public:
