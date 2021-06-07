@@ -66,7 +66,11 @@ class CpuTimer : public Timer {
         return backward_comm_start_time;
       case Event::kBackwardCommEnd:
         return backward_comm_end_time;
-    };
+      default:
+        TORCH_INTERNAL_ASSERT(false);
+    }
+    // In case the compiler doesn't get it.
+    return forward_start_time;
   }
 
  public:
