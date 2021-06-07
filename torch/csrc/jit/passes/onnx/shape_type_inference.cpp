@@ -318,21 +318,6 @@ Node* CloneNodeToGraph(
   return clone_node;
 }
 
-bool IsBlockValidForInference(Block* block) {
-  for (auto n : block->nodes()) {
-    for (auto subblock : n->blocks()) {
-      if (!IsBlockValidForInference(subblock)) {
-        return false;
-      }
-    }
-
-    if (n->kind() == ::c10::onnx::Identity) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
   // Verify if every input has type(either Tensor or Sequence) and scalar type.
   // This is a requirement for ONNX graph inputs.
@@ -355,7 +340,7 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
       return false;
     }
   }
-  return IsBlockValidForInference(graph->block());
+  return true;
 }
 
 void ConvertGraphToONNXProto(
@@ -1305,22 +1290,6 @@ void SpecialPostProcess(Node* n) {
           v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
           n->output()->setType(v_type);
         }
-      }
-      break;
-    }
-    case ::c10::onnx::Identity: {
-      n->output()->setType(n->input()->type());
-      break;
-    }
-    case ::c10::onnx::If: {
-      for (size_t i = 0; i < n->outputs().size(); ++i) {
-        n->output(i)->setType(n->blocks().at(0)->outputs().at(i)->type());
-      }
-      break;
-    }
-    case ::c10::onnx::Loop: {
-      for (size_t i = 0; i < n->outputs().size(); ++i) {
-        n->output(i)->setType(n->blocks().at(0)->outputs().at(i + 1)->type());
       }
       break;
     }
