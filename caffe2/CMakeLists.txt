@@ -1221,6 +1221,7 @@ endif()
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
 # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
 if(USE_DISTRIBUTED)
+  target_include_directories(torch_cpu PUBLIC ${TORCH_SRC_DIR}/lib)
   target_compile_definitions(torch_cpu PRIVATE USE_DISTRIBUTED)
   if(USE_GLOO AND USE_C10D_GLOO)
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
