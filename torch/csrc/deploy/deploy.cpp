@@ -119,9 +119,9 @@ Interpreter::Interpreter(InterpreterManager* manager)
   // See comment above for fbcode vs oss behavior
   char* lib_start = nullptr;
   char* lib_end = nullptr;
+  bool cuda_available = torch::cuda::is_available();
 #ifdef FBCODE_CAFFE2
-  if (torch::cuda::is_available() &&
-      &_binary_libtorch_deployinterpreter_cuda_so_start &&
+  if (&_binary_libtorch_deployinterpreter_cuda_so_start &&
       &_binary_libtorch_deployinterpreter_cuda_so_end) {
     lib_start = _binary_libtorch_deployinterpreter_cuda_so_start;
     lib_end = _binary_libtorch_deployinterpreter_cuda_so_end;
@@ -135,9 +135,11 @@ Interpreter::Interpreter(InterpreterManager* manager)
   lib_start = _binary_libtorch_deployinterpreter_so_start;
   lib_end = _binary_libtorch_deployinterpreter_so_end;
 #endif // FBCODE_CAFFE2
+  std::string cuda_available_str = cuda_available ? "true" : "false";
   TORCH_CHECK(
       lib_start != nullptr && lib_end != nullptr,
-      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.");
+      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=" +
+          cuda_available_str);
 
   write_tmp_lib(dst, lib_start, lib_end);
   fclose(dst);
