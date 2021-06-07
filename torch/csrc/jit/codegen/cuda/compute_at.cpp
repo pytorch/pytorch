@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -135,7 +137,7 @@ T1 tvIterable(const T2& val_iterable) {
 std::deque<std::deque<TensorView*>> tvChains(
     std::deque<std::deque<Val*>> val_chains) {
   std::deque<std::deque<TensorView*>> tv_chains(val_chains.size());
-  for (size_t i = 0; i < val_chains.size(); i++) {
+  for (const auto i : c10::irange(val_chains.size())) {
     tv_chains[i] = tvIterable<std::deque<TensorView*>>(val_chains[i]);
   }
   return tv_chains;
