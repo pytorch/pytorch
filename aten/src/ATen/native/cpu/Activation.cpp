@@ -271,7 +271,14 @@ void GeluKernelImpl(TensorIterator& it) {
     });
   } else {
     auto grain_size = at::internal::GRAIN_SIZE;
-    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{128};
+// Numbers based on benchmarking.
+#ifdef C10_MOBILE
+    // Benchmarked on S8 US phone.
+    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{6144};
+#else
+    // Benchmarked on i9 8 core 16 thread machine.
+    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{16384};
+#endif
     if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
       grain_size = it.numel() / at::get_num_threads();
     }
