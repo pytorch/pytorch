@@ -25,8 +25,12 @@ from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
 from functools import partial
+import functorch
 from functorch import vmap, grad_and_value
-from functorch import make_functional, load_state
+from functorch import make_functional_v2
+
+# disable warning spam
+functorch._C._set_vmap_fallback_warning_enabled(False)
 
 def save_checkpoint(state, is_best, filename="checkpoint.tar"):
     torch.save(state, filename)
@@ -85,7 +89,7 @@ def train(args, model, train_loader, optimizer, epoch, device):
 
         # In order to use functional vmap+grad, we need to be able to
         # pass the weights to a model.
-        weights, func_model, descriptors = make_functional(model)
+        func_model, weights = make_functional_v2(model)
 
         # To use vmap+grad to compute per-sample-grads, the forward pass
         # must be re-formulated on a single example.
@@ -94,7 +98,7 @@ def train(args, model, train_loader, optimizer, epoch, device):
         def compute_loss_and_output(weights, image, target):
             images = image.unsqueeze(0)
             targets = target.unsqueeze(0)
-            output = func_model(weights, (images,))
+            output = func_model(weights, images)
             loss = criterion(output, targets)
             return loss, output.squeeze(0)
 
@@ -116,14 +120,11 @@ def train(args, model, train_loader, optimizer, epoch, device):
             vmap(grads_loss_output, (None, 0, 0))(weights, images, target)
         loss = sample_loss.mean()
 
-        # `state` is the inverse operation of make_functional. We put
-        # things back into a model so that they're easier to manipulate
-        load_state(model, weights, descriptors)
         for grad_sample, weight in zip(sample_grads, model.parameters()):
             weight.grad_sample = grad_sample.detach()
 
         # Step 2: Clip the per-sample-grads, sum them to form grads, and add noise
-        grads = clip_and_accumulate_and_add_noise(
+        clip_and_accumulate_and_add_noise(
             model, args.max_per_sample_grad_norm, args.sigma)
 
         preds = np.argmax(output.detach().cpu().numpy(), axis=1)

@@ -20,7 +20,7 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 
-from functorch import grad, vmap, make_functional
+from functorch import grad, vmap, make_functional_v2
 
 class ThreeLayerNet(nn.Module):
     def __init__(self):
@@ -43,7 +43,7 @@ class ThreeLayerNet(nn.Module):
 def mse_loss(x, y):
     return torch.mean((x - y) ** 2)
 
-params, net, _ = make_functional(ThreeLayerNet())
+net, params = make_functional_v2(ThreeLayerNet())
 opt = torch.optim.Adam(params, lr=1e-3)
 alpha = 0.1
 
@@ -74,14 +74,14 @@ for it in range(20000):
     opt.zero_grad()
     def get_loss_for_task(x1, y1, x2, y2):
         def inner_loss(params, x1, y1):
-            f = net(params, (x1,))
+            f = net(params, x1)
             loss = mse_loss(f, y1)
             return loss
 
         grads = grad(inner_loss)(params, x1, y1)
         new_params = [(params[i] - alpha*grads[i]) for i in range(len(params))]
 
-        v_f = net(new_params, (x2,))
+        v_f = net(new_params, x2)
         return mse_loss(v_f, y2)
 
     task = sample_tasks(num_tasks, K)
@@ -105,7 +105,7 @@ opt.zero_grad()
 
 t_params = params
 for k in range(5):
-    t_f = net(t_params, (t_x,))
+    t_f = net(t_params, t_x)
     t_loss = F.l1_loss(t_f, t_y)
 
     grads = torch.autograd.grad(t_loss, t_params, create_graph=True)
@@ -115,7 +115,7 @@ for k in range(5):
 test_x = torch.arange(-2*math.pi, 2*math.pi, step=0.01).unsqueeze(1)
 test_y = t_A*torch.sin(test_x + t_b)
 
-test_f = net(t_params, (test_x,))
+test_f = net(t_params, test_x)
 
 plt.plot(test_x.data.numpy(), test_y.data.numpy(), label='sin(x)')
 plt.plot(test_x.data.numpy(), test_f.data.numpy(), label='net(x)')
