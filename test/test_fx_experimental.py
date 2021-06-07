@@ -123,6 +123,12 @@ class TestFXExperimental(JitTestCase):
         assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_1"
         assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
 
+        # Test the users of the nodes. No users of the last/output node.
+        assert serialized_graph2["nodes"][0]["users"][0]["name"] == "submod_0"
+        assert serialized_graph2["nodes"][1]["users"][0]["name"] == "submod_0"
+        assert serialized_graph2["nodes"][4]["users"][0]["name"] == "output"
+        assert serialized_graph2["nodes"][5]["users"] == []
+
         # Test quantization info serialization.
         x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
         q_tensor = torch.quantize_per_tensor(x, 1, 0, torch.qint32)
@@ -1325,6 +1331,7 @@ class TestNormalizeOperators(JitTestCase):
                    'reshape_as',
                    'resize_',
                    'resize_as_',
+                   'to_sparse',
                    'view',
                    'view_as',
                    'unfold',
@@ -1335,6 +1342,7 @@ class TestNormalizeOperators(JitTestCase):
                    '__rsub__',
                    '__rmul__',
                    '__rdiv__',
+                   '__rmod__',
                    '__rpow__',
                    '__rmatmul__'}
 

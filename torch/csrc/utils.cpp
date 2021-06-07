@@ -1,10 +1,5 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/python_headers.h>
-#include <cstdarg>
-#include <string>
-#include <vector>
-#include <sstream>
-#include <algorithm>
-#include <unordered_map>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/invalid_arguments.h>
@@ -31,6 +26,13 @@
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateBoolType.h>
+
+#include <algorithm>
+#include <cstdarg>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   if (!PyCallable_Check(arg))
@@ -200,7 +202,7 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   std::vector<std::string> option_strings;
   va_list option_list;
   va_start(option_list, num_options);
-  for (size_t i = 0; i < num_options; i++)
+  for(const auto i : c10::irange(num_options))
     option_strings.emplace_back(va_arg(option_list, const char*));
   va_end(option_list);
 
