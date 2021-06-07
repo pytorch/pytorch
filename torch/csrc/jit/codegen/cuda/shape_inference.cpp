@@ -398,6 +398,14 @@ class NaiveTypePropagator {
         node->output()->setType(type0->withScalarType(type1->scalarType()));
         break;
       }
+      case aten::to: {
+        const auto type0 = node->input(0)->type()->cast<TensorType>();
+        const auto out_dtype = toIValue(node->input(1));
+        TORCH_CHECK(out_dtype, "No output type specified");
+        node->output()->setType(
+            type0->withScalarType(out_dtype->toScalarType()));
+        break;
+      }
       case prim::add_optional: {
         const auto type0 = node->input(0)->type()->cast<TensorType>();
         const auto type1 = node->input(1)->type()->cast<TensorType>();
@@ -407,6 +415,34 @@ class NaiveTypePropagator {
         } else {
           const auto promoted_type = binary_broadcast_type(type0, type1);
           node->output()->setType(promoted_type);
+        }
+        break;
+      }
+      case aten::autocast_to_fp16: {
+        const auto in_type = node->input(0)->type()->cast<TensorType>();
+        const auto in_scalar_type = in_type->scalarType();
+        TORCH_CHECK(
+            hasTypeAndDevice(in_type),
+            "Type and device propagation has failed, or was not provided enough information.");
+        if (in_scalar_type == at::ScalarType::Float) {
+          node->output()->setType(
+              in_type->withScalarType(at::ScalarType::Half));
+        } else {
+          node->output()->setType(in_type);
+        }
+        break;
+      }
+      case aten::autocast_to_fp32: {
+        const auto in_type = node->input(0)->type()->cast<TensorType>();
+        const auto in_scalar_type = in_type->scalarType();
+        TORCH_CHECK(
+            hasTypeAndDevice(in_type),
+            "Type and device propagation has failed, or was not provided enough information.");
+        if (in_scalar_type == at::ScalarType::Half) {
+          node->output()->setType(
+              in_type->withScalarType(at::ScalarType::Float));
+        } else {
+          node->output()->setType(in_type);
         }
         break;
       }

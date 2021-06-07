@@ -61,6 +61,10 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // bool
     val = IValue(
         static_cast<bool>(profile_ivalue->i(Symbol::attr("profiled_bool"))));
+  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_int"))) {
+    // int
+    val = IValue(
+        static_cast<int>(profile_ivalue->i(Symbol::attr("profiled_int"))));
   } else {
     GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
     TORCH_WARN(

@@ -1986,6 +1986,137 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(y.grad.dtype, y.dtype)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_autocast_1(self):
+        def t(x: torch.Tensor, y: torch.Tensor):
+            o = x * 2.0
+            o = torch.softmax(o, dim=-1)
+            o = o * 3.0
+            o = torch.matmul(o, y)
+            return o
+
+        x = torch.randn(8, 4, dtype=torch.half, device='cuda', requires_grad=True)
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
+        grad = torch.randn(8, 4, dtype=torch.half, device='cuda', requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        for i in range(3):
+            with torch.cuda.amp.autocast():
+                jit_o = t_jit(x, y)
+                if i == 2 :
+                    fwd_graph = t_jit.graph_for(x, y)
+            jit_o.backward(grad)
+
+        self.assertGraphContainsExactly(fwd_graph, FUSION_GUARD, 1, consider_subgraphs=True)
+
+        with torch.cuda.amp.autocast():
+            bwd_graph = list(
+                list(t_jit.get_debug_state().execution_plans.values())[
+                    0].code.grad_executor_states()[0].execution_plans.values()
+            )[0].graph
+        FileCheck().check(FUSION_GROUP).run(bwd_graph)
+
+        self.assertEqual(jit_o.dtype, torch.half)
+        self.assertEqual(x.grad.dtype, x.dtype)
+        self.assertEqual(y.grad.dtype, y.dtype)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_autocast_2(self):
+        def t(x: torch.Tensor):
+            o = x * 2.0
+            o = torch.softmax(o, dim=-1)
+            o = o * 3.0
+            o = torch.softmax(o, dim=-1)
+            o = o * 4.0
+            return o
+
+        x = torch.randn(8, 4, dtype=torch.half, device='cuda', requires_grad=True)
+        grad = torch.randn(8, 4, dtype=torch.float, device='cuda', requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        for i in range(3):
+            with torch.cuda.amp.autocast() :
+                jit_o = t_jit(x)
+                if i == 2 :
+                    fwd_graph = t_jit.graph_for(x)
+            jit_o.backward(grad)
+
+        self.assertGraphContainsExactly(fwd_graph, FUSION_GUARD, 1, consider_subgraphs=True)
+
+        with torch.cuda.amp.autocast():
+            bwd_graph = list(
+                list(t_jit.get_debug_state().execution_plans.values())[
+                    0].code.grad_executor_states()[0].execution_plans.values()
+            )[0].graph
+        FileCheck().check(FUSION_GROUP).run(bwd_graph)
+
+        self.assertEqual(jit_o.dtype, torch.float)
+        self.assertEqual(x.grad.dtype, x.dtype)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_to_dtype_fp32_to_fp16(self):
+        def t(x: torch.Tensor):
+            o = x * 2.0
+            o = o.to(dtype=torch.half)
+            o = o * 3.0
+            return o
+
+        x = torch.randn(8, 4, dtype=torch.float, device='cuda')
+        t_jit = torch.jit.script(t)
+
+        for i in range(3):
+            jit_o = t_jit(x)
+
+        print(t_jit.graph_for(x))
+        self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
+        self.assertEqual(jit_o.dtype, torch.half)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_to_dtype_fp16_to_fp32(self):
+        def t(x: torch.Tensor):
+            o = x * 2.0
+            o = o.to(dtype=torch.float)
+            o = o * 3.0
+            return o
+
+        x = torch.randn(8, 4, dtype=torch.half, device='cuda')
+        t_jit = torch.jit.script(t)
+
+        for i in range(3):
+            jit_o = t_jit(x)
+
+        print(t_jit.graph_for(x))
+        self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
+        self.assertEqual(jit_o.dtype, torch.float)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_to_dtype_fp16_to_fp16(self):
+        def t(x: torch.Tensor):
+            o = x * 2.0
+            o = o.to(dtype=torch.half)
+            o = o * 3.0
+            return o
+
+        x = torch.randn(8, 4, dtype=torch.half, device='cuda')
+        t_jit = torch.jit.script(t)
+
+        for i in range(3):
+            jit_o = t_jit(x)
+
+        print(t_jit.graph_for(x))
+        self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
+        self.assertEqual(jit_o.dtype, torch.half)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(not TEST_MULTIGPU, "requires multiple CUDA device")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")

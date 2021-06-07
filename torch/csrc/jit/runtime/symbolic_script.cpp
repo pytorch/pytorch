@@ -443,6 +443,20 @@ const std::vector<std::string> functions = {
                 return grad_output._grad_sum_to_size(self_size), grad_tensor1, grad_tensor2, None
             return result, backward
 
+        def autocast_to_fp32(self):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype)
+
+            return torch.autocast_to_fp32(self), backward
+
+        def autocast_to_fp16(self):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype)
+
+            return torch.autocast_to_fp16(self), backward
+
         def _dim_arange(like,
                         dim: int):
             def backward(grad_output):

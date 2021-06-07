@@ -28,6 +28,7 @@ constexpr auto kNumLerpOps = 2;
 constexpr auto kNumLayernormFwd = 2;
 constexpr auto kNumBatchnormFwd = 3;
 constexpr auto kNumSumToSize = 2;
+constexpr auto kNumAutocastOps = 2;
 
 namespace {
 
@@ -40,6 +41,7 @@ namespace {
 
 const auto& sizeAttr = Symbol::attr("profiled_size");
 const auto& intListAttr = Symbol::attr("profiled_int_list");
+const auto& intAttr = Symbol::attr("profiled_int");
 const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
 
@@ -1239,6 +1241,62 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
+          "aten::autocast_to_fp16(Tensor(a) self) -> Tensor(a)");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            auto self = value_map[node->input()->unique()];
+            auto out = unaryOp(UnaryOpType::Set, self);
+            value_map.emplace(node->output()->unique(), out);
+          },
+          nullptr,
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::autocast_to_fp32(Tensor(a) self) -> Tensor(a)");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            auto self = value_map[node->input()->unique()];
+            auto out = unaryOp(UnaryOpType::Set, self);
+            value_map.emplace(node->output()->unique(), out);
+          },
+          nullptr,
+          nullptr);
+    }
+
+    // Limiting aten::to implementation to only change the dtype of a tensor
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            const auto self = value_map[node->input(0)->unique()];
+
+            // we need static type for cast
+            TORCH_INTERNAL_ASSERT(
+                node->input(1)->node()->kind() == prim::Constant);
+            auto dtype = toIValue(node->input(1))->toScalarType();
+
+            // We want to keep our internal fusion math in FP32
+            // Shape Inference will continue to propagate the right
+            // type to outputs unchanged.
+            if (dtype == at::ScalarType::Half) {
+              dtype = at::ScalarType::Float;
+            }
+
+            auto out = castOp(aten_to_data_type(dtype), self);
+            value_map.emplace(node->output()->unique(), out);
+          },
+          nullptr,
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
           "aten::type_as(Tensor self, Tensor other) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1569,6 +1627,34 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
   pn->setCallback(ivalue_profiler);
 }
 
+void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isInt(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(intAttr)) {
+      pn->i_(intAttr, value.toInt());
+    } else {
+      auto profiled_int = pn->i(intAttr);
+      auto input_int = value.toInt();
+      TORCH_INTERNAL_ASSERT(
+          input_int == profiled_int, "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
 void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
@@ -1832,6 +1918,20 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
         return false;
     }
     return true;
+  }
+
+  static auto to_dtype_schema =
+      getOperatorForLiteral(
+          "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
+          ->schema();
+  if (node->matches(to_dtype_schema)) {
+    switch (offset) {
+      case 1:
+        profileInt(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
   }
 
   return false;
