@@ -1,8 +1,9 @@
 #include <ATen/native/TensorTransformations.h>
-#include <ATen/WrapDimUtilsMulti.h>
 
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -10,150 +11,71 @@
 
 namespace at {
 namespace native {
-namespace {
 
-constexpr size_t dim_bitset_size = 64;
-
-Tensor build_index(Tensor input, int64_t flip_dim) {
-  int64_t element_size_bytes = input.element_size();
-  auto num_dims = input.ndimension();
-  auto dim_size = input.size(flip_dim);
-  auto stride = input.stride(flip_dim);
-
-  auto new_shape = std::vector<int64_t>(num_dims, 1);
-  new_shape[flip_dim] = dim_size;
-
-  TensorOptions tensor_options =
-    TensorOptions(c10::kLong).
-    device(c10::kCPU);
-
-  auto index = at::empty(new_shape, tensor_options);
-  auto input_index_ptr = index.data_ptr<int64_t>();
-
-  for(int64_t i = 0; i < dim_size; i++) {
-    input_index_ptr[i] = static_cast<int64_t>(dim_size - i - 1) * stride * element_size_bytes;
-  }
-  return index;
-}
-
-
-std::vector<Tensor> build_indices_loop(Tensor input, IntArrayRef flip_dims) {
-  std::vector<Tensor> indices;
-  for(auto dim: flip_dims) {
-    auto index = build_index(input, dim);
-    indices.push_back(index);
-  }
-  return indices;
-}
-
-static TensorIterator make_index_iterator(const Tensor& input, const std::vector<Tensor> indices) {
-  TensorIteratorConfig config;
-
-  auto output_tensor = Tensor();
-  if(input.is_quantized()) {
-    double scale = input.q_scale();
-    int64_t zero_point = input.q_zero_point();
-    output_tensor = at::_empty_affine_quantized(
-        input.sizes(), at::device(c10::kCPU).dtype(input.scalar_type()), scale, zero_point);
-  }
-
-  config.set_check_mem_overlap(false)
-        .check_all_same_dtype(false)
-        .declare_static_dtype_and_device(input.scalar_type(), input.device())
-        .add_owned_output(output_tensor)
-        .add_input(input);
-  for (auto& index : indices) {
-    config.add_input(index);
-  }
-  return config.build();
-}
-
-struct Indexer {
-  Indexer(int64_t num_indexers, char** indexers, const int64_t* indexer_strides)
-      : num_indexers(num_indexers),
-        indexers(indexers),
-        indexer_strides(indexer_strides) {}
-
-  int64_t num_indexers;
-  char** indexers;
-  const int64_t* indexer_strides;
-
-  int64_t get(int64_t idx) {
-    int64_t offset = *(int64_t*)&indexers[0][idx * indexer_strides[0]];
-    for (int j = 1; j < num_indexers; j++) {
-      offset += *(int64_t*)&indexers[j][idx * indexer_strides[j]];
-    }
-    return offset;
-  }
-};
-
-template <typename scalar_t>
-void flip_cpu_kernel(TensorIterator& iter) {
-  int ntensor = iter.ntensors();
-  // When launch the index parallel version, set a relative small grain size
-  // less than the INTERNAL::GRAIN_SIZE to make the whole available thread
-  // numbers get more balanced work load and a better cache location. The grain
-  // size here is chosen by the op benchmark to overcome the thread launch
-  // overhead. This value was taken from the AdvancedIndexing kernel.
-  const int index_parallel_grain_size = 3000;
-  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-    auto indexer = Indexer(ntensor - 2, &data[2], &strides[2]);
-    char* dst = data[0];
-    char* src = data[1];
-
-    for (int64_t i = 0; i < n; i++) {
-      int64_t offset = indexer.get(i);
-      *(scalar_t*)(dst + strides[0] * i) =
-          *(scalar_t*)(src + strides[1] * i + offset);
-    }
-  };
-
-  iter.for_each(loop, index_parallel_grain_size);
-}
-} // anonymous namespace
-
-Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
-  if(dims.size() == 0) {
-    return self.clone();
-  }
-
-  auto input = self;
-  const int64_t total_dims = input.dim();
+Tensor flip(const Tensor& self, IntArrayRef dims) {
+  const int64_t total_dims = self.dim();
+  // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
 
-  std::vector<int64_t> flip_dims;
+  Tensor out_tensor = at::empty_like(self, MemoryFormat::Preserve);
+
+  // Count dimensions in which we need to do work
+  int n = 0;
+  auto strides = DimVector(self.strides());
   for(int64_t i = 0; i < total_dims; i++) {
-      if(flip_dims_b[i]) {
-        flip_dims.push_back(i);
-      }
+    if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
+      n++;
+      strides[i] = 0;
+    }
   }
 
-  auto shape = input.sizes().vec();
-  auto strides = input.strides().vec();
-
-  // Set stride to zero on the dimensions that are going to be flipped
-  for(auto dim: flip_dims) {
-    strides[dim] = 0;
+  // Nothing to do, we return fast
+  if (n == 0 || self.numel() <=1) {
+    out_tensor.copy_(self);
+    return out_tensor;
   }
 
-  // Restride the input to index only on the dimensions to flip
-  auto restrided_input = input.as_strided(shape, strides);
-  auto indices = build_indices_loop(input, flip_dims);
-  auto iter = make_index_iterator(restrided_input, indices);
+  //create dummy output with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
+  const auto restrided_self = self.as_strided(self.sizes(), strides);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .declare_static_dtype_and_device(self.scalar_type(), self.device())
+    .add_output(out_tensor)
+    .add_input(self)
+    .add_input(restrided_self)
+    .build();
 
-  if (input.is_quantized()) {
-    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
-        input.scalar_type(), "flip_quantized_cpu", [&] {
-          flip_cpu_kernel<scalar_t>(iter);
-        });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        kBool, kHalf, kBFloat16, input.scalar_type(), "flip_cpu", [&] {
-          flip_cpu_kernel<scalar_t>(iter);
-        });
+  auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
+  const auto sizes = iter.shape();
+  // This is a SmallVector of _signed_ ints
+  auto strides_bytes = DimVector(iter.strides(0));
+  const auto strides_self = iter.strides(1);
+  const auto strides_dummy = iter.strides(2);
+
+  // To understand this transformation, think of a 3D cube.
+  //   - The data ptr points to the lower-left most vertex of the cube
+  //   - The strides tell us how to move in each dimension,
+  //     that is, data + stride[i] advances one element in the dimension i
+  // To flip a dimension:
+  //   - We move the pointer to the opposite vertex of the cube
+  //   - We iterate in the opposite direction (invert the strides)
+
+  for (int i=0; i<iter.ndim(); i++){
+    // We know that an dimension has a zero stride and self[i] does not, as we defined above
+    // Note that it may be the case that strides_dummy[i] = 0 not because we set it, but because
+    // strides_self[i] == 0. We do not want to do anything there
+    if (strides_dummy[i] == 0 && strides_self[i] != 0) {
+      data += strides_bytes[i] * (sizes[i]-1);
+      strides_bytes[i] *= -1;
+    }
   }
-  auto result = iter.output();
-  return result;
+  iter._unsafe_set_arg_strides(0, strides_bytes);
+  iter._unsafe_set_arg_data(0, reinterpret_cast<void*>(data));
+
+  flip_stub(iter.device_type(), iter, self.is_quantized());
+
+  return out_tensor;
 }
 
 Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
@@ -286,5 +208,8 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
   return result;
 }
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(flip_stub);
 
 }} // namespace at::native
