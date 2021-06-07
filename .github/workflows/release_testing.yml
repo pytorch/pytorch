@@ -49,7 +49,7 @@ jobs:
           . activate reltest
           pushd benchmark
           pip install -U py-cpuinfo psutil distro
-          sudo python3 torchbenchmark/util/machine_config.py
+          sudo $HOME/anaconda3/envs/reltest/bin/python3 torchbenchmark/util/machine_config.py
           popd
       - name: Run MNist
         run: |
