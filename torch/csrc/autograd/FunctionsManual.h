@@ -233,11 +233,22 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
+Tensor i1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor i1e_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
 Tensor lu_unpack_backward(
-  const std::vector<torch::autograd::Variable>& grads,
+  const variable_list& grads,
   const Tensor& LU_data,
   bool unpack_data
 );
+
+Tensor cat_jvp(at::TensorList tensors, int64_t dim);
+Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 
 } // namespace details
 } // namespace generated

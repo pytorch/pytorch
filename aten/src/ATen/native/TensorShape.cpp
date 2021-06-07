@@ -226,8 +226,8 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)  // Already checked above
       .resize_outputs(false)
-      .add_borrowed_output(result_slice)
-      .add_borrowed_input(source_slice)
+      .add_output(result_slice)
+      .add_input(source_slice)
       .enforce_safe_casting_to_output(true)
       .build();
 
@@ -253,8 +253,8 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
       auto iter = TensorIteratorConfig()
         .set_check_mem_overlap(false)  // Already checked above
         .resize_outputs(false)
-        .add_borrowed_output(result_slice)
-        .add_borrowed_input(tensor)
+        .add_output(result_slice)
+        .add_input(tensor)
         .promote_inputs_to_common_dtype(true)
         .cast_common_dtype_to_outputs(true)
         .enforce_safe_casting_to_output(true)
@@ -1313,7 +1313,7 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
   auto result = at::native::split(self, split_size, dim);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
-    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+    if (!t.is_inference()) {
       t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
     }
   }
@@ -1364,7 +1364,7 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
   auto result = at::native::split_with_sizes(self, split_sizes, dim);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
-    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+    if (!t.is_inference()) {
       t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
     }
   }
