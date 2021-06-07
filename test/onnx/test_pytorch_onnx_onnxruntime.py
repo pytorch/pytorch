@@ -1089,7 +1089,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
-    @skipIfUnsupportedOpsetVersion([14])
     def test_hardswish(self):
         model = torch.nn.Hardswish()
 
