@@ -1,135 +1,49 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <thread>
-#include <unordered_map>
 
 #include <c10d/Store.hpp>
 
-#ifdef _WIN32
-#include <c10d/WinSockUtils.hpp>
-#else
-#include <c10d/UnixSockUtils.hpp>
-#endif
-
 namespace c10d {
+namespace detail {
 
-enum class WatchResponseType : uint8_t {
-  KEY_UPDATED,
-  KEY_CREATED,
-  KEY_DELETED,
-  KEY_CALLBACK_REGISTERED
+class TCPServer;
+
+class TCPClient;
+
+class TCPCallbackClient;
+
+struct SocketAddress {
+  std::string host{};
+  std::uint16_t port{};
 };
 
-// Abstract base class to handle thread state for TCPStoreMasterDaemon and
-// TCPStoreWorkerDaemon. Contains the windows/unix implementations to signal a
-// shutdown sequence for the thread
-class BackgroundThread {
- public:
-  explicit BackgroundThread(int storeListenSocket);
-  virtual ~BackgroundThread() = 0;
+} // namespace detail
 
- protected:
-  std::thread daemonThread_;
-  int storeListenSocket_;
-  std::vector<int> sockets_;
-#ifdef _WIN32
-  const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds(10);
-  HANDLE ghStopEvent_;
-#else
-  std::vector<int> controlPipeFd_{-1, -1};
-#endif
- private:
-  // Initialization for shutdown signal
-  void initStopSignal();
-  // Triggers the shutdown signal
-  void stop();
-  // Joins the thread
-  void join();
-  // Clean up the shutdown signal
-  void closeStopSignal();
-};
+struct TCPStoreOptions {
+  static constexpr std::uint16_t kDefaultPort = 29500;
 
-// Separate thread that is only launched on master
-class TCPStoreMasterDaemon : public BackgroundThread {
- public:
-  explicit TCPStoreMasterDaemon(int storeListenSocket);
+  std::uint16_t port = kDefaultPort;
+  bool isServer = false;
+  c10::optional<std::size_t> numWorkers = c10::nullopt;
+  bool waitWorkers = true;
+  std::chrono::milliseconds timeout = Store::kDefaultTimeout;
 
- private:
-  void run();
-  void queryFds(std::vector<struct pollfd>& fds);
-  void query(int socket);
-
-  // The master runs on a single thread so only
-  // one handler can be executed at a time
-  void setHandler(int socket);
-  void compareSetHandler(int socket);
-  void addHandler(int socket);
-  void getHandler(int socket) const;
-  void checkHandler(int socket) const;
-  void getNumKeysHandler(int socket) const;
-  void deleteHandler(int socket);
-  void waitHandler(int socket);
-  void watchHandler(int socket);
-
-  bool checkKeys(const std::vector<std::string>& keys) const;
-  // Helper function to alerts waiting workers, used in setHandler, getHandler
-  void wakeupWaitingClients(const std::string& key);
-  // Helper function used when the key is changed
-  // used in setHandler, addHandler, getHandler, deleteHandler
-  void sendKeyUpdatesToClients(
-      const std::string& key,
-      const enum WatchResponseType& type,
-      std::vector<uint8_t>& oldData,
-      std::vector<uint8_t>& newData);
-  std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
-  // From key -> the list of sockets waiting on the key
-  std::unordered_map<std::string, std::vector<int>> waitingSockets_;
-  // From socket -> number of keys awaited
-  std::unordered_map<int, size_t> keysAwaited_;
-  // From key -> the list of sockets watching the key
-  std::unordered_map<std::string, std::vector<int>> watchedSockets_;
-};
-
-// Separate thread that is launched on all instances (including master)
-// Right now only handles callbacks registered from watchKey()
-class TCPStoreWorkerDaemon : public BackgroundThread {
- public:
-  explicit TCPStoreWorkerDaemon(int listenSocket);
-  // Set the callback to run key change
-  void setCallback(std::string key, WatchKeyCallback cb);
-  void waitForCallbackRegistration() {
-    // Block until callback has been registered successfully
-    std::unique_lock<std::mutex> callbackRegistrationLock(
-        callbackRegistrationMutex_);
-    callbackRegisteredCV_.wait(
-        callbackRegistrationLock, [&] { return callbackRegisteredData_; });
-
-    // Reset payload for next callback
-    callbackRegisteredData_ = false;
-  }
-  void setCallbackRegistered() {
-    callbackRegisteredData_ = true;
-    callbackRegisteredCV_.notify_one();
-  }
-
- private:
-  void run();
-  void callbackHandler(int socket);
-  // List of callbacks map each watched key
-  std::unordered_map<std::string, WatchKeyCallback> keyToCallbacks_;
-  std::mutex keyToCallbacksMutex_;
-  std::mutex callbackRegistrationMutex_;
-  std::condition_variable callbackRegisteredCV_;
-  bool callbackRegisteredData_ = false;
+  // A boolean value indicating whether multiple store instances can be
+  // initialized with the same host:port pair.
+  bool multiTenant = false;
 };
 
 class TCPStore : public Store {
  public:
-  explicit TCPStore(
+  explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
+
+  [[deprecated("Use TCPStore(host, opts) instead.")]] explicit TCPStore(
       const std::string& masterAddr,
-      PortType masterPort,
-      c10::optional<int> numWorkers = c10::nullopt_t(-1),
+      std::uint16_t masterPort,
+      c10::optional<int> numWorkers = c10::nullopt,
       bool isServer = false,
       const std::chrono::milliseconds& timeout = kDefaultTimeout,
       bool waitWorkers = true);
@@ -170,33 +84,32 @@ class TCPStore : public Store {
   void waitForWorkers();
 
   // Returns the hostname used by the TCPStore.
-  const std::string& getHost() const noexcept;
+  const std::string& getHost() const noexcept {
+    return addr_.host;
+  }
 
   // Returns the port used by the TCPStore.
-  PortType getPort() const noexcept;
+  std::uint16_t getPort() const noexcept {
+    return addr_.port;
+  }
 
  private:
-  int64_t addHelper_(const std::string& key, int64_t value);
-  std::vector<uint8_t> getHelper_(const std::string& key);
-  void waitHelper_(
-      const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout);
+  int64_t incrementValueBy(const std::string& key, int64_t delta);
 
-  std::mutex watchKeyMutex_;
-  bool isServer_;
-  int storeSocket_ = -1;
-  int listenSocket_ = -1;
-  int masterListenSocket_ = -1;
+  std::vector<uint8_t> doGet(const std::string& key);
 
-  std::string tcpStoreAddr_;
-  PortType tcpStorePort_;
+  void doWait(
+      c10::ArrayRef<std::string> keys,
+      std::chrono::milliseconds timeout);
 
-  c10::optional<int> numWorkers_;
-  const std::string initKey_;
-  const std::string regularPrefix_;
+  detail::SocketAddress addr_;
+  std::shared_ptr<detail::TCPServer> server_;
+  std::unique_ptr<detail::TCPClient> client_;
+  std::unique_ptr<detail::TCPCallbackClient> callbackClient_;
+  c10::optional<std::size_t> numWorkers_;
 
-  std::unique_ptr<TCPStoreMasterDaemon> tcpStoreMasterDaemon_ = nullptr;
-  std::unique_ptr<TCPStoreWorkerDaemon> tcpStoreWorkerDaemon_ = nullptr;
+  const std::string initKey_ = "init/";
+  const std::string keyPrefix_ = "/";
 };
 
 } // namespace c10d
