@@ -69,7 +69,7 @@ RegisterOperators reg(
            return [rg_props](Stack* stack) {
              auto num_inputs = rg_props.size();
              // Check every input's shape against profiled (expected) shape.
-             for (size_t i = 0; i < num_inputs; i++) {
+             for (const auto i : c10::irange(num_inputs)) {
                auto& input = peek(stack, i, num_inputs);
                const auto& t = input.toTensor();
                if (rg_props[i] != t.requires_grad()) {

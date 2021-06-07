@@ -143,12 +143,6 @@ def check(*inputs) -> None:
 
     """
     for input in inputs:
-        if isinstance(input, Sequence) and len(inputs) == 1:
-            for x in input:
-                if not isinstance(x, Tensor):
-                    raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
-            return
-
         if not isinstance(input, Tensor):
             raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
 
