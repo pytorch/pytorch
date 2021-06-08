@@ -174,7 +174,7 @@ auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc
   for (auto& option : options) {
     plans.emplace_back(std::move(option.plan));
   }
-  return plans; 
+  return plans;
 }
 
 auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
