@@ -81,7 +81,8 @@ bool ShapeSymbolTable::bindSymbolicShapes(
 }
 
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
-    : profiled_graph_(std::move(g)), profiling_count_(getNumProfiledRuns()) {}
+    : profiled_graph_(std::move(g)),
+      profiling_count_(static_cast<size_t>(getNumProfiledRuns())) {}
 
 ProfileOp* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,
@@ -302,7 +303,14 @@ void ProfilingRecord::removeProfilingNodes(Block* b) {
 }
 
 bool ProfilingRecord::ready() const {
-  std::lock_guard<std::mutex> lock(this->mutex_);
+  // this atomic is intentionally not guarded by `mutex_`, so
+  // profiling executor doesn't need to hold both compilation
+  // and profiling locks at the same time, thus reducing the risk
+  // of the deadlock.
+  // Note, profiling threads will still be updating `profiling_count`
+  // under `mutex_`.
+  // this is a temporary workaround until we figure out why the deadlock
+  // is happening in the first place
   return profiling_count_ == 0;
 }
 
@@ -322,17 +330,11 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
 
-    if (raw_pr->profiling_count_ > 0) {
-      raw_pr->profiling_count_--;
-    } else {
-      // if profiling_count_ is already at 0 ignore incoming profiling data
-      // since we already collected the data for the exact number of runs
-      // required
+    if (raw_pr->profiling_count_ < 1) {
       return;
     }
 
-    // merge profiling information from all runs
-    if (raw_pr->profiling_count_ == 0) {
+    if (raw_pr->profiling_count_ == 1) {
       GRAPH_DEBUG(
           "Collected ",
           raw_pr->profiled_types_per_frame_.size(),
@@ -390,6 +392,8 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
             attr::profiled_type, val_type_pair.second);
       }
     }
+
+    raw_pr->profiling_count_--;
   };
 
   auto pop = pr->createProfileNode(counter, {});

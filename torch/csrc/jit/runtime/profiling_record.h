@@ -183,7 +183,7 @@ struct ProfilingRecord {
 
   std::shared_ptr<Graph> profiled_graph_;
   mutable std::mutex mutex_;
-  size_t profiling_count_;
+  std::atomic<size_t> profiling_count_;
   // the key is a frame id
   // the value is a mapping from a Value in a graph
   // to a profiled TensorType
