@@ -146,7 +146,7 @@ void MKLExp<double>(int64_t N, const double* X, double* Y) {
 }
 
 template <typename T>
-void GeluMKLKernelImpl(TensorIterator* it) {
+void GeluMKLKernelImpl(TensorIteratorBase* it) {
   if (!it->can_use_32bit_indexing()) {
     for (auto& sub_it : it->with_32bit_indexing()) {
       GeluMKLKernelImpl<T>(&sub_it);
@@ -161,7 +161,7 @@ void GeluMKLKernelImpl(TensorIterator* it) {
 }
 
 template <typename T>
-void GeluBackwardMKLKernelImpl(TensorIterator* it) {
+void GeluBackwardMKLKernelImpl(TensorIteratorBase* it) {
   if (!it->can_use_32bit_indexing()) {
     for (auto& sub_it : it->with_32bit_indexing()) {
       GeluBackwardMKLKernelImpl<T>(&sub_it);
@@ -188,12 +188,12 @@ void GeluBackwardMKLKernelImpl(TensorIterator* it) {
 #else // AT_MKL_ENABLED()
 
 template <typename T>
-void GeluMKLKernelImpl(TensorIterator* /* it */) {
+void GeluMKLKernelImpl(TensorIteratorBase* /* it */) {
   TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 template <typename T>
-void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
+void GeluBackwardMKLKernelImpl(TensorIteratorBase* /* it */) {
   TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
@@ -264,7 +264,7 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
 // TODO(yangxm): Add another fast kernel using formula
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
-void GeluKernelImpl(TensorIterator& it) {
+void GeluKernelImpl(TensorIteratorBase& it) {
   if (at::hasMKL() && it.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
       GeluMKLKernelImpl<scalar_t>(&it);
@@ -289,7 +289,7 @@ void GeluKernelImpl(TensorIterator& it) {
   }
 }
 
-void GeluBackwardKernelImpl(TensorIterator& it) {
+void GeluBackwardKernelImpl(TensorIteratorBase& it) {
   if (hasMKL() && it.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
       GeluBackwardMKLKernelImpl<scalar_t>(&it);
@@ -369,7 +369,7 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void hardshrink_kernel(TensorIterator& iter, const Scalar& lambd) {
+void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
@@ -393,7 +393,7 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   });
 }
 
-void shrink_backward_kernel(TensorIterator& iter, const Scalar& lambd) {
+void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "shrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
