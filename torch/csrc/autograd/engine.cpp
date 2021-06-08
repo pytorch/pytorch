@@ -954,7 +954,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
   if (might_use_cuda && will_use_cuda) {
     // Collects current and default streams for devices where this process has a context,
     // so GraphTask::exec_post_processing can sync them with leaf_streams.
-    task->stash_current_streams();
+    task.stash_current_streams();
   }
 }
 
