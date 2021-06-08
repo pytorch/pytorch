@@ -137,7 +137,7 @@ class TestEqualizeFx(QuantizationTestCase):
         # Basic test with one linear layer
         class LinearModule(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(1, 1)
 
             def forward(self, x):
@@ -152,7 +152,7 @@ class TestEqualizeFx(QuantizationTestCase):
         # (quantized non-linear operation)
         class LinearConvModule(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(5, 5)
                 self.conv = nn.Conv2d(3, 3, 1, 1)
 
