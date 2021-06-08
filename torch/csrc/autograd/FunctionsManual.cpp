@@ -85,7 +85,7 @@ T not_implemented_base(const char* name, const char* reason) {
   if (strlen(reason) > 0) {
     msg = c10::str(msg, " ", reason);
   };
-  throw std::runtime_error(msg);
+  TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
 }
 
 Tensor not_implemented(const char* name, const char* reason) {
