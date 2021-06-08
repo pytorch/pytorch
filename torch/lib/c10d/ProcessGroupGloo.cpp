@@ -136,12 +136,12 @@ std::chrono::milliseconds getRemainingTime(
   return remainingMillis;
 }
 
-// Emit a LOG(ERROR) and throws runtime_error with the given messages.
+// Emit a LOG(ERROR) and throws using TORCH_CHECK with the given messages.
 void logAndThrow(
     const std::string& logMessage,
     const std::string& errorMessage) {
   LOG(ERROR) << logMessage;
-  throw std::runtime_error(errorMessage);
+  TORCH_CHECK(false, errorMessage);
 }
 
 // For monitoredBarrier, checks remaining time left to finish processing ranks
