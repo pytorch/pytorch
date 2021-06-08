@@ -20,7 +20,7 @@ int64_t BackendDebugInfoRecorder::getNextDebugHandle(const Node* node) {
   DebugHandleType debug_handle = unique_debug_handle_;
   const SourceRange& range = node->sourceRange();
   handles_to_inlined_callstack_ptrs_[debug_handle] =
-      std::make_pair(range, cs_ptr);
+      std::make_tuple(range, node->kind().toQualString(), cs_ptr);
   // This increment is with seq memory order.
   // Not trying to perf optimizing this for now.
   unique_debug_handle_++;

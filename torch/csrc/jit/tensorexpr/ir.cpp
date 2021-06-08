@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -93,7 +95,7 @@ const Expr* flatten_index(
   }
 
   const Expr* total_index = new IntImm(0);
-  for (size_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     total_index = new Add(total_index, new Mul(indices[i], strides[i]));
   }
   return total_index;
@@ -187,7 +189,7 @@ ExternalCall* ExternalCall::make(
 std::vector<const Expr*> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<const Expr*> result(v.size());
-  for (size_t i = 0; i < v.size(); i++) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
@@ -196,7 +198,7 @@ std::vector<const Expr*> ExprHandleVectorToExprVector(
 std::vector<ExprHandle> ExprVectorToExprHandleVector(
     const std::vector<const Expr*>& v) {
   std::vector<ExprHandle> result(v.size());
-  for (size_t i = 0; i < v.size(); i++) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = ExprHandle(v[i]);
   }
   return result;
@@ -205,7 +207,7 @@ std::vector<ExprHandle> ExprVectorToExprHandleVector(
 std::vector<const Var*> VarHandleVectorToVarVector(
     const std::vector<VarHandle>& v) {
   std::vector<const Var*> result(v.size());
-  for (size_t i = 0; i < v.size(); i++) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
@@ -214,7 +216,7 @@ std::vector<const Var*> VarHandleVectorToVarVector(
 std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<const Var*>& v) {
   std::vector<VarHandle> result(v.size());
-  for (size_t i = 0; i < v.size(); i++) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = VarHandle(v[i]);
   }
   return result;

@@ -86,8 +86,10 @@ class Tensor(torch._C._TensorBase):
                         self.requires_grad,
                         self._backward_hooks)
                 else:
-                    new_tensor = self.new()
+                    new_tensor = self.new_empty([])
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    if self.is_conj():
+                        new_tensor = new_tensor.conj_physical()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
@@ -555,6 +557,12 @@ class Tensor(torch._C._TensorBase):
 
     __pow__ = _wrap_type_error_to_not_implemented(_C._TensorBase.pow)
 
+    @_wrap_type_error_to_not_implemented
+    def __rmod__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmod__, (self, other), self, other)
+        return torch.remainder(other, self)
+
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
@@ -953,10 +961,14 @@ class Tensor(torch._C._TensorBase):
                 while i < row_indices.size()[0] and row_indices[i] == irow:
                     i += 1
                 ro.append(i)
-
-            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=row_indices.dtype),
-                                           coalesced_self.indices()[1], coalesced_self.values(),
-                                           size=coalesced_self.shape, dtype=coalesced_self.dtype)
+            device = coalesced_self.values().device
+            crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
+            return torch.sparse_csr_tensor(crow_indices,
+                                           coalesced_self.indices()[1].contiguous(),
+                                           coalesced_self.values(),
+                                           size=coalesced_self.shape,
+                                           dtype=coalesced_self.dtype,
+                                           device=device)
         elif self.is_sparse_csr:
             return self
         else:

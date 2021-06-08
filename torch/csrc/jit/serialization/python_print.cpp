@@ -3,6 +3,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
@@ -1336,7 +1337,7 @@ struct PythonPrintImpl {
         std::vector<std::string> buffers;
         // Populate the __parameters__ field. This tells the importer which
         // attributes are parameters.
-        for (size_t i = 0; i < numAttrs; i++) {
+        for (const auto i : c10::irange(numAttrs)) {
           if (classType->is_parameter(i)) {
             params.push_back(classType->getAttributeName(i));
           }
@@ -1378,7 +1379,7 @@ struct PythonPrintImpl {
         }
       }
 
-      for (size_t i = 0; i < numAttrs; i++) {
+      for (const auto i : c10::irange(numAttrs)) {
         const auto& name = classType->getAttributeName(i);
         const auto& type = classType->getAttribute(i);
         registerClassDependencies(type);
@@ -1406,7 +1407,7 @@ struct PythonPrintImpl {
       }
 
       size_t numConstants = classType->numConstants();
-      for (size_t i = 0; i < numConstants; i++) {
+      for (const auto i : c10::irange(numConstants)) {
         const auto& name = classType->getConstantName(i);
         IValue v = classType->getConstant(i);
 

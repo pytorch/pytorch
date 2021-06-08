@@ -959,6 +959,9 @@ struct TORCH_API TupleType : public NamedType {
         c10::nullopt,
         nullptr)); // NOLINT(modernize-make-shared)
   }
+  static TupleTypePtr create() {
+    return create({});
+  }
 
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
