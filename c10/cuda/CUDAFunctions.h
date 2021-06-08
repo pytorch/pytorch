@@ -30,7 +30,7 @@ C10_CUDA_API void set_device(DeviceIndex device);
 
 C10_CUDA_API void device_synchronize();
 
-C10_CUDA_API const char* get_cuda_check_prefix() noexcept;
+C10_CUDA_API const char* get_cuda_check_suffix() noexcept;
 
 } // namespace cuda
 } // namespace c10

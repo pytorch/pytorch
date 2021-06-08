@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -80,7 +81,7 @@ public:
       // NOLINTNEXTLINE(bugprone-branch-clone)
       auto size = tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
       v_value.resize(size);
-      for (int idx = 0; idx < size; idx++) {
+      for(const auto idx : c10::irange(size)) {
         PyObject* obj = tuple ? PyTuple_GET_ITEM(source, idx) : PyList_GET_ITEM(source, idx);
         if (THPVariable_Check(obj)) {
           v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();

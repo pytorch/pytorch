@@ -16,7 +16,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
  public:
   c10::intrusive_ptr<JitFuture> processMessage(
       Message& request,
-      std::shared_ptr<LazyStreamContext> ctx) const override;
+      std::vector<c10::Stream> streams) const override;
 
  protected:
   virtual std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
@@ -24,34 +24,33 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const MessageType& messageType) const;
 
   virtual c10::intrusive_ptr<JitFuture> processScriptCall(
-      RpcCommandBase& rpc) const;
+      RpcCommandBase& rpc,
+      std::vector<c10::Stream> streams) const;
 
   virtual c10::intrusive_ptr<JitFuture> processPythonCall(
-      RpcCommandBase& rpc) const;
+      RpcCommandBase& rpc,
+      std::vector<c10::Stream> streams) const;
 
   c10::intrusive_ptr<JitFuture> assignOwnerRRef(
       const RRefId& rrefId,
       const RRefId& forkId,
-      c10::intrusive_ptr<JitFuture> valueFuture,
-      std::shared_ptr<LazyStreamContext> lsctx) const;
+      c10::intrusive_ptr<JitFuture> valueFuture) const;
 
   virtual c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
-      RpcCommandBase& rpc) const;
+      RpcCommandBase& rpc,
+      std::vector<c10::Stream> streams) const;
 
   virtual c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      std::vector<c10::Stream> streams) const;
 
-  c10::intrusive_ptr<JitFuture> retrieveOwnerRRef(
-      const RRefId& rrefId,
-      std::shared_ptr<LazyStreamContext> lsctx) const;
+  c10::intrusive_ptr<JitFuture> retrieveOwnerRRef(const RRefId& rrefId) const;
 
   c10::intrusive_ptr<JitFuture> processScriptRRefFetchCall(
       RpcCommandBase& rpc) const;
 
   virtual c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
-      RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      RpcCommandBase& rpc) const;
 
   c10::intrusive_ptr<JitFuture> processRRefUserDelete(
       RpcCommandBase& rpc) const;
@@ -64,7 +63,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
 
   c10::intrusive_ptr<JitFuture> processForwardAutogradReq(
       RpcCommandBase& rpc,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      std::vector<c10::Stream> streams) const;
 
   c10::intrusive_ptr<JitFuture> processBackwardAutogradReq(
       RpcCommandBase& rpc) const;
@@ -80,12 +79,12 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   c10::intrusive_ptr<JitFuture> processRpc(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      std::vector<c10::Stream> streams) const;
 
   virtual c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      std::vector<c10::Stream> streams) const;
 
   c10::intrusive_ptr<Message> handleError(
       const std::exception& e,
@@ -101,7 +100,8 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
 
   c10::intrusive_ptr<JitFuture> runJitOperator(
       const jit::Operator& op,
-      std::vector<at::IValue>& stack) const;
+      std::vector<at::IValue>& stack,
+      std::vector<c10::Stream> streams) const;
 
   // Helpers to convert various kinds of objects into already-completed futures.
 
@@ -109,8 +109,6 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
 
   c10::intrusive_ptr<JitFuture> asFuture(
       c10::intrusive_ptr<Message> message) const;
-
-  c10::intrusive_ptr<JitFuture> asFuture(Message message) const;
 
   c10::intrusive_ptr<JitFuture> asFuture(std::exception_ptr err) const;
 };
