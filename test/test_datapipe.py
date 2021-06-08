@@ -495,13 +495,13 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp = prebatch_dp.batch(3)
         unbatch_dp = input_dp.unbatch()
-        self.assertEqual(len(list(zip(prebatch_dp, unbatch_dp))), target_length)
+        self.assertEqual(len(list(unbatch_dp)), target_length)
         for i, res in zip(prebatch_dp, unbatch_dp):
             self.assertEqual(i, res)
 
         input_dp = IDP([[0, 1, 2], [3, 4, 5]])
         unbatch_dp = input_dp.unbatch()
-        self.assertEqual(len(list(zip(prebatch_dp, unbatch_dp))), target_length)
+        self.assertEqual(len(list(unbatch_dp)), target_length)
         for i, res in zip(prebatch_dp, unbatch_dp):
             self.assertEqual(i, res)
 
@@ -509,14 +509,14 @@ class TestFunctionalIterDataPipe(TestCase):
 
         unbatch_dp = input_dp.unbatch()
         expected_dp = [[0, 1], [2, 3], [4, 5], [6, 7]]
-        self.assertEqual(len(list(zip(expected_dp, unbatch_dp))), 4)
+        self.assertEqual(len(list(unbatch_dp)), 4)
         for i, res in zip(expected_dp, unbatch_dp):
             self.assertEqual(i, res)
 
         unbatch_dp = input_dp.unbatch(unbatch_level=2)
-        expected_dp = [0, 1, 2, 3, 4, 5, 6, 7]
-        self.assertEqual(len(list(zip(expected_dp, unbatch_dp))), 8)
-        for i, res in zip(expected_dp, unbatch_dp):
+        expected_dp2 = [0, 1, 2, 3, 4, 5, 6, 7]
+        self.assertEqual(len(list(unbatch_dp)), 8)
+        for i, res in zip(expected_dp2, unbatch_dp):
             self.assertEqual(i, res)
 
         input_dp = IDP([[0, 1, 2], [3, 4, 5]])
