@@ -6683,6 +6683,48 @@ workflows:
     when: << pipeline.parameters.run_binary_tests >>
   build:
     jobs:
+      - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-x86_64_build
+          ios_arch: x86_64
+          ios_platform: SIMULATOR
+          lite_interpreter: "1"
+          name: pytorch_ios_12_0_0_x86_64_build
+      - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-x86_64_full_jit_build
+          ios_arch: x86_64
+          ios_platform: SIMULATOR
+          lite_interpreter: "0"
+          name: pytorch_ios_12_0_0_x86_64_full_jit_build
+      - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-arm64_build
+          context: org-member
+          ios_arch: arm64
+          ios_platform: OS
+          lite_interpreter: "1"
+          name: pytorch_ios_12_0_0_arm64_build
+      - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-arm64_metal_build
+          context: org-member
+          ios_arch: arm64
+          ios_platform: OS
+          lite_interpreter: "1"
+          name: pytorch_ios_12_0_0_arm64_metal_build
+          use_metal: "1"
+      - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-arm64_full_jit_build
+          context: org-member
+          ios_arch: arm64
+          ios_platform: OS
+          lite_interpreter: "0"
+          name: pytorch_ios_12_0_0_arm64_full_jit_build
+      - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-arm64_custom_build
+          context: org-member
+          ios_arch: arm64
+          ios_platform: OS
+          lite_interpreter: "1"
+          name: pytorch_ios_12_0_0_arm64_custom_build
+          op_list: mobilenetv2.yaml
       - binary_ios_build:
           build_environment: libtorch-ios-12.0.0-nightly-x86_64-build
           context: org-member
