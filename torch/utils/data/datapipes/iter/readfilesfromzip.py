@@ -16,6 +16,11 @@ class ReadFilesFromZipIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     args:
         datapipe: Iterable datapipe that provides pathname and zip binary stream in tuples
         length: a nominal length of the datapipe
+
+    Note:
+        The opened file handles will be closed automatically if the default DecoderDataPipe
+        is attached. Otherwise, user should be responsible to close file handles explicitly
+        or let Python's GC close them periodly.
     """
     def __init__(
             self,
@@ -47,7 +52,7 @@ class ReadFilesFromZipIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                     inner_pathname = os.path.normpath(os.path.join(pathname, zipinfo.filename))
                     # Add a reference of the source zipfile into extracted_fobj, so the source
                     # zipfile handle won't be released until all the extracted file objs are destroyed.
-                    extracted_fobj.source_zipfile_ref = zips  # type: ignore[attr-defined]
+                    extracted_fobj.source_ref = zips  # type: ignore[attr-defined]
                     # typing.cast is used here to silence mypy's type checker
                     yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
             except Exception as e:
