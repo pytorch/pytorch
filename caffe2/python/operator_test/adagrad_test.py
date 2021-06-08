@@ -26,7 +26,7 @@ class TestAdagrad(serial.SerializedTestCase):
         weight_decay=st.sampled_from([0.0, 0.1]),
         **hu.gcs
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_adagrad(self, inputs, lr, epsilon, weight_decay, gc, dc):
         param, momentum, grad = inputs
         momentum = np.abs(momentum)
@@ -98,7 +98,7 @@ class TestAdagrad(serial.SerializedTestCase):
         ),
         **hu.gcs_cpu_only
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_adagrad_output_effective_lr_and_update(self, inputs, lr, epsilon, gc, dc):
         param, momentum, grad = inputs
         momentum = np.abs(momentum)
@@ -158,7 +158,7 @@ class TestAdagrad(serial.SerializedTestCase):
         ),
         **hu.gcs
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_sparse_adagrad_empty(self, inputs, lr, epsilon, gc, dc):
         param, momentum = inputs
         grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
@@ -190,7 +190,7 @@ class TestAdagrad(serial.SerializedTestCase):
 
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
-    @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=1000)
+    @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=10000)
     @given(
         inputs=hu.tensors(n=3),
         lr=st.floats(

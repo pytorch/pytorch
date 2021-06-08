@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <cmath>
 #include <numeric>
@@ -1721,16 +1722,12 @@ TEST(LLVM, VectorizedGEMM) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* m = loops[0];
-    For* mo;
-    For* mi;
-    loop.splitWithMask(m, 16, &mo, &mi);
+    loop.splitWithMask(m, 16);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* n = loops[2];
-    For* no;
-    For* ni;
-    loop.splitWithMask(n, 16, &no, &ni);
+    loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
@@ -1827,6 +1824,30 @@ TEST(LLVM, CallRaw) {
       ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
     }
   }
+}
+
+TEST(LLVM, CustomTarget) {
+  KernelScope kernel_scope;
+  constexpr int M = 16;
+  Placeholder a("a", kFloat, {M});
+  Placeholder b("b", kFloat, {M});
+  Placeholder c("c", kFloat, {M});
+  Tensor* d = Compute("d", {{M, "m"}}, [&](const VarHandle& m) {
+    return a.load(m) * b.load(m) + c.load(m);
+  });
+  LoopNest nest({d});
+  nest.prepareForCodegen();
+  auto cg = LLVMCodeGenBuilder(nest.root_stmt(), {a, b, c, d})
+                .triple("i686-elf")
+                .cpu("i386")
+                .build();
+  std::ostringstream ss;
+  ss << cg->getCodeText("asm");
+  torch::jit::testing::FileCheck()
+      .check("fadds")
+      ->check("fmuls")
+      ->check_not("vfmadd")
+      ->run(ss.str());
 }
 
 } // namespace jit
