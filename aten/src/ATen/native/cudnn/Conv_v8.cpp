@@ -234,17 +234,6 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
 
-void try_options(cudnn_frontend::executionOptions_t & options, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
-  for (auto& option : options) {
-    try {
-      run_conv_plan(handle, x, y, w, option.plan);
-      engine_cache.emplace(key, std::move(option.plan));
-      return;
-    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
-  }
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
-}
-
 void run_single_conv(const cudnnBackendDescriptorType_t operation,
   const Tensor& x, const Tensor& y, const Tensor& w,
   IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
