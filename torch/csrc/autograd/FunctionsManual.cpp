@@ -787,10 +787,10 @@ Tensor sparse_sparse_matmul_backward(
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p_s, int64_t dim, const Scalar& maxnorm) {
   auto self_sizes = self.sizes();
+  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
   at::DimVector reduce_dims(self_sizes.size());
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
-
   auto dtype = self.scalar_type();
   auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
   const auto p = p_s.toDouble();
