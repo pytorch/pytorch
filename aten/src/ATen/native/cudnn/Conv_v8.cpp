@@ -112,11 +112,7 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
-auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
-  auto workspace_size = 1LL << 30;;
-  Tensor workspace;
-  workspace = at::empty({workspace_size}, x.options().dtype(kByte));
-
+auto build_opgraph(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation) {
   auto op = cudnn_frontend::OperationBuilder(desc)
       .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
       .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
@@ -128,6 +124,14 @@ auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc
       .setHandle(handle)
       .setOperationGraph(1, ops.data())
       .build();
+  return opGraph;
+}
+
+auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+  auto workspace_size = 1LL << 30;;
+  Tensor workspace;
+  workspace = at::empty({workspace_size}, x.options().dtype(kByte));
+  auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
   auto variantPack  = cudnn_frontend::VariantPackBuilder()
@@ -177,18 +181,7 @@ auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_
   auto workspace_size = 1LL << 30;
   Tensor workspace;
   workspace = at::empty({workspace_size}, x.options().dtype(kByte));
-
-  auto op = cudnn_frontend::OperationBuilder(desc)
-      .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
-      .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
-      .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
-      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
-      .build();
-  std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
-  auto opGraph = cudnn_frontend::OperationGraphBuilder()
-      .setHandle(handle)
-      .setOperationGraph(1, ops.data())
-      .build();
+  auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
   auto variantPack  = cudnn_frontend::VariantPackBuilder()
