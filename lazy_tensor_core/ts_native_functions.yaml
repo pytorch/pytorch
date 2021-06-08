@@ -5,6 +5,8 @@ supported:
   - as_strided
   - as_strided_
   - constant_pad_nd
+  - convolution_overrideable
+  - convolution_backward_overrideable
   - _copy_from
   - empty.memory_format
   - empty_strided
