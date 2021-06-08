@@ -4651,7 +4651,7 @@ class TestONNXRuntime(unittest.TestCase):
         model_neg_dim.eval()
         x = torch.randn(3, 18)
 
-        for dim_size_ in range(12, 24, 3):
+        for dim_size_ in range(13, 16):
             y = torch.randn(3, dim_size_)
             self.run_test(model, x, test_with_inputs=[y],
                           input_names=["x"],

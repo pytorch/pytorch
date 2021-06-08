@@ -7,7 +7,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
-from torch.onnx.symbolic_opset9 import expand, unused
+from torch.onnx.symbolic_opset9 import expand, unused, where
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -884,10 +884,19 @@ def prim_ConstantChunk(g, self, chunks, dim):
 def chunk(g, self, chunks, dim):
     # Calculate chunk size for dynamic chunk
     dim_size = g.op("Gather", g.op("Shape", self), dim, axis_i=0)
-    chunk_size = g.op("Sub", chunks, g.op("Constant", value_t=torch.tensor([1], dtype=torch.long)))
-    chunk_size = g.op("Div", g.op("Add", dim_size, chunk_size), chunks)
-    # For cases where chunk_size is divisible by number of chunks  
-    chunk_vec = expand(g, chunk_size, chunks, None)
+    chunk_size_s = g.op("Sub", chunks, g.op("Constant", value_t=torch.tensor([1], dtype=torch.long)))
+    chunk_size = g.op("Div", g.op("Add", dim_size, chunk_size_s), chunks)
+
+    # Cases where chunk_size is divisible by number of chunks
+    chunk_vec_divisible = expand(g, chunk_size, chunks, None)
+    # Cases where chunk_size is not divisible by number of chunks
+    chunk_vec_indivisible = [expand(g, chunk_size, chunk_size_s, None),
+                             g.op("Sub", dim_size, g.op("Mul", chunk_size, chunk_size_s))]
+    chunk_vec_indivisible = g.op("Concat", *chunk_vec_indivisible, axis_i=0)
+
+    # Decide chunk_vec based on divisibilty
+    chunk_vec_cond = g.op("Equal", dim_size, g.op("Mul", chunk_size, chunks))
+    chunk_vec = where(g, chunk_vec_cond, chunk_vec_divisible, chunk_vec_indivisible)
     return split(g, self, chunk_vec, dim)
 
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):
