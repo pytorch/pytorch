@@ -40,6 +40,13 @@ def triu(g, self, diagonal, out=None):
     k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
     return g.op("Trilu", self, k, upper_i=1)
 
+@parse_args("v", "v")
+def reshape(g, self, shape):
+    shape = sym_help._maybe_get_const(shape, "is")
+    if not sym_help._is_value(shape):
+        shape = g.op("Constant", value_t=torch.LongTensor(shape))
+    return g.op("Reshape", self, shape, allowzero_i=0)
+
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     sym_help.assert_training_mode(training, "batch_norm")

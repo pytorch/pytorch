@@ -2489,6 +2489,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_reshape_allowzero(self):
+        class ReshapeModel(torch.nn.Module):
+            def forward(self, x):
+                x = x.reshape(-1, 2, 4, 4, 5, 5)
+                return x
+
+        x = torch.randn(1, 32, 0, 5)
+        self.run_test(ReshapeModel(), x)
+
     def test_reshape_different_rank(self):
         class ReshapeModel(torch.nn.Module):
             def forward(self, x):

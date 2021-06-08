@@ -635,7 +635,7 @@ class TestUtilityFuns(TestCase):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.repeat_interleave(x, 3, dim=1)
+                return torch.erfc(x)
 
         x = torch.randn(2, 3, 4)
         _set_opset_version(self.opset_version)
@@ -643,8 +643,7 @@ class TestUtilityFuns(TestCase):
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
         iter = graph.nodes()
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "aten::repeat_interleave"
+        assert next(iter).kind() == "aten::erfc"
 
     def test_custom_op_fallthrough(self):
         # Test custom op
