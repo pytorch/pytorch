@@ -74,7 +74,7 @@ class TestTyping(JitTestCase):
         self.checkScript(test_dict_tensor_key, (dict_a, inp1))
         self.checkScript(test_dict_tensor_key, (dict_a, inp2))
 
-    def test_list_value_type_refinement_defaults_to_Any_list_creation(self):
+    def test_list_type_refinement_defaults_to_Any_list_creation(self):
         def fn(x):
             tup1 = ("foo", torch.tensor(2))
             tup2 = ("bar", {"23": torch.tensor(3)})
@@ -88,13 +88,14 @@ class TestTyping(JitTestCase):
                     l[0] = (tup4[0], torch.add(t, t))
             return l
 
-        self.checkScript(fn, (torch.rand(2, 3),))
+        self.checkScript(fn, (torch.arange(5),))
 
         graph = torch.jit.script(fn).graph
 
-        FileCheck().check(r"(str, Any)[]").run(graph)
+        # Check that we're making a `List[Tuple[str, Any]]`
+        FileCheck().check(r"(str, Any)[] = prim::ListConstruct").run(graph)
 
-    def test_list_value_type_refinement_defaults_to_Any_list_comprehension(self):
+    def test_list_type_refinement_defaults_to_Any_list_comprehension(self):
         def fn(x):
             tup1 = ("foo", torch.tensor(2))
             tup2 = ("bar", {"23": torch.tensor(3)})
@@ -109,15 +110,24 @@ class TestTyping(JitTestCase):
                     l[0] = (tup4[0], torch.add(t, t))
             return l
 
-        self.checkScript(fn, (torch.rand(2, 3),))
+        self.checkScript(fn, (torch.arange(5),))
 
         graph = torch.jit.script(fn).graph
 
-        print(graph)
+        # Check that we're making a `List[Tuple[str, Any]]`
+        FileCheck().check(r"(str, Any)[] = prim::ListConstruct").run(graph)
 
-        FileCheck().check(r"(str, Any)[]").run(graph)
+    def test_list_type_refinement_annotation_element_mismatch(self):
+        def fn():
+            l: List[int] = [1, 2, "foo", 3]
+            return l
 
-    def test_dict_value_type_refinement_defaults_to_Any_dict_creation(self):
+        with self.assertRaisesRegex(RuntimeError, "List type annotation"
+                                    r" `List\[int\]` did not match the "
+                                    "types of the given list elements"):
+            torch.jit.script(fn)
+
+    def test_dict_type_refinement_defaults_to_Any_dict_creation(self):
         def fn(x):
             d = dict(foo=torch.tensor(2),
                      bar={"23": torch.tensor(3)})
@@ -127,13 +137,13 @@ class TestTyping(JitTestCase):
                 d["bar"] = torch.add(t, t)
             return d
 
-        self.checkScript(fn, (torch.rand(2, 3),))
+        self.checkScript(fn, (torch.arange(5),))
 
         graph = torch.jit.script(fn).graph
 
-        FileCheck().check("Dict(str, Any)").run(graph)
+        FileCheck().check(r"Dict(str, Any) = prim::DictConstruct").run(graph)
 
-    def test_dict_value_type_refinement_defaults_to_Any_dict_comprehension(self):
+    def test_dict_type_refinement_defaults_to_Any_dict_comprehension(self):
         def fn(x):
             d = {"foo": torch.tensor(2),
                  "bar": {"23": torch.tensor(3)}}
@@ -143,11 +153,36 @@ class TestTyping(JitTestCase):
                 d["bar"] = torch.add(t, t)
             return d
 
-        self.checkScript(fn, (torch.rand(2, 3),))
+        self.checkScript(fn, (torch.arange(5),))
 
         graph = torch.jit.script(fn).graph
 
-        FileCheck().check("Dict(str, Any)").run(graph)
+        FileCheck().check("Dict(str, Any) = prim::DictConstruct").run(graph)
+
+    def test_dict_type_refinement_annotation_key_mismatch(self):
+        def fn():
+            l1 = [1, 2, "foo", 3]
+            l2 = ["foo", "bar", "baz", "qux"]
+            d: Dict[int, str] = {k : v for k, v in zip(l1, l2)}
+            return l
+
+        with self.assertRaisesRegex(RuntimeError, "Dict type annotation"
+                                    r" `Dict\[int, str\]` did not match"
+                                    " the type of an actual key type"):
+            torch.jit.script(fn)
+
+    def test_dict_type_refinement_annotation_value_mismatch(self):
+        def fn():
+            l1 = ["foo", "bar", "baz", "qux"]
+            l2 = [1, 2, "foo", 3]
+            d: Dict[str, int] = {k : v for k, v in zip(l1, l2)}
+            return l
+
+        with self.assertRaisesRegex(RuntimeError, "Dict type annotation"
+                                    r" `Dict\[str, int\]` did not match"
+                                    " the type of an actual value "
+                                    "type"):
+            torch.jit.script(fn)
 
     def test_dict_invalid_annotations(self):
         # Check for invalid value type annotation
