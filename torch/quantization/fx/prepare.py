@@ -928,7 +928,7 @@ def save_state(
         prepare_custom_config_dict  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
 
-def _prepare(
+def prepare(
         model: GraphModule,
         qconfig_dict: Any,
         node_name_to_scope: Dict[str, Tuple[str, type]],
