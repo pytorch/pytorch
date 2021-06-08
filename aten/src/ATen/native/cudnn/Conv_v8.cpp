@@ -168,7 +168,7 @@ auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc
 
   std::array<cudnn_frontend::GeneratorSource const, 2> sources = {heurgen_method, fallback_method};
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
-  auto options = generator.cudnnFindPlan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(opGraph), variantPack, predicate_function); 
+  auto options = generator.cudnnFindPlan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(opGraph), variantPack, predicate_function);
 
   cudnn_frontend::executionPlans_t plans;
   for (auto& option : options) {
