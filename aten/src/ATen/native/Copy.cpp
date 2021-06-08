@@ -90,7 +90,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVE || device_type == kVulkan || device_type == kMetal;
 }
 
 } // namespace
@@ -228,6 +228,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     device_type = kCUDA;
   } else if (iter.device_type(1) == kHIP) {
     device_type = kHIP;
+  } else if (iter.device_type(1) == kVE) {
+    device_type = kVE;
   }
 
   // TODO: if we need to, we can also enable this path for quantized tensor

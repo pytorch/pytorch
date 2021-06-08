@@ -437,6 +437,12 @@ class TORCH_API Tensor {
     return impl_->is_hip();
   }
 
+  /// Returns if a `Tensor` has VE backend.
+  bool is_ve() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ve();
+  }
+
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const {
     // NB: this is not a native function to avoid dispatching overhead.
@@ -612,6 +618,7 @@ class TORCH_API Tensor {
   Tensor cpu() const;
   Tensor cuda() const;
   Tensor hip() const;
+  Tensor ve() const;
   Tensor vulkan() const;
   Tensor metal() const;
 
