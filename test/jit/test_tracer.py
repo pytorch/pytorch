@@ -1407,11 +1407,14 @@ class TestTracer(JitTestCase):
         traced = torch.jit.trace(Wrapper(), (torch.rand(3, 4),))
 
     def test_trace_multi_output_function(self):
-        # A autograd.Function with two outputs.
+        # An autograd.Function with two outputs.
+        # It swaps inputs so we can check if shape
+        # handling is correct in TorchScript .
         class Foo(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y):
                 return y, x
+
             @staticmethod
             def backward(ctx, du, dv):
                 return dv, du
