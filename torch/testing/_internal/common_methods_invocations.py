@@ -5347,12 +5347,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types(),
            dtypesIfCUDA=all_types_and(torch.half),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_isin,
-           skips=(
-               # Skip unsupported checks for bool and complex
-               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
-                        device_type='cuda',
-                        dtypes=(torch.bool, torch.complex64, torch.complex128, torch.bfloat16)),),),
+           sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.float16),

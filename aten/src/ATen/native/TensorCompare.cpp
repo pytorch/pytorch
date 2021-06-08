@@ -13,21 +13,36 @@
 namespace at {
 namespace meta {
 
+static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
+  // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
+  TORCH_CHECK(type != ScalarType::Bool &&
+      type != ScalarType::BFloat16 &&
+      type != ScalarType::ComplexFloat &&
+      type != ScalarType::ComplexDouble,
+      "Unsupported input type encountered for isin(): ", type);
+}
+
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
   const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert
 ) {
+  check_for_unsupported_isin_dtype(elements.scalar_type());
+  check_for_unsupported_isin_dtype(test_elements.scalar_type());
   set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC2(isin, Tensor_Scalar) (
   const Tensor& elements, const c10::Scalar& test_elements, bool assume_unique, bool invert
 ) {
+  check_for_unsupported_isin_dtype(elements.scalar_type());
+  check_for_unsupported_isin_dtype(test_elements.type());
   set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC2(isin, Scalar_Tensor) (
   const c10::Scalar& elements, const Tensor& test_elements, bool assume_unique, bool invert
 ) {
+  check_for_unsupported_isin_dtype(elements.type());
+  check_for_unsupported_isin_dtype(test_elements.scalar_type());
   set_output({0}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
 }
 
