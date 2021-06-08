@@ -15,7 +15,7 @@ namespace caffe2 {
  * and this Transform will find subgraphs which fit the pattern net,
  * and replace it with the replace net.
  */
-class CAFFE2_API PatternNetTransform : public Transform {
+class TORCH_API PatternNetTransform : public Transform {
  public:
   PatternNetTransform(const NetDef& pattern_net, const NetDef& replace_net)
       : p_(transform::Graph(pattern_net)), r_(transform::Graph(replace_net)) {

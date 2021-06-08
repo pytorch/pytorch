@@ -26,6 +26,7 @@ inline bool tryTHPCopy(const THPCopyList& v, PyObject* dst, PyObject* src, bool 
 
 inline bool THPCopy(const THPCopyList& v, PyObject* dst, PyObject* src, bool non_blocking, bool broadcast)
 {
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (tryTHPCopy(v, dst, src, non_blocking, broadcast)) {
     return true;
   } else if (non_blocking && tryTHPCopy(v, dst, src, false, broadcast)) {
@@ -38,8 +39,10 @@ inline bool THPCopy(const THPCopyList& v, PyObject* dst, PyObject* src, bool non
 
 inline PyObject * THPStorageCopyMethod(const THPCopyList& v, PyObject *self, PyObject *args, PyObject *kwargs)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *src;
   int non_blocking = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
   static char *kwlist[] = {"source", "non_blocking", nullptr};
   // use int as parse type because bool not available in python2.
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:copy_", kwlist, &src, &non_blocking)) {

@@ -242,7 +242,7 @@ class DynamicShape(object):
     r'''
     An Auxiliary class for dynamic shape benchmarks
 
-    Pre-computes input with random shapes and also 
+    Pre-computes input with random shapes and also
     modifies the compute method so in each call the
     fuser sees a different input tensor shape
     '''

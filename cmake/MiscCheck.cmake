@@ -43,6 +43,9 @@ if(NOT INTERN_BUILD_MOBILE)
   # important because with ASAN you might need to help the compiled library find
   # some dynamic libraries.
   cmake_push_check_state(RESET)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  endif()
   CHECK_C_SOURCE_RUNS("
   int main() { return 0; }
   " COMPILER_WORKS)
@@ -306,8 +309,9 @@ endif()
 # Also, we will turn off deprecated-declarations
 # due to protobuf.
 
-if(IOS)
+if(IOS AND (${IOS_ARCH} MATCHES "armv7*"))
   add_definitions("-mfpu=neon-fp16")
+  add_definitions("-arch" ${IOS_ARCH})
   add_definitions("-Wno-deprecated-declarations")
 endif()
 

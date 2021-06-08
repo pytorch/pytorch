@@ -11,7 +11,7 @@ namespace fuser {
 namespace cuda {
 
 // return true or false on whether given fusion could be scheduled;
-TORCH_CUDA_API bool scheduleFusion(
+TORCH_CUDA_CU_API bool scheduleFusion(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue> inputs);
 
@@ -56,12 +56,12 @@ class ReductionParamsHash {
   }
 };
 
-TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
+TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& fusion_inputs,
     TensorView* red_tv);
 
-TORCH_CUDA_API void scheduleReduction(
+TORCH_CUDA_CU_API void scheduleReduction(
     Fusion* fusion,
     const ReductionParams& rparams,
     TensorView* red_tv,

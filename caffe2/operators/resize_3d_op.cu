@@ -123,6 +123,7 @@ bool ResizeNearest3DOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
       width_scale_,
       X.data<float>(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -190,6 +191,7 @@ bool ResizeNearest3DGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
       width_scale_,
       dY.data<float>(),
       dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

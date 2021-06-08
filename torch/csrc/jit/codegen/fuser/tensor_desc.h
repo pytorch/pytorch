@@ -18,7 +18,9 @@ namespace fuser {
 // contiguity[i] is true if the dim i is contiguous with dim i + 1.
 // contiguity.back() == true means strides.back() == 1.
 struct TORCH_API TensorDesc {
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::ScalarType scalar_type;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<bool> contiguity;
 
   TensorDesc(const at::ScalarType& type, const std::vector<bool>& contiguity)

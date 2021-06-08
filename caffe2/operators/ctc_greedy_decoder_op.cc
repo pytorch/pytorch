@@ -42,6 +42,7 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
     for (int32_t t = 0; t < seq_len_i; ++t) {
       auto* prob_data = getTensorDataPtr(inputs, t, i);
       int curr_label =
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           std::max_element(prob_data, prob_data + num_classes) - prob_data;
       if (curr_label != 0 &&
           (!merge_repeated_ || (previous_label != curr_label))) {
@@ -65,7 +66,9 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CTCGreedyDecoder, CTCGreedyDecoderOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CTCGreedyDecoder)
     .NumInputs(1, 2)
     .NumOutputs(2)
@@ -94,6 +97,7 @@ OPERATOR_SCHEMA(CTCGreedyDecoder)
         "Values vector, size (total_decoded_outputs). "
         "The vector stores the decoded classes")
     .InheritOnnxSchema();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CTCGreedyDecoder);
 
 } // namespace caffe2

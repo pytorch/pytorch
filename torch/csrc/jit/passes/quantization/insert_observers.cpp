@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
+
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -163,6 +164,14 @@ class ModuleCloneHelper {
       // Clone methods remapping the types to the cloned ones.
       for (auto& fn : type->methods()) {
         clone_method(module, r, *fn, module_qconfig_map, type_remap);
+      }
+      // Execute __setstate__(__getstate__()) to initialize custom class
+      // members.
+      if (auto setstate_method = r.find_method("__setstate__")) {
+        auto getstate_method = r.find_method("__getstate__");
+        TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+        auto state = (*getstate_method)(Stack{});
+        (*setstate_method)(Stack{state});
       }
     }
     return r;
@@ -386,7 +395,17 @@ class InsertObserversHelper {
   // are observed
   bool shouldObserve(
       Node* n,
-      const std::unordered_set<Value*>& block_observed_values) {
+      const std::unordered_set<Value*>& block_observed_values,
+      QuantType quant_type) {
+    // Check whether node output uses can be quantized, eg cat followed by
+    // linear op
+    for (Value* v : n->outputs()) {
+      for (const auto& use : v->uses()) {
+        if (useQuantizable(use, quant_type)) {
+          return true;
+        }
+      }
+    }
     if (isPropagateQuantSingleInputOp(n)) {
       return isObserved(n->input(0), block_observed_values);
     } else if (isPropagateQuantBinaryOp(n)) {
@@ -1065,6 +1084,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // offset of input for the caller node, since the first
         // input of CallFunction is the function node and the graph
         // for CallFunction start with actual input
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         size_t input_offset;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);
@@ -1399,6 +1419,7 @@ InsertObserversHelper::insertObserversFor(
       if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
         script::Module m;
         std::shared_ptr<Graph> g;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         size_t input_offset;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
@@ -1520,7 +1541,8 @@ InsertObserversHelper::insertObserversFor(
           // If the node is one of the propagate quant node, e.g.
           // aten::cat, we should observe its output only
           // if the input of the node is observed
-          if (observer_opt && shouldObserve(n, block_observed_values)) {
+          if (observer_opt &&
+              shouldObserve(n, block_observed_values, quant_type_)) {
             recordObserved(
                 v, *observer_opt, values_to_observe, block_observed_values);
           }

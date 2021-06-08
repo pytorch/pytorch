@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -13,8 +12,9 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
-class TORCH_CUDA_API GpuLower {
+class TORCH_CUDA_CU_API GpuLower {
   class KernelIrMapper;
 
  public:
@@ -61,6 +61,7 @@ class TORCH_CUDA_API GpuLower {
   Fusion* fusion_ = nullptr;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -8,7 +8,6 @@ import caffe2.python.hypothesis_test_util as hu
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
-import six
 
 
 class CustomError(Exception):
@@ -55,12 +54,12 @@ class PythonOpTest(hu.HypothesisTestCase):
 
     def test_exception(self):
         op = CreatePythonOperator(MainOpFunctionThatThrowsCustomError, [], [])
-        with six.assertRaisesRegex(self, CustomError, "This is an intentional exception."):
+        with self.assertRaisesRegex(CustomError, "This is an intentional exception."):
             workspace.RunOperatorOnce(op)
 
     def test_exception_builder(self):
         op = CreatePythonOperator(MainOpFunctionThatThrowsCustomErrorInBuilder, [], [])
-        with six.assertRaisesRegex(self, CustomError, "This is an intentional exception in builder."):
+        with self.assertRaisesRegex(CustomError, "This is an intentional exception in builder."):
             workspace.RunOperatorOnce(op)
 
     @given(x=hu.tensor())

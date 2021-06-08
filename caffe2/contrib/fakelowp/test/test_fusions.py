@@ -1,7 +1,6 @@
-
-
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
+import datetime
 import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -27,8 +26,8 @@ class Fusions(serial.SerializedTestCase):
         size=st.integers(1, 100000),
         rand_seed=st.integers(0, 65534),
     )
-    @settings(deadline=None)
-    def Skip_test_tanhquantize(self, scale, zp, size, rand_seed):
+    @settings(deadline=datetime.timedelta(seconds=10))
+    def test_tanhquantize(self, scale, zp, size, rand_seed):
         np.random.seed(rand_seed)
 
         workspace.ResetWorkspace()

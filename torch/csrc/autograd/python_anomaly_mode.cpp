@@ -41,23 +41,23 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
   // if there is no "parent_" in metadata, then it means this metadata's node
   // is the root and stop printing the traceback
   while (pyparent) {
-    PyObject* parent_metadata(PyObject_GetAttrString(pyparent, "metadata"));
+    THPObjectPtr parent_metadata(PyObject_GetAttrString(pyparent, "metadata"));
     if (!parent_metadata) {
       throw python_error();
     }
-    PyObject* parent_name_pyobj(PyObject_CallMethod(pyparent, "name", ""));
+    THPObjectPtr parent_name_pyobj(PyObject_CallMethod(pyparent, "name", ""));
     if (!parent_name_pyobj) {
       throw python_error();
     }
-    const char* parent_name_char = PyUnicode_AsUTF8(parent_name_pyobj);
+    const char* parent_name_char = PyUnicode_AsUTF8(parent_name_pyobj.get());
     if (!parent_name_char) {
       throw python_error();
     }
     const std::string parent_name(parent_name_char);
-    PyObject* parent_stack = PyDict_GetItemString(parent_metadata, ANOMALY_TRACE_KEY);
+    PyObject* parent_stack = PyDict_GetItemString(parent_metadata.get(), ANOMALY_TRACE_KEY);
     _print_stack(parent_stack, parent_name, true);
     // get the parent of this node, if this node is a root, pyparent is simply null
-    pyparent = PyDict_GetItemString(parent_metadata, ANOMALY_PARENT_KEY);
+    pyparent = PyDict_GetItemString(parent_metadata.get(), ANOMALY_PARENT_KEY);
   }
 }
 
@@ -69,11 +69,11 @@ void PyAnomalyMetadata::assign_parent(const std::shared_ptr<Node>& parent_node) 
   pybind11::gil_scoped_acquire gil;
   if (!parent_node) return;
 
-  PyObject* pyobj = functionToPyObject(parent_node);
-  if (!pyobj) {
+  THPObjectPtr parent_node_(functionToPyObject(parent_node));
+  if (!parent_node_) {
     throw python_error();
   }
-  if (PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, pyobj)) {
+  if (PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, parent_node_.get())) {
     throw python_error();
   }
 }

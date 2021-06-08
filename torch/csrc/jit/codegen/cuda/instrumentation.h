@@ -1,14 +1,15 @@
-
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
 #include <chrono>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace inst {
 
 //! An optional record of selected timestamped operations, events and counters
@@ -85,9 +86,10 @@ class TraceScope : public NonCopyable {
 //! \param name The name of the scope, normally a simple string literal
 //!
 #define FUSER_PERF_SCOPE(name) \
-  fuser::inst::TraceScope FUSER_ANONYMOUS(_perf_scope_)(name)
+  torch::jit::fuser::cuda::inst::TraceScope FUSER_ANONYMOUS(_perf_scope_)(name)
 
 } // namespace inst
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

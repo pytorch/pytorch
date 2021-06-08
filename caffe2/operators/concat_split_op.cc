@@ -62,6 +62,7 @@ vector<TensorShape> TensorInferenceForSplit(
       return ret_invalid_shape();
     }
     split.resize(output_size, input_channels / output_size);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   } else if (split.size() != output_size) {
     LOG(WARNING) << "`split` size (" << split.size()
                  << ") should be equal to output size (" << output_size << ")";
@@ -95,8 +96,11 @@ vector<TensorShape> TensorInferenceForSplit(
 }
 } // namespace.
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SplitByLengths, SplitByLengthsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
@@ -112,6 +116,7 @@ OPERATOR_SCHEMA(Split)
     .Arg("split", "(*Tuple(int)*): length of each output")
     .Arg(
         "order",
+        // NOLINTNEXTLINE(modernize-raw-string-literal)
         "(*string*): order of dimensions of input and output blobs; either \"NCHW\" or \"NHWC\"")
     .Output(0, "[output_0, output_1, ...]", "(*Tensor*): output tensor")
     .TensorInferenceFunction(TensorInferenceForSplit)
@@ -165,6 +170,7 @@ output_2: [0 5 7 4]
 )DOC")
     .InheritOnnxSchema();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SplitByLengths)
     .NumInputs(2)
     .NumOutputs(1, INT_MAX)
@@ -295,6 +301,7 @@ OpSchema::Cost CostInferenceForConcat(
     }
   }
   uint64_t nElemRead = 1;
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < in.size(); ++i) {
     nElemRead += nElemFromDim(in[i]);
   }
@@ -342,6 +349,7 @@ vector<TensorShape> TensorInferenceForConcat(
   vector<int> split_shape(1, in.size());
   vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
   if (add_axis) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       CAFFE_ENFORCE_EQ(
           in[0].dims().size(),
@@ -362,6 +370,7 @@ vector<TensorShape> TensorInferenceForConcat(
     }
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       CAFFE_ENFORCE(
           in[0].dims_size() == in[i].dims_size() ||
@@ -389,6 +398,7 @@ vector<TensorShape> TensorInferenceForConcat(
       }
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
@@ -401,7 +411,9 @@ vector<TensorShape> TensorInferenceForConcat(
       CreateTensorShape(split_shape, TensorProto::INT32)};
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Concat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
@@ -547,12 +559,16 @@ split_info: [1 1]
     .InheritOnnxSchema();
 
 // Backward compatibility names.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DepthSplit, SplitOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DepthConcat, ConcatOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DepthSplit)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
     .SetDoc("Backward compatible operator name for Split.");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DepthConcat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
@@ -577,8 +593,11 @@ class GetSplitGradient : public GradientMakerBase {
         vector<string>{GI(0), "_" + GI(0) + "_dims"});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Split, GetSplitGradient);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DepthSplit, GetSplitGradient);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SplitByLengths, GetSplitGradient);
 
 class GetConcatGradient : public GradientMakerBase {
@@ -589,11 +608,14 @@ class GetConcatGradient : public GradientMakerBase {
     }
     vector<string> grads;
     for (int i = 0; i < def_.input_size(); ++i) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       grads.push_back(GI(i));
     }
     return SingleGradientDef("Split", "", vector<string>{GO(0), O(1)}, grads);
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Concat, GetConcatGradient);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DepthConcat, GetConcatGradient);
 } // namespace caffe2

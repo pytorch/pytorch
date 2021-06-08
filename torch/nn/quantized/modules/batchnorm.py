@@ -2,6 +2,8 @@ import torch
 import torch.nn.quantized.functional
 import torch.nn.intrinsic as nni
 
+from typing import Optional, Callable
+
 class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
     """Base class for the batch normalizations.
 
@@ -20,8 +22,14 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
     In addition to the members, you can also specify the class-level
     _INTRINSIC_BN_RELU, which is used to identify the equivalent fused version.
     """
-
     _INTRINSIC_BN_RELU = None
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device,
+                          'dtype': dtype,
+                          'eps': eps,
+                          'momentum': momentum}
+        super(BatchNorm2d, self).__init__(num_features, **factory_kwargs)
+        self._quantized_fn : Optional[Callable] = None
 
     def __init__(self, *args, **kwargs):
         super(_BatchNorm, self).__init__(*args, **kwargs)
@@ -37,12 +45,11 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
 
     @classmethod
     def from_float(cls, mod):
+        activation_post_process = mod.activation_post_process
         if cls._INTRINSIC_BN_RELU is not None and \
                 type(mod) == cls._INTRINSIC_BN_RELU:
             activation_post_process = mod[1].activation_post_process
             mod = mod[0]
-        else:
-            activation_post_process = mod.activation_post_process
         scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)
         new_mod.weight = mod.weight
@@ -52,6 +59,7 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
         new_mod.scale = float(scale)
         new_mod.zero_point = int(zero_point)
         return new_mod
+
 
 class BatchNorm2d(_BatchNorm):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`."""

@@ -22,7 +22,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
       }
     }
   } else {
-    auto grad_fn = ctr(collect_next_edges(inputs));
+    auto grad_fn = ctr(GradMode::is_enabled() ? collect_next_edges(inputs) : edge_list());
     for (auto& output : outputs) {
       if (output.defined()) {
         auto variable = autograd::make_variable(output, /*requires_grad=*/false);

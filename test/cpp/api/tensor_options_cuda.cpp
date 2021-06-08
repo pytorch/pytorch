@@ -31,6 +31,7 @@ at::Device CUDADevice(DeviceIndex index) {
   ASSERT_EQ(tensor.scalar_type(), (type_));                                \
   ASSERT_TRUE(tensor.options().layout() == (layout_))
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
   auto options = CUDA(kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kStrided);
@@ -44,14 +45,17 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
   options = getDeprecatedTypeProperties(Backend::SparseCUDA, kByte).options();
   REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparse);
 
+  // NOLINTNEXTLINE(bugprone-argument-comment,cppcoreguidelines-avoid-magic-numbers)
   options = CUDA(kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kStrided);
 
   options =
+      // NOLINTNEXTLINE(bugprone-argument-comment,cppcoreguidelines-avoid-magic-numbers)
       getDeprecatedTypeProperties(Backend::SparseCUDA, kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);

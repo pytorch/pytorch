@@ -11,16 +11,23 @@ namespace caffe2 {
 // TODO(dzhulgakov): remove _STR when all lengths ops are off generic version.
 
 using SparseLengthsSumOp =
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 0, 0>;
 using SparseLengthsWeightedSumOp =
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 1, 0>;
 using SparseLengthsMeanOp =
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 0, 1>;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseLengthsSum, SparseLengthsSumOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseLengthsWeightedSum, SparseLengthsWeightedSumOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseLengthsMean, SparseLengthsMeanOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsPositionalWeightedSum)
     .NumInputs(4)
     .NumOutputs(1)
@@ -51,6 +58,7 @@ SparseWeightedSum
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_STR(
     "SparseLengthsPositionalWeightedSum",
     CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 1, 0, 1>);
@@ -71,6 +79,7 @@ using SparseLengthsSumDef = AbstractSparseLengthsDef<
     CPUContext,
     SumReducerDef,
     true /*GradientNeedIndices*/>;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSum)
     .NumInputs(SparseLengthsSumDef::ForwardOp::kNumInputs)
     .NumOutputs(1)
@@ -82,22 +91,28 @@ OPERATOR_SCHEMA(SparseLengthsSum)
     .Output(0, "OUTPUT", "Aggregated tensor")
     .FillUsing(SparseLengthsSumDef::PopulateSchema)
     .InheritOnnxSchema();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSumGradient,
     SparseLengthsSumDef::BackwardOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSumGradient)
     .NumInputs(SparseLengthsSumDef::BackwardOp::kNumInputs)
     .NumOutputs(1)
     .DisallowInputFillers();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SparseLengthsSum, SparseLengthsSumDef::GetGradient)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     TTSparseLengthsSum,
     TTSparseLengthsSumOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     TTSparseLengthsSumGradient,
     TTSparseLengthsSumGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TTSparseLengthsSum)
     .NumInputs(5)
     .NumOutputs(4)
@@ -136,6 +151,7 @@ using SparseLengthsWeightedSumDef = AbstractSparseLengthsDef<
     CPUContext,
     WeightedSumReducerDef,
     true /*GradientNeedIndices*/>;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum)
     .NumInputs(SparseLengthsWeightedSumDef::ForwardOp::kNumInputs)
     .NumOutputs(1)
@@ -148,13 +164,16 @@ OPERATOR_SCHEMA(SparseLengthsWeightedSum)
     .Output(0, "OUTPUT", "Aggregated tensor")
     .FillUsing(SparseLengthsWeightedSumDef::PopulateSchema)
     .InheritOnnxSchema();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSumGradient,
     SparseLengthsWeightedSumDef::BackwardOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSumGradient)
     .NumInputs(SparseLengthsWeightedSumDef::BackwardOp::kNumInputs)
     .NumOutputs(1)
     .DisallowInputFillers();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
     SparseLengthsWeightedSum,
     SparseLengthsWeightedSumDef::GetGradient)
@@ -165,6 +184,7 @@ using SparseLengthsMeanDef = AbstractSparseLengthsDef<
     CPUContext,
     MeanReducerDef,
     true /*GradientNeedIndices*/>;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMean)
     .NumInputs(SparseLengthsMeanDef::ForwardOp::kNumInputs)
     .NumOutputs(1)
@@ -175,15 +195,19 @@ OPERATOR_SCHEMA(SparseLengthsMean)
     .SetDoc(FormatDoc<SparseLengthsMeanDef>())
     .Output(0, "OUTPUT", "Aggregated tensor")
     .FillUsing(SparseLengthsMeanDef::PopulateSchema);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsMeanGradient,
     SparseLengthsMeanDef::BackwardOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMeanGradient)
     .NumInputs(SparseLengthsMeanDef::BackwardOp::kNumInputs)
     .NumOutputs(1)
     .DisallowInputFillers();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SparseLengthsMean, SparseLengthsMeanDef::GetGradient)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 OPERATOR_SCHEMA(TTSparseLengthsSumGradient).NumInputs(8).NumOutputs(3);
 
 class GetTTSparseLengthsGradient : public GradientMakerBase {
@@ -202,6 +226,7 @@ class GetTTSparseLengthsGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(TTSparseLengthsSum, GetTTSparseLengthsGradient)
 
 } // namespace caffe2

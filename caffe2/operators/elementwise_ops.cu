@@ -225,19 +225,24 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
              CAFFE_CUDA_NUM_THREADS,
              0,
              context_.cuda_stream()>>>(Adata, Cdata, pre, n);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       if (post >= 128) {
         reduce_sum_like<T, 512>
             <<<n, 512, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (post >= 64) {
         reduce_sum_like<T, 128>
             <<<n, 128, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (post >= 32) {
         reduce_sum_like<T, 64>
             <<<n, 64, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         reduce_sum_like<T, 32>
             <<<n, 32, 0, context_.cuda_stream()>>>(Adata, Cdata, pre, n, post);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
   }

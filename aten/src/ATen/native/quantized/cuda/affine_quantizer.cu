@@ -9,8 +9,8 @@ namespace native {
 namespace {
 
 void quantize_tensor_per_tensor_affine_cuda(
-    Tensor rtensor,
-    Tensor qtensor,
+    const Tensor& rtensor,
+    Tensor& qtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
@@ -25,20 +25,22 @@ void quantize_tensor_per_tensor_affine_cuda(
           .add_input(qtensor)
           .build();
 
-        gpu_kernel(iter,
-          [=] GPU_LAMBDA (float raw_val, scalar_t quantized_val) -> scalar_t {
-            int64_t qvalue = static_cast<int64_t>(nearbyint(raw_val / scale + zero_point));
-            qvalue = std::max<int64_t>(qvalue, qmin);
-            qvalue = std::min<int64_t>(qvalue, qmax);
-            quantized_val.val_ = qvalue;
-            return quantized_val;
-        });
+        gpu_kernel(
+            iter,
+            [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val) -> scalar_t {
+              int64_t qvalue =
+                  static_cast<int64_t>(nearbyint(raw_val / scale) + zero_point);
+              qvalue = std::max<int64_t>(qvalue, qmin);
+              qvalue = std::min<int64_t>(qvalue, qmax);
+              quantized_val.val_ = qvalue;
+              return quantized_val;
+            });
       });
 }
 
 void dequantize_tensor_per_tensor_affine_cuda(
-    Tensor qtensor,
-    Tensor rtensor,
+    const Tensor& qtensor,
+    Tensor& rtensor,
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
