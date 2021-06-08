@@ -1256,27 +1256,40 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
             && self_or_result.is_contiguous()) {
     at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
+    bool enable_multithreaded_bmm{false};
+#ifdef C10_MOBILE
+    /*
+     * Inference mode multithreading is done because various thread local
+     * state is not appropriately propagated through at::parallel_for.
+     * e.g. RecordFunction related state, dispatchKeySet
+     * Big concern with this is that if we at::parallel_for where state
+     * is not propagated then dispatch machinery may work differently, leading
+     * to undefined behavior.
+     * Thus it is recommended to not use at::parallel_for where lambdas do
+     * ops that go through dispatcher.
+     * For now we circument this by InferenceMode guard in order to unlock
+     * performance.
+     * Longer term we probably want a separate API that explicitly calls out
+     * the TLS that it propagates.
+     * Also note that this is enabled for mobile only because blas
+     * implementation for non-mobile build is already multithreaded.
+     */
+    enable_multithreaded_bmm = c10::InferenceMode::is_enabled();
+    // Benchmarking was done as follows:
+    // bmm_test: operator benchmark under
+    // benchmarks/operator_benchmarks/pt/bmm_test.py Ran this benchmark for
+    // various matrix sizes on Samsung S8U
+    enable_multithreaded_bmm =
+        bs >= 4 && res_rows >= 32 && res_cols >= 32 && contraction_size >= 32;
+#endif
     if (is_bmm_out) {
-      /*
-       * Inference mode multithreading is done because various thread local
-       * state is not appropriately propagated through at::parallel_for.
-       * e.g. RecordFunction related state, dispatchKeySet
-       * Big concern with this is that if we at::parallel_for where state
-       * is not propagated then dispatch machinery may work differently, leading
-       * to undefined behavior.
-       * Thus it is recommended to not use at::parallel_for where lambdas do
-       * ops that go through dispatcher.
-       * For now we circument this by InferenceMode guard in order to unlock
-       * performance.
-       * Longer term we probably want a separate API that explicitly calls out
-       * the TLS that it propagates.
-       */
-      if (c10::InferenceMode::is_enabled()) {
+      if (enable_multithreaded_bmm) {
         auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
           for (int64_t b = start; b < end; b++) {
             auto r = self_or_result.select(0, b);
-            addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+            addmm_impl_cpu_(
+                r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
           }
         };
         at::parallel_for(0, bs, 1, bmm_out_fn);
@@ -1287,18 +1300,19 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
         }
       }
     } else {
-      if (c10::InferenceMode::is_enabled()) {
+      if (enable_multithreaded_bmm) {
         auto bmm_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
           for (int64_t b = start; b < end; b++) {
-            self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+            self_or_result.select(0, b).addmm_(
+                batch1.select(0, b), batch2.select(0, b), beta, alpha);
           }
         };
         at::parallel_for(0, bs, 1, bmm_fn);
-      }
-      else {
+      } else {
         for (int64_t b = 0; b < bs; b++) {
-          self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+          self_or_result.select(0, b).addmm_(
+              batch1.select(0, b), batch2.select(0, b), beta, alpha);
         }
       }
     }

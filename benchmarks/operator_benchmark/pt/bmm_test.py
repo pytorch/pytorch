@@ -18,7 +18,7 @@ bmm_configs = op_bench.cross_product_configs(
     B=[2, 100],
     M=[8, 256],
     N=[256, 16],
-    K=[15, 16],
+    K=[16, 32],
     device=['cpu'],
     tags=["short"],
 )
