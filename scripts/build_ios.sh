@@ -78,11 +78,11 @@ if [ -n "${IOS_ARCH:-}" ]; then
   CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
 fi
 
-if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
+# if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
   CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
-else
-  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
-fi
+# else
+  # CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+# fi
 
 # Don't build binaries or tests (only the library)
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")

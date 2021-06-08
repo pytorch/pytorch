@@ -27,7 +27,7 @@ lipo -i ${ZIP_DIR}/install/lib/*.a
 cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
-ZIPFILE=libtorch_lite_ios_1.9.0.zip
+ZIPFILE=libtorch_ios_1.9.0.zip
 cd ${ZIP_DIR}
 #for testing
 touch version.txt
