@@ -936,12 +936,11 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 
   std::string unqualName;
   std::vector<std::string> field_names;
-  std::vector<TypePtr> field_annotations;
-  std::vector<py::object> field_defaults;
+  std::vector<TypePtr> field_types;
+  std::vector<IValue> field_defaults;
+  std::vector<py::object> objects;
 
-  std::vector<std::pair<std::string, IValue>> fields;
-
-  std::tie(unqualName, field_names, field_annotations, field_defaults) =
+  std::tie(unqualName, field_names, field_types, objects) =
       py::cast<std::tuple<
           std::string,
           std::vector<std::string>,
@@ -956,18 +955,19 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 
   for (size_t i = 0; i < field_names.size(); ++i) {
     auto ival = IValue();
-    if (!field_defaults[i].is_none()) {
-      auto type = tryToInferType(field_defaults[i]);
-      ival = toIValue(field_defaults[i], type.type());
+    if (!objects[i].is_none()) {
+      auto type = tryToInferType(objects[i]);
+      ival = toIValue(objects[i], type.type());
       TORCH_CHECK(
           !ival.isTensor(),
           "Tensors are not supported as default NamedTuple fields. "
           "Using a Tensor is dangerous because it's a mutable object");
     }
-    fields.emplace_back(std::pair<std::string, IValue>(field_names[i], ival));
+    field_names.emplace_back(field_names[i]);
+    field_defaults.emplace_back(ival);
   }
 
-  auto tt = TupleType::createNamed(qualifiedName, fields, field_annotations);
+  auto tt = TupleType::createNamed(qualifiedName, field_names, field_types, field_defaults);
   if (auto type = get_python_cu()->get_type(qualifiedName)) {
     TORCH_CHECK(
         type->isSubtypeOf(tt), "Can't redefine NamedTuple: ", tt->repr_str());

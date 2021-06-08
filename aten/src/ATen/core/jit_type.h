@@ -951,12 +951,13 @@ using NameList = std::vector<std::string>;
 struct TORCH_API TupleType : public NamedType {
 
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
-      const std::vector<std::pair<std::string, IValue>>& fields,
-      const std::vector<TypePtr>& types);
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& field_types,
+      const std::vector<IValue>& field_defaults);
 
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
-      const std::vector<TypePtr>& types);
+      const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr create(
       std::vector<TypePtr> types) {

@@ -639,8 +639,9 @@ struct SourceImporterImpl : public Resolver,
       const QualifiedName& qualified_name,
       const ClassDef& named_tuple_def) {
     ScriptTypeParser type_parser(shared_from_this());
-    std::vector<std::pair<std::string, IValue>> fields;
+    std::vector<std::string> field_names;
     std::vector<TypePtr> field_types;
+    std::vector<IValue> field_defaults;
     for (const auto& statement : named_tuple_def.body()) {
       if (statement.kind() != TK_ASSIGN) {
         throw ErrorReport(statement.range())
@@ -658,15 +659,14 @@ struct SourceImporterImpl : public Resolver,
         default_val = parsed[0];
       }
 
-      fields.emplace_back(std::pair<std::string, IValue>(
-          std::move(name), std::move(default_val)));
-
       auto type = type_parser.parseTypeFromExpr(assign.type().get());
 
+      field_names.emplace_back(std::move(name));
       field_types.emplace_back(std::move(type));
+      field_defaults.emplace_back(std::move(default_val));
     }
 
-    auto tt = TupleType::createNamed(qualified_name, fields, field_types);
+    auto tt = TupleType::createNamed(qualified_name, field_names, field_types, field_defaults);
     cu_->register_type(tt);
   }
 

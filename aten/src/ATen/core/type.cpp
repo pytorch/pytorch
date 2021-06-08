@@ -749,30 +749,30 @@ TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
-      std::vector<std::pair<std::string, IValue>> fields;
-      for (size_t i = 0; i < field_names.size(); ++i) {
-        fields.emplace_back(std::pair<std::string, IValue>(field_names[i], IValue()));
-      }
-      return TupleType::createNamed(qualName, fields, field_types);
+      std::vector<IValue> field_defaults;
+      field_defaults.reserve(field_names.size());
+      std::fill(field_defaults.begin(), field_defaults.end(), IValue());
+      return TupleType::createNamed(qualName, field_names, field_types, field_defaults);
     }
 
 
-TupleTypePtr TupleType::createNamed(
-    const c10::optional<c10::QualifiedName>& qualName,
-    const std::vector<std::pair<std::string, IValue>>& fields,
-    const std::vector<TypePtr>& field_types) {
-  TORCH_INTERNAL_ASSERT(fields.size() == field_types.size());
+TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types,
+    const std::vector<IValue>& field_defaults) {
+  TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size()
+                        && field_types.size() == field_defaults.size());
   std::vector<Argument> arguments;
-  for (size_t i = 0; i < fields.size(); ++i) {
-    TORCH_CHECK(fields[i].second.tagKind() != "Tensor", "Tensors are "
+  for (size_t i = 0; i < field_names.size(); ++i) {
+    TORCH_CHECK(field_defaults[i].tagKind() != "Tensor", "Tensors are "
                 "not supported as default NamedTuple fields. Their "
                 "mutability could lead to potential memory aliasing "
                 "problems");
     arguments.emplace_back(
-        /*name=*/fields[i].first,
+        /*name=*/field_names[i],
         /*type=*/field_types[i],
         /*N=*/i,
-        /*default_value=*/fields[i].second);
+        /*default_value=*/field_defaults[i]);
   }
 
   auto schema = std::make_shared<FunctionSchema>(
