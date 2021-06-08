@@ -305,15 +305,14 @@ static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
 
 namespace meta {
 
-static void make_reduction(
-    TensorIteratorBase& iter,
+static void check_reduction_shape(
+    impl::MetaBase& meta,
     const char* name,
-    Tensor& result,
     const Tensor& self,
     c10::optional<IntArrayRef> dim_opt,
     bool keepdim,
-    ScalarType in_dtype,
     ScalarType out_dtype) {
+  const auto& result = meta.maybe_get_output();
   // check that result type and dtype match if provided
   if (result.defined()) {
     TORCH_CHECK(
@@ -326,27 +325,34 @@ static void make_reduction(
         ".");
   }
   // dim={} performs an all-reduce, same as dim=None
-
   IntArrayRef dim = dim_opt.value_or(IntArrayRef{});
   int64_t ndim = self.dim();
   auto mask = at::native::make_dim_mask(dim, ndim);
   auto shape = at::native::shape_from_dim_mask(self, mask, keepdim);
-  iter.impl::MetaBase::set_output(shape, self.options());
-  result = iter.maybe_get_output();
-  auto viewed_result =
-      at::native::review_reduce_result(result, ndim, mask, keepdim);
+  meta.set_output(shape, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
-  if (self.scalar_type() == in_dtype) {
-    iter.build_reduce_op(viewed_result, self);
-  }
-  iter.build_reduce_op(viewed_result, self.to(in_dtype));
 }
 
-static void make_reduction(
-    TensorIteratorBase& iter,
-    const char* name,
-    Tensor& result,
+static TensorIterator make_reduction(
     const Tensor& self,
+    const Tensor& result,
+    c10::optional<IntArrayRef> dim_opt,
+    bool keepdim,
+    ScalarType in_dtype) {
+  IntArrayRef dim = dim_opt.value_or(IntArrayRef{});
+  int64_t ndim = self.dim();
+  auto mask = at::native::make_dim_mask(dim, ndim);
+  auto viewed_result =
+      at::native::review_reduce_result(result, ndim, mask, keepdim);
+  if (self.scalar_type() == in_dtype) {
+    return TensorIterator::reduce_op(viewed_result, self);
+  }
+  return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
+}
+
+static TensorIterator make_reduction_from_out_ty(
+    const Tensor& self,
+    const Tensor& result,
     c10::optional<IntArrayRef> dim,
     bool keepdim,
     ScalarType out_dtype) {
@@ -359,8 +365,8 @@ static void make_reduction(
        (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
        out_dtype == kFloat);
   auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
-  return make_reduction(
-      iter, name, result, self, dim, keepdim, in_dtype, out_dtype);
+  return make_reduction(self, result, dim, keepdim, in_dtype);
 }
+
 } // namespace meta
 } // namespace at

@@ -346,7 +346,6 @@ public:
   TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_op)
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
-  void build_reduce_op(const Tensor& out, const Tensor& a);
 
 #undef TORCH_DISALLOW_TEMPORARIES
 protected:
