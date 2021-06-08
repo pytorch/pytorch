@@ -14,7 +14,7 @@ import tempfile
 
 import torch
 from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
+from torch.testing._internal.common_utils import FILE_SCHEMA, IS_IN_CI, TEST_WITH_ROCM, shell, set_cwd
 from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
@@ -47,6 +47,7 @@ TESTS = [
     'distributed/test_jit_c10d',
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
+    'distributed/test_store',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
@@ -108,7 +109,6 @@ TESTS = [
     'test_type_promotion',
     'test_jit_disabled',
     'test_function_schema',
-    'test_op_aliases',
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
@@ -309,6 +309,7 @@ TARGET_DET_LIST = [
     'distributed/test_jit_c10d',
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
+    'distributed/test_store',
     'test_quantization',
     'test_pruning_op',
     'test_determination',
@@ -862,14 +863,6 @@ def get_selected_tests(options):
         last_index = find_test_index(options.last, selected_tests, find_last_index=True)
         selected_tests = selected_tests[:last_index + 1]
 
-    if options.shard:
-        assert len(options.shard) == 2, "Unexpected shard format"
-        assert min(options.shard) > 0, "Shards must be positive numbers"
-        which_shard, num_shards = options.shard
-        assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
-        assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
-        selected_tests = get_shard(which_shard, num_shards, selected_tests)
-
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
 
@@ -888,6 +881,14 @@ def get_selected_tests(options):
 
     elif TEST_WITH_ROCM:
         selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, 'on ROCm')
+
+    if options.shard:
+        assert len(options.shard) == 2, "Unexpected shard format"
+        assert min(options.shard) > 0, "Shards must be positive numbers"
+        which_shard, num_shards = options.shard
+        assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
+        assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
+        selected_tests = get_shard(which_shard, num_shards, selected_tests)
 
     return selected_tests
 
@@ -1132,8 +1133,8 @@ def main():
         ]
         sys.path.remove('test')
 
-
-    selected_tests = reorder_tests(selected_tests)
+    if IS_IN_CI:
+        selected_tests = reorder_tests(selected_tests)
 
     has_failed = False
     failure_messages = []

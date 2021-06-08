@@ -186,24 +186,24 @@ void runAsyncAllreduceTest(
     size_t numTensors = 2) {
   auto tests = initialize<AsyncAllreduceTest>(path, numProcesses, numTensors);
   std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
-  for (size_t i = 0; i < numProcesses; i++) {
+  for(const auto i : c10::irange(numProcesses)) {
     work[i] = tests[i].run();
   }
 
   // Wait for work to complete
-  for (size_t i = 0; i < numProcesses; i++) {
+  for(const auto i : c10::irange(numProcesses)) {
     tests[i].wait(work[i]);
   }
 
   // Check results
-  for (size_t i = 0; i < numProcesses; i++) {
+  for(const auto i : c10::irange(numProcesses)) {
     const auto size = numProcesses * numTensors;
     const auto expected = (size * (size - 1)) / 2;
     auto tensors = tests[i].getTensors();
     auto results = tests[i].getCpuTensors(work[i]->result());
     EXPECT_EQ(tensors.size(), results.size());
 
-    for (size_t j = 0; j < tensors.size(); j++) {
+    for(const auto j : c10::irange(tensors.size())) {
       auto& tensor = tensors[j];
       auto data = tensor.data_ptr<float>();
 
@@ -227,21 +227,21 @@ void runAsyncBroadcastTest(
   auto tests = initialize<AsyncBroadcastTest>(path, numProcesses, numTensors);
 
   // Try every permutation of root rank and root tensor
-  for (size_t rootRank = 0; rootRank < numProcesses; rootRank++) {
-    for (size_t rootTensor = 0; rootTensor < numTensors; rootTensor++) {
+  for(const auto rootRank : c10::irange(numProcesses)) {
+    for(const auto rootTensor : c10::irange(numTensors)) {
       std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
-      for (size_t i = 0; i < numProcesses; i++) {
+      for(const auto i : c10::irange(numProcesses)) {
         work[i] = tests[i].run(rootRank, rootTensor);
       }
 
       // Wait for work to complete
-      for (size_t i = 0; i < numProcesses; i++) {
+      for(const auto i : c10::irange(numProcesses)) {
         tests[i].wait(work[i]);
       }
 
       // Check results
       const auto expected = (rootRank * numTensors + rootTensor);
-      for (size_t i = 0; i < numProcesses; i++) {
+      for(const auto i : c10::irange(numProcesses)) {
         auto tensors = tests[i].getTensors();
         for (const auto & tensor : tensors) {
           const auto *const data = tensor.data_ptr<float>();
