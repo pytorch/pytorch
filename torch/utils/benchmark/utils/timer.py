@@ -259,7 +259,7 @@ class Timer(object):
         """
         with common.set_torch_threads(self._task_spec.num_threads):
             # Warmup
-            self._timer.timeit(number=max(int(number // 100), 1))
+            self._timer.timeit(number=max(int(number // 100), 2))
 
             return common.Measurement(
                 number_per_run=number,

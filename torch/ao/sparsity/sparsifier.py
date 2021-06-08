@@ -1,6 +1,5 @@
 
 import abc
-from collections import defaultdict
 import copy
 
 from torch.quantization.quantize import prepare as qprepare

@@ -348,6 +348,12 @@ inline Tensor silu(const Tensor& input) {
 
 // ============================================================================
 
+inline Tensor mish(const Tensor& input) {
+  return torch::mish(input);
+}
+
+// ============================================================================
+
 inline Tensor prelu(const Tensor& input, const Tensor& weight) {
   return torch::prelu(input, weight);
 }
