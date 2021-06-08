@@ -3196,7 +3196,7 @@
 - func: is_pinned(Tensor self) -> bool
   variants: method
 
-- func: pin_memory(Tensor(a) self) -> Tensor(a)
+- func: pin_memory(Tensor(a!) self) -> Tensor(a!)
   variants: method
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
