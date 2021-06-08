@@ -48,8 +48,8 @@ class TORCH_API ScriptTypeParser {
   ResolverPtr resolver_ = nullptr;
 
   // Need to use `evaluateDefaults` in serialization
-  friend class ConstantTableValue;
-  friend class SourceImporterImpl;
+  friend struct ConstantTableValue;
+  friend struct SourceImporterImpl;
 };
 } // namespace jit
 } // namespace torch
