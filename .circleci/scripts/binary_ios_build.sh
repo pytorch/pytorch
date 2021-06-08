@@ -35,6 +35,7 @@ echo "IOS_ARCH: ${IOS_ARCH}"
 echo "IOS_PLATFORM: ${IOS_PLATFORM}"
 export IOS_ARCH=${IOS_ARCH}
 export IOS_PLATFORM=${IOS_PLATFORM}
+export BUILD_LITE_INTERPRETER=0
 unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
 #store the binary
