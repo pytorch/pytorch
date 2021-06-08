@@ -153,6 +153,18 @@ with compiling PyTorch from source.
 
                               !! WARNING !!
 '''
+CUDA_MISMATCH_MESSAGE = '''
+
+                               !! WARNING !!
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+The detected CUDA version ({0}) mismatches the version that was used to compile
+PyTorch ({1}). Please make sure to use the same CUDA versions, otherwise some
+errors may appear during compilation/runtime.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                              !! WARNING !!
+'''
 ROCM_HOME = _find_rocm_home()
 MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
@@ -377,6 +389,7 @@ class BuildExtension(build_ext, object):
 
     def build_extensions(self) -> None:
         self._check_abi()
+        self._check_cuda_version()
         for extension in self.extensions:
             # Ensure at least an empty list of flags for 'cxx' and 'nvcc' when
             # extra_compile_args is a dict. Otherwise, default torch flags do
@@ -739,6 +752,14 @@ class BuildExtension(build_ext, object):
                    'This may lead to multiple activations of the VC env.'
                    'Please set `DISTUTILS_USE_SDK=1` and try again.')
             raise UserWarning(msg)
+
+    def _check_cuda_version(self):
+        if CUDA_HOME:
+            nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
+            cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode()
+            cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str).group(1)
+            if cuda_version != torch.version.cuda:
+                warnings.warn(CUDA_MISMATCH_MESSAGE.format(cuda_version, torch.version.cuda))
 
     def _add_compile_flag(self, extension, flag):
         extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
