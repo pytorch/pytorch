@@ -3,6 +3,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/detail/UnpackRaw.cuh>
+#include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>

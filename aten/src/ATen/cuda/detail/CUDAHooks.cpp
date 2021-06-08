@@ -43,6 +43,9 @@ namespace at {
 namespace cuda {
 namespace detail {
 
+const at::cuda::NVRTC& nvrtc();
+int64_t current_device();
+
 std::function<void(void)> THCMagma_init;
 
 // NB: deleter is dynamic, because we need it to live in a separate
@@ -145,19 +148,27 @@ static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvr
 }
 #endif
 
-const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
+const at::cuda::NVRTC& nvrtc() {
   // must hold onto DynamicLibrary otherwise it will unload
   static auto handle = load_nvrtc();
   return *handle.second;
 }
 
-int64_t CUDAHooks::current_device() const {
+const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
+  return nvrtc();
+}
+
+int64_t current_device() {
   int device;
   cudaError_t err = cudaGetDevice(&device);
   if (err == cudaSuccess) {
     return device;
   }
   return -1;
+}
+
+int64_t CUDAHooks::current_device() const {
+  return current_device();
 }
 
 bool hasPrimaryContext(int64_t device_index) {
@@ -167,13 +178,13 @@ bool hasPrimaryContext(int64_t device_index) {
   // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
   // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
   int ctx_is_active = 0;
-  AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
   return ctx_is_active == 1;
 }
 
 c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
   // check current device first
-  int64_t current_device_index = CUDAHooks::current_device();
+  int64_t current_device_index = current_device();
   if (current_device_index >= 0) {
     if (hasPrimaryContext(current_device_index)) {
       return current_device_index;

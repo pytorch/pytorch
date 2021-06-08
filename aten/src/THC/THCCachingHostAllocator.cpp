@@ -1,6 +1,7 @@
 #include <THC/THCCachingHostAllocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 
 
 #include <cuda_runtime_api.h>
