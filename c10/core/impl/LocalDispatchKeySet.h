@@ -49,20 +49,8 @@ class C10_API LocalDispatchKeySetWrapper {
     tls_->excluded_ = (x ^ c10::default_excluded_set).raw_repr();
   }
 
-<<<<<<< HEAD
-  // If our exclude set does not overlap with c10::default_excluded_set, we can
-  // skip some bookkeeping. (And we know at compile time if this is the case.)
-  template <uint64_t exclude>
-  uint64_t exclude_non_overlapping() {
-    static_assert(!(exclude & c10::default_excluded_set.raw_repr()), "exclude overlaps with c10::default_excluded_set.");
-    uint64_t delta = exclude & ~excluded_;
-    excluded_ |= exclude;
-    return delta;
-  }
-=======
  private:
   PODLocalState* tls_;
->>>>>>> cbe802a5e5 (move local dispatch key storage to a TLS seperate from the LocalDispatchKeySet.h)
 };
 
 struct C10_API LocalDispatchKeySet {
