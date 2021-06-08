@@ -54,7 +54,7 @@ using StreamId = int32_t;
  * functionality (e.g., get the cudaStream_t of a CUDA stream.)  There are
  * wrapper classes which provide this functionality, e.g., CUDAStream.
  */
-class Stream final {
+class C10_API Stream final {
  private:
   Device device_;
   StreamId id_;
@@ -109,11 +109,11 @@ class Stream final {
 
   // Return whether all asynchronous work previously enqueued on this stream
   // has completed running on the device.
-  C10_API bool query() const;
+  bool query() const;
 
   // Wait (by blocking the calling thread) until all asynchronous work enqueued
   // on this stream has completed running on the device.
-  C10_API void synchronize() const;
+  void synchronize() const;
 
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole
