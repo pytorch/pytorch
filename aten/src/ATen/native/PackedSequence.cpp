@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
+#include <c10/util/irange.h>
+
 namespace at { namespace native {
 
 void checkLongTensor(const Tensor& tensor) {
@@ -28,7 +30,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   TORCH_CHECK(lengths[batch_size - 1] > 0,
            "Length of all samples has to be greater than 0, but found an element "
            "in 'lengths' that is <= 0");
-  for(auto i = 0; i < batch_size - 1; i++) {
+  for (const auto i : c10::irange(batch_size - 1)) {
     if (lengths[batch_size - 1 - i] > lengths[batch_size - 2 - i]) {
       // NB: enforce_sorted is implemented at a Python level, but the sortedness
       // check lives here. If enforce_sorted=False then this error should never
@@ -119,7 +121,7 @@ Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntArrayRef input_
   return grad_input;
 }
 
-std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor& _batch_sizes, bool batch_first, Scalar padding_value, int64_t total_length) {
+std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor& _batch_sizes, bool batch_first, const Scalar& padding_value, int64_t total_length) {
   auto batch_sizes_t = _batch_sizes.contiguous();
   checkLongTensor(batch_sizes_t);
 
@@ -180,6 +182,41 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   }
 
   return std::make_tuple(output, lengths_t);
+}
+
+Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value) {
+  const int64_t sequences_size = sequences.size();
+  TORCH_CHECK(sequences_size > 0, "received an empty list of sequences");
+  IntArrayRef max_size = sequences[0].sizes();
+  IntArrayRef trailing_dims = max_size.slice(1);
+  int64_t max_len = std::max_element(
+    sequences.begin(),
+    sequences.end(),
+    [](const Tensor &a, const Tensor &b) {
+      return a.size(0) < b.size(0);
+    }
+  )->size(0);
+
+  DimVector out_dims;
+  if (batch_first) {
+    out_dims = {sequences_size, max_len};
+  } else {
+    out_dims = {max_len, sequences_size};
+  }
+  out_dims.insert(out_dims.end(), trailing_dims.begin(), trailing_dims.end());
+
+  Tensor out = at::full(out_dims, padding_value, sequences[0].options());
+  for (int64_t i = 0; i < sequences_size; i++) {
+    const Tensor currseq = sequences[i];
+    const int64_t length_i = currseq.size(0);
+    // use index notation to prevent duplicate references to the tensor
+    if (batch_first) {
+      out.select(0, i).narrow(0, 0, length_i).copy_(currseq);
+    } else {
+      out.narrow(0, 0, length_i).select(1, i).copy_(currseq);
+    }
+  }
+  return out;
 }
 
 }} // namespace at::native

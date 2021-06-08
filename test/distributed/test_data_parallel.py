@@ -4,6 +4,7 @@ import unittest
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
+import functools
 
 import torch
 from torch import nn
@@ -11,13 +12,17 @@ from torch.cuda.amp import autocast
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
-from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
+from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
-from torch.testing._internal.common_utils import skipIfRocm
 import torch.nn.functional as F
 
 torch.set_default_dtype(torch.double)
 
+NO_NCCL = not hasattr(torch.distributed, "ProcessGroupNCCL")
+
+# batched grad doesn't support data parallel
+gradcheck = functools.partial(gradcheck, check_batched_grad=False)
+_assertGradAndGradgradChecks = functools.partial(_assertGradAndGradgradChecks, check_batched_grad=False)
 
 class TestDataParallel(TestCase):
 
@@ -41,7 +46,7 @@ class TestDataParallel(TestCase):
         def fn(t):
             return dpm(inp)
 
-        torch.autograd.gradcheck(fn, (m.t_rg,))
+        gradcheck(fn, (m.t_rg,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_rnn(self):
@@ -77,6 +82,13 @@ class TestDataParallel(TestCase):
 
         for p1, p2 in zip(model.parameters(), model_dp.parameters()):
             self.assertTrue(p1.allclose(p2))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_lazy_linear(self):
+
+        with self.assertRaisesRegex(RuntimeError, 'Modules with uninitialized parameters'):
+            model_dp = torch.nn.DataParallel(torch.nn.LazyLinear(10).to(0))
+            model_dp(torch.rand(10, 10).to(0))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
@@ -508,6 +520,25 @@ class TestDataParallel(TestCase):
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_module_zero_inputs(self):
+        class TestModule(nn.Module):
+            def forward(self):
+                t = torch.eye(2, 3, device='cuda:0')
+                return t + (1 - t)
+
+        def test_helper(output, expected):
+            self.assertEqual(output.get_device(), 0)
+            self.assertEqual(output, expected)
+
+        expected = torch.ones(2, 3, device='cuda:0')
+        model = TestModule()
+
+        test_helper(nn.DataParallel(model, [0])(), expected)
+        test_helper(nn.DataParallel(model, [0, 1])(), expected)
+        test_helper(dp.data_parallel(model, None, [0]), expected)
+        test_helper(dp.data_parallel(model, (), [0, 1]), expected)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
         cuda0 = torch.device('cuda:0')
         cuda1 = torch.device('cuda:1')
@@ -570,6 +601,25 @@ class TestDataParallel(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn((4, 4)).cuda())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    @unittest.skipIf(NO_NCCL, "NCCL needed")
+    def test_data_parallel_complex(self):
+        # We expect complex parameters to be broadcast by view_as_real, e.g. move from C to R^2
+        class Cplx(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cplx = torch.nn.Parameter(torch.zeros(1, 10, dtype=torch.cfloat).cuda())
+
+            def forward(self, x):
+                return x + self.cplx
+
+        cplx = torch.nn.DataParallel(Cplx().cuda())
+        input = torch.rand(1, 10, dtype=torch.cfloat).cuda()
+        result = cplx(input)
+        # 2 is the extra real view dimension here
+        self.assertEqual(result.size(), torch.Size([1, 10, 2]))
+        self.assertEqual(result, torch.view_as_real(input))
 
     def _test_gather(self, output_device):
         inputs = (
@@ -679,7 +729,6 @@ class TestDataParallel(TestCase):
         dpm(torch.rand(4, 3, 6, 5))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_autocast(self):
         class Model(torch.nn.Linear):
             def __init__(self):
@@ -694,7 +743,6 @@ class TestDataParallel(TestCase):
         self.assertTrue(model(input).dtype is torch.float16)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_save_replica_module(self):
         # DataParallel replicas can be saved (gh-37182)
         module = torch.nn.Linear(8, 8).cuda()
@@ -705,7 +753,6 @@ class TestDataParallel(TestCase):
         torch.save(dpm, data)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_strided_grad_layout(self):
         class ConvNet(nn.Module):
             def __init__(self, layouts, dtypes):

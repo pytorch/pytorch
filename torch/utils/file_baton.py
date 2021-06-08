@@ -1,11 +1,5 @@
 import os
-import sys
 import time
-
-if sys.version < '3.3':
-    # Note(jiayq): in Python 2, FileExistsError is not defined and the
-    # error manifests it as OSError.
-    FileExistsError = OSError
 
 
 class FileBaton:

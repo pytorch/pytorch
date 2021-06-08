@@ -15,4 +15,3 @@ Device::Device(const std::string &spec) {
   device_id = atoi(spec.substr(pos + 1).c_str());
 }
 }}
-

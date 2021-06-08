@@ -34,7 +34,13 @@ touch version.txt
 echo $(date +%s) > version.txt
 zip -r ${ZIPFILE} install src version.txt LICENSE
 # upload to aws
-brew install awscli
+# Install conda then 'conda install' awscli
+curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+chmod +x ~/conda.sh
+/bin/bash ~/conda.sh -b -p ~/anaconda
+export PATH="~/anaconda/bin:${PATH}"
+source ~/anaconda/bin/activate
+conda install -c conda-forge awscli --yes
 set +x
 export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
 export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}

@@ -23,7 +23,7 @@ TORCH_API MatchedSchema matchSchema(
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwarg,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt);
 
 TORCH_API std::pair<size_t, MatchedSchema> matchSchemas(
@@ -31,7 +31,7 @@ TORCH_API std::pair<size_t, MatchedSchema> matchSchemas(
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwarg,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt,
     bool render_errors = false);
 
@@ -43,8 +43,8 @@ TORCH_API Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt);
 
 TORCH_API c10::optional<size_t> findInputWithName(

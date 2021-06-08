@@ -1,21 +1,46 @@
 set(TENSOREXPR_TEST_ROOT ${TORCH_ROOT}/test/cpp/tensorexpr)
 
-file(GLOB TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_ROOT}/test_*.cpp)
-set(TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_SRCS} PARENT_SCOPE)
+set(TENSOREXPR_TEST_SRCS
+  ${TENSOREXPR_TEST_ROOT}/test_aten.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_boundsinference.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_conv.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_cpp_codegen.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_expr.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_external_calls.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_ir_printer.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_ir_verifier.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_kernel.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_loopnest.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_memdependency.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_reductions.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_registerizer.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_simplify.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_te_fuser_pass.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_train.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_train_impl.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_type.cpp
+)
+
+if(USE_CUDA)
+  list(APPEND TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_ROOT}/test_cuda.cpp)
+endif()
+
+if(USE_LLVM AND LLVM_FOUND)
+  list(APPEND TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_ROOT}/test_llvm.cpp)
+endif()
 
 add_executable(test_tensorexpr
   ${TORCH_ROOT}/test/cpp/common/main.cpp
-  ${TENSOREXPR_TEST_ROOT}/gtest.cpp
   ${TENSOREXPR_TEST_ROOT}/padded_buffer.cpp
   ${TENSOREXPR_TEST_SRCS})
 
 target_link_libraries(test_tensorexpr PRIVATE torch gtest)
 target_include_directories(test_tensorexpr PRIVATE ${ATen_CPU_INCLUDE})
+target_compile_definitions(test_tensorexpr PRIVATE USE_GTEST)
 
 add_executable(tutorial_tensorexpr ${TENSOREXPR_TEST_ROOT}/tutorial.cpp)
 target_link_libraries(tutorial_tensorexpr PRIVATE torch)
 target_include_directories(tutorial_tensorexpr PRIVATE ${ATen_CPU_INCLUDE})
-
 
 if(USE_CUDA)
   target_link_libraries(test_tensorexpr PRIVATE

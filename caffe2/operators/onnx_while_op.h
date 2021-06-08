@@ -218,6 +218,7 @@ class ONNXWhileOp final : public Operator<Context> {
 
       // Create loop-carried deps in Workspace
       lcd_tensors_.clear();
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 2; i < num_lcds + 2; ++i) {
         Blob* b = loop_ws_->CreateBlob(body_net_def.external_input(i));
         Tensor* t = BlobGetMutableTensor(b, Context::GetDeviceType());

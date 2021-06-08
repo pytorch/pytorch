@@ -69,10 +69,6 @@
 # define TH_UNUSED
 #endif
 
-#ifndef M_PI
-# define M_PI 3.14159265358979323846
-#endif
-
 typedef void (*THErrorHandlerFunction)(const char *msg, void *data);
 typedef void (*THArgErrorHandlerFunction)(int argNumber, const char *msg, void *data);
 

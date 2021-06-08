@@ -3,12 +3,14 @@
 #include "caffe2/opt/glow_net_transform.h"
 #include "caffe2/utils/proto_utils.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     fake_fp16_conversion_use_fp16_acc,
     false,
     "Whether to enable fp16 accumulation for FC / BatchMatMul for fakefp16 "
     "operators.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     fake_fp16_conversion_use_nnpi,
     false,
@@ -41,6 +43,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
        "SparseLengthsWeightedSumFused8BitRowwiseFakeFP16NNPI"},
       {"SparseLengthsMeanFused8BitRowwise",
        "SparseLengthsMeanFused8BitRowwiseFakeFP16AccFP16"},
+      {"MatMul", "BatchMatMulFP16Acc32Fake"},
       {"BatchMatMul", "BatchMatMulFP16Acc32Fake"},
       {"Sigmoid", "SigmoidFakeFp16"},
       {"SpatialBN", "SpatialBNFakeFp16NNPI"},
@@ -58,6 +61,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
     fake_fp16_op_conversion_map["FC"] = "Fp16FCAcc16NNPI";
     fake_fp16_op_conversion_map["FbFCPacked"] = "Fp16FCAcc16NNPI";
     fake_fp16_op_conversion_map["BatchMatMul"] = "BatchMatMulFP16Acc16Fake";
+    fake_fp16_op_conversion_map["MatMul"] = "BatchMatMulFP16Acc16Fake";
   }
   if (use_nnpi) {
     fake_fp16_op_conversion_map["Sigmoid"] = "SigmoidFakeFp16NNPI";
@@ -299,8 +303,8 @@ void fakeFp16Transform(NetDef* net) {
           FLAGS_fake_fp16_conversion_use_fp16_acc,
           FLAGS_fake_fp16_conversion_use_nnpi);
 
-  auto blacklist_pos = glow::ParseNetPositionList(FLAGS_onnxifi_blacklist);
-  auto blacklist_type = glow::ParseBlackListOps(FLAGS_onnxifi_blacklist_ops);
+  auto blocklist_pos = glow::ParseNetPositionList(FLAGS_onnxifi_blacklist);
+  auto blocklist_type = glow::ParseBlockListOps(FLAGS_onnxifi_blacklist_ops);
 
   // A hack to only do fakefp16 transformation for operators which will be
   // lowered to ONNXIFI.
@@ -320,7 +324,7 @@ void fakeFp16Transform(NetDef* net) {
     auto* op = net->mutable_op(i);
     auto net_pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(*op, "net_pos", -1);
-    if (blacklist_pos.count(net_pos) || blacklist_type.count(op->type())) {
+    if (blocklist_pos.count(net_pos) || blocklist_type.count(op->type())) {
       continue;
     }
     auto it = kFakeFp16OpConversionMap.find(op->type());

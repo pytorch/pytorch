@@ -5,7 +5,11 @@
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
+#include <c10/util/Flags.h>
 #include <stdexcept>
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_bool(torch_jit_enable_cpu_fusion, false, "enable cpu fusion");
 
 namespace torch {
 namespace jit {
@@ -13,8 +17,14 @@ namespace jit {
 namespace detail {
 
 // Note: CPU fusion is currently disabled due to test flakiness
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+#if defined(FBCODE_CAFFE2)
+bool cpu_fuser_enabled = true;
+#else
 bool cpu_fuser_enabled = false;
+#endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool gpu_fuser_enabled = true;
 
 } // namespace detail
@@ -30,7 +40,8 @@ void runFusion(const int64_t key, Stack& stack) {
 }
 
 bool canFuseOnCPU() {
-  return fuser::hasFusionBackend(DeviceType::CPU) && detail::cpu_fuser_enabled;
+  return fuser::hasFusionBackend(DeviceType::CPU) &&
+      (detail::cpu_fuser_enabled || FLAGS_torch_jit_enable_cpu_fusion);
 }
 
 bool canFuseOnGPU() {

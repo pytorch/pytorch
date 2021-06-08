@@ -5,10 +5,12 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Sqr,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, SqrFunctor<CPUContext>>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Sqr)
     .NumInputs(1)
     .NumOutputs(1)
@@ -88,6 +90,7 @@ class GetSqrGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Sqr, GetSqrGradient);
 
 } // namespace caffe2

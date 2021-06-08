@@ -48,6 +48,7 @@ class C10OperatorWrapper final : public Operator<Context> {
         op_.schema().arguments().back().type()->isSubtypeOf(
             OptionalType::create(ListType::ofTensors())));
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     AT_ASSERT(operator_def.output_size() == op_.schema().returns().size());
     AT_ASSERT(
         operator_def.input_size() + (has_preallocated_outputs_ ? 1 : 0) <=
@@ -96,6 +97,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
       } else if (argument.type()->isSubtypeOf(TensorType::get())) {
         AT_ASSERTM(
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             input_tensor_index < InputSize(),
             "Error in caffe2->c10 wrapper: Too few tensor arguments given (",
             InputSize(),
@@ -143,6 +145,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   c10::List<at::Tensor> array_inputs_() {
     c10::List<at::Tensor> result;
     result.reserve(InputSize());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < InputSize(); ++i) {
       result.emplace_back(Input(i));
     }
@@ -152,6 +155,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   c10::List<at::Tensor> preallocated_outputs_() {
     c10::List<at::Tensor> result;
     result.reserve(OutputSize());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < OutputSize(); ++i) {
       result.emplace_back(OperatorBase::OutputTensorOrUndefined(i));
     }

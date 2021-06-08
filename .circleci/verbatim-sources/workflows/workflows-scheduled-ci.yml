@@ -1,0 +1,195 @@
+  scheduled-ci:
+    triggers:
+      - schedule:
+          # runs every 4 hours on the 45th minute
+          cron: "45 0,4,8,12,16,20 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+      - pytorch_linux_build:
+          name: periodic_pytorch_xenial_cuda11_3_cudnn8_gcc7_build
+          requires:
+            - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          build_environment: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+      - pytorch_linux_test:
+          name: periodic_pytorch_xenial_cuda11_3_cudnn8_gcc7_test
+          requires:
+            - periodic_pytorch_xenial_cuda11_3_cudnn8_gcc7_build
+          build_environment: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - pytorch_linux_build:
+          name: periodic_libtorch_xenial_cuda11_3_cudnn8_gcc7_build
+          requires:
+            - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          build_environment: "pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+      - pytorch_windows_build:
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
+          cuda_version: "11.3"
+          name: periodic_pytorch_windows_cuda11.3_build
+          python_version: "3.6"
+          use_cuda: "1"
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
+          vc_year: "2019"
+      - pytorch_windows_test:
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
+          cuda_version: "11.3"
+          executor: windows-with-nvidia-gpu
+          name: periodic_pytorch_windows_cuda11.3_test1
+          python_version: "3.6"
+          requires:
+            - periodic_pytorch_windows_cuda11.3_build
+          test_name: pytorch-windows-test1
+          use_cuda: "1"
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
+          vc_year: "2019"
+      - pytorch_windows_test:
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
+          cuda_version: "11.3"
+          executor: windows-with-nvidia-gpu
+          name: periodic_pytorch_windows_cuda11.3_test2
+          python_version: "3.6"
+          requires:
+            - periodic_pytorch_windows_cuda11.3_build
+          test_name: pytorch-windows-test2
+          use_cuda: "1"
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
+          vc_year: "2019"
+
+  # The following allows these jobs to run on ci-all and release branches
+  debuggable-scheduled-ci:
+    jobs:
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          filters:
+            branches:
+              only:
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_cuda11_3_cudnn8_py3_gcc7_build
+          requires:
+            - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          build_environment: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          filters:
+            branches:
+              only:
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_cuda11_3_cudnn8_py3_gcc7_test
+          requires:
+            - pytorch_linux_xenial_cuda11_3_cudnn8_py3_gcc7_build
+          build_environment: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+          filters:
+            branches:
+              only:
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_linux_build:
+          name: pytorch_libtorch_linux_xenial_cuda11_3_cudnn8_py3_gcc7_build
+          requires:
+            - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          build_environment: "pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          filters:
+            branches:
+              only:
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_build:
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
+          cuda_version: "11.3"
+          name: pytorch_windows_vs2019_py36_cuda11.3_build
+          python_version: "3.6"
+          use_cuda: "1"
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
+          vc_year: "2019"
+          filters:
+            branches:
+              only:
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
+          cuda_version: "11.3"
+          executor: windows-with-nvidia-gpu
+          name: pytorch_windows_vs2019_py36_cuda11.3_test1
+          python_version: "3.6"
+          requires:
+            - pytorch_windows_vs2019_py36_cuda11.3_build
+          test_name: pytorch-windows-test1
+          use_cuda: "1"
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
+          vc_year: "2019"
+          filters:
+            branches:
+              only:
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
+          cuda_version: "11.3"
+          executor: windows-with-nvidia-gpu
+          name: pytorch_windows_vs2019_py36_cuda11.3_test2
+          python_version: "3.6"
+          requires:
+            - pytorch_windows_vs2019_py36_cuda11.3_build
+          test_name: pytorch-windows-test2
+          use_cuda: "1"
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
+          vc_year: "2019"
+          filters:
+            branches:
+              only:
+                - /ci-all\/.*/
+                - /release\/.*/
+
+  # the following clones pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7's tests but enables
+  # slow tests and sets an environment variable so gradcheck runs with fast_mode=False
+  slow-gradcheck-scheduled-ci:
+    triggers:
+      - schedule:
+          # runs every 8 hours on the 45th minute
+          cron: "45 0,8,16 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+      - pytorch_linux_build:
+          name: periodic_pytorch_xenial_cuda10_2_cudnn7_gcc7_build
+          requires:
+            - "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+      - pytorch_linux_test:
+          name: periodic_pytorch_xenial_cuda10_2_cudnn7_gcc7_old_gradcheck_tests
+          requires:
+            - periodic_pytorch_xenial_cuda10_2_cudnn7_gcc7_build
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-tests"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium

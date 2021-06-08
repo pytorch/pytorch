@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "input"
-    input: "target.1"
+    input: "target"
     output: "2"
     name: "SoftmaxCrossEntropyLoss_0"
     op_type: "SoftmaxCrossEntropyLoss"
@@ -40,7 +40,7 @@ graph {
     }
   }
   input {
-    name: "target.1"
+    name: "target"
     type {
       tensor_type {
         elem_type: 7

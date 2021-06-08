@@ -14,6 +14,7 @@ class StatRegistryCreateOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<StatRegistry>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<StatRegistry>(new StatRegistry);
     return true;
   }
@@ -42,6 +43,7 @@ class StatRegistryExportOp : public Operator<CPUContext> {
     auto* ptimestamps = timestamps->template mutable_data<int64_t>();
     int i = 0;
     for (const auto& stat : data) {
+      // NOLINTNEXTLINE(performance-move-const-arg)
       pkeys[i] = std::move(stat.key);
       pvals[i] = stat.value;
       ptimestamps[i] =
@@ -98,6 +100,7 @@ class TimerInstance {
     using namespace std::chrono;
     auto duration = high_resolution_clock::now() - start_;
     auto nanos = duration_cast<nanoseconds>(duration).count();
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     CAFFE_EVENT(stat_, time_ns, nanos);
     running_ = false;
   }
@@ -115,6 +118,7 @@ class TimerInstance {
   std::chrono::high_resolution_clock::time_point start_;
 
   struct TimerStat {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(TimerStat);
     CAFFE_AVG_EXPORTED_STAT(time_ns);
   } stat_;
@@ -177,15 +181,23 @@ struct TimerGetOp : public Operator<CPUContext> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StatRegistryCreate, StatRegistryCreateOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StatRegistryUpdate, StatRegistryUpdateOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StatRegistryExport, StatRegistryExportOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TimerBegin, TimerBeginOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TimerEnd, TimerEndOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TimerGetAndEnd, TimerGetAndEndOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TimerGet, TimerGetOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StatRegistryCreate)
     .NumInputs(0)
     .NumOutputs(1)
@@ -196,6 +208,7 @@ counts throughout the caffe2 codebase.
 )DOC")
     .Output(0, "handle", "A Blob pointing to the newly created StatRegistry.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StatRegistryUpdate)
     .NumInputs(2, 3)
     .NumOutputs(0)
@@ -211,6 +224,7 @@ with the values of counters for the given keys.
         "If provided, update the given StatRegistry. "
         "Otherwise, update the global singleton.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StatRegistryExport)
     .NumInputs(0, 1)
     .NumOutputs(3)
@@ -226,6 +240,7 @@ OPERATOR_SCHEMA(StatRegistryExport)
         "reset",
         "(default true) Whether to atomically reset the counters afterwards.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TimerBegin)
     .NumInputs(0)
     .NumOutputs(1)
@@ -239,6 +254,7 @@ Github Links:
     .Arg("counter_name", "(*str*): name of the timer object; if not set use output name")
     .Output(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TimerEnd)
     .NumInputs(1)
     .NumOutputs(0)
@@ -251,6 +267,7 @@ Github Links:
     )DOC")
     .Input(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TimerGetAndEnd)
     .NumInputs(1)
     .NumOutputs(1)
@@ -327,6 +344,7 @@ nanos: [252250]
     .Input(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op")
     .Output(0, "nanos", "(*Tensor`<int64>`*): scalar tensor containing time in nanoseconds");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TimerGet)
     .NumInputs(1)
     .NumOutputs(1)

@@ -64,7 +64,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   image_file.read(reinterpret_cast<char*>(&magic), 4);
   magic = swap_endian(magic);
   if (magic == 529205256) {
-    LOG(FATAL) << 
+    LOG(FATAL) <<
         "It seems that you forgot to unzip the mnist dataset. You should "
         "first unzip them using e.g. gunzip on Linux.";
   }
