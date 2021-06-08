@@ -947,7 +947,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
       std::vector<py::object>>>(props);
 
   // In `_get_named_tuple_properties`, we add a dummy value to represent
-  // a missing default parameter, This provides a guarantee that the
+  // a missing default parameter. This provides a guarantee that the
   // two vectors will be the same size, even if the NamedTuple doesn't
   // have default values for all its fields
   TORCH_INTERNAL_ASSERT(field_names.size() == field_defaults.size());
@@ -958,9 +958,11 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
       auto type = tryToInferType(objects[i]);
       ival = toIValue(objects[i], type.type());
       TORCH_CHECK(
-          !ival.isTensor(),
-          "Tensors are not supported as default NamedTuple fields. "
-          "Using a Tensor is dangerous because it's a mutable object");
+          field_defaults[i].tagKind() != "Tensor",
+          "Tensors are"
+          " not supported as default NamedTuple fields. Their "
+          "mutability could lead to potential memory aliasing "
+          "problems");
     }
     field_names.emplace_back(field_names[i]);
     field_defaults.emplace_back(ival);

@@ -953,7 +953,7 @@ struct TORCH_API TupleType : public NamedType {
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
       const std::vector<TypePtr>& field_types,
-      const std::vector<IValue>& field_defaults);
+      std::vector<IValue>& field_defaults);
 
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,

@@ -759,10 +759,18 @@ TupleTypePtr TupleType::createNamed(
 TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types,
-    const std::vector<IValue>& field_defaults) {
-  TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size()
-                        && field_types.size() == field_defaults.size());
+    std::vector<IValue>& field_defaults) {
+  TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
+
+  // Pad `field_defaults` if necessary
+  const auto padding_size = field_names.size() - field_defaults.size();
+  const auto dummy = IValue();
+  field_defaults.insert(field_defaults.begin(), padding_size, dummy);
+
+  TORCH_INTERNAL_ASSERT(field_names.size() == field_defaults.size());
+
   std::vector<Argument> arguments;
+  arguments.reserve(field_names.size());
   for (size_t i = 0; i < field_names.size(); ++i) {
     TORCH_CHECK(field_defaults[i].tagKind() != "Tensor", "Tensors are "
                 "not supported as default NamedTuple fields. Their "
