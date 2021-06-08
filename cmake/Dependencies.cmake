@@ -1027,7 +1027,7 @@ if(USE_MPI)
     message(STATUS "MPI LINK flags path: " ${MPI_CXX_LINK_FLAGS})
     message(STATUS "MPI libraries: " ${MPI_CXX_LIBRARIES})
     include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
     find_program(OMPI_INFO
       NAMES ompi_info

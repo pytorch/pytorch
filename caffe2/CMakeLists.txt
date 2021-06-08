@@ -1074,6 +1074,9 @@ endif()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
+  install(DIRECTORY "${TORCH_SRC_DIR}/lib/c10d"
+    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
+    FILES_MATCHING PATTERN "*.h")
   install(FILES
     "${TORCH_SRC_DIR}/script.h"
     "${TORCH_SRC_DIR}/extension.h"

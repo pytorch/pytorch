@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <ATen/core/ivalue_inl.h>
+#include <ATen/ThreadLocalState.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
@@ -227,7 +229,7 @@ class TORCH_API Reducer {
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
 
-  using GradCallback = std::function<bool(torch::Tensor&)>;
+  using GradCallback = std::function<bool(at::Tensor&)>;
 #ifndef _WIN32
   static_assert(std::is_same<
     GradCallback,
@@ -329,7 +331,7 @@ class TORCH_API Reducer {
     c10::intrusive_ptr<c10d::ProcessGroup::Work> work;
 
     // Keep future work handle around if DDP comm hook is registered.
-    c10::intrusive_ptr<torch::jit::Future> future_work;
+    c10::intrusive_ptr<at::ivalue::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
