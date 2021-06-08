@@ -475,11 +475,10 @@ void ScriptModuleSerializer::writeArchive(
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
         if (tensor_cdata_naming_scheme) {
-          std::string string_id = std::to_string(reinterpret_cast<std::intptr_t>(
-                  tensor.storage().unsafeGetStorageImpl())); 
-          tensor_names.push_back(
-              string_id +
-              ".storage");
+          std::string string_id =
+              std::to_string(reinterpret_cast<std::intptr_t>(
+                  tensor.storage().unsafeGetStorageImpl()));
+          tensor_names.push_back(string_id + ".storage");
           storage_context_.addStorage(string_id, tensor.storage());
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
