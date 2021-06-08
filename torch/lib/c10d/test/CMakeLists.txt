@@ -28,9 +28,12 @@ if(USE_CUDA)
     c10d_add_test(ProcessGroupGlooAsyncTest.cpp torch_cpu_library c10d_cuda_test gtest_main)
   endif()
   if(USE_NCCL AND USE_C10D_NCCL)
-    c10d_add_test(ProcessGroupNCCLTest.cpp torch_cpu_library c10d_cuda_test gtest_main)
-    c10d_add_test(ProcessGroupNCCLErrorsTest.cpp torch_cpu_library c10d_cuda_test
-        gtest_main)
+    c10d_add_test(
+      ProcessGroupNCCLTest.cpp
+      torch_cpu_library c10d_cuda_test gtest_main __caffe2_nccl)
+    c10d_add_test(
+      ProcessGroupNCCLErrorsTest.cpp
+      torch_cpu_library c10d_cuda_test gtest_main __caffe2_nccl)
   endif()
 else()
   if(USE_GLOO AND USE_C10D_GLOO)

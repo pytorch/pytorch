@@ -15,7 +15,9 @@
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#ifndef _WIN32
 #include <torch/csrc/distributed/autograd/context/context.h>
+#endif
 
 namespace c10d {
 
@@ -225,8 +227,12 @@ class TORCH_API Reducer {
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
 
-  using GradCallback =
-      torch::distributed::autograd::DistAutogradContext::GradCallback;
+  using GradCallback = std::function<bool(torch::Tensor&)>;
+#ifndef _WIN32
+  static_assert(std::is_same<
+    GradCallback,
+    torch::distributed::autograd::DistAutogradContext::GradCallback>::value, "");
+#endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
   // A bucket replica represents [1..N] gradients to be reduced,
@@ -386,6 +392,7 @@ class TORCH_API Reducer {
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
 
+#ifndef _WIN32
   struct RpcContext {
     using ContextPtr = torch::distributed::autograd::ContextPtr;
     // The shared_ptr is to hold the context instance.
@@ -395,6 +402,7 @@ class TORCH_API Reducer {
     void set(ContextPtr&& new_context_ptr);
   };
   RpcContext rpc_context_;
+#endif
 
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
