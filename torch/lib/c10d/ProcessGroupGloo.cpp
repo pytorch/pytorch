@@ -323,11 +323,11 @@ void initializeStreamsEvents(
     const std::vector<at::Tensor>& tensors,
     std::vector<c10::Stream>& streams,
     std::vector<c10::Event>& events) {
-  c10::impl::VirtualGuardImpl impl(c10::kCUDA);
   streams.reserve(tensors.size());
   events.reserve(tensors.size());
   for(const auto i : c10::irange(tensors.size())) {
     c10::Device device = tensors[i].device();
+    c10::impl::VirtualGuardImpl impl(device.type());
     // Record event on current stream
     events.emplace_back(device.type());
     events[i].record(impl.getStream(device));
@@ -376,11 +376,11 @@ void initializeStreamsEvents(
     }
   }
 
-  c10::impl::VirtualGuardImpl impl(c10::kCUDA);
   streams.reserve(tensors.size());
   events.reserve(tensors.size());
   for(const auto i : c10::irange(tensors.size())) {
     c10::Device device = tensors[i][0].device();
+    c10::impl::VirtualGuardImpl impl(device.type());
     // Record event on current stream
     events.emplace_back(device.type());
     events[i].record(impl.getStream(device));
@@ -868,10 +868,10 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   void synchronize() override {
-    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
     for(const auto i : c10::irange(inputs.size())) {
-      events[i].block(impl.getStream(inputs[i].device()));
+      c10::Device device = inputs[i].device();
+      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -899,7 +899,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(c10::kCUDA));
+      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1306,10 +1306,10 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
   }
 
   void synchronize() override {
-    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
     for(const auto i : c10::irange(inputs.size())) {
-      events[i].block(impl.getStream(inputs[i].device()));
+      c10::Device device = inputs[i].device();
+      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1358,10 +1358,10 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
   }
 
   void synchronize() override {
-    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
     for(const auto i : c10::irange(inputs.size())) {
-      events[i].block(impl.getStream(inputs[i].device()));
+      c10::Device device = inputs[i].device();
+      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1388,7 +1388,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(c10::kCUDA));
+      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1587,10 +1587,10 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
   }
 
   void synchronize() override {
-    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
     for(const auto i : c10::irange(inputs.size())) {
-      events[i].block(impl.getStream(inputs[i].device()));
+      c10::Device device = inputs[i].device();
+      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1618,7 +1618,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(c10::kCUDA));
+      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1756,10 +1756,10 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   }
 
   void synchronize() override {
-    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
     for(const auto i : c10::irange(outputs.size())) {
-      outputEvents[i].block(impl.getStream(outputs[i][0].device()));
+      c10::Device device = outputs[i][0].device();
+      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1819,7 +1819,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(c10::kCUDA));
+      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -2088,10 +2088,10 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
   }
 
   void synchronize() override {
-    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
     for(const auto i : c10::irange(outputs.size())) {
-      outputEvents[i].block(impl.getStream(outputs[i][0].device()));
+      c10::Device device = outputs[i][0].device();
+      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -2146,7 +2146,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(c10::kCUDA));
+      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -2271,10 +2271,10 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
   }
 
   void synchronize() override {
-    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
     for(const auto i : c10::irange(outputs.size())) {
-      outputEvents[i].block(impl.getStream(outputs[i].device()));
+      c10::Device device = outputs[i].device();
+      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -2328,7 +2328,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(c10::kCUDA));
+      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -2464,9 +2464,9 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
   }
 
   void synchronize() override {
-    c10::impl::VirtualGuardImpl impl(c10::kCUDA);
     // Synchronize with the copy back to CUDA tensors.
-    outputEvents.front().block(impl.getStream(outputTensor.device()));
+    c10::Device device = outputTensor.device();
+    outputEvents.front().block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
   }
 
   at::Tensor cpuOutput;
