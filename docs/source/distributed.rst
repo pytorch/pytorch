@@ -622,7 +622,7 @@ The following error message is produced on rank 0, allowing the user to determin
 ::
 
   RuntimeError: Rank 1 failed to pass monitoredBarrier in 2000 ms
-   Original exception: 
+   Original exception:
   [gloo/transport/tcp/pair.cc:598] Connection closed by peer [2401:db00:eef0:1100:3560:0:1c05:25d]:8594
 
 
@@ -630,8 +630,8 @@ Next, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigg
 are synchronized appropriately. ``TORCH_DISTRIBUTED_DEBUG`` can be set to either ``OFF`` (default), ``INFO``, or ``DETAIL`` depending on the debugging level
 required. Please note that the most verbose option, ``DETAIL`` may impact the application performance and thus should only be used when debugging issues.
 
-Setting ``TORCH_DISTRIBUTED_DEBUG=INFO`` will result in additional debug logging when models trained with :func:`torch.nn.parallel.DistributedDataParallel` are initialized, and 
-``TORCH_DISTRIBUTED_DEBUG=DETAIL`` will additionally log runtime performance statistics a select number of iterations. These runtime statistics 
+Setting ``TORCH_DISTRIBUTED_DEBUG=INFO`` will result in additional debug logging when models trained with :func:`torch.nn.parallel.DistributedDataParallel` are initialized, and
+``TORCH_DISTRIBUTED_DEBUG=DETAIL`` will additionally log runtime performance statistics a select number of iterations. These runtime statistics
 include data such as forward time, backward time, gradient communication time, etc. As an example, given the following application:
 
 ::
@@ -685,7 +685,7 @@ The following logs are rendered at initialization time:
 
 ::
 
-  I0607 16:10:35.739390 515217 logger.cpp:173] [Rank 0]: DDP Initialized with: 
+  I0607 16:10:35.739390 515217 logger.cpp:173] [Rank 0]: DDP Initialized with:
   broadcast_buffers: 1
   bucket_cap_bytes: 26214400
   find_unused_parameters: 0
@@ -718,15 +718,15 @@ The following logs are rendered during runtime (when ``TORCH_DISTRIBUTED_DEBUG=D
 
 ::
 
-  I0607 16:18:58.085681 544067 logger.cpp:344] [Rank 1 / 2] Training TwoLinLayerNet unused_parameter_size=0 
-   Avg forward compute time: 40838608 
-   Avg backward compute time: 5983335 
-  Avg backward comm. time: 4326421 
+  I0607 16:18:58.085681 544067 logger.cpp:344] [Rank 1 / 2] Training TwoLinLayerNet unused_parameter_size=0
+   Avg forward compute time: 40838608
+   Avg backward compute time: 5983335
+  Avg backward comm. time: 4326421
    Avg backward comm/comp overlap time: 4207652
-  I0607 16:18:58.085693 544066 logger.cpp:344] [Rank 0 / 2] Training TwoLinLayerNet unused_parameter_size=0 
-   Avg forward compute time: 42850427 
-   Avg backward compute time: 3885553 
-  Avg backward comm. time: 2357981 
+  I0607 16:18:58.085693 544066 logger.cpp:344] [Rank 0 / 2] Training TwoLinLayerNet unused_parameter_size=0
+   Avg forward compute time: 42850427
+   Avg backward compute time: 3885553
+  Avg backward comm. time: 2357981
    Avg backward comm/comp overlap time: 2234674
 
 
@@ -734,15 +734,15 @@ In addition, ``TORCH_DISTRIBUTED_DEBUG=INFO`` enhances crashes in :func:`torch.n
 must be passed into :func:`torch.nn.parallel.DistributedDataParallel` initialization if there are parameters that may be unused in the forward pass, and as of v1.10, all model outputs are required
 to be used in loss computation as :func:`torch.nn.parallel.DistributedDataParallel` does not support unused parameters in the backwards pass. These constraints are challenging especially for larger
 models, thus when crashing with an error, :func:`torch.nn.parallel.DistributedDataParallel` will log the fully qualified name of all parameters that went unused. For example, in the above application,
-if we modify ``loss`` to be instead computed as ``loss = output[1]``, then ``TwoLinLayerNet.a`` does not receive a gradient in the backwards pass, and 
+if we modify ``loss`` to be instead computed as ``loss = output[1]``, then ``TwoLinLayerNet.a`` does not receive a gradient in the backwards pass, and
 thus results in ``DDP`` failing. On a crash, the user is passed information about parameters which went unused, which may be challenging to manually find for large models:
 
 
-:: 
+::
 
   RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one. This error indicates that your module has parameters that were not used in producing loss. You can enable unused parameter detection by passing
-   the keyword argument `find_unused_parameters=True` to `torch.nn.parallel.DistributedDataParallel`, and by 
-  making sure all `forward` function outputs participate in calculating loss. 
+   the keyword argument `find_unused_parameters=True` to `torch.nn.parallel.DistributedDataParallel`, and by
+  making sure all `forward` function outputs participate in calculating loss.
   If you already have done the above, then the distributed data parallel module wasn't able to locate the output tensors in the return value of your module's `forward` function. Please include the loss function and the structure of the return va
   lue of `forward` of your module when reporting this issue (e.g. list, dict, iterable).
   Parameters which did not receive grad for rank 0: a.weight
@@ -756,7 +756,7 @@ group, but performs consistency checks before dispatching the collective to an u
 which ensures all ranks complete their outstanding collective calls and reports ranks which are stuck. Next, the collective itself is checked for consistency by
 ensuring all collective functions match and are called with consistent tensor shapes. If this is not the case, a detailed error report is included when the
 application crashes, rather than a hang or uninformative error message. As an example, consider the following function which has mismatched input shapes into
-:func:`torch.distributed.all_reduce`: 
+:func:`torch.distributed.all_reduce`:
 
 ::
 
