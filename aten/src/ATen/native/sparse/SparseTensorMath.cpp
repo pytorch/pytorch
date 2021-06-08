@@ -890,10 +890,10 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const Scalar& alpha
 ) {
   // TODO: This error message seems awfully opaque
-  AT_ASSERT(!t.is_cuda());
-  TORCH_CHECK(!r.is_cuda(), "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!sparse_.is_cuda(), "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(!dense.is_cuda(), "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(!t.is_cuda(),  "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(!r.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(!sparse_.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(!dense.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
   TORCH_CHECK(sparse_.dense_dim() == 0, "addmm: scalar values expected, got ", sparse_.dense_dim(), "D values");
@@ -1645,15 +1645,15 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
   return result;
 }
 
-Tensor conj_sparse(const Tensor& input) {
-  if (!input.is_complex()) {
-    return input;
-  }
-  Tensor result = at::native::empty_like(input);
-  return conj_out_sparse(input, result);
-}
+// Tensor conj_physical_sparse(const Tensor& input) {
+//   if (!input.is_complex()) {
+//     return input;
+//   }
+//   Tensor result = at::native::empty_like(input);
+//   return conj_physical_out_sparse(input, result);
+// }
 
-Tensor& conj_out_sparse(const Tensor& input, Tensor& result) {
+Tensor& conj_physical_out_sparse(const Tensor& input, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.is_sparse());
   if (input.numel() == 0) {
     return result;
@@ -1665,7 +1665,7 @@ Tensor& conj_out_sparse(const Tensor& input, Tensor& result) {
     return result;
   }
   Tensor result_values = result._values();
-  at::conj_out(result_values, input._values());
+  at::conj_physical_out(result_values, input._values());
   return result;
 }
 
