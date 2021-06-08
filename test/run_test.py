@@ -15,7 +15,7 @@ import tempfile
 
 import torch
 from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
+from torch.testing._internal.common_utils import FILE_SCHEMA, IS_IN_CI, TEST_WITH_ROCM, shell, set_cwd
 from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
@@ -1214,8 +1214,8 @@ def main():
         ]
         sys.path.remove('test')
 
-
-    selected_tests = reorder_tests(selected_tests)
+    if IS_IN_CI:
+        selected_tests = reorder_tests(selected_tests)
 
     has_failed = False
     failure_messages = []
