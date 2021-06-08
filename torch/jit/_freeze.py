@@ -165,7 +165,7 @@ def run_frozen_optimizations(mod, optimize_numerics: bool = True):
             torch._C._jit_pass_fold_frozen_conv_mul_or_div(mod.graph)
 
 def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
-    # just make a copy
+    # just make a copy 2
     buffer = io.BytesIO()
     torch.jit.save(mod, buffer)
     return torch.jit.load(buffer)
