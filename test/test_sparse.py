@@ -3429,7 +3429,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @ops(sparse_unary_ufuncs)
     def test_sparse_consistency(self, device, dtype, op):
-        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+        unsupportedTypes = [torch.bfloat16, torch.float16]
         if dtype in unsupportedTypes:
             self.skipTest('Skipped! Unsupported dtypes for Sparse')
 
@@ -3447,6 +3447,21 @@ class TestSparseUnaryUfuncs(TestCase):
         output = op(sample.input.to_sparse())
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
+
+    @ops(sparse_unary_ufuncs)
+    def test_sparse_zero_dims(self, device, dtype, op):
+        # test 0x0 sparse_coo_tensor
+
+        unsupportedTypes = [torch.bfloat16, torch.float16]
+        if dtype in unsupportedTypes:
+            self.skipTest('Skipped! Unsupported dtypes for Sparse')
+
+        indices = torch.empty(2, 0, dtype=torch.int64)
+        values = torch.empty(0, dtype=dtype)
+        sparse_0x0 = torch.sparse_coo_tensor(indices, values, (0, 0))
+        expected = torch.sparse_coo_tensor(indices, op(values), (0, 0))
+        actual = op(sparse_0x0)
+        self.assertEqual(expected, actual)
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
