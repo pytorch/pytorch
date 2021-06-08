@@ -1033,6 +1033,67 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
         self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
 
+    def test_qconfig_module_name_function_order(self):
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                x = self.m1(x)
+                return x
+
+        class M3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m2 = M2()
+
+            def forward(self, x):
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                x = self.m2(x)
+                return x
+
+        m = M3().eval()
+        qconfig_dict = {
+            "module_name_function_order": [
+                # test various FQNs: global, single child, multiple children
+                ("", torch.add, 0, torch.quantization.default_qconfig),
+                ("m2", torch.add, 1, torch.quantization.default_qconfig),
+                ("m2.m1", torch.add, 0, torch.quantization.default_qconfig),
+            ],
+        }
+        m = prepare_fx(m, qconfig_dict)
+        data = torch.randn(1, 1, 1, 1)
+        m(data)
+        m = convert_fx(m)
+        m(data)
+
+        node_list = [
+            # m3
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
+            ns.call_method("dequantize"),
+            ns.call_function(torch.add),
+            # m2
+            ns.call_function(torch.add),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
+            # m1
+            ns.call_function(torch.ops.quantized.add),
+            ns.call_method("dequantize"),
+            ns.call_function(torch.add),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
     def test_qconfig_dict_validity(self):
         r"""
         Verifies that if a user passes an invalid key or makes a typo when

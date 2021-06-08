@@ -1,5 +1,5 @@
 import torch
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from typing import Union, Callable, Any, Dict, Tuple, Set
 import re
 
@@ -86,6 +86,27 @@ def get_module_name_regex_qconfig(qconfig_dict, module_name, fallback_qconfig):
     return fallback_qconfig
 
 
+def maybe_adjust_qconfig_for_module_name_function_order(
+    qconfig_dict: Any,
+    cur_module_path: str,
+    cur_function_target: Callable,
+    cur_function_idx: int,
+    fallback_qconfig: QConfigAny,
+) -> QConfigAny:
+    qconfig_module_name_function_order = \
+        qconfig_dict.get('module_name_function_order', {})
+    for module_path, function_target, function_idx, qconfig in \
+            qconfig_module_name_function_order:
+        if (
+            (module_path == cur_module_path) and
+            (function_target == cur_function_target) and
+            (function_idx == cur_function_idx)
+        ):
+            return qconfig
+
+    return fallback_qconfig
+
+
 def get_module_name_qconfig(qconfig_dict, module_name, fallback_qconfig):
     if module_name == '':
         # module name qconfig not found
@@ -119,6 +140,16 @@ def generate_qconfig_map(
         node_name_to_scope: Dict[str, Tuple[str, type]]) -> Dict[str, QConfigAny]:
     global_qconfig = qconfig_dict.get("", None)
     qconfig_map = dict()
+
+    # example:
+    #
+    #   {'foo.bar': {F.linear: 0, F.conv2d: 1, ...}, ...}
+    #
+    # meaning in submodule 'foo.bar', we have seen 0 F.linear and
+    # 1 F.conv2d invocations so far.
+    submodule_to_function_type_to_cur_idx: Dict[str, Dict[Callable, int]] = \
+        defaultdict(lambda: defaultdict(int))
+
     for node in input_graph.nodes:
         qconfig = None
         if node.op == "get_attr":
@@ -134,6 +165,14 @@ def generate_qconfig_map(
             module_path, module_type = node_name_to_scope[node.name]
             qconfig = get_qconfig(
                 qconfig_dict, module_type, module_path, function_qconfig)
+
+            cur_function_idx = \
+                submodule_to_function_type_to_cur_idx[module_path][node.target]
+            submodule_to_function_type_to_cur_idx[module_path][node.target] += 1
+            qconfig = maybe_adjust_qconfig_for_module_name_function_order(
+                qconfig_dict, module_path, node.target, cur_function_idx,
+                qconfig)
+
         elif node.op == "call_method":
             module_path, module_type = node_name_to_scope[node.name]
             # use the qconfig of the module that the node belongs to
@@ -172,7 +211,9 @@ def check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
       `qconfig_dict`: dictionary whose keys we want to check
     """
 
-    qconfig_dict_allowed_keys = {"", "object_type", "module_name_regex", "module_name"}
+    qconfig_dict_allowed_keys = {
+        "", "object_type", "module_name_regex", "module_name",
+        "module_name_function_order"}
     check_is_valid_config_dict(qconfig_dict, qconfig_dict_allowed_keys, "qconfig_dict")
 
 
