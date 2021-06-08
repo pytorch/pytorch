@@ -1,10 +1,9 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Windows CI (pytorch-win-vs2019-cpu-py3)
+name: Windows CI (pytorch-win-vs2019-cuda10-cudnn7-py3)
 
 on:
-  pull_request:
   push:
     branches:
       - master
@@ -12,9 +11,9 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: pytorch-win-vs2019-cpu-py3
+  BUILD_ENVIRONMENT: pytorch-win-vs2019-cuda10-cudnn7-py3
   BUILD_WHEEL: 1
-  CUDA_VERSION: "cpu"
+  CUDA_VERSION: "10.1"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   JOB_BASE_NAME: test
@@ -23,9 +22,11 @@ env:
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
+  TORCH_CUDA_ARCH_LIST: "7.0"
+  USE_CUDA: 1
 
 concurrency:
-  group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
+  group: pytorch-win-vs2019-cuda10-cudnn7-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -40,6 +41,14 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
+      - name: Install Cuda
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cuda_install.sh
+      - name: Install Cudnn
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cudnn_install.sh
       - name: Build
         shell: bash
         run: |
@@ -65,9 +74,9 @@ jobs:
           path: C:\w\build-results
 
   test:
-    runs-on: windows.4xlarge
+    runs-on: windows.8xlarge.nvidia.gpu
     env:
-      JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-test
+      JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-test
     needs:
       - build
     steps:
@@ -79,6 +88,14 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
+      - name: Install Cuda
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cuda_install.sh
+      - name: Install Cudnn
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cudnn_install.sh
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -153,7 +170,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_JOB: pytorch-win-vs2019-cpu-py3
+          CIRCLE_JOB: pytorch-win-vs2019-cuda10-cudnn7-py3
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
