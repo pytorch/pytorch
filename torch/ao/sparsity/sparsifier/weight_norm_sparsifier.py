@@ -15,14 +15,14 @@ class WeightNormSparsifier(BaseSparsifier):
 
     def update_mask(self, layer, sparsity_level, sparsity_pattern, **kwargs):
         if sparsity_level <= 0:
-            layer.mask = torch.ones(layer.weight.shape)
+            layer.mask = torch.ones(layer.weight.shape, device=layer.weight.device)
         elif sparsity_level >= 1.0:
-            layer.mask = torch.zeros(layer.weight.shape)
+            layer.mask = torch.zeros(layer.weight.shape, device=layer.weight.device)
         else:
             ww = layer.weight * layer.weight
             ww = ww.reshape(1, *ww.shape)
             ww_pool = F.avg_pool(ww, kernel_size=sparsity_pattern,
-                                   stride=sparsity_pattern, ceil_mode=True)
+                                 stride=sparsity_pattern, ceil_mode=True)
             ww_pool_flat = ww_pool.flatten()
             _, sorted_idx = torch.sort(ww_pool_flat)
             threshold_idx = int(round(sparsity_level * len(sorted_idx)))
@@ -31,7 +31,8 @@ class WeightNormSparsifier(BaseSparsifier):
             rows *= sparsity_pattern[0]
             cols *= sparsity_pattern[1]
 
-            new_mask = torch.ones(ww.shape)
+            new_mask = torch.ones(ww.shape, device=layer.weight.device)
             for row, col in zip(rows, cols):
-                new_mask[row:row+sparsity_pattern[0], col:col+sparsity_pattern[1]] = 0
+                new_mask[row:row + sparsity_pattern[0],
+                         col:col + sparsity_pattern[1]] = 0
             layer.mask *= new_mask
