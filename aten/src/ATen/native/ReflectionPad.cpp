@@ -96,6 +96,100 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
   set_output(input.sizes(), input.options());
 }
 
+TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
+  TORCH_CHECK(padding.size() == 6, "padding size is expected to be 6");
+  int64_t pad_left = padding[0];
+  int64_t pad_right = padding[1];
+  int64_t pad_top = padding[2];
+  int64_t pad_bottom = padding[3];
+  int64_t pad_front = padding[4];
+  int64_t pad_back = padding[4];
+  int64_t dim_w = 3;
+  int64_t dim_h = 2;
+  int64_t dim_d = 1;
+  int64_t dim_plane = 0;
+
+  // allow batch size of 0-dim.
+  bool valid_dims =
+      input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
+  bool valid_single = input.dim() == 4 && input.size(0) != 0 && valid_dims;
+  bool valid_batch = input.dim() == 5 && valid_dims && input.size(4) != 0;
+
+  TORCH_CHECK(
+    valid_single || valid_batch,
+      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+  input.sizes());
+
+  if (input.dim() == 5)
+  {
+    // batch mode
+    dim_w++;
+    dim_h++;
+    dim_d++;
+    dim_plane++;
+  }
+
+  int64_t nplane = input.size(dim_plane);
+  int64_t input_d = input.size(dim_d);
+  int64_t input_h = input.size(dim_h);
+  int64_t input_w = input.size(dim_w);
+  int64_t output_d = input_d + pad_front + pad_back;
+  int64_t output_h = input_h + pad_top + pad_bottom;
+  int64_t output_w = input_w + pad_left + pad_right;
+
+  TORCH_CHECK(output_w >= 1 || output_h >=1 || output_d >= 1,
+      "input (D: ", input_d, " H: ", input_h, ", W: ", input_w,
+      ") is too small."
+      " Calculated output D: ", output_d, " H: ", output_h, " W: ", output_w);
+
+  if (input.dim() == 5) {
+    // batch mode
+    set_output({input.size(0), nplane, output_d, output_h, output_w}, input.options());
+  } else {
+    set_output({nplane, output_d, output_h, output_w}, input.options());
+  }
+}
+
+TORCH_META_FUNC(reflection_pad3d_backward)(
+    const Tensor& grad_output,
+    const Tensor& input,
+    IntArrayRef padding
+) {
+  TORCH_CHECK(padding.size() == 6, "padding size is expected to be 6");
+  int64_t pad_left = padding[0];
+  int64_t pad_right = padding[1];
+  int64_t pad_top = padding[2];
+  int64_t pad_bottom = padding[3];
+  int64_t pad_front = padding[4];
+  int64_t pad_back = padding[4];
+  int64_t dim_w = 3;
+  int64_t dim_h = 2;
+  int64_t dim_d = 1;
+
+  if (input.dim() == 5)
+  {
+    // batch mode
+    dim_w++;
+    dim_h++;
+    dim_d++;
+  }
+
+  int64_t input_d = input.size(dim_d);
+  int64_t input_h = input.size(dim_h);
+  int64_t input_w = input.size(dim_w);
+  int64_t output_d = input_d + pad_front + pad_back;
+  int64_t output_h = input_h + pad_top + pad_bottom;
+  int64_t output_w = input_w + pad_left + pad_right;
+
+  TORCH_CHECK(output_w == grad_output.size(dim_w), "grad_output width unexpected."
+    " Expected: ", output_w, ", Got: ", grad_output.size(dim_w));
+  TORCH_CHECK(output_h == grad_output.size(dim_h), "grad_output height unexpected."
+    " Expected: ", output_h, ", Got: ", grad_output.size(dim_h));
+  TORCH_CHECK(output_d == grad_output.size(dim_d), "grad_output depth unexpected."
+    " Expected: ", output_h, ", Got: ", grad_output.size(dim_d));
+
+  set_output(input.sizes(), input.options());
+}
 } // namespace meta
 
 namespace native {
@@ -561,6 +655,180 @@ void reflection_pad2d_backward_out_template(
   }
 }
 
+template <typename scalar_t>
+static void reflection_pad3d_out_frame(
+    scalar_t *input_p, scalar_t *output_p,
+    int64_t nplane,
+    int64_t input_w, int64_t input_h, int64_t input_d,
+    int64_t output_w, int64_t output_h, int64_t output_d,
+    int64_t pad_left, int64_t pad_right,
+    int64_t pad_top, int64_t pad_bottom,
+    int64_t pad_front, int64_t pad_back)
+{
+  auto i_start_x = std::max(int64_t(0), -pad_left);
+  auto i_start_y = std::max(int64_t(0), -pad_right);
+  auto i_start_z = std::max(int64_t(0), -pad_front);
+  auto o_start_x = std::max(int64_t(0), pad_left);
+  auto o_start_y = std::max(int64_t(0), pad_right);
+  auto o_start_z = std::max(int64_t(0), pad_front);
+
+  at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int64_t ip_x, ip_y, ip_z;
+    for (int64_t k = start; k < end; k++) {
+      for (int64_t z = 0; z < output_d; z++) {
+        for (int64_t y = 0; y < output_h; y++) {
+          for (int64_t x = 0; x < output_w; x++) {
+            if (x < pad_left) {
+              ip_x = pad_left * 2 - x;
+            } else if (x >= pad_left && x < input_w + pad_left) {
+              ip_x = x;
+            } else {
+              ip_x = (input_w + pad_left - 1) * 2 - x;
+            }
+            ip_x = ip_x - o_start_x + i_start_x;
+
+            if (y < pad_top) {
+              ip_y = pad_top * 2 - y;
+            } else if (y >= pad_top && y < input_h + pad_top) {
+              ip_y = y;
+            } else {
+              ip_y = (input_h + pad_top - 1) * 2 - y;
+            }
+            ip_y = ip_y - o_start_y + i_start_y;
+
+            if (z < pad_front) {
+              ip_z = pad_front * 2 - z;
+            } else if (z >= pad_front && z < input_d + pad_front) {
+              ip_z = z;
+            } else {
+              ip_z = (input_d + pad_front - 1) * 2 - z;
+            }
+            ip_z = ip_z - o_start_z + i_start_z;
+
+            scalar_t *dest_p = output_p + k * output_w * output_h * output_d +
+              z * output_w * output_h + y * output_w + x;
+            scalar_t *src_p = input_p + k * input_w * input_h * input_d +
+              z * input_w * input_h + y * input_w + x;
+            *dest_p = *src_p;
+          }
+        }
+      }
+    }
+  });
+}
+
+template <typename scalar_t>
+static void reflection_pad3d_out_loop(
+    scalar_t *input_p, scalar_t *output_p,
+    int64_t nbatch, int64_t nplane,
+    int64_t input_w, int64_t input_h, int64_t input_d,
+    int64_t output_w, int64_t output_h, int64_t output_d,
+    int64_t pad_left, int64_t pad_right,
+    int64_t pad_top, int64_t pad_bottom,
+    int64_t pad_front, int64_t pad_back)
+{
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (int64_t p = start; p < end; p++)
+    {
+      scalar_t *input_p_inner = input_p + p * nplane * input_w * input_h * input_d;
+      scalar_t *output_p_inner = output_p + p * nplane * output_w * output_h * output_d;
+      reflection_pad3d_out_frame(input_p_inner, output_p_inner, nplane, input_w, input_h, input_d,
+          output_w, output_h, output_d, pad_left, pad_right, pad_top, pad_bottom,
+          pad_front, pad_back);
+     }
+  });
+}
+
+template <typename scalar_t>
+static void reflection_pad3d_backward_out_frame(
+    scalar_t *grad_input, scalar_t *grad_output,
+    int64_t nplane,
+    int64_t input_w, int64_t input_h, int64_t input_d,
+    int64_t output_w, int64_t output_h, int64_t output_d,
+    int64_t pad_left, int64_t pad_right,
+    int64_t pad_top, int64_t pad_bottom,
+    int64_t pad_front, int64_t pad_back
+) {
+  auto i_start_x = std::max(int64_t(0), -pad_left);
+  auto i_start_y = std::max(int64_t(0), -pad_right);
+  auto i_start_z = std::max(int64_t(0), -pad_front);
+  auto o_start_x = std::max(int64_t(0), pad_left);
+  auto o_start_y = std::max(int64_t(0), pad_right);
+  auto o_start_z = std::max(int64_t(0), pad_front);
+
+  at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int64_t ip_x, ip_y, ip_z;
+    for (int64_t k = start; k < end; k++) {
+      for (int64_t z = 0; z < output_d; z++) {
+        for (int64_t y = 0; y < output_h; y++) {
+          for (int64_t x = 0; x < output_w; x++) {
+            if (x < pad_left) {
+              ip_x = pad_left * 2 - x;
+            } else if (x >= pad_left && x < input_w + pad_left) {
+              ip_x = x;
+            } else {
+              ip_x = (input_w + pad_left - 1) * 2 - x;
+            }
+            ip_x = ip_x - o_start_x + i_start_x;
+
+            if (y < pad_top) {
+              ip_y = pad_top * 2 - y;
+            } else if (y >= pad_top && y < input_h + pad_top) {
+              ip_y = y;
+            } else {
+              ip_y = (input_h + pad_top - 1) * 2 - y;
+            }
+            ip_y = ip_y - o_start_y + i_start_y;
+
+            if (z < pad_front) {
+              ip_z = pad_front * 2 - z;
+            } else if (z >= pad_front && z < input_d + pad_front) {
+              ip_z = z;
+            } else {
+              ip_z = (input_d + pad_front - 1) * 2 - z;
+            }
+            ip_z = ip_z - o_start_z + i_start_z;
+
+            scalar_t *src_p = grad_output + k * output_w * output_h * output_d +
+              z * output_w * output_h + y * output_w + x;
+            scalar_t *dest_p = grad_input + k * input_w * input_h * input_d +
+              z * input_w * input_h + y * input_w + x;
+            *dest_p = *src_p;
+          }
+        }
+      }
+    }
+  });
+}
+
+template <typename scalar_t>
+static void reflection_pad3d_backward_out_loop(
+    scalar_t *grad_input, scalar_t *grad_output,
+    int64_t nbatch, int64_t nplane,
+    int64_t input_w, int64_t input_h, int64_t input_d,
+    int64_t output_w, int64_t output_h, int64_t output_d,
+    int64_t pad_left, int64_t pad_right,
+    int64_t pad_top, int64_t pad_bottom,
+    int64_t pad_front, int64_t pad_back
+) {
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (int64_t p = start; p < end; p++)
+    {
+      scalar_t* grad_input_inner =
+          grad_input + p * nplane * input_w * input_h * input_d;
+      scalar_t* grad_output_inner =
+          grad_output + p * nplane * output_w * output_h * output_d;
+      reflection_pad3d_out_frame(grad_input_inner, grad_output_inner,
+          nplane, input_w, input_h, input_d,
+          output_w, output_h, output_d,
+          pad_left, pad_right, pad_top,
+          pad_bottom, pad_front, pad_back);
+     }
+  });
+}
+
 } // namespace
 
 Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
@@ -686,5 +954,132 @@ Tensor reflection_pad2d_backward_cpu(
   return grad_input;
 }
 
+TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
+(const Tensor& input, IntArrayRef padding, const Tensor& output) {
+  int64_t pad_left = padding[0];
+  int64_t pad_right = padding[1];
+  int64_t pad_top = padding[2];
+  int64_t pad_bottom = padding[3];
+  int64_t pad_front = padding[4];
+  int64_t pad_back = padding[4];
+  int64_t dim_w = 3;
+  int64_t dim_h = 2;
+  int64_t dim_d = 1;
+  int64_t dim_plane = 0;
+
+  if (input.dim() == 5)
+  {
+    // batch mode
+    dim_w++;
+    dim_h++;
+    dim_d++;
+    dim_plane++;
+  }
+
+  int64_t nplane = input.size(dim_plane);
+  int64_t input_d = input.size(dim_d);
+  int64_t input_h = input.size(dim_h);
+  int64_t input_w = input.size(dim_w);
+  int64_t output_d = output.size(dim_d);
+  int64_t output_h = output.size(dim_h);
+  int64_t output_w = output.size(dim_w);
+
+  auto input_ = input.contiguous();
+
+  if (input.dim() == 5) {
+    // batch mode
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      auto nbatch = input.size(0);
+      reflection_pad3d_out_loop(
+          input_data, output_data,
+          nbatch, nplane,
+          input_w, input_h, input_d,
+          output_w, output_h, output_d,
+          pad_left, pad_right, pad_top,
+          pad_bottom, pad_front, pad_back);
+      });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      reflection_pad3d_out_frame(
+          input_data, output_data, nplane,
+          input_w, input_h, input_d,
+          output_w, output_h, output_d,
+          pad_left, pad_right, pad_top,
+          pad_bottom, pad_front, pad_back);
+    });
+  }
+}
+
+TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
+    const Tensor& input,
+    IntArrayRef padding,
+    const Tensor& grad_input) {
+  int64_t pad_left = padding[0];
+  int64_t pad_right = padding[1];
+  int64_t pad_top = padding[2];
+  int64_t pad_bottom = padding[3];
+  int64_t pad_front = padding[4];
+  int64_t pad_back = padding[4];
+  int64_t dim_w = 3;
+  int64_t dim_h = 2;
+  int64_t dim_d = 1;
+  int64_t dim_plane = 0;
+
+  if (input.dim() == 5)
+  {
+    // batch mode
+    dim_w++;
+    dim_h++;
+    dim_d++;
+    dim_plane++;
+  }
+
+  int64_t nplane = input.size(dim_plane);
+  int64_t input_d = input.size(dim_d);
+  int64_t input_h = input.size(dim_h);
+  int64_t input_w = input.size(dim_w);
+  int64_t output_d = grad_output.size(dim_d);
+  int64_t output_h = grad_output.size(dim_h);
+  int64_t output_w = grad_output.size(dim_w);
+
+  auto grad_output_ = grad_output.contiguous();
+  if (grad_output_.numel() == 0) {
+    return;
+  }
+
+  grad_input.zero_();
+
+  if (input.dim() == 5) {
+    // batch mode
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+      auto grad_input_p = grad_input.data_ptr<scalar_t>();
+      auto grad_output_p = grad_output.data_ptr<scalar_t>();
+      auto nbatch = input.size(0);
+      reflection_pad3d_backward_out_loop(
+          grad_input_p, grad_output_p,
+          nbatch, nplane,
+          input_w, input_h, input_d,
+          output_w, output_h, output_d,
+          pad_left, pad_right, pad_top,
+          pad_bottom, pad_front, pad_back);
+      });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+      auto grad_input_p = grad_input.data_ptr<scalar_t>();
+      auto grad_output_p = grad_output.data_ptr<scalar_t>();
+      reflection_pad3d_backward_out_frame(
+          grad_input_p, grad_output_p,
+          nplane,
+          input_w, input_h, input_d,
+          output_w, output_h, output_d,
+          pad_left, pad_right, pad_top,
+          pad_bottom, pad_front, pad_back);
+      });
+  }
+}
 } // namespace native
 } // namespace at

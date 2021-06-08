@@ -8871,6 +8871,15 @@
   - name: aten::resize_as_
   - name: aten::zero_
   - name: aten::zeros_like
+- name: aten::reflection_pad3d
+  depends:
+  - name: aten::contiguous
+  - name: aten::eq
+- name: aten::reflection_pad3d_backward
+  depends:
+  - name: aten::contiguous
+  - name: aten::eq
+  - name: aten::zero_
 - name: aten::relu
   depends:
   - name: aten::_empty_affine_quantized
