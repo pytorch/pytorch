@@ -55,7 +55,7 @@ struct C10_API PODLocalDispatchKeySet {
   // skip some bookkeeping. (And we know at compile time if this is the case.)
   template <uint64_t exclude>
   uint64_t exclude_non_overlapping() {
-    static_assert(!(exclude & c10::default_excluded_set.raw_repr()));
+    static_assert(!(exclude & c10::default_excluded_set.raw_repr()), "exclude overlaps with c10::default_excluded_set.");
     uint64_t delta = exclude & ~excluded_;
     excluded_ |= exclude;
     return delta;
