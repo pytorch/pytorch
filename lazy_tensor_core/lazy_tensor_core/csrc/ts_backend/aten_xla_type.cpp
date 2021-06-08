@@ -42,6 +42,18 @@ at::Tensor DoBinaryOp(const at::Tensor& self, const at::Tensor& other,
   return bridge::AtenFromLtcTensor(result);
 }
 
+at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
+  if (!tensor.defined()) {
+    return at::Tensor();
+  }
+  int64_t n = tensor.sizes()[dim] / groups;
+  at::Tensor eager_tensor =
+      tensor.to(lazy_tensors::NNCComputationClient::HardwareDeviceType());
+  return bridge::CreateLtcTensor(
+      eager_tensor.narrow(dim, n * g, n).contiguous(),
+      bridge::GetLtcDevice(tensor));
+}
+
 }  // namespace
 
 at::Tensor AtenXlaType::add(const at::Tensor& self, const at::Tensor& other,
@@ -98,6 +110,145 @@ at::Tensor AtenXlaType::constant_pad_nd(const at::Tensor& self,
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(LazyTensor::constant_pad_nd(
       bridge::GetLtcTensor(self), Helpers::I64List(pad), value));
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
+AtenXlaType::convolution_backward_overrideable(
+    const at::Tensor& grad_output, const at::Tensor& input,
+    const at::Tensor& weight, at::IntArrayRef stride, at::IntArrayRef padding,
+    at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding,
+    int64_t groups, std::array<bool, 3> output_mask) {
+  if (groups > 1) {
+    std::vector<at::Tensor> grad_input(groups);
+    std::vector<at::Tensor> grad_weight(groups);
+    std::vector<at::Tensor> grad_bias(groups);
+    for (int g = 0; g < groups; ++g) {
+      auto grad_output_g = subtensor(grad_output, 1, groups, g);
+      auto input_g = subtensor(input, 1, groups, g);
+      auto weight_g = subtensor(weight, 0, groups, g);
+      auto x_result = convolution_backward_overrideable(
+          grad_output_g, input_g, weight_g, stride, padding, dilation,
+          transposed, output_padding, 1, output_mask);
+      grad_input[g] = std::get<0>(x_result);
+      grad_weight[g] = std::get<1>(x_result);
+      grad_bias[g] = std::get<2>(x_result);
+    }
+    return {at::cat(grad_input, 1), at::cat(grad_weight, 0),
+            grad_bias[0].defined() ? at::cat(grad_bias, 0) : grad_bias[0]};
+  }
+  LTC_FN_TRACK(3);
+  LTC_COUNTER("aten::convolution_backward_overrideable", 1);
+  LTC_VLOG(3) << "LTC-TS convolution_backward_overrideable :"
+              << " grad_output=" << grad_output.toString()
+              << " input=" << input.toString()
+              << " weight=" << weight.toString();
+  const auto kernel_size = weight.sizes().slice(2);
+  LTC_CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
+  const at::DeviceType device_type =
+      lazy_tensors::NNCComputationClient::HardwareDeviceType();
+  if (transposed) {
+    at::TensorOptions options = at::TensorOptions().device(device_type);
+    auto&& x_result =
+        kernel_size.size() == 2
+            ? at::slow_conv_transpose2d_backward(
+                  grad_output.to(device_type), input.to(device_type),
+                  weight.to(device_type), kernel_size, stride, padding,
+                  output_padding, dilation,
+                  at::empty_like(grad_output, options,
+                                 at::MemoryFormat::Contiguous),
+                  at::empty_like(grad_output, options,
+                                 at::MemoryFormat::Contiguous),
+                  output_mask)
+            : at::slow_conv_transpose3d_backward(
+                  grad_output.to(device_type), input.to(device_type),
+                  weight.to(device_type), kernel_size, stride, padding,
+                  output_padding, dilation,
+                  at::empty_like(grad_output, options,
+                                 at::MemoryFormat::Preserve),
+                  at::empty_like(grad_output, options,
+                                 at::MemoryFormat::Preserve),
+                  output_mask);
+    return std::tuple<at::Tensor, at::Tensor, at::Tensor>(
+        bridge::CreateLtcTensor(std::get<0>(x_result),
+                                bridge::GetLtcDevice(grad_output)),
+        bridge::CreateLtcTensor(std::get<1>(x_result),
+                                bridge::GetLtcDevice(grad_output)),
+        bridge::CreateLtcTensor(std::get<2>(x_result),
+                                bridge::GetLtcDevice(grad_output)));
+  }
+  auto&& x_result =
+      kernel_size.size() == 2
+          ? at::slow_conv_dilated2d_backward(
+                grad_output.to(device_type), input.to(device_type),
+                weight.to(device_type), kernel_size, stride, padding, dilation,
+                output_mask)
+          : at::slow_conv_dilated3d_backward(
+                grad_output.to(device_type), input.to(device_type),
+                weight.to(device_type), kernel_size, stride, padding, dilation,
+                output_mask);
+  return std::tuple<at::Tensor, at::Tensor, at::Tensor>(
+      bridge::CreateLtcTensor(std::get<0>(x_result),
+                              bridge::GetLtcDevice(grad_output)),
+      bridge::CreateLtcTensor(std::get<1>(x_result),
+                              bridge::GetLtcDevice(grad_output)),
+      bridge::CreateLtcTensor(std::get<2>(x_result),
+                              bridge::GetLtcDevice(grad_output)));
+}
+
+at::Tensor AtenXlaType::convolution_overrideable(
+    const at::Tensor& input, const at::Tensor& weight,
+    const c10::optional<at::Tensor>& bias, at::IntArrayRef stride,
+    at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed,
+    at::IntArrayRef output_padding, int64_t groups) {
+  if (groups != 1) {
+    std::vector<at::Tensor> outputs(groups);
+    for (int g = 0; g < groups; ++g) {
+      auto input_g = subtensor(input, 1, groups, g);
+      auto weight_g = subtensor(weight, 0, groups, g);
+      auto bias_g = bias ? subtensor(*bias, 0, groups, g) : bias;
+      outputs[g] =
+          convolution_overrideable(input_g, weight_g, bias_g, stride, padding,
+                                   dilation, transposed, output_padding, 1);
+    }
+    return at::cat(outputs, 1);
+  }
+  LTC_FN_TRACK(3);
+  LTC_COUNTER("aten::convolution_overrideable", 1);
+  LTC_VLOG(3) << "LTC-TS convolution_overrideable :"
+              << " input=" << input.toString()
+              << " weight=" << weight.toString();
+  std::vector<at::Tensor> xlatens_tensors = {input, weight};
+  auto xlatens = bridge::LtcCreateTensorList(xlatens_tensors);
+  std::vector<c10::optional<at::Tensor>> xlatens_opt_tensors = {bias};
+  auto xlatens_opt = bridge::LtcCreateOptTensorList(xlatens_opt_tensors);
+  const auto kernel_size = weight.sizes().slice(2);
+  LTC_CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
+  const at::DeviceType device_type =
+      lazy_tensors::NNCComputationClient::HardwareDeviceType();
+  if (transposed) {
+    auto&& x_result =
+        kernel_size.size() == 2
+            ? at::slow_conv_transpose2d(
+                  input.to(device_type), weight.to(device_type), kernel_size,
+                  (bias && bias->defined()) ? bias->to(device_type) : bias,
+                  stride, padding, output_padding, dilation)
+            : at::slow_conv_transpose3d(
+                  input.to(device_type), weight.to(device_type), kernel_size,
+                  (bias && bias->defined()) ? bias->to(device_type) : bias,
+                  stride, padding, output_padding, dilation);
+    return bridge::CreateLtcTensor(x_result, bridge::GetLtcDevice(input));
+  }
+  auto&& x_result =
+      kernel_size.size() == 2
+          ? at::slow_conv_dilated2d(
+                input.to(device_type), weight.to(device_type), kernel_size,
+                (bias && bias->defined()) ? bias->to(device_type) : bias,
+                stride, padding, dilation)
+          : at::slow_conv_dilated3d(
+                input.to(device_type), weight.to(device_type), kernel_size,
+                (bias && bias->defined()) ? bias->to(device_type) : bias,
+                stride, padding, dilation);
+  return bridge::CreateLtcTensor(x_result, bridge::GetLtcDevice(input));
 }
 
 at::Tensor AtenXlaType::_copy_from(const at::Tensor& self,

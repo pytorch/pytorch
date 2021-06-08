@@ -8390,7 +8390,7 @@ TEST_F(AtenLtcTsTensorTest, TestAdaptiveAvgPool2DNoBatchBackward) {
   }
 }
 
-TEST_F(AtenLtcTsTensorTest, DISABLED_TestConv2DBackward) {
+TEST_F(AtenLtcTsTensorTest, TestConv2DBackward) {
   int in_channels = 4;
   int out_channels = 4;
   int kernel_size = 3;
@@ -8430,7 +8430,7 @@ TEST_F(AtenLtcTsTensorTest, DISABLED_TestConv2DBackward) {
   }
 }
 
-TEST_F(AtenLtcTsTensorTest, DISABLED_TestTransposedConv2DBackward) {
+TEST_F(AtenLtcTsTensorTest, TestTransposedConv2DBackward) {
   int in_channels = 4;
   int out_channels = 4;
   int kernel_size = 3;
@@ -8476,7 +8476,7 @@ TEST_F(AtenLtcTsTensorTest, DISABLED_TestTransposedConv2DBackward) {
   }
 }
 
-TEST_F(AtenLtcTsTensorTest, DISABLED_TestConv3DBackward) {
+TEST_F(AtenLtcTsTensorTest, TestConv3DBackward) {
   int in_channels = 4;
   int out_channels = 4;
   int kernel_size = 3;
@@ -8517,7 +8517,7 @@ TEST_F(AtenLtcTsTensorTest, DISABLED_TestConv3DBackward) {
   }
 }
 
-TEST_F(AtenLtcTsTensorTest, DISABLED_TestTransposedConv3DBackward) {
+TEST_F(AtenLtcTsTensorTest, TestTransposedConv3DBackward) {
   int in_channels = 4;
   int out_channels = 4;
   int kernel_size = 3;
