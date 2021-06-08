@@ -44,12 +44,12 @@ extern const char* kDistDebugDetailLogLevel;
 extern const char* kDistDebugInfoLogLevel;
 extern const char* kDistDebugOffLogLevel;
 
-std::string parse_env(const char* env_var_name);
+TORCH_API std::string parse_env(const char* env_var_name);
 
-DistributedDebugLevel parseDistDebugLevel();
+TORCH_API DistributedDebugLevel parseDistDebugLevel();
 
 // Retrieve tensor shapes from a given tensor.
-std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
+TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {

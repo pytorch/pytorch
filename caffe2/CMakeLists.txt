@@ -690,8 +690,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       list(APPEND Caffe2_HIP_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
     endif()
-    if(USE_DISTRIBUTED AND NOT WIN32)
-      append_filelist("libtorch_cuda_distributed_sources" Caffe2_HIP_SRCS)
+    if(USE_DISTRIBUTED)
+      if(WIN32)
+        append_filelist("libtorch_cuda_distributed_windows_sources" Caffe2_HIP_SRCS)
+      else()
+        append_filelist("libtorch_cuda_distributed_sources" Caffe2_HIP_SRCS)
+      endif()
     endif()
     # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
     # See NOTE [ ATen NVRTC Stub and HIP ]
