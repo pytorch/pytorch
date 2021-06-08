@@ -115,6 +115,7 @@ void MPSImageWrapper::prepare() {
     _buffer = [[MPSCNNContext sharedInstance].device
         newBufferWithLength:size_bytes
                     options:MTLResourceCPUCacheModeWriteCombined];
+    TORCH_CHECK(_buffer, "Allocate GPU memory failed!");
   }
   copyToMetalBuffer(_commandBuffer, _buffer, _image);
 }
