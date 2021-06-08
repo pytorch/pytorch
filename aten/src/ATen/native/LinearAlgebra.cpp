@@ -25,6 +25,10 @@
 #include <numeric>
 
 
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#endif // AT_MKLDNN_ENABLED
+
 namespace at {
 namespace meta {
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
@@ -1031,7 +1035,8 @@ static void addmm_impl_cpu_(
   const int64_t lda = a.strides()[(transpose_a == transpose_c) ? 1 : 0];
   const int64_t ldb = b.strides()[(transpose_b == transpose_c) ? 1 : 0];
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
-  if (checkMklDnnBf16GemmUsable(a, b, c)){
+#if AT_MKLDNN_ENABLED()
+  if (mkldnn_bf16_gemm_usable_check(a, b, c)){
     if (transpose_c){
       // m1, m2 are swaped
       mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
@@ -1043,6 +1048,7 @@ static void addmm_impl_cpu_(
   }
     return;
   }
+  #endif // AT_MKLDNN_ENABLED
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
@@ -1097,10 +1103,12 @@ static void addbmm_impl_(
     return;
   }
 
-  if (checkMklDnnBf16GemmUsable(batch1, batch2, result)){
+#if AT_MKLDNN_ENABLED()
+  if (mkldnn_bf16_gemm_usable_check(batch1, batch2, result)){
     mkldnn_matmul(batch1, batch2, result, beta.to<float>(), alpha.to<float>());
     return;
   }
+#endif // AT_MKLDNN_ENABLED
 
   auto adjusted_beta(beta);
   for (int64_t batch = 0; batch < num_batches; ++batch) {
@@ -1252,6 +1260,13 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
+#if AT_MKLDNN_ENABLED()
+  if (mkldnn_bf16_gemm_usable_check(batch1, batch2, self_or_result)){
+    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+    return self_or_result;
+  }
+#endif // AT_MKLDNN_ENABLED
+
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "bmm", [&] {
@@ -1262,8 +1277,6 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
-  } else if (checkMklDnnBf16GemmUsable(batch1, batch2, self_or_result)){
-    mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
   } else if (at::hasMKL() && ((
             self_or_result.scalar_type() != kHalf &&
             self_or_result.scalar_type() != kBFloat16 &&
