@@ -313,12 +313,12 @@ if (${requires_fw_grad}) {
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
 """)
 
 FW_DERIVATIVE_FORBID_LIST_TEMPLATE = CodeTemplate("""\
 for (const auto& _t: ${arg}) {
-    TORCH_CHECK(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
 }
 """)
 
