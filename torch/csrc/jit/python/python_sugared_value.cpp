@@ -950,7 +950,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   // a missing default parameter. This provides a guarantee that the
   // two vectors will be the same size, even if the NamedTuple doesn't
   // have default values for all its fields
-  TORCH_INTERNAL_ASSERT(field_names.size() == field_defaults.size());
+  TORCH_INTERNAL_ASSERT(field_names.size() == objects.size());
 
   for (size_t i = 0; i < field_names.size(); ++i) {
     auto ival = IValue();
@@ -958,14 +958,13 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
       auto type = tryToInferType(objects[i]);
       ival = toIValue(objects[i], type.type());
       TORCH_CHECK(
-          field_defaults[i].tagKind() != "Tensor",
+          ival.tagKind() != "Tensor",
           "Tensors are"
           " not supported as default NamedTuple fields. Their "
           "mutability could lead to potential memory aliasing "
           "problems");
+      field_defaults.emplace_back(ival);
     }
-    field_names.emplace_back(field_names[i]);
-    field_defaults.emplace_back(ival);
   }
 
   auto tt = TupleType::createNamed(
