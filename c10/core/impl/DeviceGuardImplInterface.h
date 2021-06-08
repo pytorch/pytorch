@@ -180,13 +180,17 @@ struct C10_API DeviceGuardImplInterface {
    * Return true if all the work previously enqueued on the stream for
    * asynchronous execution has completed running on the device.
    */
-  virtual bool queryStream(const Stream& stream) const = 0;
+  virtual bool queryStream(const Stream& stream) const {
+    TORCH_CHECK(false, "Backend doesn't support querying streams.");
+  }
 
   /**
    * Wait (by blocking the calling thread) until all the work previously
    * enqueued on the stream has completed running on the device.
    */
-  virtual void synchronizeStream(const Stream& stream) const = 0;
+  virtual void synchronizeStream(const Stream& stream) const {
+    TORCH_CHECK(false, "Backend doesn't support synchronizing streams.");
+  }
 
   /**
    * Ensure the caching allocator (if any) is aware that the given DataPtr is
