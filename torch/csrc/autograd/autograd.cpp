@@ -36,10 +36,7 @@ variable_list _make_grads(
   } else {
     TORCH_CHECK(
         num_tensors == num_gradients,
-        "got %ld tensors and %ld "
-        "gradients",
-        num_tensors,
-        num_gradients);
+        "got ", num_tensors, " tensors and ", num_gradients, " gradients");
     for (size_t i = 0; i < outputs.size(); ++i) {
       const Variable& output = outputs[i];
       const Variable& grad_output = grad_outputs[i];
