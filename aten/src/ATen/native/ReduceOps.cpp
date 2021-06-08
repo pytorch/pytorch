@@ -30,19 +30,20 @@
 namespace at {
 namespace meta {
 
-void check_reduction(
-    TensorIteratorBase& iter,
+void check_all_any(
+    impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
-    int64_t dim,
+    int64_t raw_dim,
     bool keepdim) {
+  auto dim = at::maybe_wrap_dim(raw_dim, self.dim());
   // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(
       self.layout() == Layout::Strided,
       name, " only supports strided layout, got: ",
       self.layout());
 
-  auto result = iter.maybe_get_output();
+  const auto& result = meta.maybe_get_output();
   ScalarType out_dtype;
 
   if (result.defined()) {
@@ -61,26 +62,15 @@ void check_reduction(
     }
   }
 
-  dim = at::maybe_wrap_dim(dim, self.dim());
-
-  if (self.is_cuda()) {
-    // As CUDA supports dynamic type casting, we use this overload of
-    // `make_reduction`, which doesn't cast input to the result type i.e.
-    // kBool., otherwise we use the overload below which casts the input to
-    // kBool (which is an extra operation).
-    make_reduction(
-        iter, name, result, self, dim, keepdim, self.scalar_type(), out_dtype);
-  }
-  make_reduction(
-      iter, name, result, self, dim, keepdim, /*out_dtype=*/out_dtype);
+  check_reduction_shape(meta, name, self, dim, keepdim, out_dtype);
 }
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_reduction(*this, "all", self, dim, keepdim);
+  check_all_any(*this, "all", self, dim, keepdim);
 }
 
 TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_reduction(*this, "all", self, dim, keepdim);
+  check_all_any(*this, "any", self, dim, keepdim);
 }
 
 } // namespace meta
@@ -1157,13 +1147,25 @@ Tensor norm(const Tensor& self, const Scalar& p) {
   return at::native::_norm(self, p);
 }
 
+inline TensorIterator get_reduction_iter(
+    const Tensor& self,
+    const Tensor& result,
+    int64_t dim,
+    bool keepdim) {
+  if (self.is_cuda()) {
+    return meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
+  }
+  return meta::make_reduction_from_out_ty(
+      self, result, dim, keepdim, result.scalar_type());
+}
+
 // Note [all, any : uint8 compatibility]:
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // For NumPy comptability, `all` and `any` return
 // Tensor of dtype `bool`. However for compatibility reason,
 // for `uint8`, they return Tensor of same dtype `uint8`.
 // Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-inline Tensor & _all(Tensor & result, TensorIterator & iter) {
+inline const Tensor & _all(const Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(1);
   } else {
@@ -1206,14 +1208,14 @@ Tensor all(const Tensor& self) {
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  auto iter = get_reduction_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
-    TensorIterator wrapper(*this);
-    _all(mut_result, wrapper);
+    _all(mut_result, iter);
   }
 }
 
-inline Tensor & _any(Tensor & result, TensorIterator & iter) {
+inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(0);
   } else {
@@ -1256,10 +1258,10 @@ Tensor any(const Tensor& self) {
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  auto iter = get_reduction_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
-    TensorIterator wrapper(*this);
-    _all(mut_result, wrapper);
+    _any(mut_result, iter);
   }
 }
 
