@@ -953,9 +953,21 @@ std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDa
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    data_ptrs.reserve(tensors.size());
+    auto reserve_size = tensors.size();
     for (const at::Tensor& tensor : tensors) {
-      data_ptrs.emplace_back(tensor.storage().data_ptr());
+      if(tensor.is_sparse()){
+        reserve_size++;
+      }
+    }
+    data_ptrs.reserve(reserve_size);
+    for (const at::Tensor& tensor : tensors) {
+      if(tensor.is_sparse()){
+        // sparse tensor is indices and values
+        data_ptrs.emplace_back(tensor.indices().storage().data_ptr());
+        data_ptrs.emplace_back(tensor.values().storage().data_ptr());
+      }else{
+        data_ptrs.emplace_back(tensor.storage().data_ptr());
+      }
     }
   } else {
     at::IValue::HashAliasedIValues sub_values;
