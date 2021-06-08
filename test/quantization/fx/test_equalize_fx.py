@@ -158,9 +158,8 @@ class TestEqualizeFx(QuantizationTestCase):
         equalization_qconfig = QConfig(activation=new_input_equalization_observer,
                                        weight=weight_equalization_observer)
 
-    def test_input_weight_equalization_prepare_linear_quantized_op(self):
-        """ Tests that on one linear layer, the InputEqualizationObserver is
-        inserted correctly, and the output observer is default set as a MinMaxObserver.
+    def test_input_weight_equalization_prepare_linear_conv(self):
+        """ Tests that observers are inserted correctly for a linear then conv layer
         """
         class M(nn.Module):
             def __init__(self):
@@ -188,9 +187,7 @@ class TestEqualizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
     def test_input_weight_equalization_prepare_functional_linear(self):
-        """ Tests that on one functional linear layer, the
-        InputEqualizationObserver is inserted correctly, and the output observer
-        is default set as a MinMaxObserver.
+        """ Tests that observers are inserted correctly for two functional layers
         """
         class Linear(torch.nn.Module):
             def __init__(self):
@@ -228,9 +225,8 @@ class TestEqualizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
     def test_input_weight_equalization_prepare_functional_linear_op(self):
-        """ Tests that on one functional linear layer, the
-        InputEqualizationObserver is inserted correctly, and the output observer
-        is default set as a MinMaxObserver.
+        """ Tests that observers are inserted correctly for two functional
+        linear layers with a fp32 operation in between
         """
         class Linear(torch.nn.Module):
             def __init__(self):
