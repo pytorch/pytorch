@@ -68,12 +68,18 @@ if [[ -z "$DOCKER_IMAGE" ]]; then
   fi
 fi
 
+USE_GOLD_LINKER="OFF"
+# GOLD linker can not be used if CUPTI is statically linked into PyTorch, see https://github.com/pytorch/pytorch/issues/57744
+if [[ ${DESIRED_CUDA} == "cpu" ]]; then
+  USE_GOLD_LINKER="ON"
+fi
+
 # Default to nightly, since that's where this normally uploads to
 PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 #TODO: We should be pulling semver version from the base version.txt
-BASE_BUILD_VERSION="1.9.0.dev$DATE"
+BASE_BUILD_VERSION="1.10.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -136,7 +142,7 @@ if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
 fi
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.9.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.10.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
@@ -169,7 +175,8 @@ export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
 export CIRCLE_BRANCH="$CIRCLE_BRANCH"
 export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
 
-export USE_GOLD_LINKER=1
+export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
+export USE_GLOO_WITH_OPENSSL=1
 # =================== The above code will be executed inside Docker container ===================
 EOL
 
