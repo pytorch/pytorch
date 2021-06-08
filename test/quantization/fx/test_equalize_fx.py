@@ -125,11 +125,17 @@ class TestEqualizeFx(QuantizationTestCase):
         self.assertTrue(torch.allclose(weight_qparams[1], torch.tensor(
             ref_zero_points, dtype=weight_qparams[1].dtype), atol=1))
 
-    def test_input_weight_equalization_prepare_linear(self):
-        """ Tests that on one linear layer, the InputEqualizationObserver is
-        inserted correctly, and the output observer is default set as a MinMaxObserver.
+    def test_input_weight_equalization_prepare(self):
+        """ Tests that graphs created after prepare_fx is as expected
         """
-        class M(nn.Module):
+        default_qconfig_dict = {
+            "": default_qconfig,
+            "object_type": [(nn.Linear, default_equalization_qconfig), 
+                            (nn.functional.linear, default_equalization_qconfig)]
+        }
+
+        # Basic test with one linear layer
+        class LinearModule(nn.Module):
             def __init__(self):
                 super(M, self).__init__()
                 self.linear = nn.Linear(1, 1)
@@ -137,31 +143,14 @@ class TestEqualizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        m = M().eval()
-
-        # Test default case: should insert a MinMaxObserver as an output observer
-        qconfig_dict = {
-            "": default_qconfig,
-            "object_type": [(nn.Linear, default_equalization_qconfig)]}
-        prepared = prepare_fx(m, qconfig_dict)
-
-        node_occurrence = {
+        linear_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 1,
             ns.call_module(MinMaxObserver): 1,
         }
-        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
-        # Test specific case: should insert a InputEqualizationObserver as an output observer
-        output_obs = _InputEqualizationObserver
-        new_input_equalization_observer = _InputEqualizationObserver.with_args(
-            dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, output_obs=output_obs)
-        equalization_qconfig = QConfig(activation=new_input_equalization_observer,
-                                       weight=weight_equalization_observer)
-
-    def test_input_weight_equalization_prepare_linear_conv(self):
-        """ Tests that observers are inserted correctly for a linear then conv layer
-        """
-        class M(nn.Module):
+        # Test where we have a Linear layer and then a Conv2d layer
+        # (quantized non-linear operation)
+        class LinearConvModule(nn.Module):
             def __init__(self):
                 super(M, self).__init__()
                 self.linear = nn.Linear(5, 5)
@@ -172,23 +161,11 @@ class TestEqualizeFx(QuantizationTestCase):
                 x = self.conv(x)
                 return x
 
-        m = M().eval()
-
-        # Test default case: should insert a MinMaxObserver as an output observer
-        qconfig_dict = {
-            "": default_qconfig,
-            "object_type": [(nn.Linear, default_equalization_qconfig)]}
-        prepared = prepare_fx(m, qconfig_dict)
-
-        node_occurrence = {
+        linearConv_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 1,
             ns.call_module(MinMaxObserver): 2,
         }
-        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
-    def test_input_weight_equalization_prepare_functional_linear(self):
-        """ Tests that observers are inserted correctly for two functional layers
-        """
         class Linear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -198,7 +175,8 @@ class TestEqualizeFx(QuantizationTestCase):
             def forward(self, x):
                 return nn.functional.linear(x, self.w, self.b)
 
-        class M(torch.nn.Module):
+        # Test where we have two functional linear layers
+        class FunctionalLinearModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear1 = Linear()
@@ -209,57 +187,58 @@ class TestEqualizeFx(QuantizationTestCase):
                 x = self.linear2(x)
                 return x
 
-        m = M().eval()
-
-        # Test default case: should insert a MinMaxObserver as an output observer
-        qconfig_dict = {
-            "": default_qconfig,
-            "object_type": [(Linear, default_equalization_qconfig)]}
-        prepared = prepare_fx(m, qconfig_dict)
-
-        node_occurrence = {
-            ns.call_module(_InputEqualizationObserver): 1,
+        functionalLinear_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(_WeightEqualizationObserver): 2,
-            ns.call_module(MinMaxObserver): 2,
+            ns.call_module(MinMaxObserver): 1,
         }
-        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
-    def test_input_weight_equalization_prepare_functional_linear_op(self):
-        """ Tests that observers are inserted correctly for two functional
-        linear layers with a fp32 operation in between
-        """
-        class Linear(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.ones(5, 5)
-                self.b = torch.zeros(5)
-
-            def forward(self, x):
-                return nn.functional.linear(x, self.w, self.b)
-
-        class M(torch.nn.Module):
+        # Test where we have a Linear layer followed by a fp32 operation
+        # (conv layer) without a qconfig
+        class FunctionalLinearFP32Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear1 = Linear()
+                self.conv = nn.Conv2d(3, 3, 1, 1)
                 self.linear2 = Linear()
 
             def forward(self, x):
                 x = self.linear1(x)
-                x = x * 5
+                x = self.conv(x)
                 x = self.linear2(x)
                 return x
 
-        m = M().eval()
+        fp32_qconfig_dict = {
+            "": None,
+            "object_type": [(nn.Linear, default_equalization_qconfig), 
+                            (nn.functional.linear, default_equalization_qconfig)]
+        }
 
-        # Test default case: should insert a MinMaxObserver as an output observer
-        qconfig_dict = {
-            "": default_qconfig,
-            "object_type": [(Linear, default_equalization_qconfig)]}
-        prepared = prepare_fx(m, qconfig_dict)
-
-        node_occurrence = {
-            ns.call_module(_InputEqualizationObserver): 1,
+        functionalLinearFP32_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(_WeightEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 2,
         }
-        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+
+        # Test where the output observer to be an InputEqualizationObserver
+        new_input_equalization_observer = _InputEqualizationObserver.with_args(
+            dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, output_obs=_InputEqualizationObserver)
+        equalization_qconfig = QConfig(activation=new_input_equalization_observer,
+                                       weight=weight_equalization_observer)
+        specified_qconfig_dict = {"": default_qconfig,
+                                  "object_type": [(nn.Linear, equalization_qconfig)]}
+
+        specified_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 2,
+        }
+
+        tests = [(LinearModule, default_qconfig_dict, linear_node_occurrence), 
+                 (LinearConvModule, default_qconfig_dict, linearConv_node_occurrence), 
+                 (FunctionalLinearModule, default_qconfig_dict, functionalLinear_node_occurrence), 
+                 (FunctionalLinearFP32Module, fp32_qconfig_dict, functionalLinearFP32_node_occurrence),
+                 (LinearModule, specified_qconfig_dict, specified_node_occurrence)]
+
+        for (M, qconfig_dict, node_occurrence) in tests:
+            m = M().eval()
+            prepared = prepare_fx(m, qconfig_dict)
+            self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)

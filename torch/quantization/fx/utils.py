@@ -469,3 +469,15 @@ def is_get_tensor_info_node(node: Node) -> bool:
     result: bool = \
         node.op == "call_function" and node.target == getattr and node.args[1] == "shape"  # type: ignore[assignment]
     return result
+
+def get_next_node(model: torch.nn.Module, node: Node) -> Node:
+    next_node = None
+    found = False
+    for n in model.graph.nodes:
+        if n.op in ('call_module', 'call_method', 'call_function', 'output'):
+            if found:
+                next_node = n
+                break
+        if n == node:
+            found = True
+    return next_node
