@@ -40,8 +40,9 @@ jobs:
                                            torchvision torchtext torchaudio cudatoolkit=10.2
           # conda install -y -c pytorch-test pytorch=${{ github.event.inputs.pytorch_version }} \
           #                                  torchvision torchtext torchaudio cudatoolkit=10.2
+          # echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
+          echo "RESULT_DIR=${HOME}/release-testing/1.9.0" >> $GITHUB_ENV
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
-          echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
           echo "Result dir: ${RESULT_DIR} "
       - name: Check machine tuned
         run: |
@@ -59,14 +60,14 @@ jobs:
           export LOG_FILE=${RESULT_DIR}/mnist/result.log
           export MEM_FILE=${RESULT_DIR}/mnist/result_mem.log
           taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 1
-      - name: Run MNist HogWild
-        run: |
-          . activate reltest
-          mkdir -p ${RESULT_DIR}/mnist_hogwild
-          pushd examples/mnist_hogwild
-          export LOG_FILE=${RESULT_DIR}/mnist_hogwild/result.log
-          export MEM_FILE=${RESULT_DIR}/mnist_hogwild/result_mem.log
-          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10
+      # - name: Run MNist HogWild
+      #   run: |
+      #     . activate reltest
+      #     mkdir -p ${RESULT_DIR}/mnist_hogwild
+      #     pushd examples/mnist_hogwild
+      #     export LOG_FILE=${RESULT_DIR}/mnist_hogwild/result.log
+      #     export MEM_FILE=${RESULT_DIR}/mnist_hogwild/result_mem.log
+      #     taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10
       - name: Run CPU WLM LSTM
         run: |
           . activate reltest
