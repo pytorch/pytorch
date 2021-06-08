@@ -484,6 +484,8 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
     // aten::linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
     // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
+    // This leads to problem in the operator argument checks,
+    // when either `start` or `end` is complex and dtype is None
     const auto options = TensorOptions()
         .dtype(_r.scalartypeOptional(4))
         .device(_r.device(6))
@@ -530,6 +532,8 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
     // aten::logspace(Scalar start, Scalar end, int? steps=None, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
     // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
+    // This leads to problem in the operator argument checks,
+    // when either `start` or `end` is complex and dtype is None
     const auto options = TensorOptions()
         .dtype(_r.scalartypeOptional(5))
         .device(_r.device(7))
