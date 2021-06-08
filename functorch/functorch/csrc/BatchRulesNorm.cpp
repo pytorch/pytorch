@@ -40,7 +40,7 @@ batch_norm_batch_rule(
   auto result = at::batch_norm(
       input_, weight_, bias_, running_mean_, running_var_,
       training, momentum, eps, cudnn_enabled);
-  return { reshape_dim_outof(1, batch_size, result), 1 };
+  return std::make_tuple(reshape_dim_outof(1, batch_size, result), 1);
 }
 
 Tensor batch_norm_plumbing(

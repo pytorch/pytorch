@@ -39,11 +39,11 @@ std::tuple<Tensor, optional<int64_t>> dot_batch_rule(const Tensor& A, optional<i
   auto A_ = moveBatchDimToFront(A, A_bdim);
   auto B_ = moveBatchDimToFront(B, B_bdim);
   if (A_bdim && B_bdim) {
-    return {at::matmul(A_.unsqueeze(-2), B_.unsqueeze(-1)).squeeze(-1).squeeze(-1), 0};
+    return std::make_tuple(at::matmul(A_.unsqueeze(-2), B_.unsqueeze(-1)).squeeze(-1).squeeze(-1), 0);
   } else if (!A_bdim && !B_bdim) {
-    return {at::dot(A_, B_), nullopt};
+    return std::make_tuple(at::dot(A_, B_), nullopt);
   } else {
-    return {at::matmul(A_, B_.t()), 0};
+    return std::make_tuple(at::matmul(A_, B_.t()), 0);
   }
 }
 
@@ -54,7 +54,7 @@ static std::tuple<Tensor, optional<int64_t>> tv_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& other, optional<int64_t> other_bdim) {
   if (!self_bdim && !other_bdim) {
-    return { at::matmul(self, other), nullopt };
+    return std::make_tuple( at::matmul(self, other), nullopt );
   }
   else if (self_bdim && other_bdim) {
     // See Note [Batching rules for matmul-like operators]
@@ -64,18 +64,18 @@ static std::tuple<Tensor, optional<int64_t>> tv_batch_rule(
     other_ = other_.unsqueeze(-1);
     auto result = at::matmul(self_, other_).squeeze(-1);
     auto result_bdim = result.dim() - 2;
-    return { std::move(result), result_bdim };
+    return std::make_tuple( std::move(result), result_bdim );
   }
   else if (self_bdim && !other_bdim) {
     // B...OI, I -> B...O
     auto self_ = moveBatchDimToFront(self, self_bdim);
-    return { at::matmul(self_, other), 0 };
+    return std::make_tuple( at::matmul(self_, other), 0 );
   }
   else if (!self_bdim && other_bdim) {
     // ...OI, BI -> ...OI, IB -> OB
     auto other_ = at::movedim(other, *other_bdim, -1);
     auto result = at::matmul(self, other_);
-    return { std::move(result), 1 };
+    return std::make_tuple( std::move(result), 1 );
   }
   TORCH_INTERNAL_ASSERT(false, "can't get here");
 }
@@ -84,7 +84,7 @@ static std::tuple<Tensor, optional<int64_t>> mv_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& other, optional<int64_t> other_bdim) {
   if (!self_bdim && !other_bdim) {
-    return { at::mv(self, other), nullopt };
+    return std::make_tuple( at::mv(self, other), nullopt );
   }
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto other_logical_rank = rankWithoutBatchDim(other, other_bdim);
@@ -100,7 +100,7 @@ static std::tuple<Tensor, optional<int64_t>> mm_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& other, optional<int64_t> other_bdim) {
   if (!self_bdim && !other_bdim) {
-    return { at::matmul(self, other), nullopt };
+    return std::make_tuple( at::matmul(self, other), nullopt );
   }
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto other_logical_rank = rankWithoutBatchDim(other, other_bdim);
@@ -111,7 +111,7 @@ static std::tuple<Tensor, optional<int64_t>> mm_batch_rule(
       "but expected them to have dim 2 and dim 2");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto other_ = moveBatchDimToFront(other, other_bdim);
-  return { at::matmul(self_, other_), 0 };
+  return std::make_tuple( at::matmul(self_, other_), 0 );
 }
 
 Tensor linear_decomp(
