@@ -38,6 +38,9 @@ class FilterIterDataPipe(MapIterDataPipe):
                 if len(t) > 0 or not self.drop_empty_batches:
                     result.append(t)
             else:
+                if not isinstance(b, bool):
+                    raise ValueError("Boolean output is required for "
+                                     "`filter_fn` of FilterIterDataPipe")
                 if b:
                     result.append(i)
         return result
@@ -45,9 +48,7 @@ class FilterIterDataPipe(MapIterDataPipe):
     def __iter__(self) -> Iterator[T_co]:
         res: bool
         for data in self.datapipe:
-            if self.nesting_level > 0 and not isinstance(data, list):
-                raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            elif self.nesting_level == 0 or not isinstance(data, list):
+            if self.nesting_level == 0:
                 res = self.fn(data, *self.args, **self.kwargs)
                 if not isinstance(res, bool):
                     raise ValueError("Boolean output is required for "

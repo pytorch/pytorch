@@ -404,15 +404,15 @@ class TestFunctionalIterDataPipe(TestCase):
             for a, b in zip(x, y):
                 self.assertEqual(a, torch.tensor(b, dtype=torch.float))
 
-        with self.assertRaises(Exception):
-            map_dp = input_dp.map(fn, nesting_level=4)
+        map_dp = input_dp.map(fn, nesting_level=4)
+        with self.assertRaises(IndexError):
             for x, y in zip(map_dp, input_dp):
                 self.assertEqual(len(x), len(y))
                 for a, b in zip(x, y):
                     print(a, b)
                     self.assertEqual(a, torch.tensor(b, dtype=torch.float))
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValueError):
             input_dp.map(fn, nesting_level=-2)
 
         def addition(item, amount=1.0):
@@ -574,17 +574,17 @@ class TestFunctionalIterDataPipe(TestCase):
 
         filter_dp = input_ds.filter(nesting_level=-1, filter_fn=_filter_fn, fn_kwargs={'val': 5})
         expected_dp1 = [[5, 6, 7, 8, 9]]
-        self.assertEqual(len(list(zip(filter_dp, expected_dp1))), len(expected_dp1))
+        self.assertEqual(len([d for d in filter_dp]), len(expected_dp1))
         for data, exp in zip(filter_dp, expected_dp1):
             self.assertEqual(data, exp)
 
         filter_dp = input_ds.filter(nesting_level=-1, drop_empty_batches=False, filter_fn=_filter_fn, fn_kwargs={'val': 5})
         expected_dp2: List[List[int]] = [[], [5, 6, 7, 8, 9]]
-        self.assertEqual(len(list(zip(filter_dp, expected_dp2))), len(expected_dp2))
+        self.assertEqual(len([d for d in filter_dp]), len(expected_dp2))
         for data, exp in zip(filter_dp, expected_dp2):
             self.assertEqual(data, exp)
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(IndexError):
             filter_dp = input_ds.filter(nesting_level=5, filter_fn=_filter_fn, fn_kwargs={'val': 5})
             temp = list(d for d in filter_dp)
 
@@ -592,25 +592,28 @@ class TestFunctionalIterDataPipe(TestCase):
 
         filter_dp = input_ds.filter(lambda ls: len(ls) >= 3)
         expected_dp3: List[List[int]] = [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
-        self.assertEqual(len(list(zip(filter_dp, expected_dp3))), len(expected_dp3))
+        self.assertEqual(len([d for d in filter_dp]), len(expected_dp3))
         for data, exp in zip(filter_dp, expected_dp3):
             self.assertEqual(data, exp)
 
         input_ds = IDP([[[0, 1, 2], [3, 4, 5]], [[6, 7, 8], [1, 2, 3]]])
         filter_dp = input_ds.filter(lambda x: x > 3, nesting_level=-1)
         expected_dp4 = [[[4, 5]], [[6, 7, 8]]]
+        self.assertEqual(len([d for d in filter_dp]), len(expected_dp4))
         for data2, exp2 in zip(filter_dp, expected_dp4):
             self.assertEqual(data2, exp2)
 
         input_ds = IDP([[[0, 1, 2], [3, 4, 5]], [[6, 7, 8], [1, 2, 3]]])
         filter_dp = input_ds.filter(lambda x: x > 7, nesting_level=-1)
         expected_dp5 = [[[8]]]
+        self.assertEqual(len([d for d in filter_dp]), len(expected_dp5))
         for data2, exp2 in zip(filter_dp, expected_dp5):
             self.assertEqual(data2, exp2)
 
         input_ds = IDP([[[0, 1], [3, 4]], [[6, 7, 8], [1, 2, 3]]])
         filter_dp = input_ds.filter(lambda ls: len(ls) >= 3, nesting_level=1)
         expected_dp6 = [[[6, 7, 8], [1, 2, 3]]]
+        self.assertEqual(len([d for d in filter_dp]), len(expected_dp6))
         for data2, exp2 in zip(filter_dp, expected_dp6):
             self.assertEqual(data2, exp2)
 
