@@ -61,14 +61,14 @@ jobs:
           export LOG_FILE=${RESULT_DIR}/mnist/result.log
           export MEM_FILE=${RESULT_DIR}/mnist/result_mem.log
           taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 1
-      # - name: Run MNist HogWild
-      #   run: |
-      #     . activate reltest
-      #     mkdir -p ${RESULT_DIR}/mnist_hogwild
-      #     pushd examples/mnist_hogwild
-      #     export LOG_FILE=${RESULT_DIR}/mnist_hogwild/result.log
-      #     export MEM_FILE=${RESULT_DIR}/mnist_hogwild/result_mem.log
-      #     taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10
+      - name: Run MNist HogWild
+        run: |
+          . activate reltest
+          mkdir -p ${RESULT_DIR}/mnist_hogwild
+          pushd examples/mnist_hogwild
+          export LOG_FILE=${RESULT_DIR}/mnist_hogwild/result.log
+          export MEM_FILE=${RESULT_DIR}/mnist_hogwild/result_mem.log
+          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10
       - name: Run CPU WLM LSTM
         run: |
           . activate reltest
