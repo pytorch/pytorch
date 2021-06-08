@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Utils.hpp>
@@ -48,7 +49,7 @@ class Timer {
 
 C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
-class Reducer {
+class TORCH_API Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
   // The bucket assignment for this reducer is specified as a list of
