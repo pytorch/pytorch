@@ -373,3 +373,7 @@ Example::
     >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
     tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
 """.format(**common_args))
+
+zeta = _add_docstr(_special.special_zeta,
+                  r"""
+""".format(**common_args))

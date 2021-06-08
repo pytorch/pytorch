@@ -1185,6 +1185,32 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_zeta(self, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def generator():
+        # same shape
+        yield SampleInput(make_arg((S, S)), args=(make_arg((S, S)),))
+        # rhs broadcast
+        yield SampleInput(make_arg((S, S)), args=(make_arg((S,)),))
+        # all zero `x`
+        with torch.no_grad():
+            x = make_arg((S, S))
+            x.fill_(0)
+        yield SampleInput(x, args=(make_arg((S, S)),))
+
+        # Scalar x
+        # `input` has to be a tensor
+        # yield SampleInput(0, args=(make_arg((S, S), low=-1),))
+        # yield SampleInput(2.1, args=(make_arg((S, S), low=-1),))
+
+        # Scalar y
+        yield SampleInput(make_arg((S, S)), args=(-0.5,))
+        yield SampleInput(make_arg((S, S)), args=(1.2,))
+
+    return list(generator())
+
+
 def sample_inputs_logsumexp(self, device, dtype, requires_grad):
     inputs = (
         ((), (0,), True),
@@ -6818,6 +6844,11 @@ op_db: List[OpInfo] = [
                         device_type='cpu', dtypes=[torch.float16]),
            ),
            sample_inputs_func=sample_inputs_xlog1py),
+    OpInfo('zeta',
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+           supports_inplace_autograd=True,
+           safe_casts_outputs=True,
+           sample_inputs_func=sample_inputs_),
     OpInfo('logsumexp',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
