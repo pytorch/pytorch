@@ -592,18 +592,16 @@ class TestProfiler(TestCase):
         with profile() as prof:
             torch.add(t1, t2)
             prof.add_metadata("test_key1", "test_value1")
-            prof.add_metadata("test_key2", "test_value2")
+            prof.add_metadata_json("test_key2", "[1,2,3]")
 
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
             with io.open(fname, 'r') as f:
                 trace = json.load(f)
-                assert "metadata" in trace
-                metadata = trace["metadata"]
-                assert "test_key1" in metadata
-                assert metadata["test_key1"] == "test_value1"
-                assert "test_key2" in metadata
-                assert metadata["test_key2"] == "test_value2"
+                assert "test_key1" in trace
+                assert trace["test_key1"] == "test_value1"
+                assert "test_key2" in trace
+                assert trace["test_key2"] == [1, 2, 3]
 
     def _test_profiler_tracing(self, use_kineto):
         with _profile(use_kineto=use_kineto) as prof:

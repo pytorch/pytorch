@@ -88,3 +88,4 @@ Experimental Functions
     :nosignatures:
 
     cholesky_ex
+    inv_ex

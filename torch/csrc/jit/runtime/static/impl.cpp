@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -51,8 +52,7 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
     }
   }
   // check output types
-  // Static Runtime supports output types include None, Tensor,  List/Tuple
-  // of Tensor, or Dict
+  // Static Runtime doesn't support complex outputs such as List of Lists
   for (Value* output : graph->outputs()) {
     VLOG(1) << "output: %" << output->debugName()
             << " has type: " << output->type()->repr_str();
@@ -461,13 +461,11 @@ GenerateSameStorageValues(
   return same_storage_values;
 }
 
-} // namespace
-
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
-  OptimizeGraph(graph, opts);
   CheckGraphEligibility(graph);
+  OptimizeGraph(graph, opts);
   RemoveSelfFromGraphInput(graph);
 }
 
@@ -502,6 +500,8 @@ PrepareForStaticModule(
   return std::make_pair(graph, c10::nullopt);
 }
 
+} // namespace
+
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
@@ -522,17 +522,16 @@ StaticModule::StaticModule(
       schema_(std::move(graph_and_schema.second)) {
   // check opt flags
   if (opts.optimize_graph_output_memory) {
-    if (!(opts_.optimize_memory && opts_.enable_out_variant)) {
-      throw std::runtime_error(
-          "When optimize_graph_output_memory is true, optimize_memory and enable_out_variant must be set to true");
-    }
+    TORCH_CHECK(
+        opts_.enable_out_variant && opts_.optimize_memory,
+        "When optimize_graph_output_memory is true, enable_out_variant and optimize_memory must be set to true");
   }
   if (opts_.optimize_memory) {
-    if (!opts_.enable_out_variant) {
-      throw std::runtime_error(
-          "When optimize_memory is true, enable_out_variant must be set to true");
-    }
+    TORCH_CHECK(
+        opts_.enable_out_variant,
+        "When optimize_memory is true, enable_out_variant must be set to true");
   }
+
   // map Value* to IValue (from inputs or prim::Constant) or null
   std::unordered_map<Value*, IValue*> value_to_ivalue;
   // map Value* to its SSA definition IR
@@ -588,7 +587,7 @@ StaticModule::StaticModule(
     node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
     nodes_.emplace_back(
         ProcessedNode(node, std::move(ivalue_inputs), opts.enable_out_variant));
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
+    for (const auto i : c10::irange(node->outputs().size())) {
       value_to_ivalue[node->outputs()[i]] = nullptr;
       value_to_ssa_def[node->outputs()[i]] = std::make_pair(node_idx, i);
     }
@@ -598,18 +597,12 @@ StaticModule::StaticModule(
     output_ssa_defs_.emplace_back(value_to_ssa_def[output]);
   }
 
+  // Prepare for memory planning
   AliasDb alias_db(graph_);
   auto lm = GetLivenessInformation(graph_, alias_db);
   external_values_ = lm.second;
   if (opts_.optimize_memory) {
     auto values = GetMemoryPlanningCandidates(graph_);
-    // Note (penguin): since it does not make sense to have optimize_memory
-    // enabled but enable_out_variant disabled, we check the flag dependence
-    // during initialization of StaticModule so that the following condition
-    // would not be true. This would make the code easier to understand
-    // if (!opts_.enable_out_variant) {
-    //   values.first = {};
-    // }
     value_to_same_storage_values_ =
         GenerateSameStorageValues(lm, values, alias_db);
   }
@@ -648,19 +641,16 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   // NB: create unchanging std::vector<IValue>s we can reference
   inputs_.resize(sm.num_inputs());
   nodes_.resize(sm.nodes().size());
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto idx = 0; idx < sm.nodes().size(); ++idx) {
+  for (const auto idx : c10::irange(sm.nodes().size())) {
     const auto& n_ref = sm.nodes()[idx];
     nodes_[idx] = n_ref; // copy the node
     auto& n = nodes_[idx];
     // hook up the inputs
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < n.inputs().size(); ++i) {
+    for (const auto i : c10::irange(n.inputs().size())) {
       if (n.inputs()[i] == nullptr) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int node_idx;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int out_idx;
+        int node_idx = 0;
+        int out_idx = 0;
         std::tie(node_idx, out_idx) = sm.index_map().at(idx)[i];
         DCHECK(out_idx >= 0);
         // input
@@ -669,6 +659,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
         } else if (node_idx == StaticModule::CONSTANT_VALUE) {
           n.set_input(i, &sm.constants()[out_idx]);
         } else {
+          DCHECK(node_idx >= 0);
           n.set_input(i, &(nodes_[node_idx].Output(out_idx)));
         }
       }
@@ -676,10 +667,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   }
 
   for (const auto& index_pair : sm.output_indices()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int node_idx;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int out_idx;
+    int node_idx = 0;
+    int out_idx = 0;
     std::tie(node_idx, out_idx) = index_pair;
     if (node_idx == StaticModule::INPUT_VALUE) {
       outputs_.emplace_back(&inputs_[out_idx]);
@@ -690,8 +679,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       outputs_.emplace_back(const_cast<IValue*>(&sm.constants()[out_idx]));
     } else {
-      auto& n = nodes_.at(node_idx);
-      auto* out = &n.Output(out_idx);
+      auto* out = &nodes_[node_idx].Output(out_idx);
       outputs_.emplace_back(out);
     }
   }
@@ -701,7 +689,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
     const std::vector<at::Tensor>& inps) {
   std::vector<c10::IValue> stack;
   stack.resize(inps.size());
-  for (size_t i = 0; i < inps.size(); i++) {
+  for (const auto i : c10::irange(inps.size())) {
     stack[i] = inps[i];
   }
 
@@ -742,11 +730,11 @@ c10::IValue StaticRuntime::operator()(
         "with StaticModule(const torch::jit::Module& m) instead.");
     std::vector<c10::IValue> s = args;
     static_module_.schema()->checkAndNormalizeInputs(s, kwargs);
-    for (size_t i = 0; i < s.size(); i++) {
+    for (const auto i : c10::irange(s.size())) {
       Input(i) = std::move(s[i]);
     }
   } else {
-    for (size_t i = 0; i < args.size(); i++) {
+    for (const auto i : c10::irange(args.size())) {
       Input(i) = args[i];
     }
   }
@@ -760,9 +748,8 @@ c10::IValue StaticRuntime::operator()(
 
   if (static_module_.opts().cleanup_activations) {
     // MemoryPlanner is created after the first invocation of `run()`. This is
-    // done intentionally because MemoryPlanner uses `TensorStorageImpl`
-    // object sizes of the previous `run()` for memory planning of subsequent
-    // runs
+    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
+    // previous `run()` for memory planning of subsequent runs
     if (!planner_) {
       planner_ = std::make_unique<MemoryPlanner>(
           this,
@@ -810,7 +797,7 @@ void StaticRuntime::benchmark(
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
 
-  for (size_t i = 0; i < nodes_.size(); i++) {
+  for (const auto i : c10::irange(nodes_.size())) {
     const Node* node = nodes_[i].node();
     std::cout << "Node #" << i << ": " << results.time_per_node[i]
               << " ms/iter, ";
@@ -830,8 +817,12 @@ void StaticRuntime::benchmark(
     const double ms = p.second;
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
-              << results.instances_per_node_type[kind] << " nodes)"
-              << std::endl;
+              << results.instances_per_node_type[kind] << " nodes";
+    if (results.out_nodes.count(kind) == 0) {
+      std::cout << ")" << std::endl;
+    } else {
+      std::cout << ", out variant)" << std::endl;
+    }
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
@@ -851,6 +842,12 @@ void StaticRuntime::benchmark(
       std::cout << "Total number of reused tensors: "
                 << planner_->total_reused_tensors() << std::endl;
     }
+    std::cout << "Total number of 'out' variant nodes/total number of nodes: "
+              << results.out_nodes_count << "/" << results.total_nodes_count
+              << " ("
+              << 100.0 * (results.out_nodes_count) /
+            static_cast<float>(results.total_nodes_count)
+              << "%)" << std::endl;
   }
   check_for_memory_leak();
 }
@@ -862,11 +859,13 @@ float StaticRuntime::benchmark_model(
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
 
-  for (int i = 0; i < warmup_runs; i++) {
+  for (const auto i : c10::irange(warmup_runs)) {
+    (void)i; // Suppress unused variable warning
     operator()(args, kwargs);
   }
   caffe2::Timer timer;
-  for (int i = 0; i < main_runs; i++) {
+  for (const auto i : c10::irange(main_runs)) {
+    (void)i; // Suppress unused variable warning
     operator()(args, kwargs);
   }
   float millis = timer.MilliSeconds();
@@ -898,19 +897,21 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         "with StaticModule(const torch::jit::Module& m) instead.");
     static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
   }
-  for (size_t i = 0; i < stack.size(); i++) {
+  for (const auto i : c10::irange(stack.size())) {
     Input(i) = stack[i];
   }
   results.setup_time = timer.MilliSeconds();
 
   // warmup runs
-  for (int i = 0; i < warmup_runs; i++) {
+  for (const auto i : c10::irange(warmup_runs)) {
+    (void)i; // Suppress unused variable warning
     operator()(args, kwargs);
   }
 
   // main runs
-  for (int k = 0; k < main_runs; k++) {
-    for (size_t i = 0; i < stack.size(); i++) {
+  for (const auto k : c10::irange(main_runs)) {
+    (void)k; // Suppress unused variable warning
+    for (const auto i : c10::irange(stack.size())) {
       Input(i) = stack[i];
     }
     timer.Start();
@@ -920,7 +921,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     float millis = timer.MilliSeconds();
     results.memory_alloc_time += millis;
 
-    for (size_t i = 0; i < nodes_.size(); i++) {
+    for (const auto i : c10::irange(nodes_.size())) {
       timer.Start();
       nodes_[i].run();
       millis = timer.MilliSeconds();
@@ -951,8 +952,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     if (static_module_.num_outputs() > 1) {
       std::vector<c10::IValue> outputs;
       outputs.reserve(static_module_.num_outputs());
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (auto i = 0; i < static_module_.num_outputs(); ++i) {
+      for (const auto i : c10::irange(static_module_.num_outputs())) {
         // use move here. Otherwise, clean up outputs_[i] explicitly
         outputs.emplace_back(std::move(*outputs_[i]));
       }
@@ -972,14 +972,19 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // post processing
-  for (size_t i = 0; i < nodes_.size(); i++) {
+  for (const auto i : c10::irange(nodes_.size())) {
     const Node* node = nodes_[i].node();
     std::string kind = std::string(node->kind().toQualString());
     results.time_per_node[i] /= static_cast<float>(main_runs);
     results.time_per_node_type[kind] += results.time_per_node[i];
     results.instances_per_node_type[kind]++;
+    if (nodes_[i].has_out_variant()) {
+      results.out_nodes.insert(kind);
+      results.out_nodes_count++;
+    }
     results.total_time += results.time_per_node[i];
   }
+  results.total_nodes_count = nodes_.size();
   results.memory_alloc_time /= static_cast<float>(main_runs);
   results.memory_dealloc_time /= static_cast<float>(main_runs);
   results.output_dealloc_time /= static_cast<float>(main_runs);
@@ -996,15 +1001,15 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   }
 
   // check for inputs
-  for (size_t i = 0; i < inputs_.size(); i++) {
+  for (const auto i : c10::irange(inputs_.size())) {
     TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
   }
 
   std::unordered_set<const IValue*> output_ivalues(
       outputs_.begin(), outputs_.end());
-  for (size_t n = 0; n < nodes_.size(); n++) {
+  for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
-    for (size_t i = 0; i < pnode.outputs().size(); i++) {
+    for (const auto i : c10::irange(pnode.outputs().size())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
@@ -1047,8 +1052,7 @@ static void assign_storage_to_managed_tensors(
 
   // Snapshot of the current memory state
   for (auto& pnode : runtime->nodes()) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < pnode.outputs().size(); ++i) {
+    for (const auto i : c10::irange(pnode.outputs().size())) {
       auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
       if (managed_tensor_values.count(val)) {
@@ -1090,7 +1094,7 @@ MemoryPlanner::MemoryPlanner(
     for (ProcessedNode& pnode : runtime->nodes()) {
       if (pnode.has_out_variant()) {
         // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (auto i = 0; i < pnode.outputs().size(); ++i) {
+        for (const auto i : c10::irange(pnode.outputs().size())) {
           const Value* out_v = pnode.node()->outputs()[i];
           if (external_values.count(out_v)) {
             continue;
@@ -1113,7 +1117,7 @@ MemoryPlanner::MemoryPlanner(
   std::unordered_set<IValue*> unmanaged_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < pnode.outputs().size(); ++i) {
+    for (const auto i : c10::irange(pnode.outputs().size())) {
       // Types are stored in the underlying TorchScript IR
       const Value* out_v = pnode.node()->outputs()[i];
       if (managed_tensor_values.count(out_v) || leaked_values.count(out_v)) {
@@ -1259,7 +1263,7 @@ void ProcessedNode::run() {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
     stack.reserve(size);
-    for (size_t i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       stack.emplace_back(Input(i));
     }
 
@@ -1267,8 +1271,7 @@ void ProcessedNode::run() {
     op_->operator()(&stack);
 
     DCHECK_EQ(stack.size(), node_->outputs().size());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < node_->outputs().size(); i++) {
+    for (const auto i : c10::irange(node_->outputs().size())) {
       Output(i) = std::move(stack[i]);
     }
   }

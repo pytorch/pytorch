@@ -141,6 +141,15 @@ TEST(StaticRuntime, Clone) {
   testStaticRuntime(clone_script_1, args_1);
 }
 
+TEST(StaticRuntime, Clamp) {
+  auto a = at::randn({2, 3});
+  auto max_t = at::full_like(a, 1);
+  auto min_t = at::full_like(a, -1);
+
+  testStaticRuntime(clamp_script_1, {a, -1, 1});
+  testStaticRuntime(clamp_script_2, {a, min_t, max_t});
+}
+
 TEST(StaticRuntime, Logit) {
   auto a = at::ones({2, 3});
   double b = 1e-6;
@@ -341,6 +350,15 @@ TEST(StaticRuntime, IndividualOps_to) {
   test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
   test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::Preserve);
+}
+
+TEST(StaticRuntime, IndividualOps_FullLike) {
+  auto a = at::randn({2, 3});
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  std::vector<IValue> args {a, 4, dtype, at::kStrided, cpu, false,
+                            c10::MemoryFormat::Contiguous};
+  testStaticRuntime(full_like_script, args);
 }
 
 TEST(StaticRuntime, LongModel) {

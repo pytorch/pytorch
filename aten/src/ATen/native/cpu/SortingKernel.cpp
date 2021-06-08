@@ -39,8 +39,7 @@ void _dim_apply(
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    .declare_static_shape(values.sizes(), /*squash_dim=*/dim)
+    .declare_static_shape(values.sizes(), /*squash_dims=*/dim)
     .add_output(values)
     .add_output(indices)
     .build();
@@ -49,8 +48,8 @@ void _dim_apply(
   auto indices_dim_stride = indices.stride(dim);
   auto dim_size = values.size(dim);
 
-  AT_DISPATCH_ALL_TYPES_AND2(
-    ScalarType::Bool, ScalarType::Half, iter.dtype(),
+  AT_DISPATCH_ALL_TYPES_AND3(
+    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
     "sorting_kernel_method_name", [&] {
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* values_data_bytes = data[0];
@@ -149,69 +148,29 @@ static void topk_kernel(
     int64_t dim,
     bool largest,
     bool sorted) {
+  auto sizes = self.sizes();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(sizes, /*squash_dims=*/dim)
+    .add_output(values)
+    .add_output(indices)
+    .add_input(self)
+    .build();
+
+  auto mode_values_stride = values.strides()[dim];
+  auto mode_indices_stride = indices.strides()[dim];
+  auto tmp_values_stride = self.strides()[dim];
+
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
-    dim_apply(
-        {self, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
-          auto tmp_values = tl[0].accessor<scalar_t, 1>();
-          auto mode_values = tl[1].accessor<scalar_t, 1>();
-          auto mode_indices = tl[2].accessor<int64_t, 1>();
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      return topk_impl_loop<scalar_t>(
+          mode_values_stride, mode_indices_stride, tmp_values_stride,
+          k, sizes[dim], largest, sorted, data, strides, n);
+    };
 
-          auto n = tmp_values.size(0);
-          auto use_partial_sort = k * 64 <= n;
-
-          using elem_t = std::pair<scalar_t, int64_t>;
-          std::vector<elem_t> queue(n);
-          for (int64_t j = 0; j < n; j++) {
-            queue[j].first = tmp_values[j];
-            queue[j].second = j;
-          }
-
-          // we want NaN to be sorted as top for numpy compatibility
-          if (use_partial_sort) {
-            if (largest) {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                });
-            } else {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                });
-            }
-          } else {
-            if (largest) {
-              std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k - 1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                  });
-              }
-            } else {
-              std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k -1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                  });
-              }
-            }
-          }
-
-          for (int64_t j = 0; j < k; j++) {
-            mode_values[j] = queue[j].first;
-            mode_indices[j] = queue[j].second;
-          }
-        });
+    int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
+    iter.for_each(loop, /*grain_size=*/grain_size);
   });
 }
 

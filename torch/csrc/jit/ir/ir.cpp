@@ -4,6 +4,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -872,6 +873,24 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
       uses_.end());
 }
 
+void Value::replaceAllUsesDominatedByNodeWith(
+    const Node* node,
+    Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
+    if (u.user->isDominatedBy(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isDominatedBy(node); }),
+      uses_.end());
+}
+
 size_t findArgument(
     const FunctionSchema& the_schema,
     const std::string& unqualName) {
@@ -1273,7 +1292,7 @@ void Node::cloneFrom(Node* s) {
 void Node::replaceAllUsesWith(Node* n) {
   AT_ASSERT(outputs().size() == n->outputs().size());
   size_t nOutputs = outputs().size();
-  for (size_t i = 0; i < nOutputs; i++) {
+  for (const auto i : c10::irange(nOutputs)) {
     outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
   }
 }
@@ -1298,6 +1317,17 @@ Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
       new_symbol,
       kind());
   return replace_node;
+}
+
+bool Node::isDominatedBy(const Node* dominator) const {
+  const Node* node = this;
+  while (node) {
+    if (node->owningBlock() == dominator->owningBlock()) {
+      return dominator->isBefore(node);
+    }
+    node = node->owningBlock()->owningNode();
+  }
+  return false;
 }
 
 Value* Node::insertInput(size_t i, Value* value) {
@@ -1586,7 +1616,7 @@ Value* Graph::insert(
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
   // NB: Node constructor adds node to all_nodes
   auto n = new Node(this, kind);
-  for (size_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
     n->addOutput();
   }
   return n;
