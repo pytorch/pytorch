@@ -886,7 +886,7 @@ class TestCppExtensionJIT(common.TestCase):
             #include <torch/torch.h>
 
             int fail() {{
-                torch::crash_handler::_enable_minidump_collection("{destination}");
+                torch::crash_handler::enable_minidumps("{destination}");
 
                 volatile int* bad = nullptr;
                 return *bad;
