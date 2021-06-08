@@ -97,7 +97,6 @@ class TestOpInfo(TestCase):
             else:
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
 
-        is_dtype_there_in_numpy = op.check
         for sample_input in tensors:
             sample_args = sample_input.args
             sample_kwargs = sample_input.kwargs
@@ -108,25 +107,23 @@ class TestOpInfo(TestCase):
 
             if dtype is torch.bfloat16:
                 for sample_arg in sample_args:
-                    numpy_arg = sample_arg.cpu().to(torch.float32).numpy() if isinstance(sample_arg, torch.Tensor) else torch.tensor(sample_arg).cpu().to(torch.float32).numpy()
+                    if isinstance(sample_arg, torch.Tensor):
+                        numpy_arg = sample_arg.cpu().to(torch.float32).numpy()
+                    else:
+                        return
                     numpy_args.append(numpy_arg)
                 sample_numpy_input = sample_torch_input.cpu().clone().to(torch.float32).numpy()
-                if is_dtype_there_in_numpy:
-                    out_numpy_dtype = np.float32
             else:
                 for sample_arg in sample_args:
-                    numpy_arg = sample_arg.cpu().to(dtype).numpy() if isinstance(sample_arg, torch.Tensor) else sample_arg 
+                    if isinstance(sample_arg, torch.Tensor):
+                        numpy_arg = sample_arg.cpu().to(dtype).numpy()
+                    else:
+                        return
                     numpy_args.append(numpy_arg)
                 sample_numpy_input = sample_torch_input.cpu().to(dtype).numpy()
-                if is_dtype_there_in_numpy:
-                    out_numpy_dtype = torch_to_numpy_dtype_dict[dtype]
 
             actual = op(sample_torch_input, *sample_args, **torch_kwargs)
-            # If dtype argument is there in NumPy
-            if is_dtype_there_in_numpy:
-                expected = op.ref(sample_numpy_input, *numpy_args, **numpy_kwargs, dtype=out_numpy_dtype)
-            else:
-                expected = op.ref(sample_numpy_input, *numpy_args, **numpy_kwargs)
+            expected = op.ref(sample_numpy_input, *numpy_args, **numpy_kwargs)
 
             # Crafts a custom error message for smaller, printable tensors
             if sample_torch_input.numel() < 10:
