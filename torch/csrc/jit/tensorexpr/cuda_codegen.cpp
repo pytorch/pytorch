@@ -3,6 +3,7 @@
 
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -306,7 +307,7 @@ void CudaPrinter::visit(const Intrinsics* v) {
   }
 
   os() << func_name << "(";
-  for (int i = 0; i < v->nparams(); i++) {
+  for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -893,20 +894,12 @@ static std::ostream& operator<<(
   return out;
 }
 
-#ifdef USE_ROCM
-static const char* device_resource_string = R"(
-#define POS_INFINITY INFINITY
-#define NEG_INFINITY -INFINITY
-
-)";
-#else
 static const char* device_resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
 #define NEG_INFINITY __int_as_float(0xff800000)
 
 )";
-#endif
 
 static const char* shared_resource_string = R"(
 template<typename T>

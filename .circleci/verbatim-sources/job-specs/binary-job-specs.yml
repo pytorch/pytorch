@@ -22,7 +22,7 @@
         command: |
             ls -lah /final_pkgs
     - run:
-        name: save binary size
+        name: upload build & binary data
         no_output_timeout: "5m"
         command: |
             source /env

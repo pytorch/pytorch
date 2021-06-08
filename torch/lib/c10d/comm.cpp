@@ -3,6 +3,7 @@
 #include <deque>
 
 #include <ATen/core/functional.h>
+#include <c10/util/irange.h>
 #include <c10d/reducer.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_flatten.h>
@@ -30,7 +31,7 @@ class BroadcastWork {
     auto output_tensors = torch::utils::unflatten_dense_tensors(
         flat_tensor_.front(), bucket_tensors_);
     TORCH_INTERNAL_ASSERT(output_tensors.size() == bucket_tensors_.size());
-    for (size_t i = 0; i < output_tensors.size(); i++) {
+    for(const auto i : c10::irange(output_tensors.size())) {
       bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
     }
   }
