@@ -19,8 +19,8 @@ class _InputEqualizationObserver(nn.Module):
             follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will
             follow the 8-bit setup.
-        output_obs: For the user to specify what kind of output observer they
-            would like to use
+        output_obs_cls: For the user to specify what kind of output observer
+            class they would like to use
 
     The running minimum/maximum :math:`x_\text{min/max}` are computed in the
     same way as :class:`~torch.quantization.observer.PerChannelMinMaxObserver`,
@@ -36,7 +36,7 @@ class _InputEqualizationObserver(nn.Module):
     """
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 quant_min=None, quant_max=None, output_obs=None,
+                 quant_min=None, quant_max=None, output_obs_cls=None,
                  factory_kwargs=None) -> None:
         super(_InputEqualizationObserver, self).__init__()
 
@@ -51,10 +51,10 @@ class _InputEqualizationObserver(nn.Module):
                                                   quant_max=quant_max,
                                                   factory_kwargs=factory_kwargs)
 
-        if output_obs is None:
-            self.output_obs = MinMaxObserver
+        if output_obs_cls is None:
+            self.output_obs_cls = MinMaxObserver
         else:
-            self.output_obs = output_obs
+            self.output_obs_cls = output_obs_cls
 
         self.equalization_scale = torch.empty(0)
 

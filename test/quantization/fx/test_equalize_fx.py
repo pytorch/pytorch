@@ -222,7 +222,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
         # Test where the output observer to be an InputEqualizationObserver
         new_input_equalization_observer = _InputEqualizationObserver.with_args(
-            dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, output_obs=_InputEqualizationObserver)
+            dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, output_obs_cls=_InputEqualizationObserver)
         equalization_qconfig = QConfig(activation=new_input_equalization_observer,
                                        weight=weight_equalization_observer)
         specified_qconfig_dict = {"": default_qconfig,

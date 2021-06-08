@@ -472,7 +472,7 @@ def maybe_insert_output_observer_for_node(
                     # Use the specified output observer if the following layer is
                     # not an equalization layer
                     if (not qconfig) or (not isinstance(qconfig.activation(), _InputEqualizationObserver)):
-                        observer = observer.output_obs()
+                        observer = observer.output_obs_cls()
 
             new_obs = insert_observer(node, observer, model, modules, graph)
             # set the type, so the next node can read it
