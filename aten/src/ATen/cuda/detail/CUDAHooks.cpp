@@ -73,13 +73,13 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
 bool CUDAHooks::isPinnedPtr(void* data) const {
   // First check if driver is broken/missing, in which case PyTorch CPU
   // functionalities should still work, we should report `false` here.
-  if (!CUDAHooks::hasCUDA()) {
+  if (!at::cuda::is_available()) {
     return false;
   }
   // cudaPointerGetAttributes grabs context on the current device, so we set
   // device to one that already has context, if exists.
   at::OptionalDeviceGuard device_guard;
-  auto primary_ctx_device_index = CUDAHooks::getDevceIndexWithPrimaryContext();
+  auto primary_ctx_device_index = getDeviceIndexWithPrimaryContext();
   if (primary_ctx_device_index.has_value()) {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
@@ -160,7 +160,7 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
-bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
+bool hasPrimaryContext(int64_t device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
               "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
   unsigned int ctx_flags;
@@ -171,17 +171,17 @@ bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
   return ctx_is_active == 1;
 }
 
-c10::optional<int64_t> CUDAHooks::getDevceIndexWithPrimaryContext() const {
+c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
   // check current device first
   int64_t current_device_index = CUDAHooks::current_device();
   if (current_device_index >= 0) {
-    if (CUDAHooks::hasPrimaryContext(current_device_index)) {
+    if (hasPrimaryContext(current_device_index)) {
       return current_device_index;
     }
   }
-  for (int64_t device_index = 0; device_index < CUDAHooks::getNumGPUs(); device_index++) {
+  for (int64_t device_index = 0; device_index < at::cuda::device_count(); device_index++) {
     if (device_index == current_device_index) continue;
-    if (CUDAHooks::hasPrimaryContext(device_index)) {
+    if (hasPrimaryContext(device_index)) {
       return device_index;
     }
   }

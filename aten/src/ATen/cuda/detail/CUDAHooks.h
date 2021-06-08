@@ -11,6 +11,9 @@ namespace at { namespace cuda { namespace detail {
 // Callback to initialize THC Magma, which is implemented in torch_cuda_cu
 TORCH_CUDA_CPP_API extern std::function<void()> THCMagma_init;
 
+bool hasPrimaryContext(int64_t device_index);
+c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
+
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
@@ -23,8 +26,6 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCuDNN() const override;
   const at::cuda::NVRTC& nvrtc() const override;
   int64_t current_device() const override;
-  bool hasPrimaryContext(int64_t device_index) const override;
-  c10::optional<int64_t> getDevceIndexWithPrimaryContext() const override;
   Allocator* getCUDADeviceAllocator() const override;
   Allocator* getPinnedMemoryAllocator() const override;
   bool compiledWithCuDNN() const override;

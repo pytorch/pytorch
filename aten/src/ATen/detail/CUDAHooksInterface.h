@@ -113,14 +113,6 @@ struct TORCH_API CUDAHooksInterface {
     return -1;
   }
 
-  virtual bool hasPrimaryContext(int64_t device_index) const {
-    TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual c10::optional<int64_t> getDevceIndexWithPrimaryContext() const {
-    return c10::nullopt;
-  }
-
   virtual Allocator* getPinnedMemoryAllocator() const {
     TORCH_CHECK(false, "Pinned memory requires CUDA. ", CUDA_HELP);
   }
