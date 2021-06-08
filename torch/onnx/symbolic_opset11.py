@@ -881,6 +881,15 @@ def prim_ConstantChunk(g, self, chunks, dim):
         start = end
     return res
 
+def chunk(g, self, chunks, dim):
+    # Calculate chunk size for dynamic chunk
+    dim_size = g.op("Gather", g.op("Shape", self), dim, axis_i=0)
+    chunk_size = g.op("Sub", chunks, g.op("Constant", value_t=torch.tensor([1], dtype=torch.long)))
+    chunk_size = g.op("Div", g.op("Add", dim_size, chunk_size), chunks)
+    # For cases where chunk_size is divisible by number of chunks  
+    chunk_vec = expand(g, chunk_size, chunks, None)
+    return split(g, self, chunk_vec, dim)
+
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     from torch.onnx.symbolic_opset9 import reshape
     input = self
