@@ -378,15 +378,20 @@ log1p = _add_docstr(_special.special_log1p,
                     r"""
 log1p(input, *, out=None) -> Tensor
 Computes the natural logarithm of (1 + :attr:`input`), elementwise.
+
 .. math::
     y_i = \log_{e} (x_i + 1)
+
 """ + r"""
 .. note:: This function is more accurate than :func:`torch.log` for small
           values of :attr:`input`
+
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> t = torch.randn(5)
     >>> t
@@ -398,7 +403,9 @@ Example::
 sinc = _add_docstr(_special.special_sinc,
                    r"""
 sinc(input, *, out=None) -> Tensor
+
 Computes the normalized sinc of :attr:`input.`
+
 .. math::
     \text{out}_{i} =
     \begin{cases}
@@ -406,10 +413,13 @@ Computes the normalized sinc of :attr:`input.`
       \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
     \end{cases}
 """ + r"""
+
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> t = torch.randn(4)
     >>> t
@@ -421,12 +431,16 @@ Example::
 round = _add_docstr(_special.special_round,
                     r"""
 round(input, *, out=None) -> Tensor
+
 Returns a new tensor with each of the elements of :attr:`input` rounded
 to the closest integer.
+
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> t = torch.randn(4)
     >>> t
