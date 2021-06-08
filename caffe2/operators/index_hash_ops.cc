@@ -3,8 +3,10 @@
 namespace caffe2 {
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IndexHash, IndexHashOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IndexHash)
     .NumInputs(1)
     .NumOutputs(1)
@@ -27,6 +29,7 @@ specified number. All input and output indices are enforced to be positive.
       return out;
     });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IndexHash);
 
 } // namespace

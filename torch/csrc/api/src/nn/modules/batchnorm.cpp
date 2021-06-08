@@ -16,7 +16,7 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-template <size_t D, typename Derived> 
+template <size_t D, typename Derived>
 void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::BatchNorm" << D << "d("

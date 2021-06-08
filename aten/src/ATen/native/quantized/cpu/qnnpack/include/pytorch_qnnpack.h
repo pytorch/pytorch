@@ -126,12 +126,39 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
     const float* requantization_scales,
     pytorch_qnnp_operator_t* fully_connected);
 
+enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
+    size_t input_channels,
+    size_t output_channels,
+    uint8_t input_zero_point,
+    const uint8_t* kernel_zero_points,
+    const uint32_t* kernel_col_indices,
+    const uint32_t* kernel_row_values,
+    const uint8_t* kernel_values,
+    const uint32_t kernel_row_block_size,
+    const uint32_t kernel_col_block_size,
+    uint8_t output_zero_point,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    const float* requantization_scales,
+    bool use_prepack_kernel,
+    pytorch_qnnp_operator_t* fully_connected);
+
 enum pytorch_qnnp_status pytorch_qnnp_setup_fully_connected_nc_q8(
     pytorch_qnnp_operator_t fully_connected,
     size_t batch_size,
     const uint8_t* input,
     size_t input_stride,
     uint8_t* output,
+    size_t output_stride);
+
+enum pytorch_qnnp_status pytorch_qnnp_setup_fully_connected_sparse_dq_nc_q8(
+    pytorch_qnnp_operator_t fully_connected,
+    size_t batch_size,
+    const uint8_t* input,
+    size_t input_stride,
+    const float* bias,
+    float* output,
     size_t output_stride);
 
 enum pytorch_qnnp_status pytorch_qnnp_create_global_average_pooling_nwc_q8(

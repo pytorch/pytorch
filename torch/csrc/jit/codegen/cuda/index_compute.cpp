@@ -1,11 +1,13 @@
-
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
+
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -14,6 +16,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -179,7 +182,7 @@ class ContigIDs : public OptInDispatch {
         " != ",
         root_contiguity_.size());
 
-    for (size_t i = 0; i < root_domain_.size(); i++) {
+    for (const auto i : c10::irange(root_domain_.size())) {
       if (root_contiguity_[i]) {
         auto kir_root_domain_i =
             GpuLower::lowerValue(root_domain_[i])->as<kir::IterDomain>();
@@ -301,6 +304,7 @@ void IndexCompute::handle(Merge* merge) {
     }
 
     index_map_[GpuLower::lowerValue(*(input_ids.end() - 1))
+                   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                    ->as<kir::IterDomain>()] = out_ind;
     return;
   }
@@ -791,7 +795,7 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
   // Global striding
   int64_t stride_i = 0;
   std::vector<Val*> strided_inds;
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isReduction() ||
         root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
       continue;
@@ -810,7 +814,7 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
         " dim: ",
         i,
         " id: ",
-        kir_root_dom_i);
+        kir::toString(kir_root_dom_i));
 
     auto root_ind = index_map.at(kir_root_dom_i);
     TORCH_INTERNAL_ASSERT(kir::isLoweredScalar(root_ind));
@@ -856,6 +860,7 @@ std::unordered_map<kir::ForLoop*, Val*> indexMapFromTV(
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
 
   for (auto loop : loops) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!within_alloc) {
       loop_to_ind_map[loop] = zero;
     } else if (loop->iter_domain()->isBlockDim() && is_shared) {
@@ -870,6 +875,7 @@ std::unordered_map<kir::ForLoop*, Val*> indexMapFromTV(
       within_alloc = true;
     }
   }
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return loop_to_ind_map;
 }
 
@@ -913,7 +919,7 @@ kir::TensorIndex* Index::getProducerIndex_impl(
 
   std::vector<Val*> strided_inds;
 
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast()) {
       continue;
     }
@@ -928,7 +934,7 @@ kir::TensorIndex* Index::getProducerIndex_impl(
         " dim: ",
         i,
         " id: ",
-        kir_root_dom_i);
+        kir::toString(kir_root_dom_i));
 
     auto root_ind_i = index_map.at(kir_root_dom_i);
     TORCH_INTERNAL_ASSERT(kir::isLoweredScalar(root_ind_i));
@@ -1018,7 +1024,7 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
 
   int64_t stride_i = 0;
   std::vector<Val*> strided_inds;
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isReduction() ||
         root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
       continue;
@@ -1037,7 +1043,7 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
         " dim: ",
         i,
         " id: ",
-        kir_root_dom_i);
+        kir::toString(kir_root_dom_i));
     auto ind = index_map.at(kir_root_dom_i);
 
     if (i == root_dom.size() - 1 && inner_most_dim_contig) {
@@ -1084,7 +1090,7 @@ kir::TensorIndex* Index::getConsumerIndex_impl(
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
 
   std::vector<Val*> strided_inds;
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast()) {
       continue;
     }
@@ -1099,7 +1105,7 @@ kir::TensorIndex* Index::getConsumerIndex_impl(
         " dim: ",
         i,
         " id: ",
-        kir_root_dom_i);
+        kir::toString(kir_root_dom_i));
     auto root_ind_i = index_map.at(kir_root_dom_i);
     TORCH_INTERNAL_ASSERT(kir::isLoweredScalar(root_ind_i));
 
@@ -1228,6 +1234,7 @@ std::pair<std::vector<Val*>, bool> Index::getConsumerRootPredIndices(
     }
   }
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   auto index_map = generateIndexAndExtentMap(
                        tv_stack,
                        std::deque<kir::ForLoop*>(loops.begin(), loops.end()),
@@ -1261,7 +1268,7 @@ std::pair<std::vector<Val*>, bool> Index::getConsumerRootPredIndices(
                               : consumer_tv->getRootDomain();
 
   std::vector<Val*> root_inds(root_dom.size(), ir_builder.create<kir::Int>(0));
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isBroadcast()) {
       continue;
     }
@@ -1278,6 +1285,7 @@ std::pair<std::vector<Val*>, bool> Index::getConsumerRootPredIndices(
   return std::make_pair(root_inds, use_rfactor);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -16,6 +16,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * IterVisitor starts from leaf nodes, fusion outputs, or the provided values.
@@ -29,8 +30,9 @@ namespace fuser {
  * TODO: We may want to have ordering of outputs to inputs. I'm not sure why we
  * would want this, but seems like it would be a reasonable request.
  */
-class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
+class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~IterVisitor() = default;
 
   IterVisitor() = default;
@@ -67,8 +69,8 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
 
   virtual std::vector<Statement*> next(Expr* expr) {
     FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
-    std::vector<Statement*> next_stmts{expr->inputs().begin(),
-                                       expr->inputs().end()};
+    std::vector<Statement*> next_stmts{
+        expr->inputs().begin(), expr->inputs().end()};
     return next_stmts;
   }
 
@@ -93,10 +95,12 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // guarenteed to be all siblings throughout traversal). stmt_stack.front()
   // contains the outputs we started with (not guarenteed to be all outputs
   // throughout traversal).
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<Statement*>> stmt_stack;
 
   // Statements to stop traversal on if they're hit (pretends they're leaf
   // nodes in next)
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_set<Statement*> termination_stmts;
 
   void traverse_(
@@ -146,8 +150,9 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
  * outputs to guarentee that we will traverse all outputs of all exprs during
  * the backward traversal.
  */
-class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
+class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~BackwardVisitor() = default;
 
   BackwardVisitor() = default;
@@ -170,16 +175,19 @@ class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void handle(Statement* stmt) override {
     OptOutDispatch::handle(stmt);
   }
   // This handle functions is called on every Expr* in topological order,
   // starting from outputs to inputs.
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void handle(Expr* expr) override {
     OptOutDispatch::handle(expr);
   }
   // This handle functions is called on every Val* in topological order,
   // starting from outputs to inputs.
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void handle(Val* val) override {
     OptOutDispatch::handle(val);
   }
@@ -206,7 +214,7 @@ class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
       bool traverseAllPaths = false);
 };
 
-class TORCH_CUDA_API DependencyCheck {
+class TORCH_CUDA_CU_API DependencyCheck {
  public:
   // Returns if "dependency" is a dependency of "of".
   static bool isDependencyOf(Val* dependency, Val* of);
@@ -263,6 +271,7 @@ class InputsOf : public IterVisitor {
   static std::unordered_set<Val*> output(Fusion* fusion, Val* output_);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

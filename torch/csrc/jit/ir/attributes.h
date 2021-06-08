@@ -19,21 +19,41 @@ using ::c10::Symbol;
 
 constexpr int max_tensor_display_size = 10;
 
-enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys, ival };
+enum class AttributeKind {
+  f,
+  fs,
+  c,
+  cs,
+  i,
+  is,
+  s,
+  ss,
+  t,
+  ts,
+  g,
+  gs,
+  ty,
+  tys,
+  ival
+};
 static inline const char* toString(AttributeKind kind) {
-  static const char* names[] = {"f",
-                                "fs",
-                                "i",
-                                "is",
-                                "s",
-                                "ss",
-                                "t",
-                                "ts",
-                                "g",
-                                "gs",
-                                "ty",
-                                "tys",
-                                "ival"};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  static const char* names[] = {
+      "f",
+      "c",
+      "cs",
+      "fs",
+      "i",
+      "is",
+      "s",
+      "ss",
+      "t",
+      "ts",
+      "g",
+      "gs",
+      "ty",
+      "tys",
+      "ival"};
   AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(*names));
   return names[int(kind)];
 }
@@ -88,6 +108,10 @@ struct VectorAttributeValue : public AttributeValue {
   ValueType value_;
 };
 
+using ComplexAttr =
+    ScalarAttributeValue<c10::complex<double>, AttributeKind::c>;
+using ComplexValsAttr =
+    VectorAttributeValue<c10::complex<double>, AttributeKind::cs>;
 using FloatAttr = ScalarAttributeValue<double, AttributeKind::f>;
 using FloatsAttr = VectorAttributeValue<double, AttributeKind::fs>;
 using IntAttr = ScalarAttributeValue<int64_t, AttributeKind::i>;
@@ -108,7 +132,7 @@ struct TORCH_API GraphAttr : public AttributeValue {
   using ConstructorType = std::shared_ptr<Graph>;
   using ValueType = std::shared_ptr<Graph>;
   GraphAttr(Symbol name, ConstructorType value_)
-      : AttributeValue(name), value_(value_) {}
+      : AttributeValue(name), value_(std::move(value_)) {}
   ValueType& value() {
     return value_;
   }

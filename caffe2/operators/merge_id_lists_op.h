@@ -32,6 +32,7 @@ class MergeIdListsOp : public Operator<Context> {
      * and perform checks.
      */
     auto M = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < InputSize(); i += 2) {
       auto& lengths = Input(i);
       CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS should be 1-D");

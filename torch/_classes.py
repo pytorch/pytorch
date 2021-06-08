@@ -40,7 +40,7 @@ class _Classes(types.ModuleType):
         ``torch.classes.loaded_libraries`` attribute, a set that may be inspected
         for the paths of all libraries loaded using this function.
 
-        Arguments:
+        Args:
             path (str): A path to a shared library to load.
         """
         torch.ops.load_library(path)

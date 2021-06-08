@@ -10,6 +10,7 @@
 
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestGeneratorDynamicCast) {
   // Test Description: Check dynamic cast for CPU
   auto foo = at::detail::createCPUGenerator();
@@ -17,39 +18,47 @@ TEST(CPUGeneratorImpl, TestGeneratorDynamicCast) {
   ASSERT_EQ(typeid(CPUGeneratorImpl*).hash_code(), typeid(result).hash_code());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestDefaultGenerator) {
-  // Test Description: 
+  // Test Description:
   // Check if default generator is created only once
   // address of generator should be same in all calls
   auto foo = at::detail::getDefaultCPUGenerator();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto bar = at::detail::getDefaultCPUGenerator();
   ASSERT_EQ(foo, bar);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestCloning) {
-  // Test Description: 
+  // Test Description:
   // Check cloning of new generators.
   // Note that we don't allow cloning of other
   // generator states into default generators.
   auto gen1 = at::detail::createCPUGenerator();
   auto cpu_gen1 = check_generator<CPUGeneratorImpl>(gen1);
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen1->random(); // advance gen1 state
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen1->random();
   auto gen2 = at::detail::createCPUGenerator();
   gen2 = gen1.clone();
   auto cpu_gen2 = check_generator<CPUGeneratorImpl>(gen2);
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
 
 void thread_func_get_engine_op(CPUGeneratorImpl* generator) {
   std::lock_guard<std::mutex> lock(generator->mutex_);
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   generator->random();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestMultithreadingGetEngineOperator) {
-  // Test Description: 
+  // Test Description:
   // Check CPUGeneratorImpl is reentrant and the engine state
-  // is not corrupted when multiple threads request for 
+  // is not corrupted when multiple threads request for
   // random samples.
   // See Note [Acquire lock when using random generators]
   auto gen1 = at::detail::createCPUGenerator();
@@ -67,14 +76,19 @@ TEST(CPUGeneratorImpl, TestMultithreadingGetEngineOperator) {
   t2.join();
   std::lock_guard<std::mutex> lock(gen2.mutex());
   auto cpu_gen2 = check_generator<CPUGeneratorImpl>(gen2);
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen2->random();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen2->random();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   cpu_gen2->random();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestGetSetCurrentSeed) {
-  // Test Description: 
+  // Test Description:
   // Test current seed getter and setter
   // See Note [Acquire lock when using random generators]
   auto foo = at::detail::getDefaultCPUGenerator();
@@ -91,8 +105,9 @@ void thread_func_get_set_current_seed(Generator generator) {
   generator.set_current_seed(current_seed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
-  // Test Description: 
+  // Test Description:
   // Test current seed getter and setter are thread safe
   // See Note [Acquire lock when using random generators]
   auto gen1 = at::detail::getDefaultCPUGenerator();
@@ -106,8 +121,9 @@ TEST(CPUGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
   ASSERT_EQ(gen1.current_seed(), initial_seed+3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestRNGForking) {
-  // Test Description: 
+  // Test Description:
   // Test that state of a generator can be frozen and
   // restored
   // See Note [Acquire lock when using random generators]
@@ -124,10 +140,11 @@ TEST(CPUGeneratorImpl, TestRNGForking) {
   ASSERT_EQ(target_value.sum().item<double>(), forked_value.sum().item<double>());
 }
 
-/** 
+/**
  * Philox CPU Engine Tests
  */
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestPhiloxEngineReproducibility) {
   // Test Description:
   //   Tests if same inputs give same results.
@@ -139,6 +156,7 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineReproducibility) {
   ASSERT_EQ(engine1(), engine2());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestPhiloxEngineOffset1) {
   // Test Description:
   //   Tests offsetting in same thread index.
@@ -160,6 +178,7 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineOffset1) {
   ASSERT_EQ(engine1(), engine2());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestPhiloxEngineOffset2) {
   // Test Description:
   //   Tests edge case at the end of the 2^190th value of the generator.
@@ -176,6 +195,7 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineOffset2) {
   ASSERT_EQ(engine1(), engine2());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestPhiloxEngineOffset3) {
   // Test Description:
   //   Tests edge case in between thread indices.
@@ -190,6 +210,7 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineOffset3) {
   ASSERT_EQ(engine1(), engine2());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestPhiloxEngineIndex) {
   // Test Description:
   //   Tests if thread indexing is working properly.
@@ -204,11 +225,12 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineIndex) {
  * MT19937 CPU Engine Tests
  */
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   // Test Description:
   //   Tests if same inputs give same results when compared
   //   to std.
-  
+
   // test with zero seed
   at::mt19937 engine1(0);
   std::mt19937 engine2(0);
@@ -231,5 +253,5 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   for(int i = 0; i < 10000; i++) {
     ASSERT_EQ(engine1(), engine2());
   }
-  
+
 }

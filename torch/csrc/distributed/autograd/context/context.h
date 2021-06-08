@@ -52,7 +52,7 @@ class TORCH_API DistAutogradContext {
 
   // Adds a future message recording an outstanding RPC.
   void addOutstandingRpc(
-      const std::shared_ptr<rpc::FutureMessage>& futureMessage);
+      const c10::intrusive_ptr<rpc::JitFuture>& jitFuture);
 
   // Returns all gradients.
   const c10::Dict<torch::Tensor, torch::Tensor> getGradients() const;
@@ -104,9 +104,17 @@ class TORCH_API DistAutogradContext {
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
-  std::shared_ptr<c10::ivalue::Future> clearAndWaitForOutstandingRpcsAsync();
+  c10::intrusive_ptr<c10::ivalue::Future> clearAndWaitForOutstandingRpcsAsync();
 
   void clearOutstandingRpcs();
+
+  // Record an event to mark the completion of gradient computation. These
+  // events will later help to properly synchronize gradients consumptions
+  // in getGradients(). We need these events because backward and
+  // optimizer.step are separate RPC calls, and will occur on different CUDA
+  // streams. Without synchronization, it is possible that gradients are
+  // consumed before they are ready.
+  void recordGradEvent(c10::Device device);
 
   const int64_t contextId_;
 
@@ -128,13 +136,17 @@ class TORCH_API DistAutogradContext {
   // that needs to be accumulated on that variable..
   c10::Dict<torch::Tensor, torch::Tensor> accumulatedGrads_;
 
+  // See comments for recordGradEvent(c10::Device device);
+  std::unordered_map<c10::Device, c10::Event> gradReadyEvents_;
+  const c10::impl::VirtualGuardImpl impl_;
+
   // The autograd GraphTask for the backward pass on this node for this context.
   std::shared_ptr<torch::autograd::GraphTask> graphTask_;
 
   // List of futures for RPCs initiated by this node to propagate gradients to
   // other nodes. The distributed autograd engine on this node can return
   // successfully only if all these futures are done and are successful.
-  std::vector<std::shared_ptr<rpc::FutureMessage>> outStandingRpcs_;
+  std::vector<c10::intrusive_ptr<rpc::JitFuture>> outStandingRpcs_;
 
   // Lock to protect concurrent modification of the context.
   mutable std::mutex lock_;
@@ -147,7 +159,7 @@ using ContextPtr = std::shared_ptr<DistAutogradContext>;
 // doesn't know the current context. It's just a util class.
 class TORCH_API ThreadLocalDistAutogradContext {
  public:
-  // Store 'new_context' to the thread local varaible maintained by this class.
+  // Store 'new_context' to the thread local variable maintained by this class.
   explicit ThreadLocalDistAutogradContext(ContextPtr&& new_context);
   ~ThreadLocalDistAutogradContext();
 

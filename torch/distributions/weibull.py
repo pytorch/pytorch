@@ -27,7 +27,7 @@ class Weibull(TransformedDistribution):
     def __init__(self, scale, concentration, validate_args=None):
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
-        base_dist = Exponential(torch.ones_like(self.scale))
+        base_dist = Exponential(torch.ones_like(self.scale), validate_args=validate_args)
         transforms = [PowerTransform(exponent=self.concentration_reciprocal),
                       AffineTransform(loc=0, scale=self.scale)]
         super(Weibull, self).__init__(base_dist,

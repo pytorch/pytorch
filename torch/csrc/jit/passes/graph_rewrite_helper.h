@@ -18,7 +18,7 @@ c10::optional<IValue> getIValue(
     const std::string& name,
     const std::unordered_map<const Value*, Value*>& match_vmap,
     const std::unordered_map<std::string, Value*>& vmap);
-void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph);
+TORCH_API void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph);
 
 bool isClampFusable(
     const Match& match,
@@ -39,10 +39,11 @@ struct PatternInfo {
   static PatternInfo parse_from_str(
       std::string pattern_string,
       const std::vector<MatchFilter>& filters = {}) {
-    PatternInfo rv{std::move(pattern_string),
-                   std::make_unique<Graph>(),
-                   decltype(vmap){},
-                   filters};
+    PatternInfo rv{
+        std::move(pattern_string),
+        std::make_unique<Graph>(),
+        decltype(vmap){},
+        filters};
     parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
     return rv;
   }

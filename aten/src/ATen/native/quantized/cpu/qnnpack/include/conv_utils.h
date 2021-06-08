@@ -92,6 +92,7 @@ struct conv_param_t {
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
     if (input_channels % groups != 0 || output_channels % groups != 0) {
       pytorch_qnnp_log_error(
           "failed to create %s: input and output channels must be divisible by"

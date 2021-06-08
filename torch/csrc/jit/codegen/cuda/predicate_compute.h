@@ -32,6 +32,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class PredicateCompute {
  public:
@@ -49,7 +50,7 @@ class PredicateCompute {
       bool ignore_block_grid_reductions = true);
 };
 
-class TORCH_CUDA_API UnrollPredicate {
+class TORCH_CUDA_CU_API UnrollPredicate {
  public:
   static kir::Bool* get(
       const std::vector<kir::ForLoop*>& outer_loops,
@@ -73,6 +74,7 @@ class TORCH_CUDA_API UnrollPredicate {
   const std::unordered_map<IterDomain*, IterDomain*>& p2c_root_map_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

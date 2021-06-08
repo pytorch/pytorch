@@ -8,7 +8,6 @@
 #include <THC/THCTensorCopy.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
-#include <THC/THCReduce.cuh>
 
 template <typename T>
 struct TensorCAddOp {
@@ -33,50 +32,6 @@ struct TensorMulOp {
 
   __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
     *out = *in1 * *in2;
-  }
-};
-
-template <typename T>
-struct TensorCFmodOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = *out % *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 % *in2;
-  }
-};
-
-template <>
-struct TensorCFmodOp<float> {
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = fmodf(*out, *in);
-  }
-
-  __device__ __forceinline__ void operator()(float* out, float* in1, float* in2) {
-    *out = fmodf(*in1, *in2);
-  }
-};
-
-template <>
-struct TensorCFmodOp<double> {
-  __device__ __forceinline__ void operator()(double* out, double* in) {
-    *out = fmod(*out, *in);
-  }
-
-  __device__ __forceinline__ void operator()(double* out, double* in1, double* in2) {
-    *out = fmod(*in1, *in2);
-  }
-};
-
-template <>
-struct TensorCFmodOp<at::Half> {
-  __device__ __forceinline__ void operator()(at::Half* out, at::Half* in) {
-    *out = fmodf(*out, *in);
-  }
-
-  __device__ __forceinline__ void operator()(at::Half* out, at::Half* in1, at::Half* in2) {
-    *out = fmodf(*in1, *in2);
   }
 };
 

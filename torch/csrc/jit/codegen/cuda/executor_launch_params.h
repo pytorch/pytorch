@@ -6,7 +6,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class TORCH_CUDA_API LaunchParams {
+class TORCH_CUDA_CU_API LaunchParams {
  public:
   static constexpr int64_t UNINITIALIZED_VAL = -1;
 
@@ -72,6 +72,8 @@ class TORCH_CUDA_API LaunchParams {
         class_val == UNINITIALIZED_VAL || incoming_val == class_val,
         "Tried to set ",
         val,
+        " from ",
+        class_val,
         " to ",
         incoming_val,
         ", but it was already set and new value does not match.",

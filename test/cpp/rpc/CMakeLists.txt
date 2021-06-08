@@ -5,7 +5,7 @@ set(TORCH_RPC_TEST_SOURCES
   ${TORCH_RPC_TEST_DIR}/test_wire_serialization.cpp
 )
 set(TORCH_RPC_TEST_DEPENDENCY_LIBS
-  torch c10d gtest process_group_agent tensorpipe_agent
+  torch c10d gtest process_group_agent
 )
 
 if(USE_GLOO)
@@ -20,7 +20,7 @@ if(USE_TENSORPIPE)
     ${TORCH_RPC_TEST_DIR}/test_tensorpipe_serialization.cpp
   )
   list(APPEND TORCH_RPC_TEST_DEPENDENCY_LIBS
-    tensorpipe
+    tensorpipe_agent tensorpipe
   )
 endif()
 

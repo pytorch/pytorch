@@ -66,6 +66,23 @@ class malformed_input : public std::runtime_error {
             "MALFORMED INPUT: " + err + " - " + std::to_string(stmt)) {}
 };
 
+class malformed_ir : public std::runtime_error {
+ public:
+  explicit malformed_ir() : std::runtime_error("MALFORMED IR") {}
+  explicit malformed_ir(const std::string& err)
+      : std::runtime_error("MALFORMED IR: " + err) {}
+  explicit malformed_ir(const Expr* expr)
+      : std::runtime_error("MALFORMED IR: " + std::to_string(expr)) {}
+  explicit malformed_ir(const std::string& err, const Expr* expr)
+      : std::runtime_error(
+            "MALFORMED IR: " + err + " - " + std::to_string(expr)) {}
+  explicit malformed_ir(const Stmt* stmt)
+      : std::runtime_error("MALFORMED IR: " + std::to_string(stmt)) {}
+  explicit malformed_ir(const std::string& err, const Stmt* stmt)
+      : std::runtime_error(
+            "MALFORMED IR: " + err + " - " + std::to_string(stmt)) {}
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

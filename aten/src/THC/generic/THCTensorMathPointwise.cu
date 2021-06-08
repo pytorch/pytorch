@@ -11,47 +11,6 @@ static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor
   at::namedinference::propagate_names(result, src);
 }
 
-#define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \
-  struct Tensor_##NAME##_##REAL##_Op {                                  \
-    __device__ __forceinline__ void operator()(scalar_t* out, scalar_t* in) const { \
-      *out = CFUNC(*in);                                                \
-    }                                                                   \
-                                                                        \
-    __device__ __forceinline__ void operator()(scalar_t* v) const {         \
-      *v = CFUNC(*v);                                                   \
-    }                                                                   \
-  };                                                                    \
-                                                                        \
-  void THCTensor_(NAME)(THCState* state, THCTensor* self_, THCTensor* src) { \
-    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));       \
-    at::assert_no_internal_overlap(self_);                              \
-    if (self_ == src) {                                                 \
-      if (!THC_pointwiseApply1<scalar_t>(state, self_, Tensor_##NAME##_##REAL##_Op())) { \
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);                      \
-      }                                                                 \
-    } else {                                                            \
-      THCTensor_(resizeAs)(state, self_, src);                          \
-                                                                        \
-      if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, Tensor_##NAME##_##REAL##_Op())) { \
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);                      \
-      }                                                                 \
-    }                                                                   \
-                                                                        \
-    THCudaCheck(cudaGetLastError());                                    \
-    propagate_names_if_named_tensor_enabled(self_, src);                \
-  }
-
-#define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC, REAL) \
-  IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)
-
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( sqrt, THCNumerics<scalar_t>::sqrt,  Real)
-
-#endif
-#undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
-#undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC
-
 void THCTensor_(crossKernel)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, int dimension)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, x, y));
@@ -69,37 +28,5 @@ void THCTensor_(crossKernel)(THCState *state, THCTensor *self, THCTensor *x, THC
   THCTensor_(free)(state, ny);
   THCTensor_(free)(state, nself);
 }
-
-namespace {
-c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl> retainTensorImpl(THCTensor* self) {
-  c10::raw::intrusive_ptr::incref(self);
-  return c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(self);
-}
-}
-
-void THCTensor_(cmul)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
-{
-  auto out = at::Tensor(retainTensorImpl(self_));
-  at::mul_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)));
-}
-
-void THCTensor_(cfmod)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, src1, src2));
-  THArgCheck(THCTensor_(nElement)(state, src1) ==
-             THCTensor_(nElement)(state, src2), 2, "sizes do not match");
-
-  if (self == src1) {
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self, src2, TensorCFmodOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self, src1);
-    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self, src1, src2, TensorCFmodOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-}
-
 #endif
 #endif

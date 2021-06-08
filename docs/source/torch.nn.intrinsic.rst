@@ -18,6 +18,11 @@ ConvBn2d
 .. autoclass:: ConvBn2d
     :members:
 
+ConvBn3d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvBn3d
+    :members:
+
 ConvBnReLU1d
 ~~~~~~~~~~~~~~~
 .. autoclass:: ConvBnReLU1d
@@ -26,6 +31,11 @@ ConvBnReLU1d
 ConvBnReLU2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: ConvBnReLU2d
+    :members:
+
+ConvBnReLU3d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvBnReLU3d
     :members:
 
 ConvReLU1d
@@ -38,3 +48,7 @@ ConvReLU2d
 .. autoclass:: ConvReLU2d
     :members:
 
+ConvReLU3d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvReLU3d
+    :members:

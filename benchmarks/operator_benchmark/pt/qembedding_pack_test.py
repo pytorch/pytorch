@@ -35,21 +35,25 @@ unpack_ops = op_bench.op_list(
 
 class EmbeddingBagFloatToFusedBase(op_bench.TorchBenchmarkBase):
     def init(self, num_embeddings, embedding_dim, op_func):
-        self.weight = torch.from_numpy((np.random.random_sample((
-            num_embeddings, embedding_dim)) + 1).astype(np.float32))
+        self.inputs = {
+            "weight": torch.from_numpy((np.random.random_sample((
+                num_embeddings, embedding_dim)) + 1).astype(np.float32))
+        }
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.weight)
+    def forward(self, weight):
+        return self.op_func(weight)
 
 class EmbeddingBagFusedToFloatBase(op_bench.TorchBenchmarkBase):
     def init(self, num_embeddings, embedding_dim, op_func):
         weight = torch.randn(num_embeddings, embedding_dim + 8, dtype=torch.float)
-        self.packed_weight = weight.to(torch.uint8)
+        self.inputs = {
+            "packed_weight": weight.to(torch.uint8)
+        }
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.packed_weight)
+    def forward(self, packed_weight):
+        return self.op_func(packed_weight)
 
 
 op_bench.generate_pt_tests_from_op_list(conversion_ops,

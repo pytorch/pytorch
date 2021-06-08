@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API FileStoreHandler : public StoreHandler {
+class TORCH_API FileStoreHandler : public StoreHandler {
  public:
   explicit FileStoreHandler(const std::string& path, const std::string& prefix);
   virtual ~FileStoreHandler();

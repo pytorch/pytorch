@@ -394,7 +394,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
-def celu(input: Tensor, scale: float, zero_point: int, alpha: Optional[float] = 1.) -> Tensor:
+def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
     r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
 
     Applies the quantized CELU function element-wise.
@@ -410,25 +410,8 @@ def celu(input: Tensor, scale: float, zero_point: int, alpha: Optional[float] = 
     return torch.ops.quantized.celu(input, scale, zero_point, alpha)
 
 
-def relu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""relu(input, inplace=False) -> Tensor
-
-    Applies the rectified linear unit function element-wise.
-    See :class:`~torch.nn.quantized.ReLU` for more details.
-
-    Args:
-        input: quantized input
-        inplace: perform the computation inplace
-    """
-    if not input.is_quantized:
-        raise ValueError("Input to 'quantized.relu' must be quantized!")
-    if inplace:
-        return torch.relu_(input)
-    else:
-        return torch.relu(input)
-
 def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False,
-               scale: float = None, zero_point: int = None):
+               scale: Optional[float] = None, zero_point: Optional[int] = None):
     r"""
     Quantized version of the.
     leaky_relu(input, negative_slope=0.01, inplace=False, scale, zero_point) -> Tensor
