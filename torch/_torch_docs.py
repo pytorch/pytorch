@@ -3894,9 +3894,16 @@ Example::
 
 add_docstr(torch.histogram,
            r"""
-histogram(input, bins, *, min=None, max=None, weight=None, density=False, out=None) -> (Tensor, Tensor)
+histogram(input, bins, *, range=[], min=None, max=None, weight=None, density=False, out=None) -> (Tensor, Tensor)
 
 Computes the histogram of the values in a tensor.
+
+If :attr:`bins` is an int, it specifies the number of equal-width bins.
+Either :attr:`range` or :attr:`min` and :attr:`max` may be used to
+specify the lower and upper range of the bins. If no range is specified,
+the minimum and maximum elements of the input tensor are used.
+
+If :attr:`bins` is a tensor, it specifies the sequence of bin edges.
 
 Args:
     {input}
@@ -3904,8 +3911,9 @@ Args:
           defines the sequence of bin edges including the rightmost edge.
 
 Keyword args:
-    min (scalar): Defines the lower range of the bins. If not provided, defaults to input.min().
-    max (scalar): Defines the upper range of the bins. If not provided, defaults to input.max().
+    range (tuple of float): Defines the range of the bins.
+    min (float): Defines the lower range of the bins.
+    max (float): Defines the upper range of the bins.
     weight (Tensor): If provided, weight should have the same shape as input. Each value in
                      input contributes its associated weight towards its bin's result.
     density (bool): If False, the result will contain the count (or total weight) in each bin.

@@ -4908,8 +4908,16 @@ else:
             (np_hist, np_bin_edges) = np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density)
             return (torch.from_numpy(np_hist).to(actual_dtype), torch.from_numpy(np_bin_edges).to(actual_dtype))
 
-        (minv, maxv) = bin_range if bin_range else (None, None)
-        (actual_hist, actual_bin_edges) = torch.histogram(t, bins, min=minv, max=maxv, weight=weights, density=density)
+        if bin_range:
+            (minv, maxv) = bin_range
+            (actual_hist, actual_bin_edges) = torch.histogram(t, bins, min=minv, max=maxv, weight=weights, density=density)
+
+            # Tests that passing min and max as 'range' tuple produces the same result
+            (range_hist, range_bin_edges) = torch.histogram(t, bins, range=bin_range, weight=weights, density=density)
+            self.assertEqual(range_hist, actual_hist)
+            self.assertEqual(range_bin_edges, actual_bin_edges)
+        else:
+            (actual_hist, actual_bin_edges) = torch.histogram(t, bins, weight=weights, density=density)
 
         actual_dtype = actual_hist.dtype
 
@@ -4942,13 +4950,20 @@ else:
             (1, 5, 1),
             (2, 3, 5))
 
-        for contig, bins_contig, bin_ct, minmax, weighted, density, shape in \
-                product([True, False], [True, False], range(1, 10), [True, False], [True, False], [True, False], shapes):
+        for contig, bins_contig, bin_ct, weighted, density, shape in \
+                product([True, False], [True, False], range(1, 10), [True, False], [True, False], shapes):
             values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous=not contig)
-            bin_range = sorted((random.uniform(-9, 9), random.uniform(-9, 9))) if minmax else None
             weights = make_tensor(shape, device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
 
             # Tests passing just the bin_ct
+            self._test_histogram_numpy(values, bin_ct, None, weights, density)
+
+            # Tests with caller-specified histogram range
+            bin_range = sorted((random.uniform(-9, 9), random.uniform(-9, 9)))
+            self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
+
+            # Tests with min=max
+            bin_range[1] = bin_range[0]
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
 
             # Tests with caller-specified bin edges
@@ -4959,17 +4974,17 @@ else:
                 bin_edges_noncontig.copy_(bin_edges)
                 bin_edges = bin_edges_noncontig
             self.assertEqual(bin_edges.is_contiguous(), bins_contig)
-            self._test_histogram_numpy(values, bin_edges, bin_range, weights, density)
+            self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             # Tests with input tensor in which all elements are equal
             elt = random.uniform(-9, 9)
             values = make_tensor(shape, device, dtype, low=elt, high=elt, noncontiguous=not contig)
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
-            self._test_histogram_numpy(values, bin_edges, bin_range, weights, density)
+            self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             # Tests with input equal to bin_edges
             weights = make_tensor(bin_ct + 1, device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
-            self._test_histogram_numpy(bin_edges, bin_edges, bin_range, weights, density)
+            self._test_histogram_numpy(bin_edges, bin_edges, None, weights, density)
 
         # Tests values of default args
         for bin_ct, shape in product(range(1, 10), shapes):
@@ -5033,6 +5048,31 @@ else:
             hist = make_tensor((2), device, dtype=dtype, noncontiguous=True)
             bin_edges = make_tensor((), device, dtype=dtype)
             torch.histogram(values, 2, out=(hist, bin_edges))
+
+        with self.assertRaisesRegex(RuntimeError, 'min and max should be specified together'):
+            values = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, 2, min=0.)
+
+        with self.assertRaisesRegex(RuntimeError, 'min and max should be specified together'):
+            values = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, 2, max=0.)
+
+        with self.assertRaisesRegex(RuntimeError, 'range and min/max arguments should not both be specified'):
+            values = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, 2, min=0., max=1., range=(0, 1))
+
+        with self.assertRaisesRegex(TypeError, 'received an invalid combination of arguments'):
+            values = make_tensor((), device, dtype=dtype)
+            bin_edges = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, bin_edges, range=(0, 1))
+
+        with self.assertRaisesRegex(RuntimeError, 'min should not exceed max'):
+            values = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, 2, min=1., max=0.)
+
+        with self.assertRaisesRegex(RuntimeError, 'min should not exceed max'):
+            values = make_tensor((), device, dtype=dtype)
+            torch.histogram(values, 2, range=(1, 0))
 
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):

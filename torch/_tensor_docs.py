@@ -1714,7 +1714,7 @@ See :func:`torch.histc`
 
 add_docstr_all('histogram',
                r"""
-histogram(input, bins, *, min=None, max=None, weight=None, density=False) -> (Tensor, Tensor)
+histogram(input, bins, *, range=[], min=None, max=None, weight=None, density=False) -> (Tensor, Tensor)
 
 See :func:`torch.histogram`
 """)
