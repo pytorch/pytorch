@@ -65,6 +65,7 @@ void setInputTensorDescriptorTypeAndBuffer(
 template <typename T>
 void adjustQuantizedOffsetImpl(Tensor* t, uint8_t offset) {
   auto* data = t->mutable_data<T>();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < t->numel(); ++i) {
     data[i] -= offset;
   }
@@ -131,6 +132,7 @@ void BlobToTensorDescriptor(
   CAFFE_ENFORCE(blob, "Blob ", name, " doesn't exist");
   const bool is_int8tensor =
       blob->meta().id() == TypeMeta::Id<int8::Int8TensorCPU>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool is_external_tensor;
 #ifndef C10_MOBILE
   auto function_ptr =
@@ -278,6 +280,7 @@ details::OutputReshapeInfo OnnxifiOp<CPUContext>::initOutputReshapeInfo()
   output_reshape_info.begins.reserve(output_names_.size());
   output_reshape_info.ends.reserve(output_names_.size());
   output_reshape_info.fast_path.reserve(output_names_.size());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < output_names_.size(); ++i) {
     const auto it = output_shape_hints_.find(i);
     CAFFE_ENFORCE(
@@ -316,6 +319,7 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
   end.Resize(dim_size);
   int32_t* end_ptr = end.template mutable_data<int32_t>();
   int32_t mismatch = 0;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int j = 0; j < dim_size; ++j) {
     CAFFE_ENFORCE_GE(
         max_shape[j],
@@ -330,6 +334,7 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
         real_shape[j],
         ")");
     begin_ptr[j] = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (max_shape[j] > real_shape[j]) {
       end_ptr[j] = real_shape[j];
       mismatch += j;
@@ -346,48 +351,13 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
 }
 
 template <>
-int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
-  if (use_onnx_ || !adjust_output_batch_) {
-    return max_batch_size_;
-  }
-
-  // Get the real batch size from nominal input. If it's equal to
-  // max_batch_size, mark that we don't need to adjust batch size and return.
-  // Otherwise, do a pass of shape inference to get the real shapes of the
-  // outputs.
-  const Tensor* t = nullptr;
-  if (this->template InputIsType<int8::Int8TensorCPU>(nominal_batch_idx_)) {
-    const auto& input_tensor_int8 =
-        this->template Input<int8::Int8TensorCPU>(nominal_batch_idx_);
-    t = &input_tensor_int8.t;
-  } else {
-    t = &Input(nominal_batch_idx_);
-  }
-
-  CAFFE_ENFORCE(
-      t, "Null input shape tensor ptr. Possibly unsupported tensor type");
-  CAFFE_ENFORCE(
-      !t->sizes().empty(),
-      input_names_[nominal_batch_idx_],
-      " cannot be empty");
-  const auto dims = t->sizes();
-  const int current_batch_size = dims[0];
-  if (current_batch_size == max_batch_size_) {
-    return max_batch_size_;
-  }
-
-  // We still need to adjust output size but we can skip the shape inference as
-  // it was done before.
-  if (output_reshape_info_.count(current_batch_size)) {
-    return current_batch_size;
-  }
-
+void OnnxifiOp<CPUContext>::extractOutputBatchSizes(int current_batch_size) {
   auto& output_reshape_info =
       output_reshape_info_.emplace(current_batch_size, initOutputReshapeInfo())
           .first->second;
 
   if (use_passed_output_shapes_) {
-    auto shape_info_it = output_shapes_per_bs_.find(current_batch_size);
+    const auto shape_info_it = output_shapes_per_bs_.find(current_batch_size);
     CAFFE_ENFORCE(
         shape_info_it != output_shapes_per_bs_.end(),
         "Unable to find outputs shapes for bs=",
@@ -402,7 +372,7 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
           i);
     }
   } else {
-    BoundShapeSpec spec(dims[0], max_seq_size_);
+    BoundShapeSpec spec(current_batch_size, max_seq_size_);
     auto bound_shape_inferencer =
         BoundShapeInferencerRegistry()->Create("C10", spec);
     for (int i = 0; i < InputSize(); ++i) {
@@ -443,6 +413,46 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
           i);
     }
   }
+}
+
+template <>
+int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
+  if (use_onnx_ || !adjust_output_batch_) {
+    return max_batch_size_;
+  }
+
+  // Get the real batch size from nominal input. If it's equal to
+  // max_batch_size, mark that we don't need to adjust batch size and return.
+  // Otherwise, do a pass of shape inference to get the real shapes of the
+  // outputs.
+  const Tensor* t = nullptr;
+  if (this->template InputIsType<int8::Int8TensorCPU>(nominal_batch_idx_)) {
+    const auto& input_tensor_int8 =
+        this->template Input<int8::Int8TensorCPU>(nominal_batch_idx_);
+    t = &input_tensor_int8.t;
+  } else {
+    t = &Input(nominal_batch_idx_);
+  }
+
+  CAFFE_ENFORCE(
+      t, "Null input shape tensor ptr. Possibly unsupported tensor type");
+  CAFFE_ENFORCE(
+      !t->sizes().empty(),
+      input_names_[nominal_batch_idx_],
+      " cannot be empty");
+  const auto dims = t->sizes();
+  const int current_batch_size = dims[0];
+  if (current_batch_size == max_batch_size_) {
+    return max_batch_size_;
+  }
+
+  // We still need to adjust output size but we can skip the shape inference as
+  // it was done before.
+  if (output_reshape_info_.count(current_batch_size)) {
+    return current_batch_size;
+  }
+
+  extractOutputBatchSizes(current_batch_size);
 
   return current_batch_size;
 }
@@ -533,6 +543,15 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(
   }
 }
 
+string mapOnnxStateToString(onnxEventState state) {
+  switch (state) {
+    case ONNXIFI_EVENT_STATE_NONSIGNALLED:
+      return "ONNXIFI_EVENT_STATE_NONSIGNALLED";
+    default:
+      return "ONNXIFI_EVENT_STATE_STRING_NOT_MAPPED";
+  }
+}
+
 string mapOnnxStatusToString(onnxStatus status) {
   switch (status) {
     case ONNXIFI_STATUS_SUCCESS:
@@ -617,19 +636,23 @@ string mapOnnxStatusToString(onnxStatus status) {
 template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (unsigned i = 0U; i < InputSize(); ++i) {
     auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     at::IntArrayRef tensor_dims;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
       const auto& input_tensor_int8 =
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           this->template Input<int8::Int8TensorCPU>(i);
       const auto& cpu_tensor = input_tensor_int8.t;
       tensor_dims = cpu_tensor.sizes();
       setInputTensorDescriptorTypeAndBuffer(
           input_tensor_int8, &tensor_descriptor);
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       const auto& input_tensor = Input(i);
       tensor_dims = input_tensor.sizes();
       setInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
@@ -644,7 +667,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
   c10::SmallVector<int64_t, 4> tensor_dims_int64;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (unsigned i = 0U; i < OutputSize(); ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     setOutputShapeAndType(i, tensor_dims_int64);
   }
   bool ext_supported = false;
@@ -656,7 +681,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   /**
    * If onnxifi extension mode is enabled,
    * and onnxSetIOAndRunGraph is supported in backend,
-   * then we run throw this workflow;
+   * then we run through this workflow;
    * Else we fallback to non-onnxifi-extension workflow.
    **/
   if (onnxSetIOAndRunGraphPointer_ != nullptr) {
@@ -690,8 +715,25 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         "Reason: onnxSetIOAndRunGraph returned status code ",
         mapOnnxStatusToString(status));
 
-    current_batch_size = extractOutputBatchSizes();
+    // Check if we should rely on Onnxifi to provide current batch size
+    if (use_onnxifi_batch_size_ && onnxGetCurrentBatchSizePointer_ != nullptr) {
+      int64_t onnxifiBatchSize;
+      if ((*onnxGetCurrentBatchSizePointer_)(&onnxifiBatchSize) == ONNXIFI_STATUS_SUCCESS) {
+        current_batch_size = onnxifiBatchSize;
+
+        if (current_batch_size != max_batch_size_ &&
+            output_reshape_info_.count(current_batch_size) == 0) {
+          extractOutputBatchSizes(current_batch_size);
+        }
+      } else {
+        current_batch_size = extractOutputBatchSizes();
+      }
+    } else {
+      current_batch_size = extractOutputBatchSizes();
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     onnxEventState eventState;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     onnxStatus eventStatus;
     std::string message;
     size_t messageLength = 512;
@@ -703,6 +745,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             timeout_,
             &eventState,
             &eventStatus,
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
             const_cast<char*>(message.data()),
             &messageLength),
         ONNXIFI_STATUS_SUCCESS);
@@ -711,7 +754,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         ONNXIFI_EVENT_STATE_SIGNALLED,
         "Onnxifi run timeouted out after ",
         timeout_,
-        " ms.");
+        " ms.",
+        "Reason: Onnxifi run returned event state code ",
+        mapOnnxStateToString(eventState));
     if (eventStatus != ONNXIFI_STATUS_SUCCESS) {
       if (messageLength == 0) {
         CAFFE_THROW("onnxifi internal error");
@@ -760,8 +805,10 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   }
 
   if (adjust_quantized_offset_) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (unsigned i = 0U; i < OutputSize(); ++i) {
       if (quantized_outputs_[i]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         auto* int8_tensor = this->template Output<int8::Int8TensorCPU>(i);
         int8_tensor->zero_point += adjust_quantized_offset_;
         adjustQuantizedOffset(&int8_tensor->t, adjust_quantized_offset_);
@@ -776,7 +823,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Onnxifi)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)

@@ -118,7 +118,7 @@ template <typename Op,
           typename Ta,
           typename IndexType,
           int ADims>
-#if defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
@@ -138,7 +138,7 @@ template <typename Op,
           typename Ta, typename Tb,
           typename IndexType,
           int ADims, int BDims>
-#if defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
@@ -157,7 +157,7 @@ template <typename Op,
           typename Ta, typename Tb, typename Tc,
           typename IndexType,
           int ADims, int BDims, int CDims>
-#if defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void

@@ -384,7 +384,7 @@ class TestRecursiveScript(JitTestCase):
     def test_error_stack_class(self):
         class X(object):
             def bad_fn(self):
-                import pdb  # noqa
+                import pdb  # noqa: F401
 
         def fn(x) -> X:
             return X(10)
@@ -400,7 +400,7 @@ class TestRecursiveScript(JitTestCase):
     def test_error_stack_annotation(self):
         class X(object):
             def bad_fn(self):
-                import pdb  # noqa
+                import pdb  # noqa: F401
 
         def fn(x) -> X:
             return X(10)

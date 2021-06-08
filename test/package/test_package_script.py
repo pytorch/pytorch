@@ -12,7 +12,7 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 
 class TestPackageScript(PackageTestCase):
@@ -29,6 +29,7 @@ class TestPackageScript(PackageTestCase):
 
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("model", "model.pkl", uses_interface)
         buffer.seek(0)
 

@@ -134,6 +134,8 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
+        a = a.resolve_conj()
+        b = b.resolve_conj()
         if equal_nan == "relaxed":
             a = a.clone()
             b = b.clone()
@@ -345,7 +347,7 @@ def all_types():
 def all_types_and(*dtypes):
     return _all_types + _validate_dtypes(*dtypes)
 
-_complex_types = (torch.cfloat, torch.cdouble)
+_complex_types = _dispatch_dtypes((torch.cfloat, torch.cdouble))
 def complex_types():
     return _complex_types
 

@@ -17,9 +17,7 @@ class LiteNativePeer implements INativePeer {
   private final HybridData mHybridData;
 
   private static native HybridData initHybrid(
-      String moduleAbsolutePath,
-      Map<String, String> extraFiles,
-      int deviceJniCode);
+      String moduleAbsolutePath, Map<String, String> extraFiles, int deviceJniCode);
 
   LiteNativePeer(String moduleAbsolutePath, Map<String, String> extraFiles, Device device) {
     mHybridData = initHybrid(moduleAbsolutePath, extraFiles, device.jniCode);

@@ -34,19 +34,20 @@ typedef struct {
   std::atomic<int> refcount;
 } THMapInfo;
 
-const char * unknown_filename = "filename not specified";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+const std::string unknown_filename = "filename not specified";
 #ifdef _WIN32
-const char * unknown_eventname = "eventname not specified";
+const std::string unknown_eventname = "eventname not specified";
 #endif
 
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
-  : filename_(filename ? filename : unknown_filename)
+THMapAllocator::THMapAllocator(WithFd, std::string filename, int fd, int flags, size_t size)
+  : filename_(filename.empty() ? unknown_filename : std::move(filename))
   , flags_(0) // to be filled later
   , size_(0) // to be filled later
 #ifdef _WIN32
   , handle_(INVALID_HANDLE_VALUE) // to be filled later
   , event_(INVALID_HANDLE_VALUE) // to be filled later
-  , eventname_(filename ? std::string(filename) + "_event" : unknown_eventname)
+  , eventname_(filename.empty() ? unknown_eventname : (filename + "_event"))
 #else
   , fd_(fd)
 #endif
@@ -212,8 +213,11 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 #else /* _WIN32 */
   {
     /* open file */
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int fd;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int flags; // shadow
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     struct stat file_stat;
 
     if (flags_ & (TH_ALLOCATOR_MAPPED_SHARED | TH_ALLOCATOR_MAPPED_SHAREDMEM)) {
@@ -259,11 +263,13 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
     }
 
     if (size > 0) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (size > file_stat.st_size) {
         if (flags_) {
           if (ftruncate(fd, size) == -1) {
             AT_ERROR("unable to resize file <", filename_, "> to the right size");
           }
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < size) {
             ::close(fd);
             AT_ERROR("unable to stretch file <", filename_, "> to the right size");
@@ -332,8 +338,8 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
   c10::reportMemoryUsageToProfiler(base_ptr_, size_, c10::Device(c10::DeviceType::CPU));
 }
 
-THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
-  : THMapAllocator(WITH_FD, filename, -1, flags, size)
+THMapAllocator::THMapAllocator(std::string filename, int flags, size_t size)
+  : THMapAllocator(WITH_FD, std::move(filename), -1, flags, size)
 {}
 
 #ifdef _WIN32
@@ -398,11 +404,11 @@ void THMapAllocator::close() {
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
-THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size) {
+THMapAllocator::THMapAllocator(std::string filename, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size) {
+THMapAllocator::THMapAllocator(WithFd, std::string filename, int fd, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
@@ -548,8 +554,8 @@ THRefcountedMapAllocator* THRefcountedMapAllocator::fromDataPtr(const at::DataPt
   return dptr.cast_context<THRefcountedMapAllocator>(&deleteTHRefcountedMapAllocator);
 }
 
-at::DataPtr THMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
-  auto* context = new THMapAllocator(filename, flags, size);
+at::DataPtr THMapAllocator::makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THMapAllocator(std::move(filename), flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteTHMapAllocator, at::DeviceType::CPU};
 }
@@ -577,6 +583,7 @@ void* THRefcountedMapAllocator::data() const {
 }
 
 THMapAllocator::~THMapAllocator() {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   close();
   c10::reportMemoryUsageToProfiler(base_ptr_, -size_, c10::Device(c10::DeviceType::CPU));
 }

@@ -8,15 +8,31 @@
 
 # Taken and modified from original source:
 # https://eli.thegreenplace.net/2015/redirecting-all-kinds-of-stdout-in-python/
-
 import ctypes
+import logging
 import os
 import sys
 from contextlib import contextmanager
 from functools import partial
 
+IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 
-libc = ctypes.CDLL("libc.so.6")
+
+logger = logging.getLogger(__name__)
+
+
+def get_libc():
+    if IS_WINDOWS or IS_MACOS:
+        logger.warning(
+            "NOTE: Redirects are currently not supported in Windows or MacOs."
+        )
+        return None
+    else:
+        return ctypes.CDLL("libc.so.6")
+
+
+libc = get_libc()
 
 
 def _c_std(stream: str):

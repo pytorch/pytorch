@@ -19,6 +19,10 @@
 #include <execinfo.h>
 #endif
 
+#ifdef FBCODE_CAFFE2
+#include <common/process/StackTrace.h>
+#endif
+
 namespace c10 {
 
 #if SUPPORTS_BACKTRACE
@@ -167,7 +171,14 @@ std::string get_backtrace(
     size_t frames_to_skip,
     size_t maximum_number_of_frames,
     bool skip_python_frames) {
-#if SUPPORTS_BACKTRACE
+#ifdef FBCODE_CAFFE2
+  // For some reason, the stacktrace implementation in fbcode is
+  // better than ours, see  https://github.com/pytorch/pytorch/issues/56399
+  // When it's available, just use that.
+  facebook::process::StackTrace st;
+  return st.toString();
+
+#elif SUPPORTS_BACKTRACE
 
   // We always skip this frame (backtrace).
   frames_to_skip += 1;
@@ -240,7 +251,8 @@ std::string get_backtrace(
   return stream.str();
 #elif defined(_MSC_VER) // !SUPPORTS_BACKTRACE
   // This backtrace retrieval is implemented on Windows via the Windows
-  // API using `CaptureStackBackTrace`, `SymFromAddr` and `SymGetLineFromAddr64`.
+  // API using `CaptureStackBackTrace`, `SymFromAddr` and
+  // `SymGetLineFromAddr64`.
   // https://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
   // https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
   // https://docs.microsoft.com/en-us/windows/win32/debug/capturestackbacktrace
@@ -302,7 +314,8 @@ std::string get_backtrace(
            << back_trace[i_frame] << std::dec;
     if (with_symbol) {
       stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
-             << p_symbol->Address << std::dec << " " << module << "!" << p_symbol->Name;
+             << p_symbol->Address << std::dec << " " << module << "!"
+             << p_symbol->Name;
     } else {
       stream << " <unknown symbol address> " << module << "!<unknown symbol>";
     }

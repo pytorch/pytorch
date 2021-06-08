@@ -88,6 +88,7 @@ class ReshapeOp : public Operator<Context> {
     // NOTE: support for legacy caffe1 syntax
     // Copy over the dimensions for those that are specified zero.
     if (total_size != 0) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 0; i < actual_new_shape.size() && i < input.dim(); ++i) {
         if (actual_new_shape[i] == 0) {
           actual_new_shape[i] = input.size(i);

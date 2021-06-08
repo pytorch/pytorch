@@ -130,8 +130,7 @@ class ConcatBench : public benchmark::Fixture {
           output_buf,
           {for_vars[0],
            new Add(for_vars[1], new IntImm(cumulative_input_sizes))},
-          new Load(inputs[i].data(), {for_vars[0], for_vars[1]}, new IntImm(1)),
-          new IntImm(1));
+          new Load(inputs[i].data(), {for_vars[0], for_vars[1]}));
       auto for_st = new For(
           for_vars[0],
           new IntImm(0),

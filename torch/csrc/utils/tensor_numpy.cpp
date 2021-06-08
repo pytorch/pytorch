@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/tensor_numpy.h>
 #define WITH_NUMPY_IMPORT_ARRAY
 #include <torch/csrc/utils/numpy_stub.h>
+#include <c10/util/irange.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
@@ -51,6 +52,7 @@ bool is_numpy_available() {
     }
     // Try to get exception message, print warning and return false
     std::string message = "Failed to initialize NumPy";
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *type, *value, *traceback;
     PyErr_Fetch(&type, &value, &traceback);
     if (auto str = value ? PyObject_Str(value) : nullptr) {
@@ -72,7 +74,7 @@ static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
   // shape and stride conversion from int64_t to npy_intp
   auto nelem = x.size();
   auto result = std::vector<npy_intp>(nelem);
-  for (size_t i = 0; i < nelem; i++) {
+  for(const auto i : c10::irange(nelem)) {
     result[i] = static_cast<npy_intp>(x[i]);
   }
   return result;
@@ -81,7 +83,7 @@ static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
 static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
   // shape and stride conversion from npy_intp to int64_t
   auto result = std::vector<int64_t>(ndim);
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     result[i] = static_cast<int64_t>(values[i]);
   }
   return result;
@@ -93,7 +95,7 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
     throw TypeError("shape and strides must be sequences");
   }
   auto result = std::vector<int64_t>(ndim);
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     auto item = THPObjectPtr(PySequence_GetItem(py_seq, i));
     if (!item) throw python_error();
 
@@ -195,7 +197,7 @@ at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/)
   }
 
   size_t storage_size = 1;
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     if (strides[i] < 0) {
       throw ValueError(
           "At least one stride in the given numpy array is negative, "
@@ -312,12 +314,14 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
   ScalarType dtype;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dtype_size_in_bytes;
   {
     PyObject *py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
     if (py_typestr == nullptr) {
       throw TypeError("attribute `typestr` must exist");
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyArray_Descr *descr;
     if(!PyArray_DescrConverter(py_typestr, &descr)) {
       throw ValueError("cannot parse `typestr`");
@@ -328,6 +332,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['data']` attribute
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void *data_ptr;
   {
     PyObject *py_data = PyDict_GetItemString(cuda_dict, "data");

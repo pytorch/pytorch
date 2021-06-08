@@ -93,7 +93,7 @@ class ParametrizationList(ModuleList):
         """
         with torch.no_grad():
             # See https://github.com/pytorch/pytorch/issues/53103
-            for module in reversed(self):  # type: ignore
+            for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     value = module.right_inverse(value)
                 else:
@@ -205,6 +205,9 @@ def register_parametrization(
     Parametrizations may be concatenated by registering several parametrizations
     on the same attribute.
 
+    The training mode of the registered parametrizations are updated on registration
+    if necessary to match the training mode of the host module
+
     Parametrized parameters and buffers have an inbuilt caching system that can be activated
     using the context manager :func:`cached`.
 
@@ -256,9 +259,10 @@ def register_parametrization(
         >>> print(torch.allclose(m.weight, A))
         True
     """
+    parametrization.train(module.training)
     if is_parametrized(module, tensor_name):
         # Just add the new parametrization to the parametrization list
-        module.parametrizations[tensor_name].append(parametrization)  # type: ignore
+        module.parametrizations[tensor_name].append(parametrization)  # type: ignore[index, union-attr]
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
@@ -275,7 +279,7 @@ def register_parametrization(
         # Add a property into the class
         _inject_property(module, tensor_name)
         # Add a ParametrizationList
-        module.parametrizations[tensor_name] = ParametrizationList(  # type: ignore
+        module.parametrizations[tensor_name] = ParametrizationList(  # type: ignore[assignment, index, operator]
             [parametrization], original
         )
     else:
@@ -341,9 +345,10 @@ def remove_parametrizations(
         )
 
     # Fetch the original tensor
-    original = module.parametrizations[tensor_name].original  # type: ignore
+    original = module.parametrizations[tensor_name].original  # type: ignore[index, union-attr]
     if leave_parametrized:
-        t = getattr(module, tensor_name)
+        with torch.no_grad():
+            t = getattr(module, tensor_name)
         # If they have the same dtype, we reuse the original tensor.
         # We do this so that the parameter does not to change the id()
         # This way the user does not need to update the optimizer
@@ -359,7 +364,7 @@ def remove_parametrizations(
     # Delete the property that manages the parametrization
     delattr(module.__class__, tensor_name)
     # Delete the ParametrizationList
-    del module.parametrizations[tensor_name]  # type: ignore
+    del module.parametrizations[tensor_name]  # type: ignore[operator, union-attr]
 
     # Restore the parameter / buffer into the main class
     if isinstance(original, Parameter):

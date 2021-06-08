@@ -77,16 +77,22 @@ void NetObserverReporterPrint::report(
     }
   }
 
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto it = caffe2_perf.begin(); it != caffe2_perf.end(); it++) {
     std::stringstream buffer;
     auto entry = *it;
     buffer << IDENTIFIER << "{";
+    // NOLINTNEXTLINE(modernize-raw-string-literal)
     buffer << "\"type\": \"" << sanatize(entry["type"]) << "\","
+           // NOLINTNEXTLINE(modernize-raw-string-literal)
            << "\"unit\": \"" << sanatize(entry["unit"]) << "\","
+           // NOLINTNEXTLINE(modernize-raw-string-literal)
            << "\"metric\": \"" << sanatize(entry["metric"]) << "\",";
     if (entry.find("value") != entry.end()) {
+      // NOLINTNEXTLINE(modernize-raw-string-literal)
       buffer << "\"value\": \"" << sanatize(entry["value"]) << "\"";
     } else if (entry.find("info_string") != entry.end()) {
+      // NOLINTNEXTLINE(modernize-raw-string-literal)
       buffer << "\"info_string\": \"" << sanatize(entry["info_string"]) << "\"";
     }
     buffer << "}";

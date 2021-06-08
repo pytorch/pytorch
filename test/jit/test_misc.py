@@ -24,8 +24,8 @@ class TestMisc(JitTestCase):
     def test_joined_str(self):
         def func(x):
             hello, test = "Hello", "test"
-            print(f"{hello + ' ' + test}, I'm a {test}") # noqa E999
-            print(f"format blank") # noqa F541
+            print(f"{hello + ' ' + test}, I'm a {test}")
+            print("format blank")
             hi = 'hi'
             print(f"stuff before {hi}")
             print(f"{hi} stuff after")

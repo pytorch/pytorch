@@ -8,6 +8,7 @@
 
 using namespace ideep;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterEngineAllocator cpu_alloc(
   engine::cpu_engine(),
   [](size_t size) {

@@ -10,8 +10,10 @@
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
+  - [Local linting](#local-linting)
   - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
+  - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Writing documentation](#writing-documentation)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
@@ -33,6 +35,7 @@
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+  - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
 - [Running clang-tidy](#running-clang-tidy)
 - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
 - [Building PyTorch with ASAN](#building-pytorch-with-asan)
@@ -74,11 +77,17 @@ https://github.com/pytorch/pytorch#from-source
 
 To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing PyTorch installs:
+1. Uninstall all existing PyTorch installs. You may need to run `pip
+uninstall torch` multiple times. You'll know `torch` is fully
+uninstalled when you see `WARNING: Skipping torch as it is not
+installed`. (You should only have to `pip uninstall` a few times, but
+you can always `uninstall` with `timeout` or in a loop if you're feeling
+lazy.)
+
+
 ```bash
-conda uninstall pytorch
-pip uninstall torch
-pip uninstall torch # run this command twice
+conda -y uninstall pytorch
+yes | pip uninstall torch
 ```
 
 2. Clone a copy of PyTorch from source:
@@ -131,8 +140,10 @@ For example:
 You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
 if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
-In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
-and `python setup.py clean`. Then you can install in `develop` mode again.
+In case you want to reinstall, make sure that you uninstall PyTorch
+first by running `pip uninstall torch` until you see `WARNING: Skipping
+torch as it is not installed`; next run `python setup.py clean`. After
+that, you can install in `develop` mode again.
 
 ### Tips and Debugging
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
@@ -357,13 +368,48 @@ The above is an example of testing a change to all Loss functions: this
 command runs tests such as `TestNN.test_BCELoss` and
 `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
+
+### Local linting
+
+You can run the same linting steps that are used in CI locally via `make`:
+
+```bash
+# Lint all files
+make lint -j 6  # run lint (using 6 parallel jobs)
+
+# Lint only the files you have changed
+make quicklint -j 6
+```
+
+These jobs may require extra dependencies that aren't dependencies of PyTorch
+itself, so you can install them via this command, which you should only have to
+run once:
+
+```bash
+make setup_lint
+```
+
+To run a specific linting step, use one of these targets or see the
+[`Makefile`](Makefile) for a complete list of options.
+
+```bash
+# Check for tabs, trailing newlines, etc.
+make quick_checks
+
+make flake8
+
+make mypy
+
+make cmakelint
+```
+
 ### Running `mypy`
 
 `mypy` is an optional static type checker for Python. We have multiple `mypy`
 configs for the PyTorch codebase, so you can run them all using this command:
 
 ```bash
-for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+make mypy
 ```
 
 See [Guide for adding type annotations to
@@ -389,6 +435,26 @@ is part of the test suite `ContainerAliasingTest` in the file
 ./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
 ```
 
+
+### Run Specific CI Jobs
+
+You can generate a commit that limits the CI to only run a specific job by using
+`tools/explicit_ci_jobs.py` like so:
+
+```bash
+# --job: specify one or more times to filter to a specific job + its dependencies
+# --make-commit: commit CI changes to git with a message explaining the change
+python tools/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+
+# Make your changes
+
+ghstack submit
+```
+
+**NB**: It is not recommended to use this workflow unless you are also using
+[`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
+of very low signal to reviewers.
+
 ## Writing documentation
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
@@ -411,8 +477,12 @@ pip install -r requirements.txt
 # npm install -g katex
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
-# If you're a Facebook employee using a devserver, yarn may be more convenient:
-# yarn global add katex
+```
+
+> Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
+
+```
+yarn global add katex
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
@@ -477,6 +547,13 @@ et my_machine -t="8000:8000"
 ```
 
 Then navigate to `localhost:8000` in your web browser.
+
+**Tip:**
+You can start a lightweight HTTP server on the remote machine with:
+
+```
+python -m http.server 8000 <path_to_html_output>
+```
 
 Alternatively, you can run `rsync` on your local machine to copy the files from
 your remote machine:
@@ -833,7 +910,7 @@ tensor([1., 2., 3., 4.], dtype=torch.float64)
 ```
 
 GDB tries to automatically load `pytorch-gdb` thanks to the
-[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, auto-loadings is disabled by default, because of security reasons:
+[.gdbinit](.gdbinit) at the root of the pytorch repo. However, auto-loadings is disabled by default, because of security reasons:
 
 ```
 $ gdb
@@ -1015,6 +1092,18 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   any occurrences of the PURE token in code with an empty string. This is why
   we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
   The same is likely true for other identifiers that we just didn't try to use yet.
+
+### Building on legacy code and CUDA
+
+CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions from this table:
+| CUDA version | Newest supported VS version                             | PyTorch version |
+| ------------ | ------------------------------------------------------- | --------------- |
+| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |  0.4.1 ~ 1.5.1  |
+| 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.3.0 ~ 1.7.0  |
+| 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
+| 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
+
+Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
 ## Running clang-tidy
 

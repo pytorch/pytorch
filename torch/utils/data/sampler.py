@@ -59,10 +59,10 @@ class SequentialSampler(Sampler[int]):
     """
     data_source: Sized
 
-    def __init__(self, data_source):
+    def __init__(self, data_source: Sized) -> None:
         self.data_source = data_source
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         return iter(range(len(self.data_source)))
 
     def __len__(self) -> int:
@@ -109,7 +109,7 @@ class RandomSampler(Sampler[int]):
             return len(self.data_source)
         return self._num_samples
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
         if self.generator is None:
             generator = torch.Generator()
@@ -123,7 +123,7 @@ class RandomSampler(Sampler[int]):
         else:
             yield from torch.randperm(n, generator=generator).tolist()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_samples
 
 
@@ -140,10 +140,10 @@ class SubsetRandomSampler(Sampler[int]):
         self.indices = indices
         self.generator = generator
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         return (self.indices[i] for i in torch.randperm(len(self.indices), generator=self.generator))
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.indices)
 
 
@@ -182,11 +182,11 @@ class WeightedRandomSampler(Sampler[int]):
         self.replacement = replacement
         self.generator = generator
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         rand_tensor = torch.multinomial(self.weights, self.num_samples, self.replacement, generator=self.generator)
         return iter(rand_tensor.tolist())
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_samples
 
 
@@ -221,7 +221,7 @@ class BatchSampler(Sampler[List[int]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[List[int]]:
         batch = []
         for idx in self.sampler:
             batch.append(idx)
@@ -231,12 +231,12 @@ class BatchSampler(Sampler[List[int]]):
         if len(batch) > 0 and not self.drop_last:
             yield batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         # Can only be called if self.sampler has __len__ implemented
         # We cannot enforce this condition, so we turn off typechecking for the
         # implementation below.
         # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
         if self.drop_last:
-            return len(self.sampler) // self.batch_size  # type: ignore
+            return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
         else:
-            return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]

@@ -398,6 +398,14 @@ inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) 
   return true;
 }
 
+constexpr int getApplyBlocksPerSM() {
+  return AT_APPLY_BLOCKS_PER_SM;
+}
+
+constexpr int getApplyBlockSize() {
+  return AT_APPLY_THREADS_PER_BLOCK;
+}
+
 inline dim3 getApplyBlock() {
   return dim3(AT_APPLY_THREADS_PER_BLOCK);
 }

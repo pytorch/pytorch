@@ -73,11 +73,11 @@ class _FunctionalSGD(object):
             F.sgd(params,
                   grads,
                   momentum_buffer_list,
-                  weight_decay,
-                  momentum,
-                  lr,
-                  dampening,
-                  self.nesterov)
+                  weight_decay=weight_decay,
+                  momentum=momentum,
+                  lr=lr,
+                  dampening=dampening,
+                  nesterov=self.nesterov)
 
         # update momentum_buffers in state
         for i, p in enumerate(params):

@@ -867,6 +867,35 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 }
 
 template <>
+void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
+#if CUDA_VERSION >= 11000
+  TORCH_CUDABLAS_CHECK(cublasDotEx(
+      handle,
+      n,
+      x,
+      CUDA_R_16BF,
+      incx,
+      y,
+      CUDA_R_16BF,
+      incy,
+      result,
+      CUDA_R_16BF,
+      CUDA_R_32F));
+#elif HIP_VERSION >= 210
+  TORCH_CUDABLAS_CHECK(rocblas_bfdot(
+      handle,
+      n,
+      reinterpret_cast<const rocblas_bfloat16*>(x),
+      incx,
+      reinterpret_cast<const rocblas_bfloat16*>(y),
+      incy,
+      reinterpret_cast<rocblas_bfloat16*>(result)));
+#else
+  AT_ERROR("Cublas_bfdot requires CUDA 11.0+");
+#endif
+}
+
+template <>
 void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
   TORCH_CUDABLAS_CHECK(cublasCdotc(handle, n, reinterpret_cast<const cuComplex*>(x),
                                    incx, reinterpret_cast<const cuComplex*>(y), incy,
@@ -880,8 +909,48 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
+// This guards blocks use of geqrfBatched, getrfBatched, getriBatched on platforms other than cuda
 #ifdef CUDART_VERSION
+
+template <>
+void geqrfBatched<float>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasSgeqrfBatched(
+      handle, m, n, A_array, lda, tau_array, info, batchsize));
+}
+
+template <>
+void geqrfBatched<double>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDgeqrfBatched(
+      handle, m, n, A_array, lda, tau_array, info, batchsize));
+}
+
+template <>
+void geqrfBatched<c10::complex<float>>(
+    CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCgeqrfBatched(
+      handle,
+      m,
+      n,
+      reinterpret_cast<cuComplex**>(A_array),
+      lda,
+      reinterpret_cast<cuComplex**>(tau_array),
+      info,
+      batchsize));
+}
+
+template <>
+void geqrfBatched<c10::complex<double>>(
+    CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZgeqrfBatched(
+      handle,
+      m,
+      n,
+      reinterpret_cast<cuDoubleComplex**>(A_array),
+      lda,
+      reinterpret_cast<cuDoubleComplex**>(tau_array),
+      info,
+      batchsize));
+}
 
 template <>
 void getrfBatched<double>(
@@ -997,6 +1066,46 @@ void getriBatched<c10::complex<float>>(
       lddc,
       info_array,
       batchsize));
+}
+
+template <>
+void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDgelsBatched(
+      handle, trans, m, n, nrhs, dA_array, ldda, dC_array, lddc, info, devInfoArray, batchSize));
+}
+
+template <>
+void gelsBatched<float>(CUDABLAS_GELS_BATCHED_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasSgelsBatched(
+      handle, trans, m, n, nrhs, dA_array, ldda, dC_array, lddc, info, devInfoArray, batchSize));
+}
+
+template <>
+void gelsBatched<c10::complex<double>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZgelsBatched(
+      handle, trans,
+      m, n, nrhs,
+      reinterpret_cast<cuDoubleComplex**>(dA_array),
+      ldda,
+      reinterpret_cast<cuDoubleComplex**>(dC_array),
+      lddc,
+      info,
+      devInfoArray,
+      batchSize));
+}
+
+template <>
+void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCgelsBatched(
+      handle, trans,
+      m, n, nrhs,
+      reinterpret_cast<cuComplex**>(dA_array),
+      ldda,
+      reinterpret_cast<cuComplex**>(dC_array),
+      lddc,
+      info,
+      devInfoArray,
+      batchSize));
 }
 
 #endif // CUDART_VERSION

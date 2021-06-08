@@ -21,9 +21,11 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) convolution modules.
 template <size_t D, typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ConvNdImpl : public torch::nn::Cloneable<Derived> {
  public:
   explicit ConvNdImpl(detail::ConvNdOptions<D> options_) : options(std::move(options_)) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     reset();
   }
 
@@ -41,13 +43,13 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
           std::fill_n(_reversed_padding_repeated_twice.begin(), 2 * D, 0);
         },
         [&](enumtype::kSame) {
-          for (int64_t i = 0; i < D; ++i) {
+          for (size_t i = 0; i < D; ++i) {
             const auto stride = (*options.stride())[i];
             TORCH_CHECK(stride == 1, "padding='same' is not supported for strided convolutions");
           }
 
           _reversed_padding_repeated_twice.resize(2 * D);
-          for (int64_t i = 0; i < D; ++i) {
+          for (size_t i = 0; i < D; ++i) {
             const auto dilation = (*options.dilation())[i];
             const auto kernel_size = (*options.kernel_size())[i];
             const auto total_padding = dilation * (kernel_size - 1);
@@ -94,6 +96,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
     init::kaiming_uniform_(weight, /*a=*/std::sqrt(5));  // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
     if (bias.defined()) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t fan_in, fan_out;
       std::tie(fan_in, fan_out) = init::_calculate_fan_in_and_fan_out(weight);
       auto bound = 1 / std::sqrt(fan_in);
@@ -140,15 +143,19 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
   }
 
   /// The options with which this `Module` was constructed.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   detail::ConvNdOptions<D> options;
 
   /// The learned kernel (or "weight").
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor weight;
 
   /// The learned bias. Only defined if the `bias` option was true.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor bias;
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<int64_t> _reversed_padding_repeated_twice;
 };
 
@@ -165,6 +172,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv1dImpl : public ConvNdImpl<1, Conv1dImpl> {
  public:
   Conv1dImpl(
@@ -197,6 +205,7 @@ TORCH_MODULE(Conv1d);
 /// ```
 /// Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv2dImpl : public ConvNdImpl<2, Conv2dImpl> {
  public:
   Conv2dImpl(
@@ -232,6 +241,7 @@ TORCH_MODULE(Conv2d);
 /// ```
 /// Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv3dImpl : public ConvNdImpl<3, Conv3dImpl> {
  public:
   Conv3dImpl(
@@ -255,6 +265,7 @@ TORCH_MODULE(Conv3d);
 
 /// Base class for all (dimension-specialized) convolution transpose modules.
 template <size_t D, typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
  public:
   using torch::nn::ConvNdImpl<D, Derived>::ConvNdImpl;
@@ -317,6 +328,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 /// ```
 /// ConvTranspose1d model(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose1dImpl : public ConvTransposeNdImpl<1, ConvTranspose1dImpl> {
  public:
   ConvTranspose1dImpl(
@@ -352,6 +364,7 @@ TORCH_MODULE(ConvTranspose1d);
 /// ```
 /// ConvTranspose2d model(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose2dImpl : public ConvTransposeNdImpl<2, ConvTranspose2dImpl> {
  public:
   ConvTranspose2dImpl(
@@ -387,6 +400,7 @@ TORCH_MODULE(ConvTranspose2d);
 /// ```
 /// ConvTranspose3d model(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose3dImpl : public ConvTransposeNdImpl<3, ConvTranspose3dImpl> {
  public:
   ConvTranspose3dImpl(

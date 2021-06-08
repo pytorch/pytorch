@@ -41,7 +41,7 @@ if(NOT BUILD_LITE_INTERPRETER)
 endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec256/*.h" "quantized/*.h")
+file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec256/*.h" "cpu/vec/*.h" "quantized/*.h")
 file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
 file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
@@ -79,11 +79,21 @@ EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
 file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
 file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
 
+file(GLOB native_ao_sparse_cpp
+            "native/ao_sparse/*.cpp"
+            "native/ao_sparse/cpu/*.cpp"
+            "native/ao_sparse/quantized/*.cpp"
+            "native/ao_sparse/quantized/cpu/*.cpp")
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
 file(GLOB native_h "native/*.h")
+file(GLOB native_ao_sparse_h
+            "native/ao_sparse/*.h"
+            "native/ao_sparse/cpu/*.h"
+            "native/ao_sparse/quantized/*.h"
+            "native/ao_sparse/quantized/cpu/*.h")
 file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
 file(GLOB native_cpu_h "native/cpu/*.h")
 
@@ -127,7 +137,8 @@ if(BUILD_LITE_INTERPRETER)
   list(APPEND all_cpu_cpp ${Aten_TH_AVX_extra_src})
 else()
   set(
-    all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp}
+    all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
+    ${native_ao_sparse_cpp} ${native_sparse_cpp}
     ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
     ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp}
     ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
@@ -298,6 +309,9 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
     set(BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
     set(OLD_CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE})
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+      set(DISABLE_SVE ON CACHE BOOL "Xcode's clang-12.5 crashes while trying to compile SVE code" FORCE)
+    endif()
     if("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU" AND
         CMAKE_C_COMPILER_VERSION VERSION_GREATER 6.9 AND CMAKE_C_COMPILER_VERSION VERSION_LESS 8)
       set(GCC_7 True)
@@ -422,7 +436,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
 else()
   if(USE_PYTORCH_METAL)
     if(IOS)
@@ -486,7 +500,7 @@ set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_BENCHMARK_SRCS ${ATen_MOBILE_BENCHMARK_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VEC256_TEST_SRCS  ${ATen_VEC256_TEST_SRCS} PARENT_SCOPE)
+set(ATen_VEC_TEST_SRCS  ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_TEST_SRCS ${ATen_QUANTIZED_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
 set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)

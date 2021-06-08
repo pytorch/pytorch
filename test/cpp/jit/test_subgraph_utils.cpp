@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphUtilsTest, Basic) {
   auto graph = build_lstm();
   EliminateCommonSubexpression(graph);
@@ -19,6 +20,7 @@ TEST(SubgraphUtilsTest, Basic) {
   for (bool reverse_iterate : {true, false}) {
     // Merge everything into a single subgraph
     bool first = true;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* subgraph;
     auto it =
         reverse_iterate ? graph->nodes().rbegin() : graph->nodes().begin();
@@ -38,6 +40,7 @@ TEST(SubgraphUtilsTest, Basic) {
     }
 
     // Unmerge and compare with original node listing
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     SubgraphUtils::unmergeSubgraph(subgraph);
     EliminateCommonSubexpression(graph);
 
@@ -46,6 +49,7 @@ TEST(SubgraphUtilsTest, Basic) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphUtilsTest, MergeSubgraphs) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> parse_map;
@@ -82,6 +86,7 @@ graph(%a : Tensor, %b : Tensor, %c : Tensor):
     while (graph2->next() != *graph->nodes().end()) {
       SubgraphUtils::mergeNodeIntoSubgraph(graph2->next(), graph2);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* subgraph;
     if (reverse_merge) {
       SubgraphUtils::mergeNodeIntoSubgraph(graph2, graph1);
@@ -113,6 +118,7 @@ graph(%a : Tensor, %b : Tensor, %c : Tensor):
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphUtilsTest, GraphName) {
   auto graph = std::make_shared<Graph>();
 

@@ -27,6 +27,9 @@ class BaseTestClass(JitTestCase):
         torch._C._debug_set_fusion_group_inlining(False)
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
+        # TODO: CPU fuser currently is disabled when multithreading.
+        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
+        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
@@ -39,6 +42,7 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -94,8 +98,7 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.addcmul(torch.add(x, y), z, w)
             return c
 
-        device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
-        for dev in device_options:
+        for dev in self.devices:
             rand_a = torch.rand(1024, dtype=torch.float, device=dev)
             rand_b = torch.rand(1024, dtype=torch.float, device=dev)
             rand_c = torch.rand(1024, dtype=torch.float, device=dev)
@@ -116,79 +119,64 @@ class TestTensorExprFuser(BaseTestClass):
             y = run_addcmul(rand_a, rand_b, rand_c, rand_d)
             np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy(), atol=1e-6)
 
-    def test_three_arg_cuda(self):
-        if not torch.cuda.is_available():
-            return
-        cuda_cg_executed = CudaCodeGenExecuted()
-        cuda_cg_created = CudaCodeGenCreated()
-
-        def test(x, y, z):
-            aaa = torch.add(x, y)
-            bbb = torch.add(aaa, z)
-            return bbb
-
-        M = 32
-        N = 32
-        traced = torch.jit.trace(
-            test,
-            (
-                torch.rand(M, N, device="cuda"),
-                torch.rand(M, N, device="cuda"),
-                torch.rand(M, N, device="cuda"),
-            ),
-        )
-
-        a = torch.rand(M, N, device="cuda")
-        b = torch.rand(M, N, device="cuda")
-        c = torch.rand(M, N, device="cuda")
-        x = traced(a, b, c)
-        x = warmup_and_run_forward(traced, a, b, c)
-        self.assertLastGraphAllFused()
-        npr = a.cpu().numpy() + b.cpu().numpy() + c.cpu().numpy()
-        np.testing.assert_allclose(npr, x.cpu().numpy())
-        assert cuda_cg_executed.elapsed_value() >= 1
-        assert cuda_cg_created.elapsed_value() >= 1
-
-    def test_broadcast_cuda(self):
-        if not torch.cuda.is_available():
-            return
-
-        def test_body(M, N, L, K):
-            if not torch.cuda.is_available():
-                return
-            cuda_cg_executed = CudaCodeGenExecuted()
-            cuda_cg_created = CudaCodeGenCreated()
-
+    def test_three_arg2(self):
+        for device in self.devices:
             def test(x, y, z):
-                v1 = torch.add(x, y)
-                v2 = torch.add(v1, z)
-                return v2
+                aaa = torch.add(x, y)
+                bbb = torch.add(aaa, z)
+                return bbb
 
-            a_shape = [M, N]
-            b_shape = [L, M, 1]
-            c_shape = [K, L, 1, 1]
+            M = 32
+            N = 32
             traced = torch.jit.trace(
                 test,
                 (
-                    torch.rand(*a_shape, device="cuda"),
-                    torch.rand(*b_shape, device="cuda"),
-                    torch.rand(*c_shape, device="cuda"),
+                    torch.rand(M, N, device=device),
+                    torch.rand(M, N, device=device),
+                    torch.rand(M, N, device=device),
                 ),
             )
 
-            a = torch.rand(*a_shape, device="cuda")
-            b = torch.rand(*b_shape, device="cuda")
-            c = torch.rand(*c_shape, device="cuda")
+            a = torch.rand(M, N, device=device)
+            b = torch.rand(M, N, device=device)
+            c = torch.rand(M, N, device=device)
+            x = traced(a, b, c)
             x = warmup_and_run_forward(traced, a, b, c)
             self.assertLastGraphAllFused()
             npr = a.cpu().numpy() + b.cpu().numpy() + c.cpu().numpy()
             np.testing.assert_allclose(npr, x.cpu().numpy())
-            assert cuda_cg_executed.elapsed_value() >= 1
-            assert cuda_cg_created.elapsed_value() >= 1
 
-        test_configs = [[36, 17, 63, 33], [32, 32, 32, 32]]
-        for test_config in test_configs:
-            test_body(*test_config)
+    def test_broadcast3(self):
+        for device in self.devices:
+            def test_body(M, N, L, K):
+                def test(x, y, z):
+                    v1 = torch.add(x, y)
+                    v2 = torch.add(v1, z)
+                    return v2
+
+                a_shape = [M, N]
+                b_shape = [L, M, 1]
+                c_shape = [K, L, 1, 1]
+                traced = torch.jit.trace(
+                    test,
+                    (
+                        torch.rand(*a_shape, device=device),
+                        torch.rand(*b_shape, device=device),
+                        torch.rand(*c_shape, device=device),
+                    ),
+                )
+
+                a = torch.rand(*a_shape, device=device)
+                b = torch.rand(*b_shape, device=device)
+                c = torch.rand(*c_shape, device=device)
+                x = warmup_and_run_forward(traced, a, b, c)
+                self.assertLastGraphAllFused()
+                npr = a.cpu().numpy() + b.cpu().numpy() + c.cpu().numpy()
+                np.testing.assert_allclose(npr, x.cpu().numpy())
+
+            test_configs = [[5, 2, 7, 3], [8, 8, 8, 8]]
+            for test_config in test_configs:
+                test_body(*test_config)
 
     def test_all_combos(self):
         def easy(x, y, z):
@@ -267,7 +255,6 @@ class TestTensorExprFuser(BaseTestClass):
         npr = np_easy(a.numpy(), b.numpy(), c.numpy())
         np.testing.assert_allclose(npr, x.numpy())
 
-    @unittest.skip("temporarily disable")
     def test_broadcast_2(self):
         zero = torch.tensor([0.0], dtype=torch.float)
 
@@ -292,7 +279,6 @@ class TestTensorExprFuser(BaseTestClass):
         rnp = foo_np(x.numpy(), y.numpy(), z.numpy())
         np.testing.assert_allclose(r, rnp)
 
-    @unittest.skip("temporarily disable")
     def test_broadcast_big2(self):
         zero = torch.tensor([0.0], dtype=torch.float)
 
@@ -328,7 +314,6 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(a.numpy() + 2.0 * a.numpy(), x.numpy())
 
     @suppress_warnings
-    @unittest.skip("temporarily disable")
     def test_constant(self):
         def constant(x):
             bbb = torch.tensor([1.0])
@@ -523,8 +508,7 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.lt(x, y)
             return c
 
-        device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
-        for dev in device_options:
+        for dev in self.devices:
             traced = torch.jit.trace(easy, (torch.zeros(1024, device=dev), torch.zeros(1024, device=dev)))
             a = torch.ones(1024, dtype=torch.int32, device=dev)
             b = torch.zeros(1024, dtype=torch.int32, device=dev)
@@ -589,9 +573,7 @@ class TestTensorExprFuser(BaseTestClass):
         def test(x):
             return torch.clamp(x + 3.0, 0.0, 6.0)
 
-        device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
-
-        for dev in device_options:
+        for dev in self.devices:
             traced = torch.jit.trace(test, (torch.zeros(1024, device=dev)))
             a = 20.0 * torch.rand(1024, device=dev) - 10.0
             an = a.cpu().numpy()
@@ -602,8 +584,7 @@ class TestTensorExprFuser(BaseTestClass):
         def test(x):
             return torch.clamp(F.relu(x), 0, 0.5)
 
-        device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
-        for dev in device_options:
+        for dev in self.devices:
             traced = torch.jit.trace(test, (torch.zeros(1024, device=dev)))
             a = 20.0 * torch.rand(1024, device=dev) - 10.0
             an = a.cpu().numpy()
@@ -722,9 +703,8 @@ class TestTensorExprFuser(BaseTestClass):
             test_pow,
             test_type_as,
         }
-        device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
         for torch_fn in fns:
-            for dev in device_options:
+            for dev in self.devices:
                 rand_a = torch.rand(1024, device=dev)
                 rand_b = torch.rand(1024, device=dev)
                 in1 = 20 * torch.rand(1024, device=dev)
@@ -906,10 +886,9 @@ class TestTensorExprFuser(BaseTestClass):
             test_hardtanh,
             test_sigmoid,
         }
-        device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
 
         for torch_fn in fns:
-            for dev in device_options:
+            for dev in self.devices:
                 # print(torch_fn, dev)
                 rand_a = torch.rand(1024, device=dev)
                 rand_b = torch.rand(1024, device=dev)
@@ -936,13 +915,12 @@ class TestTensorExprFuser(BaseTestClass):
                 #     # np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
     def test_rand_like(self):
-        devices = ["cuda"] if torch.cuda.is_available() else []
         N = 1 << 16
 
         def run_rand_like(x, y):
             return torch.rand_like(torch.add(x, y))
 
-        for device in devices:
+        for device in self.devices:
             x = torch.rand(N, device=device)
             traced = torch.jit.trace(run_rand_like, (x, x), check_trace=False)
             x_v = warmup_and_run_forward(traced, x, x)
@@ -976,13 +954,10 @@ class TestTensorExprFuser(BaseTestClass):
         self.assertLastGraphAllFused()
 
     def test_double_intrinsics(self):
-        # TODO: add "cpu" device once `pow` is supported there
-        devices = ["cuda"] if torch.cuda.is_available() else []
-
         def do_pow(x):
             return torch.pow(x, 7)
 
-        for device in devices:
+        for device in self.devices:
             x = torch.rand(10, dtype=torch.double, device=device)
             traced = torch.jit.trace(do_pow, (x))
             x = warmup_and_run_forward(traced, x)
@@ -1045,7 +1020,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         traced = torch.jit.trace(easy, (torch.zeros(1024, 1024)))
 
-        a = torch.zeros(1024, 1024)
+        a = torch.zeros(32, 32)
         x = warmup_and_run_forward(traced, a)
         self.assertLastGraphAllFused()
         npr = a.numpy()
@@ -1053,121 +1028,102 @@ class TestTensorExprFuser(BaseTestClass):
         npr_a, npr_b = np.array_split(npr2, 2)
         np.testing.assert_allclose(npr_a + npr_b, x.numpy())
 
-    def _test_cat(self, device):
-        def foo(*args):
-            args_2 = [v + i for i, v in enumerate(args)]
-            v = torch.cat(args_2, dim=1)
-            return v * v
+    def test_cat(self):
+        for device in self.devices:
+            def foo(*args):
+                args_2 = [v + i for i, v in enumerate(args)]
+                v = torch.cat(args_2, dim=1)
+                return v * v
 
-        M = 16
-        Ns = [128, 16, 1]
-        values = [torch.zeros(M, N, device=device) for N in Ns]
-        traced = torch.jit.trace(foo, values)
+            M = 16
+            Ns = [128, 16, 1]
+            values = [torch.zeros(M, N, device=device) for N in Ns]
+            traced = torch.jit.trace(foo, values)
 
-        x = warmup_and_run_forward(traced, *values)
-        self.assertLastGraphAllFused()
-        ref = foo(*values)
-        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
-
-    def test_cat_cpu(self):
-        self._test_cat('cpu')
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_cat_cuda(self):
-        self._test_cat('cuda')
+            x = warmup_and_run_forward(traced, *values)
+            self.assertLastGraphAllFused()
+            ref = foo(*values)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
     # This test checks that we correctly handle fusion group with just aten::cat in it.
     # Note that the test only makes sense with min_fusion_group=1, otherwise no
     # fusion groups would be formed at all.
     # TODO: Fix and re-enable the test.
-    def _test_cat_only(self, device):
-        def foo(*args):
-            args_2 = [v + i for i, v in enumerate(args)]
-            v = torch.cat(args_2, dim=1)
-            return v
+    @unittest.skip("cat is broken with fusion group inlining disabled")
+    def test_cat_only(self):
+        for device in self.devices:
+            def foo(*args):
+                args_2 = [v + i for i, v in enumerate(args)]
+                v = torch.cat(args_2, dim=1)
+                return v
 
-        M = 16
-        Ns = [128, 16, 1]
-        values = [torch.zeros(M, N, device=device) for N in Ns]
-        traced = torch.jit.trace(foo, values)
+            M = 16
+            Ns = [128, 16, 1]
+            values = [torch.zeros(M, N, device=device) for N in Ns]
+            traced = torch.jit.trace(foo, values)
 
-        x = warmup_and_run_forward(traced, *values)
-        self.assertLastGraphAllFused()
-        ref = foo(*values)
-        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+            x = warmup_and_run_forward(traced, *values)
+            self.assertLastGraphAllFused()
+            ref = foo(*values)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
-    @unittest.skip("temporarily disable")
-    def test_cat_only_cpu(self):
-        self._test_cat_only('cpu')
+    def test_cat_negative_dim(self):
+        for device in self.devices:
+            def foo(*args):
+                v = torch.cat(args, dim=-1)
+                return v * v
 
-    @unittest.skip("temporarily disable")
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_cat_only_cuda(self):
-        self._test_cat_only('cuda')
+            M = 16
+            Ns = [128, 16, 1]
+            values = [torch.randn(M, N, device=device) for N in Ns]
+            traced = torch.jit.trace(foo, values)
 
-    def _test_cat_negative_dim(self, device):
-        def foo(*args):
-            v = torch.cat(args, dim=-1)
-            return v * v
+            x = warmup_and_run_forward(traced, *values)
+            self.assertLastGraphAllFused()
+            ref = foo(*values)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
-        M = 16
-        Ns = [128, 16, 1]
-        values = [torch.randn(M, N, device=device) for N in Ns]
-        traced = torch.jit.trace(foo, values)
-
-        x = warmup_and_run_forward(traced, *values)
-        self.assertLastGraphAllFused()
-        ref = foo(*values)
-        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
-
-    def test_cat_negative_dim_cpu(self):
-        self._test_cat_negative_dim('cpu')
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_cat_negative_dim_cuda(self):
-        self._test_cat_negative_dim('cuda')
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_cat_promote_inputs(self):
-        def foo(*args):
-            v = torch.cat(args, dim=1)
-            return v * v
+        for device in self.devices:
+            def foo(*args):
+                v = torch.cat(args, dim=1)
+                return v * v
 
-        M = 16
-        Ns = [128, 16, 1]
-        dtypes = [torch.half, torch.float32, torch.double]
-        values = [torch.randn(M, N, device='cuda', dtype=dt) for N, dt in zip(Ns, dtypes)]
-        traced = torch.jit.trace(foo, values)
+            M = 16
+            Ns = [128, 16, 1]
+            dtypes = [torch.half, torch.float32, torch.double]
+            values = [torch.randn(M, N, device=device, dtype=dt) for N, dt in zip(Ns, dtypes)]
+            traced = torch.jit.trace(foo, values)
 
-        x = warmup_and_run_forward(traced, *values)
-        self.assertLastGraphAllFused()
-        ref = foo(*values)
-        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+            x = warmup_and_run_forward(traced, *values)
+            self.assertLastGraphAllFused()
+            ref = foo(*values)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_cat_empty_tensors(self):
-        def foo(*args):
-            v = torch.cat(args, dim=1)
-            return v * v
+        for device in self.devices:
+            def foo(*args):
+                v = torch.cat(args, dim=1)
+                return v * v
 
-        M = 16
-        Ns = [128, 16, 1]
-        empty = torch.tensor([], device='cuda', dtype=torch.double)
-        values = [empty] + [torch.randn(M, N, device='cuda') for N in Ns]
-        traced = torch.jit.trace(foo, values)
+            M = 16
+            Ns = [128, 16, 1]
+            empty = torch.tensor([], device=device, dtype=torch.double)
+            values = [empty] + [torch.randn(M, N, device=device) for N in Ns]
+            traced = torch.jit.trace(foo, values)
 
-        x = warmup_and_run_forward(traced, *values)
-        self.assertLastGraphAllFused()
-        ref = foo(*values)
-        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+            x = warmup_and_run_forward(traced, *values)
+            self.assertLastGraphAllFused()
+            ref = foo(*values)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
-        # now test with only empty tensors
-        values = [empty for i in range(3)]
-        traced = torch.jit.trace(foo, values)
-        x = warmup_and_run_forward(traced, *values)
-        self.assertLastGraphAllFused()
-        ref = foo(*values)
-        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+            # now test with only empty tensors
+            values = [empty for i in range(3)]
+            traced = torch.jit.trace(foo, values)
+            x = warmup_and_run_forward(traced, *values)
+            self.assertLastGraphAllFused()
+            ref = foo(*values)
+            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
     def test_scalar(self):
         @torch.jit.script
@@ -1206,7 +1162,6 @@ class TestTensorExprFuser(BaseTestClass):
         r = test(x, y, z)
         assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
-    @unittest.skip("no shape inference for aten::slice yet")
     def test_slice(self):
         def easy(x, y):
             a = x[0:512:2]
@@ -1307,13 +1262,11 @@ class TestTensorExprFuser(BaseTestClass):
             self.assertLastGraphAllFused()
 
     def test_exp_pow(self):
-        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
-
         @torch.jit.script
         def do_exp(x, y, z):
             return ((x * y) * 2) * torch.pow(z, 2)
 
-        for device in devices:
+        for device in self.devices:
             x = torch.rand(10, dtype=torch.double, device=device)
             y = torch.rand(10, dtype=torch.double, device=device)
             z = torch.rand(10, dtype=torch.double, device=device)
@@ -1351,8 +1304,8 @@ class TestTensorExprFuser(BaseTestClass):
         # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skip("dynamic shapes are not quite there yet")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_dynamic_shape(self):
         with num_profiled_runs(2):
             @torch.jit.script
@@ -1409,8 +1362,6 @@ class TestTensorExprFuser(BaseTestClass):
         assert cuda.elapsed_value() == 2
 
     def test_bitwise_ops(self):
-        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
-
         def run_and(x, y):
             return x & (x & y)
 
@@ -1428,7 +1379,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         fns = {run_and, run_or, run_xor, run_lshift, run_rshift}
 
-        for device in devices:
+        for device in self.devices:
             for fn in fns:
                 a = torch.ones(128, dtype=torch.int32, device=device)
                 b = torch.zeros(128, dtype=torch.int32, device=device)
@@ -1451,26 +1402,22 @@ class TestTensorExprFuser(BaseTestClass):
         y = run_where(a, b)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_multi_rand(self):
-        def test(x):
-            y = torch.rand_like(x)
-            return (x + y) - (y - x)
-        a = torch.rand(4, device="cuda")
-        scripted = torch.jit.script(test)
-        cx = CudaCodeGenExecuted()
-        out = warmup_and_run_forward(scripted, a)
-        self.assertLastGraphAllFused()
-        assert torch.allclose(out, 2 * a)
-        assert cx.elapsed_value() == 1
+        for device in self.devices:
+            def test(x):
+                y = torch.rand_like(x)
+                return (x + y) - (y - x)
+            a = torch.rand(4, device=device)
+            scripted = torch.jit.script(test)
+            out = warmup_and_run_forward(scripted, a)
+            self.assertLastGraphAllFused()
+            assert torch.allclose(out, 2 * a)
 
     def test_mask(self):
-        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
-
         def test(x):
             return x.unsqueeze(1) == 0
 
-        for d in devices:
+        for d in self.devices:
             x = torch.rand(4, device=d) > 0.5
             scripted = torch.jit.script(test)
             out = warmup_and_run_forward(scripted, x)

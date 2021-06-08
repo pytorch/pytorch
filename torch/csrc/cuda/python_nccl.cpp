@@ -288,7 +288,7 @@ at::Tensor extract_tensor(PyObject* obj) {
   if (!THPVariable_Check(obj)) {
     throw torch::TypeError("expected Tensor (got %s)", Py_TYPE(obj)->tp_name);
   }
-  return ((THPVariable*)obj)->cdata;
+  return THPVariable_Unpack(obj);
 }
 
 static inline
@@ -305,8 +305,7 @@ std::vector<at::Tensor> extract_tensors(PyObject* obj) {
       throw torch::TypeError(
           "expected Tensor at %d (got %s)", (int)i, Py_TYPE(item)->tp_name);
     }
-    auto var = (THPVariable*)item;
-    list.emplace_back(var->cdata);
+    list.emplace_back(THPVariable_Unpack(item));
   }
   return list;
 }

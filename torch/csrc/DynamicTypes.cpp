@@ -25,12 +25,16 @@
 
 namespace torch {
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<PyTypeObject*, at::DeprecatedTypeProperties*> py_storage_type_to_attype;
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
 THPDtype* dtype_registry
   [static_cast<int>(at::ScalarType::NumOptions)] = {};
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
 THPLayout* layout_registry
   [static_cast<int>(at::Layout::NumOptions)] = {};
 

@@ -488,7 +488,7 @@ __global__
     __shared__ float row_sum_squares_avg;
 
     for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
-      const float x_ij = grad[group * block_size + i] +
+      const float x_ij = grad[group * block_size + i] * in_weight_temp +
           weight_decay * param[index * block_size + i];
       sum_squares += x_ij * x_ij;
     }
@@ -496,8 +496,7 @@ __global__
 
     if (threadIdx.x == 0) {
       row_sum_squares_avg = reduce_result / static_cast<float>(block_size);
-      param_mom[index] +=
-          static_cast<T>(row_sum_squares_avg * in_weight_temp * in_weight_temp);
+      param_mom[index] += static_cast<T>(row_sum_squares_avg);
     }
     __syncthreads();
 

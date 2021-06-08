@@ -15,7 +15,7 @@ static void lerp_kernel_scalar(
     const Tensor& end,
     const Scalar& weight) {
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
-  auto iter = TensorIterator::binary_op(ret, self, end);
+  auto iter = TensorIterator::borrowing_binary_op(ret, self, end);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(ret.scalar_type(), "lerp_kernel_scalar", [&] {
     using value_t = typename c10::scalar_value_type<scalar_t>::type;
     scalar_t weight_val = weight.to<scalar_t>();
@@ -56,7 +56,9 @@ static void lerp_kernel_tensor(
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_kernel_scalar);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_kernel_tensor);
 
 } // namespace native

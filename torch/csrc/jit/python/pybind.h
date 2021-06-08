@@ -118,6 +118,7 @@ namespace detail {
 template <>
 struct type_caster<torch::jit::IValue> {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::IValue, _("IValue"));
 
   bool load(handle src, bool) {
@@ -140,6 +141,7 @@ struct type_caster<torch::jit::IValue> {
 template <>
 struct type_caster<torch::jit::Symbol> {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::Symbol, _("Symbol"));
 
   bool load(handle src, bool) {
@@ -167,6 +169,7 @@ struct type_caster<torch::jit::Symbol> {
 template <>
 struct type_caster<torch::jit::AttributeKind> {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::AttributeKind, _("AttributeKind"));
 
   bool load(handle src, bool) {

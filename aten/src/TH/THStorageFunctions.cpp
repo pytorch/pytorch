@@ -3,39 +3,51 @@
 
 #include <TH/THStorageFunctions.hpp>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateAllTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateComplexTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateHalfType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateBoolType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateQTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateAllTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateComplexTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateHalfType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateBoolType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateQTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
@@ -76,6 +88,7 @@ void THStorage_resizeBytes(THStorage* storage, ptrdiff_t size_bytes) {
     storage->set_nbytes(size_bytes);
     if (old_data != nullptr) {
       ptrdiff_t copy_capacity = old_capacity;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (storage->nbytes() < copy_capacity) {
         copy_capacity = storage->nbytes();
       }

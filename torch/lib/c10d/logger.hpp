@@ -1,3 +1,4 @@
+#include <c10/util/Logging.h>
 #include <c10d/reducer.hpp>
 
 namespace c10d {
@@ -13,10 +14,12 @@ class Logger {
       int output_device,
       bool broadcast_buffers);
 
+  void set_static_graph();
+
   // An interface for users to get DDPLoggingData and log them
   // in the applications. Explanation of logging fields are in
   // "struct DDPLoggingData" of "torch/c10/util/Logging.h".
-  c10::DDPLoggingData get_ddp_logging_data();
+  at::DDPLoggingData get_ddp_logging_data();
 
   // Stream insertion operator for logging data to stream under
   // TORCH_DISTRIBUTED_DEBUG.
@@ -32,6 +35,9 @@ class Logger {
   void set_comm_hook(const std::string& hook);
   // Set running with uneven input detection (model.join() context manager)
   void set_uneven_input_join();
+
+  // Reset performance stats at current iteration
+  void reset_performance_stats();
 
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.
@@ -56,10 +62,24 @@ class Logger {
   // events need to be created and recorded on multiple devices.
   void set_runtime_stats_and_log();
 
+  // Called when DDP/reducer is failing with an error. The
+  // logging data structure will have two fields filled: "has_error" indicating
+  // that this iteration encountered an error and other fields are not valid,
+  // and "error", a string which contains the error message that DDP failed
+  // with.
+  template <typename... Args>
+  void set_error_and_log(const std::string& ddp_error, const Args&... args) {
+    ddp_logging_data_->ints_map["has_error"] = 1;
+    auto err = c10::str(ddp_error, args...);
+    ddp_logging_data_->strs_map["error"] = err;
+    at::LogPyTorchDDPUsage(*ddp_logging_data_);
+  }
+
+
  private:
   // ddp_logging_data_ is used to hold all the ddp related logging
   // data fields.
-  std::unique_ptr<c10::DDPLoggingData> ddp_logging_data_;
+  std::unique_ptr<at::DDPLoggingData> ddp_logging_data_;
   std::shared_ptr<c10d::Reducer> reducer_;
   // track the number of iterations when runtime stats are collected so far.
   long num_iterations_stats_recorded_ = 0;

@@ -176,11 +176,6 @@ Tensor class reference
    - To create a tensor with similar type but different size as another tensor,
      use ``tensor.new_*`` creation ops.
 
-   .. warning::
-      The :class:`torch.Tensor` constructor is deprecated. Instead, consider using:
-      :func:`torch.tensor` for creating tensors from tensor-like objects (e.g. lists and tuples);
-      or :func:`torch.empty` for creating uninitialized tensors with specific sizes (e.g. int).
-
 .. autoattribute:: Tensor.T
 
 .. autosummary::
@@ -281,6 +276,9 @@ Tensor class reference
     Tensor.contiguous
     Tensor.copy_
     Tensor.conj
+    Tensor.conj_physical
+    Tensor.conj_physical_
+    Tensor.resolve_conj
     Tensor.copysign
     Tensor.copysign_
     Tensor.cos
@@ -327,6 +325,7 @@ Tensor class reference
     Tensor.divide_
     Tensor.dot
     Tensor.double
+    Tensor.dsplit
     Tensor.eig
     Tensor.element_size
     Tensor.eq
@@ -383,6 +382,7 @@ Tensor class reference
     Tensor.hardshrink
     Tensor.heaviside
     Tensor.histc
+    Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_
     Tensor.i0
@@ -413,7 +413,9 @@ Tensor class reference
     Tensor.isnan
     Tensor.is_contiguous
     Tensor.is_complex
+    Tensor.is_conj
     Tensor.is_floating_point
+    Tensor.is_inference
     Tensor.is_leaf
     Tensor.is_pinned
     Tensor.is_set_to
@@ -528,6 +530,7 @@ Tensor class reference
     Tensor.pinverse
     Tensor.polygamma
     Tensor.polygamma_
+    Tensor.positive
     Tensor.pow
     Tensor.pow_
     Tensor.prod
@@ -666,6 +669,7 @@ Tensor class reference
     Tensor.vdot
     Tensor.view
     Tensor.view_as
+    Tensor.vsplit
     Tensor.where
     Tensor.xlogy
     Tensor.xlogy_

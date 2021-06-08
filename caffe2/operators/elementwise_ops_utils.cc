@@ -47,7 +47,9 @@ std::vector<int> ComputeBinaryBroadcastForwardDims(
     const c10::ArrayRef<int>& B_dims) {
   const int ndim = std::max(A_dims.size(), B_dims.size());
   std::vector<int> C_dims(ndim);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int i = A_dims.size() - 1;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int j = B_dims.size() - 1;
   int k = ndim - 1;
   for (; i >= 0 && j >= 0; --k) {
@@ -84,7 +86,9 @@ void ComputeBinaryBroadcastBackwardAxes(
   A_axes->clear();
   B_axes->clear();
   const int ndim = std::max(A_dims.size(), B_dims.size());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int i = A_dims.size() - 1;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int j = B_dims.size() - 1;
   int k = ndim - 1;
   for (; i >= 0 && j >= 0; --k) {

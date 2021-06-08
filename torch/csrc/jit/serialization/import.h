@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -15,6 +16,29 @@ class ReadAdapterInterface;
 
 namespace torch {
 namespace jit {
+
+// used in torch.package deserialization
+class TORCH_API StorageContext {
+ public:
+  explicit StorageContext() = default;
+
+  void addStorage(const std::string& name, c10::Storage storage) {
+    storage_map_.insert({name, storage});
+  }
+
+  bool hasStorage(const std::string& name) {
+    return storage_map_.find(name) != storage_map_.end();
+  }
+
+  c10::Storage getStorage(const std::string& name) {
+    TORCH_INTERNAL_ASSERT(hasStorage(name));
+    return storage_map_.find(name)->second;
+  }
+  ~StorageContext() = default;
+
+ private:
+  std::map<std::string, c10::Storage> storage_map_;
+};
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
@@ -36,6 +60,14 @@ TORCH_API Module import_ir_module(
     const std::string& filename,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
+
+// For reading unified serialization format from torch.Package
+TORCH_API Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+    std::shared_ptr<torch::jit::StorageContext> storage_context,
+    c10::optional<at::Device> device,
+    std::string ts_id /* torchscript identifier inside package */);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
@@ -88,13 +120,6 @@ TORCH_API Module load(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
-
-TORCH_API IValue readArchiveAndTensors(
-    const std::string& archive_name,
-    c10::optional<TypeResolver> type_resolver,
-    c10::optional<ObjLoader> obj_loader,
-    c10::optional<at::Device> device,
-    caffe2::serialize::PyTorchStreamReader& stream_reader);
 
 } // namespace jit
 } // namespace torch

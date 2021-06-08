@@ -2,9 +2,11 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
@@ -88,6 +90,7 @@ class AttributePropagator {
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
       runOptimization(
           subgraph, /* unroll? */ false, /* const_prop_user_classes? */ false);
+      LowerSimpleTuples(subgraph);
     };
 
     for (auto function : preservedMethods_) {
@@ -267,6 +270,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::recordMutableAttrs,
                   *this,
@@ -309,7 +313,7 @@ class AttributePropagator {
 
     } else if (attr.isList()) {
       c10::List<IValue> elems = std::move(attr).toList();
-      for (size_t i = 0; i < elems.size(); i++) {
+      for (const auto i : c10::irange(elems.size())) {
         elems.set(i, overrideGradient(elems.extract(i)));
       }
       attr = std::move(elems);
@@ -392,6 +396,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::inlineInterfaceCalls,
                   *this,
@@ -487,6 +492,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::propagateAttributes,
                   *this,
@@ -612,6 +618,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::recordReferencedAttrs,
                   *this,
@@ -643,6 +650,7 @@ class AttributePropagator {
       auto attr = module.attr(name);
       auto attrTy = attr.type();
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool isMutable;
       if (AliasDb::isMutableType(attrTy)) {
         isMutable = preservedAttrs_.count(attr);

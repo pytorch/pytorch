@@ -18,14 +18,14 @@ using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 Tensor& hardswish_(Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  std::vector<int64_t> outputSize = input.sizes().vec();
-  std::vector<int64_t> textureSize = computeTextureSize(outputSize);
-  MPSImage* Y = createTemporaryImage(commandBuffer, textureSize);
+  IntArrayRef outputSize = input.sizes();
+  std::vector<int64_t> imageSize = computeImageSize(outputSize);
+  MPSImage* Y = createTemporaryImage(commandBuffer, imageSize);
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:mpscnn::kernelFor(
-                                   X, @"hardswish", @"hardswish_nonarray")
+                                   X, "hardswish", "hardswish_nonarray")
                      Constants:@[
                        @(X.featureChannels),
                        @(X.height),
@@ -44,7 +44,7 @@ Tensor& hardswish_(Tensor& input) {
   [X markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->copyFromTexture(Y);
+  implStorage.texture()->setImage(Y);
   return input;
 }
 

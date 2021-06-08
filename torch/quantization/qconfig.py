@@ -1,6 +1,14 @@
 from collections import namedtuple
-from .observer import *
-from .fake_quantize import *
+from .observer import (HistogramObserver, MovingAverageMinMaxObserver,
+                       PlaceholderObserver, default_debug_observer,
+                       default_dynamic_quant_observer,
+                       default_float_qparams_observer, default_observer,
+                       default_per_channel_weight_observer,
+                       default_placeholder_observer, default_weight_observer)
+from .fake_quantize import (FakeQuantize, default_fake_quant,
+                            default_per_channel_weight_fake_quant,
+                            default_weight_fake_quant)
+import torch
 import torch.nn as nn
 
 from typing import Union, Optional

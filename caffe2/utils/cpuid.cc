@@ -7,9 +7,13 @@ const CpuId& GetCpuId() {
   return cpuid_singleton;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f1c_ = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f1d_ = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f7b_ = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f7c_ = 0;
 
 CpuId::CpuId() {
@@ -61,13 +65,16 @@ CpuId::CpuId() {
         : "edx");
   }
 #elif defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t n;
   __asm__("cpuid" : "=a"(n) : "a"(0) : "ebx", "ecx", "edx");
   if (n >= 1) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t f1a;
     __asm__("cpuid" : "=a"(f1a), "=c"(f1c_), "=d"(f1d_) : "a"(1) : "ebx");
   }
   if (n >= 7) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t f7a;
     __asm__("cpuid"
             : "=a"(f7a), "=b"(f7b_), "=c"(f7c_)

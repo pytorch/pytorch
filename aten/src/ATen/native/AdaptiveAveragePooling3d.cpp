@@ -8,10 +8,12 @@ namespace native {
 namespace {
 
 inline int start_index(int a, int b, int c) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (int)std::floor((float)(a * c) / b);
 }
 
 inline int end_index(int a, int b, int c) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (int)std::ceil((float)((a + 1) * c) / b);
 }
 

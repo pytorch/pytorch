@@ -81,9 +81,9 @@ class Adadelta(Optimizer):
                        grads,
                        square_avgs,
                        acc_deltas,
-                       lr,
-                       rho,
-                       eps,
-                       weight_decay)
+                       lr=lr,
+                       rho=rho,
+                       eps=eps,
+                       weight_decay=weight_decay)
 
         return loss

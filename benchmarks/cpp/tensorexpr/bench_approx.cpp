@@ -12,17 +12,18 @@ using namespace torch::jit::tensorexpr;
 
 void vectorize(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target, int width) {
   auto loops = ln->getLoopStmtsFor(target);
-  For *outer, *inner, *tail;
-  ln->splitWithTail(loops[0], width, &outer, &inner, &tail);
+  For *inner, *tail;
+  ln->splitWithTail(loops[0], width, &inner, &tail);
   ln->vectorize(inner);
 }
 
 void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
   std::vector<For*> loops = ln->getLoopStmtsFor(target);
-  For *outer, *inner, *tail;
-  ln->splitWithTail(loops[0], 16 * 8, &outer, &inner, &tail);
+  For *inner, *tail;
+  ln->splitWithTail(loops[0], 16 * 8, &inner, &tail);
+  For* outer = loops[0];
   ln->vectorize(inner);
-  ln->splitWithTail(outer, 8, &outer, &inner, &tail);
+  ln->splitWithTail(outer, 8, &inner, &tail);
   Stmt* unrolled;
   LoopNest::unroll(inner, &unrolled);
 }
@@ -156,7 +157,7 @@ static void log_aten(benchmark::State& state) {
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   for (auto _ : state) {
-    at::native::log_out(B_t, A_t);
+    at::log_out(B_t, A_t);
   }
   state.counters["log/s"] = benchmark::Counter(
       uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
@@ -348,7 +349,7 @@ static void tanh_aten(benchmark::State& state) {
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   for (auto _ : state) {
-    at::native::tanh_out(A_t, B_t);
+    at::tanh_out(A_t, B_t);
   }
   state.counters["tanh/s"] = benchmark::Counter(
       uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
@@ -364,7 +365,7 @@ static void tanh_caffe2(benchmark::State& state) {
   auto Y = B_t.data_ptr<float>();
   caffe2::CPUContext c;
   auto tanh = caffe2::TanhFunctor<caffe2::CPUContext>();
-  at::native::tanh_out(A_t, B_ref);
+  at::tanh_out(A_t, B_ref);
   tanh(N, X, Y, &c);
   TORCH_CHECK(at::native::allclose(B_t, B_ref, 1e-3f, 1e-6f));
 

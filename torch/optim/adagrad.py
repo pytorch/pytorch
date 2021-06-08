@@ -84,9 +84,9 @@ class Adagrad(Optimizer):
                       grads,
                       state_sums,
                       state_steps,
-                      group['lr'],
-                      group['weight_decay'],
-                      group['lr_decay'],
-                      group['eps'])
+                      lr=group['lr'],
+                      weight_decay=group['weight_decay'],
+                      lr_decay=group['lr_decay'],
+                      eps=group['eps'])
 
         return loss

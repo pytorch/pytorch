@@ -84,6 +84,7 @@ void setConvolutionParams(
 
   cudnnDataType_t dataType = getCudnnDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
+  params->device_id = at::cuda::current_device();
   params->dataType = dataType;
   // ASSERT(weight.dim() == input.dim())
   params->input_dim = input.dim();

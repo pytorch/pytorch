@@ -20,14 +20,17 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 
 @skipIfNoTorchVision
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_resnet(self):
         resnet = resnet18()
 
@@ -38,6 +41,7 @@ class ModelTest(PackageTestCase):
             # put the pickled resnet in the package, by default
             # this will also save all the code files references by
             # the objects in the pickle
+            e.intern("**")
             e.save_pickle("model", "model.pkl", resnet)
 
             # check th debug graph has something reasonable:
@@ -77,6 +81,7 @@ class ModelTest(PackageTestCase):
             # we suggest reconstructing the model objects using code from a single package
             # using functions like save_state_dict and load_state_dict to transfer state
             # to the correct code objects.
+            e.intern("**")
             e.save_pickle("model", "model.pkl", r2)
 
         f2.seek(0)
@@ -119,6 +124,7 @@ class ModelTest(PackageTestCase):
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
         with PackageExporter(f1, verbose=False) as e:
+            e.intern("**")
             e.save_pickle("model", "pickled", resnet)
             # note that this source is the same for all models in this approach
             # so it can be made part of an API that just takes the model and
@@ -141,6 +147,7 @@ class ModelTest(PackageTestCase):
         # - more code to write to save/load the model
         # + but this code can be edited later to adjust adapt the model later
         with PackageExporter(f2, verbose=False) as e:
+            e.intern("**")
             e.save_pickle("model", "state_dict", resnet.state_dict())
             src = dedent(
                 """\
@@ -181,6 +188,7 @@ class ModelTest(PackageTestCase):
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
         with PackageExporter(f1, verbose=False) as e:
+            e.intern("**")
             e.save_pickle("model", "pickled", resnet)
 
         f1.seek(0)

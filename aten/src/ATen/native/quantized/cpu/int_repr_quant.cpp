@@ -12,6 +12,7 @@ namespace native {
 // format of the output the same as input
 Tensor int_repr_quantized_cpu(const Tensor& self) {
   Tensor dst;
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self.scalar_type(), "int_repr", [&]() {
     if (bit_width == 4) {
       int64_t out_size = std::ceil(self.numel() * 0.5);

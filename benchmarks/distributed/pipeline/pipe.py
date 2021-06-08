@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from torch.distributed.pipeline.sync import Pipe
 from torch.distributed.pipeline.sync.utils import partition_model
-from torch.optim import Adam  # type: ignore
+from torch.optim import Adam
 
 def sizeof_fmt(num, suffix='B'):
     for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti']:

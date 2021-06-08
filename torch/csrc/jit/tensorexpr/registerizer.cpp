@@ -389,7 +389,6 @@ void RegisterizerAnalysis::visit(const Store* v) {
   for (auto* i : v->indices()) {
     accessHash = hasher_.hash_combine(accessHash, i);
   }
-  accessHash = hasher_.hash_combine(accessHash, v->mask());
 
   auto& bufAccesses = currentScope_->getAccessMapByBuf(v->buf());
   auto candidateIt = bufAccesses.find(accessHash);
@@ -439,7 +438,6 @@ void RegisterizerAnalysis::visit(const Load* v) {
   for (auto* i : v->indices()) {
     accessHash = hasher_.hash_combine(accessHash, i);
   }
-  accessHash = hasher_.hash_combine(accessHash, v->mask());
 
   auto& bufAccesses = currentScope_->getAccessMapByBuf(v->buf());
   auto candidateIt = bufAccesses.find(accessHash);
@@ -670,7 +668,7 @@ Stmt* RegisterizerReplacer::mutate(const Store* v) {
 
   const Expr* new_val = v->value()->accept_mutator(this);
 
-  return new Store(info->replacement().var_wrapper, {}, new_val, v->mask());
+  return new Store(info->replacement().var_wrapper, {}, new_val);
 }
 
 Stmt* RegisterizerReplacer::mutate(const Block* v) {
@@ -704,11 +702,8 @@ Stmt* RegisterizerReplacer::mutate(const Block* v) {
       auto it = scope.finalizePoints_.find(stmt);
       if (it != scope.finalizePoints_.end()) {
         for (auto& info : it->second) {
-          Store* finalizer = new Store(
-              info->buf(),
-              info->indices(),
-              info->replacement().var,
-              new IntImm(1));
+          Store* finalizer =
+              new Store(info->buf(), info->indices(), info->replacement().var);
           stmts.push_back(finalizer);
         }
         scope.finalizePoints_.erase(it);
@@ -761,12 +756,7 @@ void RegisterizerReplacer::buildReplacements() {
     // create a default initializer by reading the access.
     if (info->replacement().initializer == nullptr) {
       info->replacement().initializer = new Let(
-          v,
-          new Load(
-              info->buf()->dtype(),
-              info->buf(),
-              info->indices(),
-              new IntImm(1)));
+          v, new Load(info->buf()->dtype(), info->buf(), info->indices()));
     }
   }
 }

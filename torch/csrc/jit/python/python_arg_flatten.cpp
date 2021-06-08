@@ -39,12 +39,6 @@ py::object cast_handle_sequence(std::vector<py::handle> objs) {
 }
 
 void flatten_rec(PyObject* obj, ParsedArgs& args) {
-  auto as_variable = [](at::Tensor& tensor) // Wrap tensor as Variable
-  {
-    PyObject* wappred_obj = THPVariable_Wrap(tensor);
-    return reinterpret_cast<THPVariable*>(wappred_obj)->cdata;
-  };
-
   auto& structure = args.desc.structure;
   if (six::isTuple(obj)) {
     structure.push_back(D::TupleOpen);
@@ -68,28 +62,25 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.strings.emplace_back(str);
     args.desc.structure.push_back(D::String);
   } else if (THPVariable_Check(obj)) {
-    auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
+    auto& var = THPVariable_Unpack(obj);
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
   } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
     args.desc.structure.push_back(D::NoneType);
   } else if (PyBool_Check(obj)) { // Wrap integers in bool tensors
-    at::Tensor tensor = scalar_to_tensor(at::Scalar(THPUtils_unpackBool(obj)));
-    auto var = as_variable(tensor);
+    at::Tensor var = scalar_to_tensor(at::Scalar(THPUtils_unpackBool(obj)));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Bool);
   } else if (PyLong_Check(obj)) { // Wrap integers in long tensors
-    at::Tensor tensor = scalar_to_tensor(
+    at::Tensor var = scalar_to_tensor(
         at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
-    auto var = as_variable(tensor);
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Long);
   } else if (PyFloat_Check(obj)) { // Wrap floating points in double tensors
-    at::Tensor tensor = scalar_to_tensor(THPUtils_unpackDouble(obj));
-    auto var = as_variable(tensor);
+    at::Tensor var = scalar_to_tensor(THPUtils_unpackDouble(obj));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Double);

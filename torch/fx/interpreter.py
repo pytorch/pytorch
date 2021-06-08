@@ -2,7 +2,7 @@ from .graph_module import GraphModule
 from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
-from .symbolic_trace import Tracer
+from ._symbolic_trace import Tracer
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 class Interpreter:
@@ -220,7 +220,7 @@ class Interpreter:
             Any: The value returned by the method invocation
         """
         # args[0] is the `self` object for this method call
-        self_obj, *args_tail = args  # type: ignore
+        self_obj, *args_tail = args
 
         # Execute the method and return the result
         assert isinstance(target, str)

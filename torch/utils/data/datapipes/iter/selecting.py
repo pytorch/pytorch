@@ -36,4 +36,4 @@ class FilterIterDataPipe(MapIterDataPipe):
                 yield data
 
     def __len__(self):
-        raise(NotImplementedError)
+        raise NotImplementedError

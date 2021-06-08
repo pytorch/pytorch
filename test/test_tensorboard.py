@@ -8,7 +8,7 @@ import uuid
 
 TEST_TENSORBOARD = True
 try:
-    import tensorboard.summary.writer.event_file_writer  # noqa F401
+    import tensorboard.summary.writer.event_file_writer  # noqa: F401
     from tensorboard.compat.proto.summary_pb2 import Summary
 except ImportError:
     TEST_TENSORBOARD = False
@@ -363,32 +363,32 @@ class TestTensorBoardSummary(BaseTestCase):
             summary.image('dummy',
                           tensor_N(shape=(1, 8, 8)),
                           dataformats='CHW'),
-                          self))  # noqa E127
+                          self))  # noqa: E131
 
     def test_image_with_one_channel_batched(self):
         self.assertTrue(compare_image_proto(
             summary.image('dummy',
                           tensor_N(shape=(2, 1, 8, 8)),
                           dataformats='NCHW'),
-                          self))  # noqa E127
+                          self))  # noqa: E131
 
     def test_image_with_3_channel_batched(self):
         self.assertTrue(compare_image_proto(
             summary.image('dummy',
                           tensor_N(shape=(2, 3, 8, 8)),
                           dataformats='NCHW'),
-                          self))  # noqa E127
+                          self))  # noqa: E131
 
     def test_image_without_channel(self):
         self.assertTrue(compare_image_proto(
             summary.image('dummy',
                           tensor_N(shape=(8, 8)),
                           dataformats='HW'),
-                          self))  # noqa E127
+                          self))  # noqa: E131
 
     def test_video(self):
         try:
-            import moviepy  # noqa F401
+            import moviepy  # noqa: F401
         except ImportError:
             return
         self.assertTrue(compare_proto(summary.video('dummy', tensor_N(shape=(4, 3, 1, 8, 8))), self))
@@ -661,11 +661,11 @@ class TestTensorBoardFigure(BaseTestCase):
             figures.append(figure)
 
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
-        self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa F812
+        self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa: F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != '3.3.0':
-            self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa F812
+            self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa: F812
         else:
             print("Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163")
 

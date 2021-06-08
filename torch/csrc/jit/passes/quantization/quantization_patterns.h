@@ -39,10 +39,12 @@ std::string getAtenOpPattern(
     for (const auto& extra_arg : _extra_op_args) {
       aten_op_pattern += R"(
           )" +
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           extra_arg + "_scalar = aten::item(" + extra_arg + ")";
     }
 
     for (auto& _extra_op_arg : _extra_op_args) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       _extra_op_arg = _extra_op_arg + "_scalar";
     }
   }
@@ -170,6 +172,7 @@ QuantFusionInfo getClampOpFusionInfo(
           %r = )";
   std::vector<std::string> scalar_extra_args;
   for (const auto& arg : extra_op_args) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     scalar_extra_args.push_back(arg + "_scalar");
   }
   op_pattern +=

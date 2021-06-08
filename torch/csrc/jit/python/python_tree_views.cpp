@@ -35,10 +35,13 @@ struct SourceRangeFactory {
         leading_whitespace_chars_(leading_whitespace_chars) {}
 
   SourceRange create(int line, int start_col, int end_col) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t start_byte_offset, end_byte_offset;
     std::tie(start_byte_offset, end_byte_offset) = line_col_to_byte_offs(
         line,
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         start_col + leading_whitespace_chars_,
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         end_col + leading_whitespace_chars_);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
   }
@@ -185,15 +188,18 @@ void initTreeViewBindings(PyObject* module) {
   py::class_<ClassDef, TreeView>(m, "ClassDef")
       .def(py::init([](const Ident& name,
                        std::vector<Stmt> body,
-                       std::vector<Property> props) {
+                       std::vector<Property> props,
+                       std::vector<Assign> assigns) {
         const auto& r = name.range();
         return ClassDef::create(
             r,
             name,
             Maybe<Expr>::create(r),
             wrap_list(r, std::move(body)),
-            wrap_list(r, std::move(props)));
+            wrap_list(r, std::move(props)),
+            wrap_list(r, std::move(assigns)));
       }));
+
   py::class_<Decl, TreeView>(m, "Decl").def(py::init(
       [](const SourceRange& r, std::vector<Param> params, Expr* return_type) {
         return Decl::create(

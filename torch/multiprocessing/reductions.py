@@ -123,9 +123,14 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+
     if tensor_cls == torch.nn.parameter.Parameter:
-        t = torch.nn.parameter.Parameter(t)
-    t.requires_grad = requires_grad
+        # It is crucial for integer tensors to receive
+        # the requires_grad=False as an argument in the constructor
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+
     return t
 
 

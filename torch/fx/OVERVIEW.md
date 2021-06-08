@@ -4,21 +4,22 @@ FX is a toolkit for pass writers to facilitate Python-to-Python transformation o
 
 ## Table of Contents
 
-- [FX Technical Overview](#fx-technical-overview)
-  - [Table of Contents](#table-of-contents)
+<!-- toc -->
+
 - [Introduction](#introduction)
   - [Motivation](#motivation)
   - [Use Cases](#use-cases)
   - [Technical Details](#technical-details)
 - [Internal Structure](#internal-structure)
   - [Graph](#graph)
-  - [Graph Module](#graph-module)
+  - [GraphModule](#graphmodule)
 - [Symbolic Tracing](#symbolic-tracing)
-  - [About](#about)
   - [Tracer](#tracer)
   - [Proxy](#proxy)
-- [The FX IR](#ir)
-- [Transformation and Codegen](#codegen)
+- [The FX IR](#the-fx-ir)
+- [Transformation and Codegen](#transformation-and-codegen)
+
+<!-- tocstop -->
 
 # Introduction
 

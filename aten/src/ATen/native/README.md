@@ -365,19 +365,20 @@ you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
 `device_guard: False` to your function definition.
 
-### `matches_jit_signature`
+### `device_check`
 
 ```
-matches_jit_signature: False
+device_check: NoCheck
 ```
 
-This will indicate that the func syntax does not follow the JIT signature schema.
-If you are a triggering an assert related to JIT signature compliance
-try adding this field and setting it to False. In general, this serves as a means
-of tracking an ongoing schema unification with the goal of aligning func syntax
-with other components of PyTorch in order to reduce overall complexity.
-If you find yourself having to set this field to False add @gchanan to your PR's
-set of reviewers.
+By default, ATen code generation will generate device check,
+which will ensure all the tensor parameters passed to kernel are
+on the same device.
+
+However, in some cases, checking the device is unncessary, becuase,
+e.g., you call a function allows to work on multiple devices.
+In that case, code generation of the device check can e disabled by adding
+`device_check: NoCheck` to your function definition.
 
 ### `manual_kernel_registration`
 
@@ -392,6 +393,19 @@ You can find the manual registrations in torch/csrc/autograd/VariableTypeManual.
 Currently ops have this field set to True should match `MANUAL_CATCHALL` in tools/autograd/gen_variable_type.py
 (It can be a superset of `MANUAL_CATCHALL` but we don't have a use case for it).
 This field should only be used rarely.
+
+### `use_const_ref_for_mutable_tensors`
+
+```
+use_const_ref_for_mutable_tensors: True
+```
+
+With this flag set, we will generate arguments for Tensors whose underlying data may change as
+`const Tensor&` (or similar), just like we would for other Tensors. Previously, we generated these
+as `Tensor &`, which 1) allowed changing which `TensorImpl` the `Tensor` itself referred to and 2)
+was not necessary to allow the underlying data to change. (This was like using `T * const` when we
+wanted `const T*`.)
+
 
 ## Writing an implementation in C++
 

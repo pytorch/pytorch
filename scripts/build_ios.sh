@@ -13,7 +13,7 @@ CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   # Build PyTorch mobile
-  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
   # custom build with selected ops
@@ -78,10 +78,10 @@ if [ -n "${IOS_ARCH:-}" ]; then
   CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
 fi
 
-if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
-  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
-else
+if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
   CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
 fi
 
 # Don't build binaries or tests (only the library)

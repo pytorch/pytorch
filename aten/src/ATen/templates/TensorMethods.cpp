@@ -57,14 +57,6 @@ TensorOptions Tensor::options() const {
 
 ${tensor_method_definitions}
 
-NamedTensorMeta* Tensor::get_named_tensor_meta() {
-  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-}
-
-const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
-  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-}
-
 #define DEFINE_CAST(T, name)                                        \
   template <>                                                       \
   TORCH_API T* Tensor::data_ptr() const {                           \

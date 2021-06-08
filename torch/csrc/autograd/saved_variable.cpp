@@ -32,7 +32,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // is saved for backward.  Whether a tensor is saved for backward is determined
     // by derivative formula and thus varies op by op, so by saying "no inference
     // tensor in autograd" it's easier for users to understand and follow.
-    TORCH_CHECK(!variable.unsafeGetTensorImpl()->is_inference_tensor(),
+    TORCH_CHECK(!variable.is_inference(),
       "Inference tensors cannot be saved for backward. To work around "
       "you can make a clone to get a normal tensor and use it in autograd.")
 
@@ -139,9 +139,12 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* ERR_BACKWARD_TWICE =
-    "Trying to backward through the graph a second time, but the saved intermediate "
-    "results have already been freed. Specify retain_graph=True when calling "
-    ".backward() or autograd.grad() the first time.";
+    "Trying to backward through the graph a second time (or directly access saved "
+    "variables after they have already been freed). Saved intermediate values "
+    "of the graph are freed when you call .backward() or autograd.grad(). Specify "
+    "retain_graph=True if you need to backward through the graph a second time or "
+    "if you need to access saved variables after calling backward.";
 
 }} // namespace torch::autograd

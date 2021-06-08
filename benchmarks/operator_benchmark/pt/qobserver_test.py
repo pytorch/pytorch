@@ -43,7 +43,7 @@ qobserver_per_tensor_configs_short = op_bench.config_list(
     cross_product_configs={
         'qscheme': (torch.per_tensor_affine, torch.per_tensor_symmetric)
     },
-    **qobserver_short_configs_dict,  # noqa
+    **qobserver_short_configs_dict,
 )
 
 qobserver_per_tensor_configs_long = op_bench.cross_product_configs(
@@ -67,7 +67,7 @@ q_hist_observer_per_tensor_configs_short = op_bench.config_list(
     cross_product_configs={
         'qscheme': (torch.per_tensor_affine, torch.per_tensor_symmetric)
     },
-    **q_hist_observer_short_configs_dict,  # noqa
+    **q_hist_observer_short_configs_dict,
 )
 
 q_hist_observer_per_tensor_configs_long = op_bench.cross_product_configs(

@@ -99,8 +99,8 @@ void check_names_valid_for(const Tensor& tensor, DimnameList names);
 void check_names_valid_for(size_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
-TORCH_API Tensor& internal_set_names_inplace(Tensor& tensor, c10::optional<DimnameList> names);
-TORCH_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
+TORCH_API const Tensor& internal_set_names_inplace(const Tensor& tensor, c10::optional<DimnameList> names);
+TORCH_API const Tensor& internal_set_names_inplace(const Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
 
 constexpr size_t kMaxNamedTensorDim = 64;
 
@@ -132,7 +132,6 @@ TORCH_API DimnameList get_names(const TensorImpl* impl);
 // instead if the haven't been. The names of a tensor are not allocated if a
 // tensor is constructed with names=None.
 TORCH_API c10::optional<DimnameList> get_opt_names(const TensorImpl* impl);
-
 
 } // namespace impl
 

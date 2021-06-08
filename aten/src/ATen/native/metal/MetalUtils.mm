@@ -1,28 +1,27 @@
 #import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <Accelerate/Accelerate.h>
 
 namespace at {
 namespace native {
 namespace metal {
 
-std::vector<uint16_t> Fp32ToFp16(const std::vector<float>& src) {
-  unsigned long count = src.size();
-  std::vector<uint16_t> output(count, 0);
-  vImage_Buffer float32{(void*)src.data(), 1, count, count * sizeof(float)};
-  vImage_Buffer float16{
-      (void*)output.data(), 1, count, count * sizeof(uint16_t)};
-  if (vImageConvert_PlanarFtoPlanar16F(&float32, &float16, 0) !=
-      kvImageNoError) {
-    TORCH_CHECK(false);
-  }
-
+std::vector<fp16_t> Fp32ToFp16(const std::vector<float>& src) {
+    unsigned long count = src.size();
+    std::vector<fp16_t> output(count, 0);
+    vImage_Buffer float32{(void*)src.data(), 1, count, count * sizeof(float)};
+    vImage_Buffer float16{(void*)output.data(), 1, count, count * sizeof(fp16_t)};
+    if (vImageConvert_PlanarFtoPlanar16F(&float32, &float16, 0) !=
+        kvImageNoError) {
+      TORCH_CHECK(false);
+    }
   return output;
 }
 
-std::vector<float> Fp16ToFp32(const std::vector<uint16_t>& src) {
+std::vector<float> Fp16ToFp32(const std::vector<fp16_t>& src) {
   unsigned long count = src.size();
   std::vector<float> output(count, 0);
-  vImage_Buffer float16{(void*)src.data(), 1, count, count * sizeof(uint16_t)};
+  vImage_Buffer float16{(void*)src.data(), 1, count, count * sizeof(fp16_t)};
   vImage_Buffer float32{(void*)output.data(), 1, count, count * sizeof(float)};
   if (vImageConvert_Planar16FtoPlanarF(&float16, &float32, 0) !=
       kvImageNoError) {

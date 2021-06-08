@@ -29,8 +29,10 @@ void SmallVectorBase::grow_pod(
   if (NewCapacityInBytes < MinSizeInBytes)
     NewCapacityInBytes = MinSizeInBytes;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* NewElts;
   if (BeginX == FirstEl) {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     NewElts = malloc(NewCapacityInBytes);
     if (NewElts == nullptr)
       throw std::bad_alloc();
@@ -39,6 +41,7 @@ void SmallVectorBase::grow_pod(
     memcpy(NewElts, this->BeginX, CurSizeBytes);
   } else {
     // If this wasn't grown from the inline copy, grow the allocated space.
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     NewElts = realloc(this->BeginX, NewCapacityInBytes);
     if (NewElts == nullptr)
       throw std::bad_alloc();

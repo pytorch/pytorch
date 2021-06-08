@@ -155,6 +155,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
     std::stringstream ss;
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     ss << "value of type '" << value_->type()->annotation_str() << "'";
     return ss.str();
   }

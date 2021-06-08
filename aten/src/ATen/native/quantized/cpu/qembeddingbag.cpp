@@ -53,6 +53,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   }
 
   int64_t current = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float* per_sample_weights_data;
   if (per_sample_weights_.has_value()) {
     per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
@@ -64,6 +65,7 @@ at::Tensor& embedding_lookup_fallback_impl(
         "Expect the lengths data to be less than indices size");
 
     for (int i = 0; i < lengths_data[m]; ++i, ++current) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t idx;
       if (!pruned) {
         idx = indices_data[current];
@@ -86,6 +88,7 @@ at::Tensor& embedding_lookup_fallback_impl(
       if (per_sample_weights_.has_value()) {
         weight_val = per_sample_weights_data[current];
       }
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float scale, bias;
       if (BIT_RATE == 8) {
         const uint8_t* scale_bias =

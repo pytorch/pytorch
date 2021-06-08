@@ -52,18 +52,21 @@ size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
   return in_->read(pos, buf, n, "reading file");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
     : ar_(std::make_unique<mz_zip_archive>()),
       in_(std::make_unique<FileAdapter>(file_name)) {
   init();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
     : ar_(std::make_unique<mz_zip_archive>()),
       in_(std::make_unique<IStreamAdapter>(in)) {
   init();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(
     std::shared_ptr<ReadAdapterInterface> in)
     : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
@@ -80,6 +83,7 @@ void PyTorchStreamReader::init() {
   // check for the old magic number,
   constexpr size_t kMagicValueLength = 8;
   if (size > kMagicValueLength) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     char buf[kMagicValueLength];
     read(0, buf, kMagicValueLength);
     valid("checking magic number");
@@ -114,6 +118,7 @@ void PyTorchStreamReader::init() {
 
   // version check
   at::DataPtr version_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t version_size;
   if (hasRecord(".data/version")) {
     std::tie(version_ptr, version_size) = getRecord(".data/version");
@@ -124,6 +129,7 @@ void PyTorchStreamReader::init() {
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
   AT_ASSERTM(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       version_ >= kMinSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
       c10::to_string(version_),
@@ -131,6 +137,7 @@ void PyTorchStreamReader::init() {
       c10::to_string(kMinSupportedFileFormatVersion),
       ". Your PyTorch script module file is too old. Please re-export it again.");
   AT_ASSERTM(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       version_ <= kMaxSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
       version_,
@@ -140,15 +147,14 @@ void PyTorchStreamReader::init() {
 }
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {
-  auto err = mz_zip_get_last_error(ar_.get());
-  if (err != MZ_ZIP_NO_ERROR) {
-    CAFFE_THROW(
-        "PytorchStreamReader failed ",
-        what,
-        info,
-        ": ",
-        mz_zip_get_error_string(err));
-  }
+  const auto err = mz_zip_get_last_error(ar_.get());
+  TORCH_CHECK(
+      err == MZ_ZIP_NO_ERROR,
+      "PytorchStreamReader failed ",
+      what,
+      info,
+      ": ",
+      mz_zip_get_error_string(err));
 }
 
 constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
@@ -192,18 +198,24 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
   std::string ss = archive_name_plus_slash_ + name;
   mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
-  bool result = ar_->m_last_error != MZ_ZIP_FILE_NOT_FOUND;
-  if (!result) {
-    ar_->m_last_error = MZ_ZIP_NO_ERROR;
+  const mz_zip_error err = mz_zip_get_last_error(ar_.get());
+
+  if (err == MZ_ZIP_NO_ERROR) {
+    return true;
+  } else if (err == MZ_ZIP_FILE_NOT_FOUND) {
+    return false;
+  } else {
+    // A different error happened, raise it.
+    valid("attempting to locate file ", name.c_str());
   }
-  valid("attempting to locate file ", name.c_str());
-  return result;
+  TORCH_INTERNAL_ASSERT(false, "should not reach here");
 }
 
 std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   std::lock_guard<std::mutex> guard(reader_lock_);
   mz_uint num_files = mz_zip_reader_get_num_files(ar_.get());
   std::vector<std::string> out;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
   for (size_t i = 0; i < num_files; i++) {
     mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
@@ -217,6 +229,7 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           ": ",
           buf);
     }
+    // NOLINTNEXTLINE(modernize-use-emplace)
     out.push_back(buf + archive_name_plus_slash_.size());
   }
   return out;
@@ -229,9 +242,6 @@ const std::vector<std::string>& PyTorchStreamWriter::getAllWrittenRecords() {
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
-  if (ar_->m_last_error == MZ_ZIP_FILE_NOT_FOUND) {
-    CAFFE_THROW("file not found: ", ss);
-  }
   valid("locating file ", name.c_str());
   return result;
 }
@@ -259,6 +269,7 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   valid("retrieving file meta-data for ", name.c_str());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint8_t local_header[MZ_ZIP_LOCAL_DIR_HEADER_SIZE];
   in_->read(
       stat.m_local_header_ofs,
@@ -300,6 +311,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::function<size_t(const void*, size_t)>& writer_func)
     : archive_name_("archive"),
       writer_func_(writer_func) {
@@ -403,6 +415,7 @@ void PyTorchStreamWriter::valid(const char* what, const char* info) {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyTorchStreamWriter::~PyTorchStreamWriter() {
   if (!finalized_) {
     writeEndOfFile();

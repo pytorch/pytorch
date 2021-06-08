@@ -40,35 +40,26 @@ inline int getPrecedence(IRNodeType ty) {
       return 2;
     case kAdd:
     case kSub:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 6;
     case kMul:
     case kDiv:
     case kMod:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 5;
     case kMax:
     case kMin:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 99;
     case kAnd:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 11;
     case kOr:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 13;
     case kLshift:
     case kRshift:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 7;
     case kXor:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 12;
     case kCompareSelect:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 16;
     default:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 99;
   }
 }
@@ -147,8 +138,9 @@ class BinaryOpNode : public ExprNode<Op> {
       const Expr* lhs_v,
       const Expr* rhs_v,
       IRNodeType expr_type,
-      ScalarType ret_type = ScalarType::None)
+      ScalarType ret_type = ScalarType::Undefined)
       : ExprNode<Op>(
+            // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
             BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type),
             expr_type),
         lhs_(CastIfNeeded(lhs_v, ExprNode<Op>::dtype())),
@@ -420,43 +412,27 @@ class TORCH_API Load : public ExprNode<Load> {
     TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
     return indices_[0];
   }
-  const Expr* mask() const {
-    return mask_;
-  }
   const Buf* buf() const {
     return buf_;
   }
   static ExprHandle make(
       Dtype dtype,
       const BufHandle& buf,
-      const std::vector<ExprHandle>& indices,
-      const ExprHandle& mask);
-  static ExprHandle make(
-      const BufHandle& buf,
-      const std::vector<ExprHandle>& indices,
-      const ExprHandle& mask);
-  static ExprHandle make(
-      Dtype dtype,
-      const BufHandle& buf,
       const std::vector<ExprHandle>& indices);
   static ExprHandle make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices);
 
-  Load(
-      Dtype dtype,
-      const Buf* base_handle,
-      std::vector<const Expr*> indices,
-      const Expr* mask);
-  Load(
-      const Buf* base_handle,
-      const std::vector<const Expr*>& indices,
-      const Expr* mask);
+  Load(Dtype dtype, const Buf* base_handle, std::vector<const Expr*> indices);
+  Load(const Buf* base_handle, const std::vector<const Expr*>& indices);
+
+  void set_indices(std::vector<const Expr*> indices) {
+    indices_ = indices;
+  };
 
  private:
   const Buf* buf_;
   std::vector<const Expr*> indices_;
-  const Expr* mask_;
 };
 
 class TORCH_API Broadcast : public ExprNode<Broadcast> {

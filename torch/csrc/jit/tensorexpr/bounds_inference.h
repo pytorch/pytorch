@@ -35,6 +35,10 @@ TORCH_API BoundsInfo getInferredBounds(
     analysis::MemDependencyChecker& analyzer,
     Stmt* s,
     bool distinctAccessKinds = true);
+TORCH_API BoundsInfo getInferredBounds(
+    analysis::MemDependencyChecker& analyzer,
+    Expr* e,
+    bool distinctAccessKinds = true);
 
 TORCH_API void printBoundsInfo(const BoundsInfo& v);
 
@@ -51,11 +55,23 @@ enum class HazardKind {
 TORCH_API HazardKind
 getPotentialHazards(analysis::MemDependencyChecker& analyzer, Stmt* A, Stmt* B);
 
-// Returns true if there is a partial overlap between accesses in A and B.
-TORCH_API bool hasPartialOverlap(
+// Returns true if there is a conflicting overlap between accesses in
+// statements A and B. A conflicting overlap is an overlap in buffer accesses
+// where at least one of the accesses is a Store.
+TORCH_API bool hasConflictingOverlap(
     analysis::MemDependencyChecker& analyzer,
     Stmt* A,
     Stmt* B);
+// Same as above, between accesses in stores S1 and S2.
+TORCH_API bool isOverlapping(
+    analysis::MemDependencyChecker& analyzer,
+    Store* S1,
+    Store* S2);
+// Same as above, between accesses in store S and load L.
+TORCH_API bool isOverlapping(
+    analysis::MemDependencyChecker& analyzer,
+    Store* S,
+    Load* L);
 
 } // namespace tensorexpr
 } // namespace jit

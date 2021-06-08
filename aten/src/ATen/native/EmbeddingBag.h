@@ -35,13 +35,15 @@ void make_offset2bag_out(
     const Tensor& indices,
     const Tensor& offsets,
     const int64_t mode,
-    const c10::optional<Tensor>& per_sample_weights);
+    const c10::optional<Tensor>& per_sample_weights,
+    const int64_t padding_idx = -1);
 
 void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     Tensor& bag_size, Tensor& max_indices,
     const Tensor &weight, const Tensor &indices,
     const Tensor &offsets, const int64_t mode = 0,
     const c10::optional<Tensor>& per_sample_weights = c10::nullopt,
-    bool include_last_offset = false);
+    bool include_last_offset = false,
+    int64_t padding_idx = -1);
 } // native
 } // at

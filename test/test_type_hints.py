@@ -1,10 +1,11 @@
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
 import tempfile
 import torch
 import doctest
 import os
 import inspect
+from pathlib import Path
 
 try:
     import mypy.api
@@ -36,10 +37,10 @@ def get_all_examples():
     example_file_lines = [
         "import torch",
         "import torch.nn.functional as F",
-        "import math  # type: ignore",  # mypy complains about floats where SupportFloat is expected
-        "import numpy  # type: ignore",
-        "import io  # type: ignore",
-        "import itertools  # type: ignore",
+        "import math",
+        "import numpy",
+        "import io",
+        "import itertools",
         "",
         # for requires_grad_ example
         # NB: We are parsing this file as Python 2, so we must use
@@ -76,7 +77,7 @@ class TestTypeHints(TestCase):
         """
         Run documentation examples through mypy.
         """
-        fn = os.path.join(os.path.dirname(__file__), 'generated_type_hints_smoketest.py')
+        fn = Path(__file__).resolve().parent / 'generated_type_hints_smoketest.py'
         with open(fn, "w") as f:
             print(get_all_examples(), file=f)
 
@@ -118,13 +119,17 @@ class TestTypeHints(TestCase):
                 )
             except OSError:
                 raise unittest.SkipTest('cannot symlink') from None
-            (stdout, stderr, result) = mypy.api.run([
-                '--cache-dir=.mypy_cache/doc',
-                '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
-                os.path.abspath(fn),
-            ])
+            repo_rootdir = Path(__file__).resolve().parent.parent
+            # TODO: Would be better not to chdir here, this affects the
+            # entire process!
+            with set_cwd(str(repo_rootdir)):
+                (stdout, stderr, result) = mypy.api.run([
+                    '--cache-dir=.mypy_cache/doc',
+                    '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
+                    str(fn),
+                ])
             if result != 0:
-                self.fail(f"mypy failed:\n{stdout}")
+                self.fail(f"mypy failed:\n{stderr}\n{stdout}")
 
 
 if __name__ == '__main__':

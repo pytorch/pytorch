@@ -23,7 +23,7 @@ import logging
 
 from torch.distributed.elastic.events.handlers import get_logging_handler
 
-from .api import Event, EventSource, EventMetadataValue  # noqa F401
+from .api import Event, EventSource, EventMetadataValue  # noqa: F401
 
 _events_logger = None
 

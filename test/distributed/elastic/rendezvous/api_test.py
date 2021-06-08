@@ -11,7 +11,7 @@ from torch.distributed import Store
 from torch.distributed.elastic.rendezvous import (
     RendezvousHandler,
     RendezvousHandlerRegistry,
-    RendezvousParameters
+    RendezvousParameters,
 )
 
 
@@ -55,7 +55,7 @@ class RendezvousParametersTest(TestCase):
         self.assertEqual(params.min_nodes, self._min_nodes)
         self.assertEqual(params.max_nodes, self._max_nodes)
 
-    def test_init_initializes_params_if_min_nodes_equals_to_max_nodes(self) -> None:
+    def test_init_initializes_params_if_min_and_max_nodes_are_equal(self) -> None:
         self._max_nodes = 3
 
         params = self._create_params()
@@ -202,7 +202,7 @@ class _DummyRendezvousHandler(RendezvousHandler):
         pass
 
     def num_nodes_waiting(self) -> int:
-        return -1
+        return 0
 
     def get_run_id(self) -> str:
         return ""

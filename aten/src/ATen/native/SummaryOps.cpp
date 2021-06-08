@@ -62,7 +62,8 @@ Tensor _bincount_cpu_template(
 Tensor
 _bincount_cpu(const Tensor& self, const c10::optional<Tensor>& weights_opt, int64_t minlength) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weights = c10::value_or_else(weights_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
+  const Tensor& weights = *weights_maybe_owned;
 
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cpu", [&] {
     const auto scalar = weights.scalar_type();

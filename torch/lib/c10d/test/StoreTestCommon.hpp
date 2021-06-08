@@ -19,11 +19,11 @@ inline void set(
 inline std::vector<uint8_t> compareSet(
     Store& store,
     const std::string& key,
-    const std::string& currentValue,
-    const std::string& newValue) {
-  std::vector<uint8_t> currentData(currentValue.begin(), currentValue.end());
-  std::vector<uint8_t> newData(newValue.begin(), newValue.end());
-  return store.compareSet(key, currentData, newData);
+    const std::string& expectedValue,
+    const std::string& desiredValue) {
+  std::vector<uint8_t> expectedData(expectedValue.begin(), expectedValue.end());
+  std::vector<uint8_t> desiredData(desiredValue.begin(), desiredValue.end());
+  return store.compareSet(key, expectedData, desiredData);
 }
 
 inline void check(

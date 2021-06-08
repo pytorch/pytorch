@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-from .linear import Linear
+from .linear import NonDynamicallyQuantizableLinear
 from torch.nn.init import xavier_uniform_
 from torch.nn.init import constant_
 from torch.nn.init import xavier_normal_
@@ -393,6 +393,41 @@ class SiLU(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         return F.silu(input, inplace=self.inplace)
+
+    def extra_repr(self) -> str:
+        inplace_str = 'inplace=True' if self.inplace else ''
+        return inplace_str
+
+class Mish(Module):
+    r"""Applies the Mish function, element-wise.
+    Mish: A Self Regularized Non-Monotonic Neural Activation Function.
+
+    .. math::
+        \text{Mish}(x) = x * \text{Tanh}(\text{Softplus}(x))
+
+    .. note::
+        See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`_
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Mish()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+    __constants__ = ['inplace']
+    inplace: bool
+
+    def __init__(self, inplace: bool = False):
+        super(Mish, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.mish(input, inplace=self.inplace)
 
     def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
@@ -855,6 +890,8 @@ class MultiheadAttention(Module):
                        value sequences at dim=1.
         kdim: total number of features in key. Default: None.
         vdim: total number of features in value. Default: None.
+        batch_first: If ``True``, then the input and output tensors are provided
+            as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
 
     Note that if :attr:`kdim` and :attr:`vdim` are None, they will be set
     to :attr:`embed_dim` such that query, key, and value have the same
@@ -865,10 +902,13 @@ class MultiheadAttention(Module):
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
     """
+    __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
     bias_v: Optional[torch.Tensor]
 
-    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
+    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
+                 kdim=None, vdim=None, batch_first=False, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(MultiheadAttention, self).__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
@@ -877,29 +917,30 @@ class MultiheadAttention(Module):
 
         self.num_heads = num_heads
         self.dropout = dropout
+        self.batch_first = batch_first
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
         if self._qkv_same_embed_dim is False:
-            self.q_proj_weight = Parameter(torch.empty(embed_dim, embed_dim))
-            self.k_proj_weight = Parameter(torch.empty(embed_dim, self.kdim))
-            self.v_proj_weight = Parameter(torch.empty(embed_dim, self.vdim))
+            self.q_proj_weight = Parameter(torch.empty((embed_dim, embed_dim), **factory_kwargs))
+            self.k_proj_weight = Parameter(torch.empty((embed_dim, self.kdim), **factory_kwargs))
+            self.v_proj_weight = Parameter(torch.empty((embed_dim, self.vdim), **factory_kwargs))
             self.register_parameter('in_proj_weight', None)
         else:
-            self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
+            self.in_proj_weight = Parameter(torch.empty((3 * embed_dim, embed_dim), **factory_kwargs))
             self.register_parameter('q_proj_weight', None)
             self.register_parameter('k_proj_weight', None)
             self.register_parameter('v_proj_weight', None)
 
         if bias:
-            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
+            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim, **factory_kwargs))
         else:
             self.register_parameter('in_proj_bias', None)
-        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = NonDynamicallyQuantizableLinear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
 
         if add_bias_kv:
-            self.bias_k = Parameter(torch.empty(1, 1, embed_dim))
-            self.bias_v = Parameter(torch.empty(1, 1, embed_dim))
+            self.bias_k = Parameter(torch.empty((1, 1, embed_dim), **factory_kwargs))
+            self.bias_v = Parameter(torch.empty((1, 1, embed_dim), **factory_kwargs))
         else:
             self.bias_k = self.bias_v = None
 
@@ -947,11 +988,11 @@ class MultiheadAttention(Module):
 
     Shapes for inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
-          the embedding dimension.
+          the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
+          the embedding dimension. :math:`(N, S, E)` if ``batch_first`` is ``True``.
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
+          the embedding dimension. :math:`(N, S, E)` if ``batch_first`` is ``True``.
         - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
           If a ByteTensor is provided, the non-zero positions will be ignored while the position
           with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
@@ -968,12 +1009,15 @@ class MultiheadAttention(Module):
 
     Shapes for outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
-          E is the embedding dimension.
+          E is the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
         """
+        if self.batch_first:
+            query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+
         if not self._qkv_same_embed_dim:
-            return F.multi_head_attention_forward(
+            attn_output, attn_output_weights = F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
                 self.in_proj_weight, self.in_proj_bias,
                 self.bias_k, self.bias_v, self.add_zero_attn,
@@ -984,7 +1028,7 @@ class MultiheadAttention(Module):
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
                 v_proj_weight=self.v_proj_weight)
         else:
-            return F.multi_head_attention_forward(
+            attn_output, attn_output_weights = F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
                 self.in_proj_weight, self.in_proj_bias,
                 self.bias_k, self.bias_v, self.add_zero_attn,
@@ -992,7 +1036,10 @@ class MultiheadAttention(Module):
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask)
-
+        if self.batch_first:
+            return attn_output.transpose(1, 0), attn_output_weights
+        else:
+            return attn_output, attn_output_weights
 
 class PReLU(Module):
     r"""Applies the element-wise function:
@@ -1046,10 +1093,12 @@ class PReLU(Module):
     __constants__ = ['num_parameters']
     num_parameters: int
 
-    def __init__(self, num_parameters: int = 1, init: float = 0.25) -> None:
+    def __init__(self, num_parameters: int = 1, init: float = 0.25,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         self.num_parameters = num_parameters
         super(PReLU, self).__init__()
-        self.weight = Parameter(torch.empty(num_parameters).fill_(init))
+        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init))
 
     def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)

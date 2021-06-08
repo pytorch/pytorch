@@ -51,6 +51,7 @@ namespace detail {
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(const RNNOptionsBase& options_)
   : options_base(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -88,6 +89,7 @@ void RNNImplBase<Derived>::reset() {
     gate_size = 4 * options_base.hidden_size();
   } else if (c10::get_if<enumtype::kGRU>(&options_base.mode())) {
     gate_size = 3 * options_base.hidden_size();
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
     gate_size = options_base.hidden_size();
   } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
@@ -125,13 +127,13 @@ void RNNImplBase<Derived>::reset() {
         layer_params.emplace_back(w_hr);
         param_names.emplace_back("weight_hr_l{layer}{suffix}");
       }
-      for (size_t i = 0; i < param_names.size(); i++) {  // NOLINT(modernize-loop-convert)
+      for(const auto i : c10::irange(param_names.size())) {  // NOLINT(modernize-loop-convert)
         std::string x = std::regex_replace(param_names[i], std::regex("\\{layer\\}"), c10::str(layer));
         x = std::regex_replace(x, std::regex("\\{suffix\\}"), c10::str(suffix));
         param_names[i] = x;
       }
 
-      for (size_t i = 0; i < param_names.size(); i++) {
+      for(const auto i : c10::irange(param_names.size())) {
         auto name = param_names[i];
         auto param = layer_params[i];
         this->register_parameter(name, param);
@@ -651,6 +653,7 @@ template <typename Derived>
 RNNCellImplBase<Derived>::RNNCellImplBase(
   const RNNCellOptionsBase& options_)
   : options_base(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

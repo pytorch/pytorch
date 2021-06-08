@@ -593,7 +593,8 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
       at::cuda::detail::canUse32BitIndexMath(out) &&
       nDims <= CAT_ARRAY_MAX_INPUT_DIMS &&
       all32BitIndexable &&
-      allSameType) {
+      allSameType &&
+      memory_format == c10::MemoryFormat::Contiguous) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
           out.scalar_type(), "cat_cuda", [&]() {

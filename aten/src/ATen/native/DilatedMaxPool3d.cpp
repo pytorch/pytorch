@@ -40,6 +40,7 @@ static void max_pool3d_with_indices_single_out_frame(
     for (auto k = start; k < end; k++)
     {
       /* loop over output */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t i, j, ti;
       scalar_t *ip = input_p + k * itime * iwidth * iheight;
       for (ti = 0; ti < otime; ti++)
@@ -290,6 +291,7 @@ static void max_pool3d_with_indices_backward_single_out_frame(
       int64_t *indz_p_k = indz_p + k * otime * owidth * oheight;
 
       /* calculate max points */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t ti, i, j;
       for (ti = 0; ti < otime; ti++)
       {

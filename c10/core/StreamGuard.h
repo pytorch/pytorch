@@ -47,7 +47,9 @@ struct StreamGuard {
   /// WARNING: reset_stream does NOT preserve previously set streams on
   /// different devices.  If you need to set streams on multiple devices
   /// on , use MultiStreamGuard instead.
-  void reset_stream(Stream stream) { guard_.reset_stream(stream); }
+  void reset_stream(Stream stream) {
+    guard_.reset_stream(stream);
+  }
 
   /// Returns the stream that was set at the time the guard was constructed.
   Stream original_stream() const {
@@ -62,13 +64,17 @@ struct StreamGuard {
 
   /// Returns the most recent device that was set using this device guard,
   /// either from construction, or via set_device/reset_device/set_index.
-  Device current_device() const { return guard_.current_device(); }
+  Device current_device() const {
+    return guard_.current_device();
+  }
 
   /// Returns the device that was set at the most recent reset_stream(),
   /// or otherwise the device at construction time.
-  Device original_device() const { return guard_.original_device(); }
+  Device original_device() const {
+    return guard_.original_device();
+  }
 
-private:
+ private:
   c10::impl::InlineStreamGuard<impl::VirtualGuardImpl> guard_;
 };
 
@@ -88,7 +94,8 @@ struct OptionalStreamGuard {
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit OptionalStreamGuard(optional<Stream> stream_opt) : guard_(stream_opt) {}
+  explicit OptionalStreamGuard(optional<Stream> stream_opt)
+      : guard_(stream_opt) {}
 
   /// Copy is disallowed
   OptionalStreamGuard(const OptionalStreamGuard&) = delete;
@@ -105,22 +112,54 @@ struct OptionalStreamGuard {
   /// set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream.
   /// Initializes the guard if it was not previously initialized.
-  void reset_stream(Stream stream) { guard_.reset_stream(stream); }
+  void reset_stream(Stream stream) {
+    guard_.reset_stream(stream);
+  }
 
   /// Returns the stream that was set at the time the guard was most recently
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<Stream> original_stream() const { return guard_.original_stream(); }
+  optional<Stream> original_stream() const {
+    return guard_.original_stream();
+  }
 
   /// Returns the most recent  stream that was set using this stream guard,
-  /// either from construction, or via reset_stream, if the guard is initialized,
-  /// or nullopt if the guard is uninitialized.
-  optional<Stream> current_stream() const { return guard_.current_stream(); }
+  /// either from construction, or via reset_stream, if the guard is
+  /// initialized, or nullopt if the guard is uninitialized.
+  optional<Stream> current_stream() const {
+    return guard_.current_stream();
+  }
 
-  /// Restore the original  device and stream, resetting this guard to uninitialized state.
-  void reset() { guard_.reset(); }
+  /// Restore the original  device and stream, resetting this guard to
+  /// uninitialized state.
+  void reset() {
+    guard_.reset();
+  }
 
-private:
+ private:
   c10::impl::InlineOptionalStreamGuard<impl::VirtualGuardImpl> guard_;
+};
+
+/**
+ * A MultiStreamGuard is an RAII class that sets the current streams of a set of
+ * devices all at once, and resets them to their original values on destruction.
+ */
+struct MultiStreamGuard {
+  /// Set the current streams to the passed streams on each of their respective
+  /// devices.
+  explicit MultiStreamGuard(ArrayRef<Stream> streams) : guard_(streams) {}
+
+  /// Copy is disallowed
+  MultiStreamGuard(const MultiStreamGuard&) = delete;
+  MultiStreamGuard& operator=(const MultiStreamGuard&) = delete;
+
+  // See Note [Move construction for RAII guards is tricky]
+  MultiStreamGuard(MultiStreamGuard&& other) = delete;
+
+  // See Note [Move assignment for RAII guards is tricky]
+  MultiStreamGuard& operator=(MultiStreamGuard&& other) = delete;
+
+ private:
+  c10::impl::InlineMultiStreamGuard<impl::VirtualGuardImpl> guard_;
 };
 
 } // namespace c10

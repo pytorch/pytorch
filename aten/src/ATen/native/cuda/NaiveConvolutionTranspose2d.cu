@@ -6,7 +6,6 @@
 
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <ATen/native/cuda/im2col.cuh>
 
@@ -175,7 +174,7 @@ void slow_conv_transpose2d_out_cuda_template(
       columns_arg{columns_, "columns", 5}, ones_arg{ones_, "ones", 6};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_out_cuda",
+      __func__,
       {input_arg, output_arg, weight_arg, bias_arg, columns_arg, ones_arg});
 
   int n_input_plane = weight_.size(0);
@@ -390,7 +389,7 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
       grad_input_arg{grad_input, "grad_input", 5};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_backward_out_cuda",
+      __func__,
       {input_arg,
        grad_output_arg,
        weight_arg,
@@ -578,7 +577,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
       columns_arg{columns_, "columns", 5}, ones_arg{ones_, "ones", 6};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_acc_grad_parameters_cuda",
+      __func__,
       {input_arg,
        grad_output_arg,
        grad_weight_arg,
@@ -785,7 +784,8 @@ Tensor& slow_conv_transpose2d_out_cuda(const Tensor& input,
     IntArrayRef dilation,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -815,7 +815,8 @@ Tensor slow_conv_transpose2d_cuda(
     IntArrayRef output_padding,
     IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);

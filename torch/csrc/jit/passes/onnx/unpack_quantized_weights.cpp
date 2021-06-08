@@ -178,7 +178,9 @@ void unpackQuantizedWeightsHelper(
 
     torch::List<int64_t> stride_int, padding_int, dilation_int,
         output_padding_int;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t groups_int;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t transpose_int;
 
     if (itr->second.isTuple()) {

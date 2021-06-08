@@ -13,6 +13,8 @@ from .functional_adamw import _FunctionalAdamW
 from .functional_sgd import _FunctionalSGD
 from .functional_adadelta import _FunctionalAdadelta
 from .functional_rmsprop import _FunctionalRMSprop
+from .functional_rprop import _FunctionalRprop
+from .functional_adamax import _FunctionalAdamax
 import torch.distributed.autograd as dist_autograd
 
 
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 # XXX: we define a _ScriptModuleOptimizer here to explicitly
 # compile the FunctionalOptimizer class into TorchScript
 # This is because ScriptClass instance still lives in
-# python unless you explictly compile it as an attribute
+# python unless you explicitly compile it as an attribute
 # in ScriptModule or pass it to a ScriptFunction
 # _ScriptLocalOptimizerInterface serves as a common
 # interface type for Optimizer ScriptModules.
@@ -152,10 +154,10 @@ class DistributedOptimizer:
 
     `DistributedOptimizer` creates the local optimizer with TorchScript enabled
     by default, so that optimizer updates are not blocked by the Python Global
-    Interpreter Lock (GIL) during multithreaded training (e.g. Distributed Model
-    Parallel). This feature is currently in beta stage, enabled for optimizers
-    including `Adagrad`, `Adam`, `SGD`, `RMSprop`, `AdamW` and `Adadelta`. We
-    are increasing the coverage to all optimizers in future releases.
+    Interpreter Lock (GIL) in the case of multithreaded training (e.g. Distributed
+    Model Parallel). This feature is currently enabled for most optimizers. You
+    can also follow `the recipe`__ in PyTorch tutorials to enable TorchScript support
+    for your own custom optimizers.
 
     Args:
         optimizer_class (optim.Optimizer): the class of optimizer to
@@ -187,6 +189,8 @@ class DistributedOptimizer:
         >>>      lr=0.05,
         >>>   )
         >>>   dist_optim.step(context_id)
+
+    __ https://github.com/pytorch/tutorials/pull/1465
     """
 
     # dict to map a user passed in optimizer_class to a functional
@@ -200,6 +204,8 @@ class DistributedOptimizer:
         optim.SGD: _FunctionalSGD,
         optim.Adadelta: _FunctionalAdadelta,
         optim.RMSprop: _FunctionalRMSprop,
+        optim.Rprop: _FunctionalRprop,
+        optim.Adamax: _FunctionalAdamax,
     }
 
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):

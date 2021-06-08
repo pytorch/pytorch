@@ -44,8 +44,7 @@ class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                     inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
                     # Add a reference of the source tarfile into extracted_fobj, so the source
                     # tarfile handle won't be released until all the extracted file objs are destroyed.
-                    # Add `# type: ignore` to silence mypy's type checker
-                    extracted_fobj.source_tarfile_ref = tar  # type: ignore
+                    extracted_fobj.source_tarfile_ref = tar  # type: ignore[attr-defined]
                     # typing.cast is used here to silence mypy's type checker
                     yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
             except Exception as e:

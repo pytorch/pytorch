@@ -245,7 +245,6 @@ parser = argparse.ArgumentParser(description="Compile py source")
 parser.add_argument("paths", nargs="*", help="Paths to freeze.")
 parser.add_argument("--verbose", action="store_true", help="Print debug logs")
 parser.add_argument("--install_dir", help="Root directory for all output files")
-parser.add_argument("--fbcode_dir", help="Root directory for all output files")
 parser.add_argument("--oss", action="store_true", help="If it's OSS build, add a fake _PyImport_FrozenModules")
 
 args = parser.parse_args()
@@ -253,14 +252,13 @@ args = parser.parse_args()
 f = Freezer(args.verbose)
 
 for p in args.paths:
-    if args.fbcode_dir:
-        p = os.path.join(args.fbcode_dir, p)
     path = Path(p)
     if path.is_dir() and not Path.exists(path / '__init__.py'):
         # this 'top level path p' is a standard directory containing modules,
         # not a module itself
         # each 'mod' could be a dir containing __init__.py or .py file
-        for mod in path.glob("*"):
+        # NB: sorted to make sure this is deterministic
+        for mod in sorted(path.glob("*")):
             f.compile_path(mod, mod)
     else:
         f.compile_path(path, path)

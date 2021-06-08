@@ -1,9 +1,24 @@
 import os
 import sys
 import unittest
+from typing import Tuple
 
 import torch
-from jit.test_hooks_modules import *
+from jit.test_hooks_modules import (
+    ModuleDirectforwardSubmodCall, ModuleForwardSingleInput,
+    ModuleForwardTupleInput, create_forward_tuple_input,
+    create_module_forward_multiple_inputs, create_module_forward_single_input,
+    create_module_hook_return_nothing,
+    create_module_multiple_hooks_multiple_inputs,
+    create_module_multiple_hooks_single_input, create_module_no_forward_input,
+    create_module_same_hook_repeated, create_submodule_forward_multiple_inputs,
+    create_submodule_forward_single_input,
+    create_submodule_forward_single_input_return_not_tupled,
+    create_submodule_hook_return_nothing,
+    create_submodule_multiple_hooks_multiple_inputs,
+    create_submodule_multiple_hooks_single_input,
+    create_submodule_no_forward_input, create_submodule_same_hook_repeated,
+    create_submodule_to_call_directly_with_hooks)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -169,7 +184,7 @@ class TestHooks(JitTestCase):
         self.assertNotEqual(m_scripted("a"), m_scripted.forward("a"))
 
     def test_submodule_direct_forward_invocation(self):
-        m_submod_forward_call = ModuleDirectFowardSubmodCall(
+        m_submod_forward_call = ModuleDirectforwardSubmodCall(
             "outer_mod_name", "inner_mod_name"
         )
         m_submod_call = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
@@ -330,7 +345,7 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong inner types for the input tuple"
-            r" argument. Received type: 'Tuple\[None\]'",
+            r" argument. Received type: 'Tuple\[NoneType\]'",
         ):
             torch.jit.script(m)
 

@@ -115,7 +115,7 @@ namespace gflags = google;
 // flags defined in C10. This is done via a global reference, so the flag
 // itself is not duplicated - under the hood it is the same global gflags flag.
 #define C10_GFLAGS_DEF_WRAPPER(type, real_type, name, default_value, help_str) \
-  DEFINE_##type(name, default_value, help_str);                                \
+  DEFINE_##type(name, default_value, help_str);
 
 #define C10_DEFINE_int(name, default_value, help_str) \
   C10_GFLAGS_DEF_WRAPPER(int32, gflags::int32, name, default_value, help_str)
@@ -131,8 +131,7 @@ namespace gflags = google;
   C10_GFLAGS_DEF_WRAPPER(string, ::fLS::clstring, name, default_value, help_str)
 
 // DECLARE_typed_var should be used in header files and in the global namespace.
-#define C10_GFLAGS_DECLARE_WRAPPER(type, real_type, name) \
-  DECLARE_##type(name);                                   \
+#define C10_GFLAGS_DECLARE_WRAPPER(type, real_type, name) DECLARE_##type(name);
 
 #define C10_DECLARE_int(name) \
   C10_GFLAGS_DECLARE_WRAPPER(int32, gflags::int32, name)

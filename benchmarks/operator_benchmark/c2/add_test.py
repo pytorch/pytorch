@@ -1,6 +1,6 @@
 import operator_benchmark as op_bench
 import benchmark_caffe2 as op_bench_c2
-from benchmark_caffe2 import Caffe2BenchmarkBase # noqa
+from benchmark_caffe2 import Caffe2BenchmarkBase  # noqa: F401
 from caffe2.python import core
 
 

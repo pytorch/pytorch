@@ -1,14 +1,19 @@
 import torch
-from torch.fx import GraphModule  # type: ignore
-from torch.fx.symbolic_trace import Tracer  # type: ignore
-from torch.fx.node import Target, Node, Argument  # type: ignore
+from torch.fx import GraphModule
+from torch.fx._symbolic_trace import Tracer
+from torch.fx.node import Target, Node, Argument
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
+from .fx.qconfig_utils import (
+    check_is_valid_convert_custom_config_dict,
+    check_is_valid_fuse_custom_config_dict,
+    check_is_valid_prepare_custom_config_dict,
+    check_is_valid_qconfig_dict)
 from torch.nn.intrinsic import _FusedModule
-from typing import Dict, Any, List, Callable, Tuple, Optional
+from typing import Dict, Any, List, Callable, Tuple, Optional, Set
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):
@@ -150,6 +155,9 @@ forward graph of the parent module,
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
 
+    check_is_valid_qconfig_dict(qconfig_dict)
+    check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict)
+
     skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
     skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
 
@@ -167,9 +175,13 @@ forward graph of the parent module,
         float_custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         skipped_module_classes += float_custom_module_classes
+
+    preserved_attributes = prepare_custom_config_dict.get("preserved_attributes", [])
     tracer = QuantizationTracer(
         skipped_module_names, skipped_module_classes)
     graph_module = GraphModule(model, tracer.trace(model))
+    for attr_name in preserved_attributes:
+        setattr(graph_module, attr_name, getattr(model, attr_name))
     graph_module = _fuse_fx(graph_module, prepare_custom_config_dict)
     quantizer = Quantizer()
     prepared = quantizer.prepare(
@@ -179,7 +191,6 @@ forward graph of the parent module,
         prepare_custom_config_dict=prepare_custom_config_dict,
         is_standalone_module=is_standalone_module)
 
-    preserved_attributes = prepare_custom_config_dict.get("preserved_attributes", [])
     for attr_name in preserved_attributes:
         setattr(prepared, attr_name, getattr(model, attr_name))
     return prepared
@@ -221,6 +232,12 @@ def fuse_fx(model: torch.nn.Module,
            "additional_fuser_method_mapping": {
              (Module1, Module2): fuse_module1_module2
            }
+
+           # Attributes that are not used in forward function will
+           # be removed when constructing GraphModule, this is a list of attributes
+           # to preserve as an attribute of the GraphModule even when they are
+           # not used in the code, these attributes will also persist through deepcopy
+           "preserved_attributes": ["preserved_attr"],
          }
 
     Example:
@@ -232,7 +249,13 @@ def fuse_fx(model: torch.nn.Module,
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
-    graph_module = torch.fx.symbolic_trace(model)  # type: ignore
+    check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict)
+    graph_module = torch.fx.symbolic_trace(model)
+    preserved_attributes: Set[str] = set()
+    if fuse_custom_config_dict:
+        preserved_attributes = set(fuse_custom_config_dict.get("preserved_attributes", []))
+    for attr_name in preserved_attributes:
+        setattr(graph_module, attr_name, getattr(model, attr_name))
     return _fuse_fx(graph_module, fuse_custom_config_dict)
 
 def prepare_fx(
@@ -344,7 +367,7 @@ def prepare_fx(
         # Attributes that are not used in forward function will
         # be removed when constructing GraphModule, this is a list of attributes
         # to preserve as an attribute of the GraphModule even when they are
-        # not used in the code
+        # not used in the code, these attributes will also persist through deepcopy
         "preserved_attributes": ["preserved_attr"],
       }
 
@@ -359,7 +382,6 @@ def prepare_fx(
     from torch.quantization import prepare_fx
 
     float_model.eval()
-    graph_module = torch.fx.symbolic_trace(float_model)
     qconfig = get_default_qconfig('fbgemm')
     def calibrate(model, data_loader):
         model.eval()
@@ -368,7 +390,7 @@ def prepare_fx(
                 model(image)
 
     qconfig_dict = {"": qconfig}
-    prepared_model = prepare_fx(graph_module, qconfig_dict)
+    prepared_model = prepare_fx(float_model, qconfig_dict)
     # Run calibration
     calibrate(prepared_model, sample_inference_data)
     ```
@@ -426,6 +448,7 @@ def _convert_fx(
         convert_custom_config_dict = {}
 
     _check_is_graph_module(graph_module)
+    check_is_valid_convert_custom_config_dict(convert_custom_config_dict)
 
     quantizer = Quantizer()
     quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict,

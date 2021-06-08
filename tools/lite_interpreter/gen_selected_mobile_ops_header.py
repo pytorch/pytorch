@@ -2,8 +2,10 @@
 import argparse
 import os
 from typing import Set
-from tools.codegen.selective_build.selector import *
+from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.code_template import CodeTemplate
+
+import yaml
 
 if_condition_template_str = """if (kernel_tag_sv.compare("$kernel_tag_name") == 0) {
   return $dtype_checks;
@@ -101,7 +103,7 @@ def write_selected_mobile_ops_with_all_dtypes(
         header_contents = "".join(body_parts)
         out_file.write(header_contents.encode("utf-8"))
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate selected_mobile_ops.h for selective build."
     )
