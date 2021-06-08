@@ -22,7 +22,7 @@ call %INSTALLER_DIR%\install_miniconda3.bat
 
 
 :: Install ninja and other deps
-if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses typing_extensions )
+if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions )
 
 :: Override VS env here
 pushd .
@@ -39,6 +39,10 @@ if not "%USE_CUDA%"=="1" goto cuda_build_end
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
 
 rem version transformer, for example 10.1 to 10_1.
+if x%CUDA_VERSION:.=%==x%CUDA_VERSION% (
+    echo CUDA version %CUDA_VERSION% format isn't correct, which doesn't contain '.'
+    exit /b 1
+)
 set VERSION_SUFFIX=%CUDA_VERSION:.=_%
 set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
 

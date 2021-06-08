@@ -108,6 +108,13 @@ def plural(n: int) -> str:
     return '' if n == 1 else 's'
 
 
+def get_base_commit(sha1: str) -> str:
+    return subprocess.check_output(
+        ["git", "merge-base", sha1, "origin/master"],
+        encoding="ascii",
+    ).strip()
+
+
 def display_stat(
     x: Stat,
     format: Tuple[Tuple[int, int], Tuple[int, int]],
@@ -675,6 +682,7 @@ def build_info() -> ReportMetaMeta:
         "build_pr": os.environ.get("CIRCLE_PR_NUMBER", ""),
         "build_tag": os.environ.get("CIRCLE_TAG", ""),
         "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
+        "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "")),
         "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
         "build_job": os.environ.get("CIRCLE_JOB", ""),
         "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
@@ -766,12 +774,12 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.environ.get('CIRCLE_JOB')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
-    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
-        print("S3 upload only enabled on master, nightly and release branches.")
-        print(f"skipping test report on branch: {branch}")
-        return
     now = datetime.datetime.utcnow().isoformat()
-    key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
+        pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
+        key = f'pr_test_time/{pr}/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+    else:
+        key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
@@ -784,10 +792,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
 def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
     sha1 = os.environ.get("CIRCLE_SHA1", "HEAD")
 
-    base = subprocess.check_output(
-        ["git", "merge-base", sha1, "origin/master"],
-        encoding="ascii",
-    ).strip()
+    base = get_base_commit(sha1)
 
     count_spec = f"{base}..{sha1}"
     intermediate_commits = int(subprocess.check_output(
