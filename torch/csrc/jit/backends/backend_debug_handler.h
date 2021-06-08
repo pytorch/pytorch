@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/ivalue.h>
 
+#include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/scope.h>
 
@@ -109,15 +110,9 @@ namespace jit {
  *  [M.forward, source range] -> [aten::mul's source range] We need to track
  *  mul's source range and inlined CS both.
  */
-using DebugHandleType = int64_t;
 
 using BackendDebugInfoMapType =
-    std::unordered_map<DebugHandleType, DebugInfoTuple>;
-
-using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
-
-using BackendDebugHandleGenerator =
-    std::function<NodeToDebugHandle(const std::shared_ptr<Graph>&)>;
+    std::unordered_map<torch::jit::DebugHandleType, DebugInfoTuple>;
 
 /*
  * This class is used to generate debug info map.

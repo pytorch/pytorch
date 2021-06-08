@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/backends/backend_debug_handler.h>
 
 #include <ATen/core/jit_type.h>
 
@@ -9,6 +8,13 @@
 
 namespace torch {
 namespace jit {
+
+using DebugHandleType = int64_t;
+
+using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
+
+using BackendDebugHandleGenerator =
+    std::function<NodeToDebugHandle(const std::shared_ptr<Graph>&)>;
 
 namespace detail {
 
