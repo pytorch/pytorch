@@ -264,8 +264,8 @@ void DistEngine::computeDependencies(
 
   if (might_use_cuda && will_use_cuda) {
     // Collects current and default streams for devices where this process has a context,
-    // so GraphTask::exec_post_processing can sync them with leaf_streams.
-    task->stash_current_streams();
+    // so graphTask::exec_post_processing can sync them with leaf_streams.
+    graphTask->stash_current_streams();
   }
 
   // Now lets compute which functions need to be executed. The algorithm is as
