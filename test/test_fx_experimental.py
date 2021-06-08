@@ -29,7 +29,7 @@ import torch.fx.experimental.optimization as optimization
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
-from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_nn import module_tests
 from torch.fx.operator_schemas import (
     _torchscript_type_to_python_type,
     normalize_function,
@@ -866,7 +866,7 @@ terrible spacing
         Exhaustively test `Node.normalized_arguments` on all standard
         torch.nn Module classes
         """
-        for test_params in module_tests + new_module_tests:
+        for test_params in module_tests:
             if 'constructor' not in test_params:
                 constructor = getattr(torch.nn, test_params['module_name'])
             else:

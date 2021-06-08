@@ -10,7 +10,6 @@ import traceback
 
 import test_onnx_common
 from torch.testing._internal.common_nn import module_tests
-from test_nn import new_module_tests
 
 
 # Take a test case (a dict) as input, return the test name.
@@ -136,5 +135,5 @@ def convert_tests(testcases, sets=1):
     print_stats(FunctionalModule_nums, nn_module)
 
 if __name__ == "__main__":
-    testcases = module_tests + new_module_tests
+    testcases = module_tests
     convert_tests(testcases)

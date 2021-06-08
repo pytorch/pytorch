@@ -8,7 +8,7 @@ import torch.cuda
 import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
-from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_nn import module_tests
 from torch.testing._internal.common_utils import is_iterable_of_tensors
 
 from copy import deepcopy
@@ -572,4 +572,4 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
 
 
 def get_all_nn_module_tests():
-    return module_tests + new_module_tests + additional_module_tests
+    return module_tests + additional_module_tests

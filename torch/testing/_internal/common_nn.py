@@ -1248,7 +1248,7 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 
-new_module_tests = [
+module_tests.extend([
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
     bceloss_weights_no_reduce_test(),
@@ -3698,7 +3698,7 @@ new_module_tests = [
         with_tf32=True,
         tf32_precision=0.01,
     )
-]
+])
 
 # add conv padding mode tests:
 for padding_mode, cpp_padding_mode in zip(
@@ -3717,7 +3717,7 @@ for padding_mode, cpp_padding_mode in zip(
         cpp_padding = '{' + ', '.join(map(str, padding)) + '}'
         input_size = (2, 2) + (4,) * d
         output_size = (2, 3) + tuple(p + 1 for p in padding)  # simplified from `(4 + 2 * p - 3) // 2 + 1`
-        new_module_tests.append(
+        module_tests.append(
             dict(
                 module_name='Conv{}d'.format(d),
                 constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
