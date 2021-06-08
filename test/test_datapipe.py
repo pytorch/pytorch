@@ -138,7 +138,7 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertEqual(rec[1].read(), f.read())
             rec[1].close()
         # read extracted files after reaching the end of the tarfile
-        data_refs = list(rec for rec in datapipe3)
+        data_refs = list(datapipe3)
         self.assertEqual(len(data_refs), len(self.temp_files))
         for data_ref, temp_file in zip(data_refs, self.temp_files):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
@@ -165,7 +165,7 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertEqual(rec[1].read(), f.read())
             rec[1].close()
         # read extracted files before reaching the end of the zipile
-        data_refs = list(rec for rec in datapipe3)
+        data_refs = list(datapipe3)
         self.assertEqual(len(data_refs), len(self.temp_files))
         for data_ref, temp_file in zip(data_refs, self.temp_files):
             self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
@@ -204,12 +204,12 @@ class TestIterableDataPipeBasic(TestCase):
                 # Corresponding byte stream is closed by Decoder
                 self.assertTrue(inp[1].closed)
 
-        cached = list(d for d in datapipe2)
+        cached = list(datapipe2)
         datapipe3 = dp.iter.RoutedDecoder(cached, _png_decoder)
         datapipe3.add_handler(decoder_basichandlers)
         _helper(cached, datapipe3)
 
-        cached = list(d for d in datapipe2)
+        cached = list(datapipe2)
         datapipe4 = dp.iter.RoutedDecoder(cached, decoder_basichandlers)
         datapipe4.add_handler(_png_decoder)
         _helper(cached, datapipe4, channel_first=True)
@@ -342,10 +342,10 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp_nl = IDP_NoLen(range(5))
 
         concat_dp = input_dp1.concat(input_dp_nl)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(concat_dp)
 
-        self.assertEqual(list(d for d in concat_dp), list(range(10)) + list(range(5)))
+        self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
     def test_map_datapipe(self):
         input_dp = IDP(range(10))
@@ -372,7 +372,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp_nl = IDP_NoLen(range(10))
         map_dp_nl = input_dp_nl.map()
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(map_dp_nl)
         for x, y in zip(map_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
@@ -391,7 +391,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp_nl = IDP_NoLen(arrs)
         collate_dp_nl = input_dp_nl.collate()
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(collate_dp_nl)
         for x, y in zip(collate_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y))
@@ -420,7 +420,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp_nl = IDP_NoLen(range(10))
         batch_dp_nl = input_dp_nl.batch(batch_size=2)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(batch_dp_nl)
 
     def test_bucket_batch_datapipe(self):
@@ -430,7 +430,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp_nl = IDP_NoLen(range(20))
         bucket_dp_nl = input_dp_nl.bucket_batch(batch_size=7)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(bucket_dp_nl)
 
         # Test Bucket Batch without sort_key
@@ -489,7 +489,7 @@ class TestFunctionalIterDataPipe(TestCase):
         for data, exp in zip(filter_dp, range(5, 10)):
             self.assertEqual(data, exp)
 
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(filter_dp)
 
         def _non_bool_fn(data):
@@ -497,7 +497,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         filter_dp = input_ds.filter(filter_fn=_non_bool_fn)
         with self.assertRaises(ValueError):
-            temp = list(d for d in filter_dp)
+            temp = list(filter_dp)
 
     def test_sampler_datapipe(self):
         input_dp = IDP(range(10))
@@ -527,18 +527,18 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(len(shuffle_dp), len(input_ds))
 
             random.seed(123)
-            res = list(d for d in shuffle_dp)
+            res = list(shuffle_dp)
             self.assertEqual(sorted(res), exp)
 
             # Test Deterministic
             for num_workers in (0, 1):
                 random.seed(123)
                 dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn)
-                dl_res = list(d for d in dl)
+                dl_res = list(dl)
                 self.assertEqual(res, dl_res)
 
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
 
     @skipIfNoTorchVision
@@ -578,7 +578,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp = IDP_NoLen(inputs)  # type: ignore[assignment]
         transform = torchvision.transforms.ToTensor()
         tsfm_dp = input_dp.transforms(transform)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(tsfm_dp)
         for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
             self.assertEqual(tsfm_data, input_data)
@@ -588,10 +588,10 @@ class TestFunctionalIterDataPipe(TestCase):
             dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore[arg-type]
 
         zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore[var-annotated]
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
-        self.assertEqual(list(d for d in zipped_dp), exp)
+        self.assertEqual(list(zipped_dp), exp)
 
         zipped_dp = dp.iter.Zip(IDP(range(10)), IDP(range(5)))
         self.assertEqual(len(zipped_dp), 5)
@@ -904,9 +904,9 @@ class TestTyping(TestCase):
                [(1, 1), (2, '2')])
         for ds in dss:
             dp = DP(ds)  # type: ignore[var-annotated]
-            self.assertEqual(list(d for d in dp), ds)
+            self.assertEqual(list(dp), ds)
             # Reset __iter__
-            self.assertEqual(list(d for d in dp), ds)
+            self.assertEqual(list(dp), ds)
 
         dss = ([(1, 1), ('2', 2)],  # type: ignore[assignment, list-item]
                [[1, '1'], [2, '2']],  # type: ignore[list-item]
@@ -914,15 +914,15 @@ class TestTyping(TestCase):
         for ds in dss:
             dp = DP(ds)
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
-                list(d for d in dp)
+                list(dp)
 
             with runtime_validation_disabled():
-                self.assertEqual(list(d for d in dp), ds)
+                self.assertEqual(list(dp), ds)
                 with runtime_validation_disabled():
-                    self.assertEqual(list(d for d in dp), ds)
+                    self.assertEqual(list(dp), ds)
 
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
-                list(d for d in dp)
+                list(dp)
 
 
 if __name__ == '__main__':
