@@ -4,6 +4,7 @@
 #include <map>
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/irange.h>
 
 #if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
@@ -783,7 +784,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
         at::Tensor dstFlatData = at::empty({dst_len}, dstdata[0].options());
         auto srcFlatDataSplits =
             srcFlatData.split_with_sizes(c10::IntArrayRef(send_lengthsL), 0);
-        for (int i = 0; i < size_; i++) {
+        for(const auto i : c10::irange(size_)) {
           srcFlatDataSplits[i].copy_(srcdata[i].view({-1}));
         }
         c10::DeviceGuard guard1(srcdata[0].device());
@@ -801,7 +802,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
 
         auto dstFlatDataSplits =
             dstFlatData.split_with_sizes(c10::IntArrayRef(recv_lengthsL), 0);
-        for (int i = 0; i < size_; i++) {
+        for(const auto i : c10::irange(size_)) {
           dstdata[i].view({-1}).copy_(dstFlatDataSplits[i]);
         }
       };
