@@ -7,49 +7,6 @@ CONFIG_TREE_DATA = [
             ("5.4", [  # All this subtree rebases to master and then build
                 ("3.6", [
                     ("important", [X(True)]),
-                    ("parallel_tbb", [X(True)]),
-                    ("parallel_native", [X(True)]),
-                    ("pure_torch", [X(True)]),
-                ]),
-            ]),
-            # TODO: bring back libtorch test
-            ("7", [X("3.6")]),
-        ]),
-        ("clang", [
-            ("5", [
-                ("3.6", [
-                    ("asan", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-            ("7", [
-                ("3.6", [
-                    ("onnx", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("cuda", [
-            ("10.2", [
-                ("3.6", [
-                    ("shard_test", [X(True)]),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [X(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-            ("11.1", [
-                ("3.8", [
-                    ("shard_test", [XImportant(True)]),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [X(True)]),
-                        ]),
-                    ]),
                 ]),
             ]),
         ]),
@@ -59,37 +16,6 @@ CONFIG_TREE_DATA = [
             ("9", [
                 ("3.6", [
                     ("noarch", [XImportant(True)]),
-                ]),
-            ]),
-            ("9", [
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                    ("vulkan", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("cuda", [
-            ("10.2", [
-                ("3.9", [
-                    ("shard_test", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("gcc", [
-            ("9", [
-                ("3.8", [
-                    ("coverage", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-        ]),
-        ("rocm", [
-            ("3.9", [
-                ("3.6", [
-                    ('build_only', [XImportant(True)]),
                 ]),
             ]),
         ]),
