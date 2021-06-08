@@ -30,10 +30,10 @@
 namespace at {
 namespace meta {
 
-void check_reduction(
-    TensorIteratorBase& iter,
+ScalarType check_allany_and_get_output_dtype(
     const char* name,
     const Tensor& self,
+    const Tensor& result,
     IntArrayRef dims,
     bool keepdim) {
   // Refer [all, any : uint8 compatibility]
@@ -42,7 +42,6 @@ void check_reduction(
       name, " only supports strided layout, got: ",
       self.layout());
 
-  auto result = iter.maybe_get_output();
   ScalarType out_dtype;
 
   if (result.defined()) {
@@ -61,26 +60,28 @@ void check_reduction(
     }
   }
 
-  if (self.is_cuda()) {
-    // As CUDA supports dynamic type casting, we use this overload of
-    // `make_reduction`, which doesn't cast input to the result type i.e.
-    // kBool., otherwise we use the overload below which casts the input to
-    // kBool (which is an extra operation).
-    make_reduction(
-        iter, name, result, self, dims, keepdim, self.scalar_type(), out_dtype);
-  }
-  make_reduction(
-      iter, name, result, self, dims, keepdim, /*out_dtype=*/out_dtype);
+  return out_dtype;
+}
+
+void check_allany_for_meta(
+    impl::MetaBase& meta,
+    const char* name,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  const auto& result = meta.maybe_get_output();
+  auto out_dtype = check_allany_and_get_output_dtype(name, self, result, dim, keepdim);
+  auto shape = get_reduction_shape(self, dim, keepdim);
+  meta.set_output(shape, self.options().dtype(out_dtype));
 }
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  dim = at::maybe_wrap_dim(dim, self.dim());
-  check_reduction(*this, "all", self, dim, keepdim);
+  check_allany_for_meta(*this, "all", self, dim, keepdim);
 }
 
 TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  dim = at::maybe_wrap_dim(dim, self.dim());
-  check_reduction(*this, "all", self, dim, keepdim);
+  check_allany_for_meta(*this, "any", self, dim, keepdim);
 }
 
 } // namespace meta
@@ -1163,7 +1164,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
 // Tensor of dtype `bool`. However for compatibility reason,
 // for `uint8`, they return Tensor of same dtype `uint8`.
 // Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-inline Tensor & _all(Tensor & result, TensorIterator & iter) {
+inline const Tensor & _all(const Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(1);
   } else {
@@ -1173,23 +1174,45 @@ inline Tensor & _all(Tensor & result, TensorIterator & iter) {
   return result;
 }
 
+inline TensorIterator get_allany_iter(
+    const Tensor& self,
+    const Tensor& result,
+    IntArrayRef dims,
+    bool keepdim) {
+  if (self.is_cuda()) {
+    // As CUDA supports dynamic type casting, we use this overload of
+    // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
+    // otherwise we use the overload below which casts the input to kBool (which is
+    // an extra operation).
+    return meta::make_reduction(self, result, dims, keepdim, self.scalar_type());
+  }
+  return meta::make_reduction_from_out_ty(
+      self, result, dims, keepdim, result.scalar_type());
+}
+
 Tensor all(const Tensor& self) {
-  TensorIterator iter;
-  at::meta::check_reduction(iter, "all", self, {}, false);
-  auto result = iter.maybe_get_output(0);
+  Tensor result;
+
+  auto out_dtype =
+      meta::check_allany_and_get_output_dtype("all", self, result, {}, false);
+  auto shape = meta::get_reduction_shape(self, {}, false);
+
+  result = at::empty(shape, self.options().dtype(out_dtype));
+  auto iter = get_allany_iter(self, result, {}, false);
+
   return _all(result, iter);
 }
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  auto iter = get_allany_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
-    TensorIterator wrapper(*this);
-    _all(mut_result, wrapper);
+    _all(mut_result, iter);
   }
 }
 
-inline Tensor & _any(Tensor & result, TensorIterator & iter) {
+inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(0);
   } else {
@@ -1200,18 +1223,24 @@ inline Tensor & _any(Tensor & result, TensorIterator & iter) {
 }
 
 Tensor any(const Tensor& self) {
-  TensorIterator iter;
-  at::meta::check_reduction(iter, "any", self, {}, false);
-  auto result = iter.maybe_get_output(0);
+  Tensor result;
+
+  auto out_dtype =
+      meta::check_allany_and_get_output_dtype("any", self, result, {}, false);
+  auto shape = meta::get_reduction_shape(self, {}, false);
+
+  result = at::empty(shape, self.options().dtype(out_dtype));
+  auto iter = get_allany_iter(self, result, {}, false);
+
   return _any(result, iter);
 }
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  auto iter = get_allany_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
-    TensorIterator wrapper(*this);
-    _all(mut_result, wrapper);
+    _any(mut_result, iter);
   }
 }
 
