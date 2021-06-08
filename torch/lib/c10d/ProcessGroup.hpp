@@ -82,7 +82,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // replaced by ivalue::Future.
   // Python binding for this class might change, please do not assume
   // this will be bound using pybind.
-  class Work : public torch::CustomClassHolder {
+  class TORCH_API Work : public torch::CustomClassHolder {
    public:
     Work(
         int rank = -1,

@@ -68,7 +68,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   //
   // FIXME: This probably should be called WorkGloo since the work is executed in sync mode
   // by a background thread.
-  class AsyncWork : public ProcessGroup::Work {
+  class TORCH_API AsyncWork : public ProcessGroup::Work {
    public:
     explicit AsyncWork(
         std::vector<std::vector<at::Tensor>> outputTensors,
@@ -97,7 +97,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   };
 
   // Wrap c10d store as Gloo store
-  class GlooStore : public ::gloo::rendezvous::Store {
+  class TORCH_API GlooStore : public ::gloo::rendezvous::Store {
    public:
     GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
 
@@ -140,7 +140,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   // recv operation. It keeps a reference to the tensor it is
   // operating on to prevent it from being deallocated while the
   // operation is still in flight.
-  class SendWork : public ProcessGroup::Work {
+  class TORCH_API SendWork : public ProcessGroup::Work {
    public:
     explicit SendWork(
         at::Tensor& tensor,
@@ -155,7 +155,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
   };
 
-  class RecvWork : public ProcessGroup::Work {
+  class TORCH_API RecvWork : public ProcessGroup::Work {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
