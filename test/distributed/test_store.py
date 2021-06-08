@@ -253,7 +253,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
         server_store.set("key", "value")
         port = server_store.port
-        world_size = random.randint(5, 10) if world_size else world_size
+        world_size = random.randint(5, 10) if world_size == -1 else world_size
         for i in range(world_size):
             self._create_client(i, addr, port, world_size)
 
