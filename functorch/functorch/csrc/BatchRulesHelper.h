@@ -34,7 +34,7 @@ Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, i
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
     const Tensor& tensor, optional<int64_t> batch_dim, ExtraArgs... extra_args) {
-  return {Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim};
+  return std::make_tuple(Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim);
 }
 
 #define INVOKE(object,ptrToMember)  ((object).*(ptrToMember))

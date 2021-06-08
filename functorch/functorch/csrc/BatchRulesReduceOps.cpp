@@ -30,7 +30,7 @@ template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
   if (!self_bdim.has_value()) {
-    return { Func(self, dims, std::forward<ExtraArgs>(extra_args)...), nullopt };
+    return std::make_tuple( Func(self, dims, std::forward<ExtraArgs>(extra_args)...), nullopt );
   }
   auto self_dim = self.dim();
 
@@ -40,7 +40,7 @@ std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
   }
 
   if (self_dim == 1 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
-    return { self.clone(), 0 };
+    return std::make_tuple( self.clone(), 0 );
   }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   VmapDimVector new_dims;
@@ -49,7 +49,7 @@ std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
     new_dims.push_back(getPhysicalDim(self_, self_bdim.has_value(), dim));
   }
   auto result = Func(self_, new_dims, std::forward<ExtraArgs>(extra_args)...);
-  return { result, 0 };
+  return std::make_tuple( result, 0 );
 }
 
 // For now I'm not macroing these (don't see another way to do it), since I'm
@@ -112,7 +112,7 @@ template<typename F, F Func>
 std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, optional<int64_t> dim, bool keepdim) {
   if (!self_bdim.has_value()) {
-    return { Func(self, dim, keepdim), nullopt };
+    return std::make_tuple( Func(self, dim, keepdim), nullopt );
   }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   if (!dim) {
@@ -133,7 +133,7 @@ std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
     self_ = self_.unsqueeze(-1);
   }
   auto result = Func(self_, new_dim, keepdim);
-  return {result, 0};
+  return std::make_tuple(result, 0);
 }
 
 
@@ -146,14 +146,14 @@ _log_softmax_backward_data(
   TORCH_INTERNAL_ASSERT(!(output_bdim.has_value() ^ self_bdim.has_value()),
       "output_bdim and self_bdim must be the same");
   if (!grad_output_bdim && !self_bdim) {
-    return { at::_log_softmax_backward_data(grad_output, output, dim, self), nullopt };
+    return std::make_tuple( at::_log_softmax_backward_data(grad_output, output, dim, self), nullopt );
   }
   if (grad_output_bdim && self_bdim) {
     auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
     auto output_ = moveBatchDimToFront(output, output_bdim);
     auto self_ = moveBatchDimToFront(self, self_bdim);
     dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
-    return { at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 };
+    return std::make_tuple( at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 );
   }
   // NB: It turns out that expanding + calling log_softmax_backward is generally
   // faster than the decomposition.
@@ -165,14 +165,14 @@ _log_softmax_backward_data(
     dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
     auto output_ = output.expand_as(grad_output_);
     auto self_ = self.expand_as(grad_output_);
-    return { at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 };
+    return std::make_tuple( at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 );
   }
   if (!grad_output_bdim && self_bdim) {
     auto output_ = moveBatchDimToFront(output, output_bdim);
     auto self_ = moveBatchDimToFront(self, self_bdim);
     auto grad_output_ = grad_output.expand_as(output_);
     dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
-    return { at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 };
+    return std::make_tuple( at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 );
   }
   TORCH_INTERNAL_ASSERT(false);
 }

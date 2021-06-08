@@ -86,7 +86,7 @@ std::tuple<Tensor, optional<int64_t>> flatten_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   start_dim = getPhysicalDim(self_, self_bdim.has_value(), start_dim);
   end_dim = getPhysicalDim(self_, self_bdim.has_value(), end_dim);
-  return { at::flatten(self_, start_dim, end_dim), valIfNonempty(self_bdim, 0) };
+  return std::make_tuple(at::flatten(self_, start_dim, end_dim), valIfNonempty(self_bdim, 0));
 }
 
 std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
@@ -99,7 +99,7 @@ std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
   if (self_bdim) {
     dim += 1;
   }
-  return { self_.unsqueeze(dim), valIfNonempty(self_bdim, 0) };
+  return std::make_tuple(self_.unsqueeze(dim), valIfNonempty(self_bdim, 0));
 }
 
 // NB: repeat is not actually a view, but it is in this file
@@ -108,7 +108,7 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
     optional<int64_t> self_bdim,
     IntArrayRef sizes) {
   if (!self_bdim) {
-    return { self.repeat(sizes), nullopt };
+    return std::make_tuple(self.repeat(sizes), nullopt);
   }
 
   VmapDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
@@ -117,7 +117,7 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
   while (self_.dim() < sizes_with_bdim.size()) {
     self_ = self_.unsqueeze(1);
   }
-  return { self_.repeat(sizes_with_bdim), 0 };
+  return std::make_tuple(self_.repeat(sizes_with_bdim), 0);
 }
 
 std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
@@ -125,15 +125,15 @@ std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
     optional<int64_t> input_bdim,
     int64_t diagonal) {
   if (!input_bdim) {
-    return { at::diag(input, diagonal), nullopt };
+    return std::make_tuple(at::diag(input, diagonal), nullopt);
   }
   auto input_ = moveBatchDimToFront(input, input_bdim);
   auto rank = rankWithoutBatchDim(input, input_bdim);
 
   if (rank == 1) {
-    return { at::diag_embed(input_, diagonal), 0};
+    return std::make_tuple(at::diag_embed(input_, diagonal), 0);
   } else if (rank == 2) {
-    return { at::diagonal(input_.movedim(0, -1), diagonal).clone(), rank - 2};
+    return std::make_tuple(at::diagonal(input_.movedim(0, -1), diagonal).clone(), rank - 2);
   } else {
     throw std::runtime_error("Passed in an invalid shape to at::diag");
   }
