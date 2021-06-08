@@ -637,7 +637,6 @@ include data such as forward time, backward time, gradient communication time, e
 ::
 
     import os
-    from datetime import timedelta
 
     import torch
     import torch.distributed as dist
@@ -730,7 +729,7 @@ The following logs are rendered during runtime (when ``TORCH_DISTRIBUTED_DEBUG=D
    Avg backward comm/comp overlap time: 2234674
 
 
-In addition, ``TORCH_DISTRIBUTED_DEBUG=INFO`` enhances crashes in :func:`torch.nn.parallel.DistributedDataParallel` due to unused parameters in the model. Currently, ``find_unused_parameters=True``
+In addition, ``TORCH_DISTRIBUTED_DEBUG=INFO`` enhances crash logging in :func:`torch.nn.parallel.DistributedDataParallel` due to unused parameters in the model. Currently, ``find_unused_parameters=True``
 must be passed into :func:`torch.nn.parallel.DistributedDataParallel` initialization if there are parameters that may be unused in the forward pass, and as of v1.10, all model outputs are required
 to be used in loss computation as :func:`torch.nn.parallel.DistributedDataParallel` does not support unused parameters in the backwards pass. These constraints are challenging especially for larger
 models, thus when crashing with an error, :func:`torch.nn.parallel.DistributedDataParallel` will log the fully qualified name of all parameters that went unused. For example, in the above application,
