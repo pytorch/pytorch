@@ -37,12 +37,12 @@ jobs:
       - name: Install PyTorch and setup environment
         run: |
           . activate reltest
-          conda install -y -c pytorch-test pytorch=1.9.0 \
+          conda install -y -c pytorch-test pytorch=1.8.1 \
                                            torchvision torchtext torchaudio cudatoolkit=10.2
           # conda install -y -c pytorch-test pytorch=${{ github.event.inputs.pytorch_version }} \
           #                                  torchvision torchtext torchaudio cudatoolkit=10.2
           # echo "RESULT_DIR=${HOME}/release-testing/${{ github.event.inputs.pytorch_version }}" >> $GITHUB_ENV
-          echo "RESULT_DIR=${HOME}/release-testing/1.9.0" >> $GITHUB_ENV
+          echo "RESULT_DIR=${HOME}/release-testing/1.8.1" >> $GITHUB_ENV
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
           echo "Result dir: ${RESULT_DIR} "
       - name: Check machine tuned
