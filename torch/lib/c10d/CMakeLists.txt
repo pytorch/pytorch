@@ -1,36 +1,5 @@
 cmake_minimum_required(VERSION 3.2 FATAL_ERROR)
 
-# FIXME Remove @nocommit
-# copy_header(FileStore.hpp)
-# copy_header(ParamCommsUtils.hpp)
-# copy_header(PrefixStore.hpp)
-# copy_header(ProcessGroup.hpp)
-# copy_header(Store.hpp)
-# copy_header(TCPStore.hpp)
-# copy_header(Types.hpp)
-# copy_header(Utils.hpp)
-# copy_header(sequence_num.hpp)
-# if(USE_GLOO)
-#   copy_header(ProcessGroupGloo.hpp)
-#   copy_header(GlooDeviceFactory.hpp)
-#   copy_header(ProcessGroupWrapper.hpp)
-# endif()
-# if(NOT WIN32)
-#   copy_header(HashStore.hpp)
-#   copy_header(UnixSockUtils.hpp)
-# else()
-#   copy_header(WinSockUtils.hpp)
-# endif()
-#
-# if(USE_C10D_NCCL)
-#   copy_header(ProcessGroupNCCL.hpp)
-#   copy_header(NCCLUtils.hpp)
-# endif()
-#
-# if(USE_C10D_MPI)
-#   copy_header(ProcessGroupMPI.hpp)
-# endif()
-
 option(BUILD_EXAMPLES "Build examples" OFF)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
@@ -41,6 +10,3 @@ if(BUILD_TEST)
   enable_testing()
   add_subdirectory(test)
 endif()
-
-# Install all header files that were prepared in the build directory
-install(DIRECTORY ${CMAKE_BINARY_DIR}/include/ DESTINATION include)
