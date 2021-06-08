@@ -205,7 +205,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
 class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @property
     def world_size(self):
-        return min(4, max(2, torch.cuda.device_count()))
+        return 2
 
     @common_distributed.skip_if_rocm
     def test_step(self):
