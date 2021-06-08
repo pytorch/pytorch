@@ -80,7 +80,7 @@ class ParametrizationList(ModuleList):
         here for completeness. It should not be instantiated by the user.
 
     Args:
-        modules (sequence): an sequence of modules representing the parametrizations
+        modules (sequence): sequence of modules representing the parametrizations
         original (Parameter or Tensor): parameter or buffer that is parametrized
     """
     original: Tensor
@@ -98,20 +98,19 @@ class ParametrizationList(ModuleList):
         # We check that the following invariants hold:
         #    X = module.weight
         #    Y = param.right_inverse(X)
-        #    assert isinstance(Y, Tensor) or isinstance(Y, collections.Sequence)
+        #    assert isinstance(Y, Tensor) or
+        #           (isinstance(Y, collections.Sequence) and all(isinstance(t, Tensor) for t in Y))
         #    Z = param(Y) if isisntance(Y, Tensor) else param(*Y)
-        #    if isinstance(Y, collections.Sequence):
-        #       assert all(isinstance(t, Tensor) for t in Y)
         #    # Consistency checks
         #    assert X.dtype == Z.dtype and X.shape == Z.shape
         #    # If it has one input, this allows to be able to use set_ to be able to
         #    # move data to/from the original tensor without changing its id (which is what the
         #    # optimiser uses to track parameters)
-        #    # We also require the shape to be the same to avoid the user shooting themselves
-        #    # in the foot. This second requirement may be dropped in the future
         #    if isinstance(Y, Tensor)
-        #      assert X.dtype == Y.dtype and X.shape == Y.shape
+        #      assert X.dtype == Y.dtype
         # Below we use original = X, new = Y
+        original_shape = original.shape
+        original_dtype = original.dtype
 
         # Compute new
         with torch.no_grad():
@@ -141,45 +140,40 @@ class ParametrizationList(ModuleList):
                     f"original.dtype: {original.dtype}\n"
                     f"right_inverse(original).dtype: {new.dtype}"
                 )
-            if original.shape != new.shape:
-                raise ValueError(
-                    "When `right_inverse` outputs one tensor, it may not change the shape.\n"
-                    f"original.shape: {original.shape}\n"
-                    f"right_inverse(original).shape: {new.shape}"
-                )
             # Set the original to original so that the user does not need to re-register the parameter
             # manually in the optimiser
             with torch.no_grad():
                 original.set_(new)  # type: ignore[call-overload]
             _register_parameter_or_buffer(self, "original", original)
         else:
-            requires_grad = original.requires_grad
             for i, originali in enumerate(new):
                 if not isinstance(originali, Tensor):
                     raise ValueError("'right_inverse' must return a Tensor or a Sequence of tensors "
                                      "(list, tuple...). "
                                      f"Got a sequence with an element {originali.__class__.__name__}.")
 
-                # If they require grad we expect the user to add the new parametesr to the optimizer
-                # after registering the parametrization
-                if requires_grad:
+                # If the original tensor was a Parameter that required grad, we expect the user to
+                # add the new parameters to the optimizer after registering the parametrization
+                # (this is documented)
+                if isinstance(original, Parameter):
                     originali = Parameter(originali)
+                originali.requires_grad_(original.requires_grad)
                 _register_parameter_or_buffer(self, f"original{i}", originali)
 
         # Consistency checks:
         # Since f : A -> B, right_inverse : B -> A, Z and original should live in B
         # Z = forward(right_inverse(original))
         Z = self()
-        if Z.dtype != original.dtype:
+        if Z.dtype != original_dtype:
             raise ValueError(
                 "Registering a parametrization may not change the dtype of the tensor.\n"
-                f"unparametrized dtype: {original.dtype}\n"
+                f"unparametrized dtype: {original_dtype}\n"
                 f"parametrized dtype: {Z.dtype}"
             )
-        if Z.shape != original.shape:
+        if Z.shape != original_shape:
             raise ValueError(
                 "Registering a parametrization may not change the shape of the tensor.\n"
-                f"unarametrized shape: {original.shape}\n"
+                f"unarametrized shape: {original_shape}\n"
                 f"parametrized shape: {Z.shape}"
             )
 
@@ -199,11 +193,22 @@ class ParametrizationList(ModuleList):
                     value = module.right_inverse(value)
                 # else we assume that right_inverse is the identity
             if self.ntensors == 1:
+                # This check should never fail as it is an invariant, but we check it again juts in case
+                if value.dtype != self.original.dtype:
+                    raise ValueError(
+                        f"The tensor returned by `right_inverse` has dtype {value.dtype} "
+                        f"while `original` has dtype {self.original.dtype}"
+                    )
                 # We know that the result is going to have the same dtype
                 self.original.set_(value)  # type: ignore[call-overload]
             else:
                 for i, tensor in enumerate(value):
                     original_i = getattr(self, f"original{i}")
+                    if original_i.dtype != tensor.dtype:
+                        raise ValueError(
+                            f"Tensor {i} returned by `right_inverse` has dtype {tensor.dtype} "
+                            f"while `original{i}` has dtype {originali.dtype}"
+                        )
                     original_i.set_(tensor)
 
     def forward(self) -> Tensor:
@@ -402,35 +407,36 @@ def register_parametrization(
         assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
         parametrization_list = module.parametrizations[tensor_name]
         Y = parametrization_list()
-        Z = parametrization(Y)
-        if Z.dtype != Y.dtype:
+        X = parametrization(Y)
+        if X.dtype != Y.dtype:
             raise ValueError(
-                "Registering a parametrization may not change the dtype of the parameter.\n"
-                f"self.{tensor_name}.dtype: {Y.dtype}\n"
-                f"parametrization(self.{tensor_name}).dtype: {Z.dtype}"
+                "Registering a parametrization may not change the dtype of the tensor.\n"
+                f"module.{tensor_name}.dtype: {Y.dtype}\n"
+                f"parametrization(module.{tensor_name}).dtype: {X.dtype}"
             )
-        if Z.shape != Y.shape:
+        if X.shape != Y.shape:
             raise ValueError(
-                "Registering a parametrization may not change the shape of the parameter.\n"
-                f"self.{tensor_name}.shape: {Y.shape}\n"
-                f"parametrization(self.{tensor_name}).shape: {Z.shape}"
+                "Registering a parametrization may not change the shape of the tensor.\n"
+                f"module.{tensor_name}.shape: {Y.shape}\n"
+                f"parametrization(module.{tensor_name}).shape: {X.shape}"
             )
         if hasattr(parametrization, "right_inverse"):
-            X = parametrization.right_inverse(Z)  # type: ignore[operator]
-            # nb. The naming of X / Y / Z in the code vs the errors is different
+            Z = parametrization.right_inverse(X)  # type: ignore[operator]
             if Z.dtype != X.dtype:
                 raise ValueError(
-                    "parametrization.right_inverse(X) may not change the dtype of X.\n"
-                    f"X.dtype: {Z.dtype}\n"
-                    f"parametrization.right_inverse(X).dtype: {X.dtype}"
+                    "parametrization.right_inverse(X) may not change the dtype of X for "
+                    f"X = parametrization(module.{tensor_name}).\n"
+                    f"X.dtype: {X.dtype}\n"
+                    f"parametrization.right_inverse(X).dtype: {Z.dtype}"
                 )
             if Z.shape != X.shape:
                 raise ValueError(
-                    "parametrization.right_inverse(X) may not change the shape of X.\n"
-                    f"X.shape: {Z.shape}\n"
-                    f"parametrization.right_inverse(X).shape: {X.shape}"
+                    "parametrization.right_inverse(X) may not change the shape of X for "
+                    f"X = parametrization(module.{tensor_name}).\n"
+                    f"X.shape: {X.shape}\n"
+                    f"parametrization.right_inverse(X).shape: {Z.shape}"
                 )
-        # else right_inverse is considered to be the identity
+        # else right_inverse is assumed to be the identity
 
         # add the new parametrization to the parametrization list
         parametrization_list.append(parametrization)
@@ -531,7 +537,6 @@ def remove_parametrizations(
             # We cannot use no_grad because we need to know whether one or more
             # original tensors required grad
             t = getattr(module, tensor_name)
-            print(t.requires_grad)
             # We'll have to trust the user to add it to the optimizer
             original = Parameter(t) if t.requires_grad else t
         else:

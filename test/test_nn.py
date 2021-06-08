@@ -2431,15 +2431,15 @@ class TestNN(NNTestCase):
                 return 2 * x
 
         # A parametrization that changes the size
-        class ChangeShapeForward(nn.Module):
+        class ChangeShape(nn.Module):
             def forward(self, x):
                 return x[:-1]
 
-        class ChangeShapeInverse(nn.Module):
-            def forward(self, x):
-                return x
-
             def right_inverse(self, x):
+                return torch.cat([x, x[:1]])
+
+        class ChangeShapeForward(nn.Module):
+            def forward(self, x):
                 return x[:-1]
 
         # A parametrization that changes the dtype
@@ -2457,30 +2457,35 @@ class TestNN(NNTestCase):
 
         module = nn.Linear(3, 4)
         weight_init = module.weight.clone()
-        with self.assertRaisesRegex(ValueError, "a parametrization may not change the shape"):
-            parametrize.register_parametrization(module, "weight", ChangeShapeForward())
-        self.assertFalse(parametrize.is_parametrized(module))
 
-        with self.assertRaisesRegex(ValueError, "it may not change the shape"):
-            parametrize.register_parametrization(module, "weight", ChangeShapeInverse())
+        # Changing the shape in right_inverse should be fine as long as it does not
+        # change the shape of module.weight
+        parametrize.register_parametrization(module, "weight", ChangeShape())
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
+
+        # But changing the shape just in the forward and not in the backward is not
+        with self.assertRaisesRegex(ValueError, "may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShapeForward())
         self.assertFalse(parametrize.is_parametrized(module))
 
         with self.assertRaisesRegex(ValueError, "a parametrization may not change the dtype"):
             parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
         self.assertFalse(parametrize.is_parametrized(module))
 
-        with self.assertRaisesRegex(ValueError, "it may not change the dtype"):
+        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
             parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
         self.assertFalse(parametrize.is_parametrized(module))
 
         # Same tests with a parametrized module
         parametrize.register_parametrization(module, "weight", Basic())
 
+        # Changing the shape is not fine here, because it would require to change the output
+        # shape of the previous parametrization, which is not possible
+        with self.assertRaisesRegex(ValueError, "may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShape())
+
         with self.assertRaisesRegex(ValueError, "a parametrization may not change the shape"):
             parametrize.register_parametrization(module, "weight", ChangeShapeForward())
-
-        with self.assertRaisesRegex(ValueError, "may not change the shape"):
-            parametrize.register_parametrization(module, "weight", ChangeShapeInverse())
 
         with self.assertRaisesRegex(ValueError, "a parametrization may not change the dtype"):
             parametrize.register_parametrization(module, "weight", ChangeDtypeForward())
@@ -2619,7 +2624,7 @@ class TestNN(NNTestCase):
         # Multiplying by a scalar does not change the rank
         self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
 
-        # The model should have 3 parameters now
+        # Test backward
         for _ in range(2):
             # The model has now three parameters
             self.assertEqual(len(list(model.parameters())), 3)
