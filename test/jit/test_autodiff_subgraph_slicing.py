@@ -1,7 +1,9 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode_for_profiling_tests
+from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, \
+    num_profiled_runs, enable_profiling_mode_for_profiling_tests
+from torch.testing._internal.common_jit import check_against_reference
 import torch
 
 # Make the helper files in test/ importable
@@ -9,6 +11,8 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
+
+from typing import Optional
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -29,7 +33,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 return ge.graph_for(*inputs)
 
     def assertGraphSize(self, graph, size):
-        nodes = list(filter(lambda n : n.kind() != "prim::BailOut" and n.kind() != "prim::BailoutTemplate", graph.nodes()))
+        nodes = list(filter(lambda n: (n.kind() != "prim::BailOut" and
+                                       n.kind() != "prim::BailoutTemplate" and
+                                       n.kind() != "prim::TypeCheck" and
+                                       n.kind() != "prim::RequiresGradCheck"),
+                            graph.nodes()))
         self.assertEqual(len(list(nodes)), size)
 
     def test_chunk_constant_script_ad(self):
@@ -43,6 +51,92 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "This threshold is only valid for Profiling Executor")
+    def test_diff_graph_inline_threshold(self):
+        with enable_profiling_mode_for_profiling_tests():
+            NUM_RUNS = 1
+            with num_profiled_runs(NUM_RUNS):
+                @torch.jit.script
+                def foo(x):
+
+                    #  two nodes should be fused
+                    #  see https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/runtime/graph_executor_impl.h#L49
+                    return torch.sigmoid(torch.sigmoid(x))
+
+                @torch.jit.script
+                def bar(x):
+                    #  two nodes should NOT be fused
+                    return torch.sigmoid(x)
+
+                input = torch.rand([4, 4], requires_grad=True)
+                foo(input)
+                foo(input)
+
+                bar(input)
+                bar(input)
+
+                print(foo.graph_for(input))
+                self.assertGraphContainsExactly(foo.graph_for(input), 'prim::DifferentiableGraph', 1)
+                self.assertGraphContainsExactly(bar.graph_for(input), 'prim::DifferentiableGraph', 0)
+
+    def test_bias_as_module_attr(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+            class M(torch.nn.Module):
+                def __init__(self, has_bias):
+                    super(M, self).__init__()
+                    self.ll = torch.nn.Linear(10, 10, has_bias)
+
+                def forward(self, x, y):
+                    return self.ll(x + y) * x + y
+
+            x = torch.rand(10, 10, requires_grad=True)
+            no_bias = M(False)
+            scripted_no_bias = torch.jit.script(no_bias)
+            scripted_no_bias(x, x)
+            scripted_no_bias(x, x)
+            scripted_no_bias(x, x)
+            has_bias = M(True)
+            check_against_reference(self, scripted_no_bias, no_bias, lambda x: x, (x, x,), check_types=False)
+            scripted_has_bias = torch.jit.script(has_bias)
+            scripted_has_bias(x, x)
+            scripted_has_bias(x, x)
+            scripted_has_bias(x, x)
+            check_against_reference(self, scripted_has_bias, has_bias, lambda x: x, (x, x,), check_types=False)
+
+    def test_constructed_bias(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+            def method1(x, weight, b1, b2):
+                bias = b1 * b2
+                return torch.nn.functional.linear(x, weight, bias)
+            N = 10
+            x = torch.rand(N, N, requires_grad=True)
+            weight = torch.rand(N, N, requires_grad=True)
+            b1 = torch.rand(N, N, requires_grad=True)
+            b2 = torch.rand(N, N, requires_grad=True)
+            scripted = self.checkScript(method1, (x, weight, b1, b2))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, b1, b2), check_types=False)
+
+    def test_bias_as_arg(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+            def method1(x, weight, bias: Optional[torch.Tensor]):
+                return torch.nn.functional.linear(x, weight, bias).relu() + 2
+            N = 10
+            x = torch.rand(N, N, requires_grad=True)
+            weight = torch.rand(N, N, requires_grad=True)
+            bias = None
+            scripted = self.checkScript(method1, (x, weight, bias))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
+            bias = torch.rand(N, N, requires_grad=True)
+            scripted = self.checkScript(method1, (x, weight, bias))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
 
     def test_simple_merge(self):
         # o --> o

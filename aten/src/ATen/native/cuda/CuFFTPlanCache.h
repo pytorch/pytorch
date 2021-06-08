@@ -1,65 +1,118 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/Config.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/utils/ParamsHash.h>
+#include <c10/util/accumulate.h>
 
-#include <list>
-#include <unordered_map>
-#include <string>
-#include <stdexcept>
-#include <sstream>
-#include <limits>
 #include <cufft.h>
 #include <cufftXt.h>
 
+#include <limits>
+#include <list>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+
 namespace at { namespace native { namespace detail {
 
-// This POD struct is used to let us easily compute hashes of the
+// Enum representing the FFT type
+enum class CuFFTTransformType : int8_t {
+  C2C,  // Complex-to-complex
+  R2C,  // Real-to-complex
+  C2R,  // Complex-to-real
+};
+
+// This struct is used to let us easily compute hashes of the
 // parameters.
 // It will be the **key** to the plan cache.
 struct CuFFTParams
 {
-  at::ScalarType scalar_type_;
-  int64_t input_sizes_[max_rank + 2];
-  int64_t input_strides_[max_rank + 2];
-  uint8_t signal_ndim_;  // between 1 and max_rank, i.e., 1 <= signal_ndim <= 3
-  bool complex_input_;
-  bool complex_output_;
-  int64_t signal_sizes_[max_rank];
-  bool onesided_;
+  int64_t signal_ndim_; // between 1 and max_rank, i.e., 1 <= signal_ndim <= 3
+  // These include additional batch dimension as well.
+  int64_t sizes_[max_rank + 1];
+  int64_t input_strides_[max_rank + 1];
+  int64_t output_strides_[max_rank + 1];
+  CuFFTTransformType fft_type_;
+  ScalarType value_type_;
+
+  CuFFTParams() = default;
+
+  CuFFTParams(IntArrayRef in_strides, IntArrayRef out_strides,
+      IntArrayRef signal_sizes, CuFFTTransformType fft_type, ScalarType value_type) {
+    // Padding bits must be zeroed for hashing
+    memset(this, 0, sizeof(*this));
+    signal_ndim_ = signal_sizes.size() - 1;
+    fft_type_ = fft_type;
+    value_type_ = value_type;
+
+    TORCH_INTERNAL_ASSERT(in_strides.size() == signal_sizes.size());
+    TORCH_INTERNAL_ASSERT(out_strides.size() == signal_sizes.size());
+    TORCH_INTERNAL_ASSERT(1 <= signal_ndim_ && signal_ndim_ <= max_rank);
+
+    std::copy(signal_sizes.cbegin(), signal_sizes.cend(), sizes_);
+    std::copy(in_strides.cbegin(), in_strides.cend(), input_strides_);
+    std::copy(out_strides.cbegin(), out_strides.cend(), output_strides_);
+  }
 };
 
-// NB: This can't be a constructor, because then CuFFTParams
-// would not be a POD anymore.
-static inline void setCuFFTParams(CuFFTParams* params,
-    const Tensor& input, int64_t signal_ndim, bool complex_input,
-    bool complex_output, IntArrayRef checked_signal_sizes, bool onesided) {
+static_assert(std::is_trivial<CuFFTParams>::value, "");
 
-  memset(params, 0, sizeof(CuFFTParams));
-  params->scalar_type_ = input.scalar_type();
-  for (int i = 0; i != input.dim(); ++i) {
-    params->input_sizes_[i] = input.size(i);
-    if (input.size(i) != 1) {
-      params->input_strides_[i] = input.stride(i);
-    }
+// Returns true if the transform type has complex input
+inline bool cufft_complex_input(CuFFTTransformType type) {
+  switch (type) {
+    case CuFFTTransformType::C2C:
+    case CuFFTTransformType::C2R:
+      return true;
+
+    case CuFFTTransformType::R2C:
+      return false;
   }
-  params->signal_ndim_ = (uint8_t) signal_ndim;
-  params->complex_input_ = complex_input;
-  params->complex_output_ = complex_output;
-  for (size_t i = 0; i != checked_signal_sizes.size(); ++i) {
-    params->signal_sizes_[i] = checked_signal_sizes[i];
-  }
-  params->onesided_ = onesided;
+  TORCH_INTERNAL_ASSERT(false);
 }
 
-struct CuFFTHandleDeleter {
-  void operator()(cufftHandle* x) {
+// Returns true if the transform type has complex output
+inline bool cufft_complex_output(CuFFTTransformType type) {
+  switch (type) {
+    case CuFFTTransformType::C2C:
+    case CuFFTTransformType::R2C:
+      return true;
+
+    case CuFFTTransformType::C2R:
+      return false;
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+// Create transform type enum from bools representing if input and output are complex
+inline CuFFTTransformType GetCuFFTTransformType(bool complex_input, bool complex_output) {
+  if (complex_input && complex_output) {
+    return CuFFTTransformType::C2C;
+  } else if (complex_input && !complex_output) {
+    return CuFFTTransformType::C2R;
+  } else if (!complex_input && complex_output) {
+    return CuFFTTransformType::R2C;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Real to real FFTs are not supported");
+}
+
+
+class CuFFTHandle {
+  ::cufftHandle handle_;
+public:
+
+  CuFFTHandle() {
+    CUFFT_CHECK(cufftCreate(&handle_));
+  }
+
+  ::cufftHandle & get() { return handle_; }
+  const ::cufftHandle & get() const { return handle_; }
+
+  ~CuFFTHandle() {
 // Not using fftDestroy() for rocFFT to work around double freeing of handles
 #ifndef __HIP_PLATFORM_HCC__
-    if (x != nullptr) {
-      CUFFT_CHECK(cufftDestroy(*x));
-    }
+    cufftDestroy(handle_);
 #endif
   }
 };
@@ -67,6 +120,101 @@ struct CuFFTHandleDeleter {
 __forceinline__
 static bool is_pow_of_two(int64_t x) {
   return (x & (x - 1)) == 0;
+}
+
+#ifdef __HIP_PLATFORM_HCC__
+    using cufft_size_type = int;
+#else
+    using cufft_size_type = long long int;
+#endif
+
+using CuFFTDimVector = c10::SmallVector<cufft_size_type, at::kDimVectorStaticSize>;
+
+// Struct representing a tensor in CuFFT's data layout for planning transforms
+// See NOTE [ cuFFT Embedded Strides ].
+struct CuFFTDataLayout {
+  CuFFTDimVector embed;
+  cufft_size_type stride, dist;
+  bool must_clone, simple;
+};
+
+// Returns a cufft embedding for a contiguous signal of the given size.
+// e.g. if the input is cloned, this will be the resulting data layout
+// See NOTE [ cuFFT Embedded Strides ].
+inline CuFFTDataLayout cufft_simple_embed(IntArrayRef sizes, bool onesided) {
+  const auto signal_ndim = sizes.size() - 1;
+  CuFFTDataLayout layout;
+  layout.simple = true;
+  layout.must_clone = false;
+  layout.embed.assign(sizes.cbegin() + 1, sizes.cend());
+  if (onesided) {
+    layout.embed.back() = sizes.back() / 2 + 1;
+  }
+  layout.stride = 1;
+  layout.dist = 1;
+  for (const auto& len : layout.embed) {
+    layout.dist *= len;
+  }
+  return layout;
+}
+
+// Convert strides to a CuFFT embedded representation.
+// If strides cannot be embedded, returns a simple layout and sets must_clone flag
+// See NOTE [ cuFFT Embedded Strides ].
+inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bool onesided) {
+  const auto signal_ndim = strides.size() - 1;
+  CuFFTDataLayout layout;
+  auto last_stride = strides[signal_ndim];
+  layout.must_clone = (last_stride <= 0);
+
+  const auto last_dim_size = onesided ?
+      sizes[signal_ndim] / 2 + 1 : sizes[signal_ndim];
+  const auto signal_numel = c10::multiply_integers(sizes.slice(1, sizes.size() - 2)) * last_dim_size;
+
+  // Zero stides are not allowed, even if the batch size is one.
+  // If that happens just set a dummy case
+  if (sizes[0] == 1) {
+    layout.dist = signal_numel;
+  } else if (strides[0] == 0) {
+    layout.must_clone = true;
+  } else {
+    layout.dist = strides[0];
+  }
+
+  // Calculate the embedding shape, or set must_clone if the strides cannot be embedded
+  layout.embed.resize(signal_ndim);
+  for (auto i = signal_ndim - 1; !layout.must_clone && i > 0; i--) {
+    auto stride = strides[i];
+    if (sizes[i] == 1) {
+      layout.embed[i] = 1;
+    } else if (stride > 0 && stride % last_stride == 0) {
+      layout.embed[i] = stride / last_stride;
+      last_stride = stride;
+    } else {
+      layout.must_clone = true;
+    }
+  }
+
+  if (layout.must_clone) {
+    // If the input needs to be cloned, assume it will be contiguous
+    layout = cufft_simple_embed(sizes, onesided);
+    layout.must_clone = true;
+  } else {
+    layout.embed[0] = sizes[1];
+    layout.stride = strides[signal_ndim];
+    // Determine if layout represents a simple embedding (contiguous data)
+    layout.simple = [&] {
+      for (int64_t i = 1; i < signal_ndim - 1; ++i) {
+        if (layout.embed[i] != sizes[i + 1]) {
+          return false;
+        }
+      }
+
+      return (layout.stride == 1 && layout.dist == signal_numel &&
+          layout.embed.back() == last_dim_size);
+    }();
+  }
+  return layout;
 }
 
 // This class contains all the information needed to execute a cuFFT plan:
@@ -85,31 +233,42 @@ public:
   CuFFTConfig(const CuFFTConfig&) = delete;
   CuFFTConfig& operator=(CuFFTConfig const&) = delete;
 
-  explicit CuFFTConfig(Tensor& input, int64_t signal_ndim, bool complex_input,
-    bool complex_output, IntArrayRef checked_signal_sizes, bool onesided,
-    IntArrayRef output_sizes) {
+  explicit CuFFTConfig(const CuFFTParams& params):
+      CuFFTConfig(
+          IntArrayRef(params.input_strides_, params.signal_ndim_ + 1),
+          IntArrayRef(params.output_strides_, params.signal_ndim_ + 1),
+          IntArrayRef(params.sizes_, params.signal_ndim_ + 1),
+          params.fft_type_,
+          params.value_type_) {}
 
-    // signal sizes
-#ifdef __HIP_PLATFORM_HCC__
-    std::vector<int> signal_sizes(checked_signal_sizes.begin(),
-                                  checked_signal_sizes.end());
-#else
-    std::vector<long long int> signal_sizes(checked_signal_sizes.begin(),
-                                            checked_signal_sizes.end());
-#endif
+  // For complex types, strides are in units of 2 * element_size(dtype)
+  // sizes are for the full signal, including batch size and always two-sided
+  CuFFTConfig(IntArrayRef in_strides, IntArrayRef out_strides,
+      IntArrayRef sizes, CuFFTTransformType fft_type, ScalarType dtype):
+        fft_type_(fft_type), value_type_(dtype) {
+
+    // signal sizes (excluding batch dim)
+    CuFFTDimVector signal_sizes(sizes.begin() + 1, sizes.end());
 
     // input batch size
-    long long int batch = input.size(0);
+    const int64_t batch = sizes[0];
+    const int64_t signal_ndim = sizes.size() - 1;
 
     // Since cuFFT has limited non-unit stride support and various constraints, we
     // use a flag to keep track throughout this function to see if we need to
     // input = input.clone();
+
+#ifdef __HIP_PLATFORM_HCC__
+    // clone input to avoid issues with hipfft clobering the input and failing tests
+    clone_input = true;
+#else
     clone_input = false;
+#endif
 
     // For half, base strides on the real part of real-to-complex and
     // complex-to-real transforms are not supported. Since our output is always
     // contiguous, only need to check real-to-complex case.
-    if (input.scalar_type() == ScalarType::Half) {
+    if (dtype == ScalarType::Half) {
       // cuFFT on half requires compute capability of at least SM_53
       auto dev_prop = at::cuda::getCurrentDeviceProperties();
       TORCH_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
@@ -117,144 +276,67 @@ public:
                "capability less than SM_53, but the device containing input half "
                "tensor only has SM_", dev_prop->major, dev_prop->minor);
       for (int64_t i = 0; i < signal_ndim; i++) {
-        auto signal_size = checked_signal_sizes[i];
-        TORCH_CHECK(is_pow_of_two(signal_size),
-                 "cuFFT doesn't support signals of half type with size at any ",
-                 "dimension that is not a power of two, but got a signal size of ",
-                 checked_signal_sizes);
+        TORCH_CHECK(is_pow_of_two(sizes[i + 1]),
+            "cuFFT only supports dimensions whose sizes are powers of two when"
+            " computing in half precision, but got a signal size of",
+            sizes.slice(1));
       }
-      clone_input |= input.stride(signal_ndim) != 1;
+      clone_input |= in_strides.back() != 1;
     }
 
-    // check the input sizes and strides to see if we need to make it contiguous
-    // cuFFT doesn't support batch dim with stride 0
-    clone_input |= input.stride(0) == 0;
-
-    if (complex_input) {
-      // Real/imag dimension must be like complex type.
-      clone_input |= input.stride(-1) != 1;
-      // Strides of other dimensions needs to be aligned when viewed as of complex
-      // type, i.e., multiples of 2. We check the batch dim and last signal dim
-      // here. If the input can be viewed as having embedded strides, the other
-      // signal dims will also satisfy this.
-      // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
-      clone_input |= (batch > 0 && input.stride(0) % 2 != 0) ||
-                      input.stride(signal_ndim) % 2 != 0;
-
-      // Complex to real FFTs may overwrite the input buffer (gh-34551)
-      clone_input |= !complex_output;
+    CuFFTDataLayout in_layout;
+    if (clone_input) {
+      in_layout = cufft_simple_embed(sizes, fft_type == CuFFTTransformType::C2R);
+    } else {
+      in_layout = as_cufft_embed(in_strides, sizes, fft_type == CuFFTTransformType::C2R);
     }
-
-    // Checks if input strides can be viewed as embedded.
-    // See NOTE [ cuFFT Embedded Strides ].
-    //
-    // TODO: Figure out why windows fails to compile
-    //         c10::optional<std::vector<long long int>> inembed_opt =
-    //         c10::nullopt;
-    //       Then move the following to a helper function.
-#ifdef __HIP_PLATFORM_HCC__
-    std::vector<int> inembed(signal_ndim);
-#else
-    std::vector<long long int> inembed(signal_ndim);
-#endif
-    if (!clone_input) {
-      auto istrides = input.strides();
-      auto last_istride = istrides[signal_ndim];
-      clone_input = last_istride <= 0;
-      for (auto i = signal_ndim - 1; !clone_input && i > 0 /* inembed[0] doesn't matteer */; i--) {
-        auto istride = istrides[i];
-        if (istride > 0 && istride % last_istride == 0) {
-          inembed[i] = istride / last_istride;
-          last_istride = istride;
-        } else {
-          clone_input = true;
-        }
-      }
-    }
+    auto out_layout = as_cufft_embed(out_strides, sizes, fft_type == CuFFTTransformType::R2C);
+    TORCH_INTERNAL_ASSERT(!out_layout.must_clone, "Out strides cannot be represented as CuFFT embedding");
+    clone_input |= in_layout.must_clone;
 
     // Check if we can take advantage of simple data layout.
     //
-    // Note that this is before the actual cloning. This is intentional so we can
-    // check for advanced data layout with complex-to-real transform. cuFFT
-    // out-of-place complex-to-real transforms with advanced layout may overwrite
-    // input, and we need to clone the input.
-    //
-    // This just needs contiguity in cases except for twosided real-to-complex
-    // transform where we won't have simple data layout as output is two sided.
-    //
     // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
 
-    bool simple_layout = !(!complex_input && complex_output && !onesided) &&  // not twosided R2C
-                         (clone_input || input.is_contiguous());              // contiguous
-    if (!simple_layout && complex_input && !complex_output) {
-      clone_input = true;
-      simple_layout = true;
-    }
-
-    // if input should be cloned but simple layout can't be used (e.g. twosided R2C)
-    if (clone_input && !simple_layout) {
-      auto input_size = input.sizes();
-      std::copy(input_size.begin() + 1,                // begin of signal dim in input
-                input_size.begin() + signal_ndim + 1,  // end of signal dim in input
-                inembed.begin());                      // begin of output
-    }
+    const bool simple_layout = in_layout.simple && out_layout.simple;
 
 #ifdef __HIP_PLATFORM_HCC__
-
-    hipfftType exec_type;
-    if (input.scalar_type() == ScalarType::Float) {
-      if (complex_input && complex_output) {
-        exec_type = HIPFFT_C2C;
-      } else if (complex_input && !complex_output) {
-        exec_type = HIPFFT_C2R;
-      } else if (!complex_input && complex_output) {
-        exec_type = HIPFFT_R2C;
-      } else {
-        AT_ERROR("hipFFT doesn't support r2r (float)");
+    hipfftType exec_type = [&]{
+      if (dtype == kFloat) {
+        switch (fft_type) {
+          case CuFFTTransformType::C2C: return HIPFFT_C2C;
+          case CuFFTTransformType::R2C: return HIPFFT_R2C;
+          case CuFFTTransformType::C2R: return HIPFFT_C2R;
+        }
+      } else if (dtype == kDouble) {
+        switch (fft_type) {
+          case CuFFTTransformType::C2C: return HIPFFT_Z2Z;
+          case CuFFTTransformType::R2C: return HIPFFT_D2Z;
+          case CuFFTTransformType::C2R: return HIPFFT_Z2D;
+        }
       }
-    } else if (input.scalar_type() == ScalarType::Double) {
-      if (complex_input && complex_output) {
-        exec_type = HIPFFT_Z2Z;
-      } else if (complex_input && !complex_output) {
-        exec_type = HIPFFT_Z2D;
-      } else if (!complex_input && complex_output) {
-        exec_type = HIPFFT_D2Z;
-      } else {
-        AT_ERROR("hipFFT doesn't support r2r (double)");
-      }
-    } else {
-      std::ostringstream ss;
-      ss << "hipFFT doesn't support tensor of type: "
-         << toString(input.scalar_type());
-      AT_ERROR(ss.str());
-    }
-
+      TORCH_CHECK(false, "hipFFT doesn't support transforms of type: ", dtype);
+    }();
 #else
     cudaDataType itype, otype, exec_type;
-    if (input.scalar_type() == ScalarType::Float) {
+    const auto complex_input = cufft_complex_input(fft_type);
+    const auto complex_output = cufft_complex_output(fft_type);
+    if (dtype == ScalarType::Float) {
       itype = complex_input ? CUDA_C_32F : CUDA_R_32F;
       otype = complex_output ? CUDA_C_32F : CUDA_R_32F;
       exec_type = CUDA_C_32F;
-    } else if (input.scalar_type() == ScalarType::Double) {
+    } else if (dtype == ScalarType::Double) {
       itype = complex_input ? CUDA_C_64F : CUDA_R_64F;
       otype = complex_output ? CUDA_C_64F : CUDA_R_64F;
       exec_type = CUDA_C_64F;
-    } else if (input.scalar_type() == ScalarType::Half) {
+    } else if (dtype == ScalarType::Half) {
       itype = complex_input ? CUDA_C_16F : CUDA_R_16F;
       otype = complex_output ? CUDA_C_16F : CUDA_R_16F;
       exec_type = CUDA_C_16F;
     } else {
-      std::ostringstream ss;
-      ss << "cuFFT doesn't support tensor of type: "
-         << toString(input.scalar_type());
-      AT_ERROR(ss.str());
+      TORCH_CHECK(false, "cuFFT doesn't support tensor of type: ", dtype);
     }
 #endif
-
-    // create plan
-    auto raw_plan_ptr = new cufftHandle();
-    CUFFT_CHECK(cufftCreate(raw_plan_ptr));
-    plan_ptr.reset(raw_plan_ptr);
 
     // disable auto allocation of workspace to use THC allocator
     CUFFT_CHECK(cufftSetAutoAllocation(plan(), /* autoAllocate */ 0));
@@ -264,8 +346,8 @@ public:
     // make plan
     if (simple_layout) {
       // If with unit-stride, we tell cuFFT by setting inembed == onembed == NULL.
-      // In such case, cuFFT ignores base_istride, base_ostride, idist, and odist
-      // by assuming base_istride = base_ostride = 1.
+      // In such case, cuFFT ignores istride, ostride, idist, and odist
+      // by assuming istride = ostride = 1.
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
 #ifdef __HIP_PLATFORM_HCC__
@@ -280,65 +362,34 @@ public:
         batch, &ws_size_t, exec_type));
 #endif
     } else {
-      // set idist (stride at batch dim)
-      // set base_istride (stride at innermost dim of signal)
-      long long int idist, base_istride;
-      if (clone_input) {
-        idist = at::prod_intlist(input.sizes().slice(1, signal_ndim));
-        base_istride = 1;
-      } else if (complex_input) {
-        idist = input.stride(0) >> 1;
-        base_istride = input.stride(signal_ndim) >> 1;
-      } else {
-        idist = input.stride(0);
-        base_istride = input.stride(signal_ndim);
-      }
-      // Even if batch dimension is one and idist (stride(0)) doesn't matter,
-      // cuFFT errors if idist = 0. This is hack to make it succeed.
-      if (idist == 0 && batch == 1) {
-        idist = 1;
-      }
-
-      // set odist, onembed, base_ostride
 #ifdef __HIP_PLATFORM_HCC__
-      int odist = at::prod_intlist(output_sizes.slice(1, signal_ndim));
-      std::vector<int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
-      int base_ostride = 1;
-
-      int istride = base_istride;
-      int iidist = idist;
       CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
-        inembed.data(), istride, iidist,
-        onembed.data(), base_ostride, odist,
+        in_layout.embed.data(), in_layout.stride, in_layout.dist,
+        out_layout.embed.data(), out_layout.stride, out_layout.dist,
         exec_type, batch, &ws_size_t));
 #else
-      long long int odist = at::prod_intlist(output_sizes.slice(1, signal_ndim));
-      std::vector<long long int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
-      long long int base_ostride = 1;
-
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
-            inembed.data(), base_istride, idist, itype,
-            onembed.data(), base_ostride, odist, otype,
+            in_layout.embed.data(), in_layout.stride, in_layout.dist, itype,
+            out_layout.embed.data(), out_layout.stride, out_layout.dist, otype,
             batch, &ws_size_t, exec_type));
 #endif
-      }
+    }
     ws_size = static_cast<int64_t>(ws_size_t);
   }
 
-#ifdef __HIP_PLATFORM_HCC__
-  cufftHandle &plan() const { return *plan_ptr.get(); }
-#else
-  const cufftHandle &plan() const { return *plan_ptr.get(); }
-#endif
+  const cufftHandle &plan() const { return plan_ptr.get(); }
 
+  CuFFTTransformType transform_type() const { return fft_type_; }
+  ScalarType data_type() const { return value_type_; }
   bool should_clone_input() const { return clone_input; }
-
   int64_t workspace_size() const { return ws_size; }
 
 private:
-  std::unique_ptr<cufftHandle, CuFFTHandleDeleter> plan_ptr;
+  CuFFTHandle plan_ptr;
   bool clone_input;
   int64_t ws_size;
+  CuFFTTransformType fft_type_;
+  ScalarType value_type_;
 };
 
 #if CUDA_VERSION < 10000
@@ -392,15 +443,13 @@ public:
   }
 
   // If key is in this cache, return the cached config. Otherwise, emplace the
-  // config in this cache using value_args and return it.
+  // config in this cache and return it.
   // Return const reference because CuFFTConfig shouldn't be tampered with once
   // created.
-  // This is similar to c++ 17 try_emplace.
-  template<typename K, class ...VArgs>
-  const CuFFTConfig &try_emplace_value(K&& key, VArgs&&... value_args) {
+  const CuFFTConfig &lookup(CuFFTParams params) {
     AT_ASSERT(_max_size > 0);
 
-    map_kkv_iter_t map_it = _cache_map.find(key);
+    map_kkv_iter_t map_it = _cache_map.find(params);
     // Hit, put to list front
     if (map_it != _cache_map.end()) {
       _usage_list.splice(_usage_list.begin(), _usage_list, map_it->second);
@@ -418,8 +467,8 @@ public:
 
     // construct new plan at list front, then insert into _cache_map
     _usage_list.emplace_front(std::piecewise_construct,
-                       std::forward_as_tuple(key),
-                       std::forward_as_tuple(value_args...));
+                       std::forward_as_tuple(params),
+                       std::forward_as_tuple(params));
     auto kv_it = _usage_list.begin();
     _cache_map.emplace(std::piecewise_construct,
                 std::forward_as_tuple(kv_it->first),

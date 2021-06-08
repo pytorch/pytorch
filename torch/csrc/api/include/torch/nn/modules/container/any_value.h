@@ -39,6 +39,7 @@ class AnyValue {
 
   /// Constructs the `AnyValue` from value type.
   template <typename T>
+  // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   explicit AnyValue(T&& value)
       : content_(
             torch::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {}
@@ -105,6 +106,7 @@ class AnyValue {
   struct Holder : public Placeholder {
     /// A template because T&& would not be universal reference here.
     template <typename U>
+    // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
     explicit Holder(U&& value_) noexcept
         : Placeholder(typeid(T)), value(std::forward<U>(value_)) {}
     std::unique_ptr<Placeholder> clone() const override {

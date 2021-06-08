@@ -136,9 +136,12 @@ bool RMSNormOp<CUDAContext>::DoRunWithType() {
     RowwiseRMSCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             N, static_cast<T>(eps_), X_data, rrms_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     RMSNormForwardCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             N, X_data, gamma_data, beta_data, rrms_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   return true;
@@ -160,9 +163,12 @@ void RMSNormGradientOp<CUDAContext>::RMSNormBackward(
   ComputeInternalGradientsCUDAKernel<T>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, dY, X, gamma, rrms, c2_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   RMSNormBackwardCUDAKernel<T>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, dY, X, gamma, rrms, c2_data, dX);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -179,6 +185,7 @@ void RMSNormGradientOp<CUDAContext>::GammaBetaBackward(
   GammaBetaBackwardCUDAKernel<T>
       <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           M, N, dY, X, rrms, dgamma, dbeta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(RMSNorm, RMSNormOp<CUDAContext>);

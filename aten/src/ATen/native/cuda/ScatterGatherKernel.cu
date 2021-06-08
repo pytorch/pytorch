@@ -72,11 +72,11 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
     return;
   }
 
-  dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
-  auto stream = at::cuda::getCurrentCUDAStream();
+  const dim3 block(nt);
+  const dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  const auto stream = at::cuda::getCurrentCUDAStream();
   _scatter_gather_elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 
@@ -192,7 +192,7 @@ struct cuda_scatter_gather_base_kernel {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
-      method_name, [&] {
+      "cuda_scatter_gather_base_kernel_func", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
@@ -264,7 +264,7 @@ struct cuda_scatter_gather_base_kernel {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
-      method_name, [&] {
+      "cuda_scatter_gather_base_kernel_reduce_multiply", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
@@ -365,7 +365,7 @@ struct cuda_scatter_fill_base_kernel {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
-      method_name, [&] {
+      "cuda_scatter_fill_base_kernel_func", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
@@ -417,7 +417,7 @@ struct cuda_scatter_fill_base_kernel {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
-      method_name, [&] {
+      "cuda_scatter_fill_base_kernel_reduce_multiply", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
@@ -444,7 +444,7 @@ void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const T
     "scatter_cuda_", tensor_assign);
 }
 
-void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
+void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Scalar& src) {
   cuda_scatter_fill_base_kernel<>()(
     self, dim, index, src,
     "scatter_fill_cuda_", tensor_assign);
@@ -474,7 +474,7 @@ void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& i
 }
 
 void scatter_scalar_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                               Scalar& value, const SCATTER_GATHER_OP& reduce) {
+                               const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
@@ -494,5 +494,5 @@ REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel);
 REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel);
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel);
-    
+
 }} // namespace at::native

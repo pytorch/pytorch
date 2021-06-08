@@ -23,6 +23,10 @@ void SendRpcBackward::setGrads(const torch::autograd::variable_list& grads) {
   grads_ = grads;
 }
 
+const torch::autograd::variable_list& SendRpcBackward::getGrads() const {
+  return grads_;
+}
+
 } // namespace autograd
 } // namespace distributed
 } // namespace torch

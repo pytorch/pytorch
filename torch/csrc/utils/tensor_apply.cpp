@@ -2,6 +2,7 @@
 
 #include <ATen/TensorUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -33,7 +34,7 @@ static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t di
   if (dim == ndim) {
     auto args = THPObjectPtr(PyTuple_New(N));
     if (!args) throw python_error();
-    for (size_t i = 0; i < N; i++) {
+    for(const auto i : c10::irange(N)) {
       PyObject* arg = load_scalar(strided_data[i].data, scalarType);
       if (!arg) throw python_error();
       PyTuple_SET_ITEM(args.get(), i, arg);
@@ -45,7 +46,8 @@ static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t di
   }
 
   auto n = sizes[dim];
-  for (int64_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
+    (void)i; // Suppress unused variable warning
     recursive_apply(sizes, scalarType, dim + 1, fn, strided_data);
     for (auto& td : strided_data) {
       td.step(dim);
@@ -53,8 +55,11 @@ static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t di
   }
 }
 
-Tensor & apply_(Tensor & self, PyObject* fn) {
-  if (self.options().backend() != Backend::CPU) {
+const Tensor & apply_(const Tensor & self, PyObject* fn) {
+  if (self.is_meta()) {
+    return self;  // Just skip
+  }
+  if (!self.device().is_cpu()) {
     throw TypeError("apply_ is only implemented on CPU tensors");
   }
   auto scalarType = self.scalar_type();
@@ -62,25 +67,24 @@ Tensor & apply_(Tensor & self, PyObject* fn) {
   return self;
 }
 
-Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
-  if (self.options().backend() != Backend::CPU) {
-    throw TypeError("map_ is only implemented on CPU tensors");
-  }
+const Tensor & map_(const Tensor & self, const Tensor & other_, PyObject* fn) {
   if (!other_.options().type_equal(self.options())) {
     throw TypeError("map_: expected %s for 'other' (got %s)",
         self.toString().c_str(), other_.toString().c_str());
   }
-  Tensor other;
-  std::tie(other) = expand_inplace(self, other_, "map_");
+  if (self.is_meta()) {
+    return self;  // Just skip
+  }
+  if (!self.device().is_cpu()) {
+    throw TypeError("map_ is only implemented on CPU tensors");
+  }
+  c10::MaybeOwned<Tensor> other = expand_inplace(self, other_, "map_");
   auto scalarType = self.scalar_type();
-  recursive_apply<2>(self.sizes(), scalarType, 0, fn, {{ self, other }});
+  recursive_apply<2>(self.sizes(), scalarType, 0, fn, {{ self, *other }});
   return self;
 }
 
-Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn) {
-  if (self.options().backend() != Backend::CPU || x_.options().backend() != Backend::CPU || y_.options().backend() != Backend::CPU) {
-    throw TypeError("map2_ is only implemented on CPU tensors");
-  }
+const Tensor & map2_(const Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn) {
   if (!x_.options().type_equal(self.options())) {
     throw TypeError("map2_: expected %s for argument 'x' (got %s)",
         self.toString().c_str(), x_.toString().c_str());
@@ -89,10 +93,15 @@ Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn
     throw TypeError("map2_: expected %s for argument 'y' (got %s)",
         self.toString().c_str(), y_.toString().c_str());
   }
-  Tensor other1, other2;
-  std::tie(other1, other2) = expand_inplace(self, x_, y_, "map2_");
+  if (self.is_meta()) {
+    return self;  // Just skip
+  }
+  if (!self.device().is_cpu() || !x_.device().is_cpu() || !y_.device().is_cpu()) {
+    throw TypeError("map2_ is only implemented on CPU tensors");
+  }
+  auto others = expand_inplace(self, x_, y_, "map2_");
   auto scalarType = self.scalar_type();
-  recursive_apply<3>(self.sizes(), scalarType, 0, fn, {{ self, other1, other2 }});
+  recursive_apply<3>(self.sizes(), scalarType, 0, fn, {{ self, *std::get<0>(others), *std::get<1>(others) }});
   return self;
 }
 

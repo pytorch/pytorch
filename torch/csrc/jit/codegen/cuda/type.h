@@ -12,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
@@ -168,23 +169,23 @@ bool is_logical_op(const BinaryOpType& bot);
 DataType aten_to_data_type(const at::ScalarType& scalar_type);
 at::ScalarType data_type_to_aten(const DataType& data_type);
 
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ValType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const DataType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ExprType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ParallelType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const MemoryType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const IterType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ValType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ExprType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
 
 std::string stringifyThreadSize(const ParallelType);
 std::string stringifyThread(const ParallelType);
 
-TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
-TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 
-TORCH_CUDA_API c10::optional<std::string> cast_func_str(
+TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
 
 size_t dataTypeSize(DataType type);
@@ -200,6 +201,7 @@ enum class LaunchConfigType {
   TIDx
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

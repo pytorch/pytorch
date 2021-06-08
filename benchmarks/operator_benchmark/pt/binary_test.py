@@ -29,12 +29,14 @@ binary_configs_broadcast = op_bench.config_list(
 
 class BinaryOpBcastBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_one, in_two, dtype, device, op_func):
-        self.in_one = torch.randn(in_one, device=device).to(dtype=dtype)
-        self.in_two = torch.randn(in_two, device=device).to(dtype=dtype)
+        self.inputs = {
+            "in_one": torch.randn(in_one, device=device).to(dtype=dtype),
+            "in_two": torch.randn(in_two, device=device).to(dtype=dtype)
+        }
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.in_one, self.in_two)
+    def forward(self, in_one, in_two):
+        return self.op_func(in_one, in_two)
 
 
 op_bench.generate_pt_tests_from_op_list(binary_ops_bcast_list,
@@ -42,12 +44,15 @@ op_bench.generate_pt_tests_from_op_list(binary_ops_bcast_list,
                                         BinaryOpBcastBenchmark)
 
 
+def copy(in1, in2):
+    return in1.copy_(in2)
+
 # Benchmark ops performance without broadcast
 binary_ops_list = op_bench.op_list(
     attr_names=['op_name', 'op_func'],
     attrs=[
         ['add', torch.add],
-        ['copy_', lambda in1, in2: in1.copy_(in2)],
+        ['copy_', copy],
     ],
 )
 
@@ -79,12 +84,14 @@ binary_long_configs = op_bench.cross_product_configs(
 
 class BinaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype_one, dtype_two, op_func):
-        self.input_one = torch.randn(M, N, K, device=device).to(dtype=dtype_one)
-        self.input_two = torch.randn(M, N, K, device=device).to(dtype=dtype_two)
+        self.inputs = {
+            "input_one": torch.randn(M, N, K, device=device).to(dtype=dtype_one),
+            "input_two": torch.randn(M, N, K, device=device).to(dtype=dtype_two)
+        }
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.input_one, self.input_two)
+    def forward(self, input_one, input_two):
+        return self.op_func(input_one, input_two)
 
 
 op_bench.generate_pt_tests_from_op_list(binary_ops_list,

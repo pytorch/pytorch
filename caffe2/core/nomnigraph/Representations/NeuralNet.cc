@@ -4,6 +4,7 @@
 namespace nom {
 namespace repr {
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 NeuralNetOperator::~NeuralNetOperator() {}
 
 const std::string NeuralNetOperator::getName() const {
@@ -20,6 +21,7 @@ const std::string NeuralNetOperator::getName() const {
   }
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 NeuralNetData::~NeuralNetData() {}
 
 const std::string NeuralNetData::getName() const {
@@ -49,7 +51,7 @@ NNGraph::NodeRef NNModule::createUniqueDataNode(const std::string& s) {
       }
     }
   } while (need_name);
-  return dataFlow.createNode(util::make_unique<nom::repr::Tensor>(curr_name));
+  return dataFlow.createNode(std::make_unique<nom::repr::Tensor>(curr_name));
 }
 
 void NNModule::replaceSubgraph(
@@ -237,7 +239,7 @@ void replaceAsConsumer(
 NNGraph::NodeRef
 createOutput(NNModule* nn, NNGraph::NodeRef producer, std::string name) {
   auto outputNode =
-      nn->dataFlow.createNode(util::make_unique<nom::repr::Tensor>(name));
+      nn->dataFlow.createNode(std::make_unique<nom::repr::Tensor>(name));
   nn->dataFlow.createEdge(producer, outputNode);
   return outputNode;
 }
@@ -313,6 +315,7 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   // Finally we reconcile any data dependency issues (if we can).
   for (auto& bbNode : m->controlFlow.getMutableNodes()) {
     auto bb = bbNode->mutableData();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int permutation;
     do {
       permutation = 0;

@@ -43,6 +43,8 @@ bool TileOp<CUDAContext>::DoTile(
   TileCopyCUDAKernel<T>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           total_size, inner_size, tiles_, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

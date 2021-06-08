@@ -13,7 +13,8 @@ namespace utils {
 inline double clip_grad_norm_(
     std::vector<Tensor> parameters,
     double max_norm,
-    double norm_type = 2.0) {
+    double norm_type = 2.0,
+    bool error_if_nonfinite = false) {
   std::vector<Tensor> params_with_grad;
 
   for (const auto& param : parameters) {
@@ -26,16 +27,30 @@ inline double clip_grad_norm_(
   if (norm_type == std::numeric_limits<double>::infinity()) {
     for (const auto& param : params_with_grad) {
       auto param_max = param.grad().data().abs().max().item().toDouble();
-      if (param_max > total_norm) {
+      if (param_max > total_norm || std::isnan(param_max)) {
         total_norm = param_max;
       }
     }
+  } else if (norm_type == 0) {
+    total_norm = static_cast<double>(params_with_grad.size());
   } else {
     for (const auto& param : params_with_grad) {
       auto param_norm = param.grad().data().norm(norm_type);
       total_norm += std::pow(param_norm.item().toDouble(), norm_type);
     }
     total_norm = std::pow(total_norm, 1.0 / norm_type);
+  }
+  if (!std::isfinite(total_norm)) {
+    TORCH_CHECK(!error_if_nonfinite,
+      "The total norm of order ", norm_type, " for gradients from `parameters` ",
+      "is non-finite, so it cannot be clipped. To disable this error and scale ",
+      "the gradients with the non-finite norm anyway, set ",
+      "`error_if_nonfinite=false`");
+
+    TORCH_WARN_ONCE("Non-finite norm encountered in torch.nn.utils.clip_grad_norm_; continuing anyway. "
+                    "Note that the default behavior will change in a future release to error out "
+                    "if a non-finite total norm is encountered. At that point, setting "
+                    "error_if_nonfinite=false will be required to retain the old behavior.");
   }
 
   auto clip_coef = max_norm / (total_norm + 1e-6);
@@ -52,8 +67,9 @@ inline double clip_grad_norm_(
 inline double clip_grad_norm_(
     std::initializer_list<Tensor> parameters,
     double max_norm,
-    double norm_type = 2.0) {
-  return clip_grad_norm_(std::vector<Tensor>(parameters), max_norm, norm_type);
+    double norm_type = 2.0,
+    bool error_if_nonfinite = false) {
+  return clip_grad_norm_(std::vector<Tensor>(parameters), max_norm, norm_type, error_if_nonfinite);
 }
 
 // A wrapper around clip_grad_norm_ that allows us to call the function with a
@@ -61,9 +77,10 @@ inline double clip_grad_norm_(
 inline double clip_grad_norm_(
     Tensor parameter,
     double max_norm,
-    double norm_type = 2.0) {
+    double norm_type = 2.0,
+    bool error_if_nonfinite = false) {
   std::vector<Tensor> params = {parameter};
-  return clip_grad_norm_(params, max_norm, norm_type);
+  return clip_grad_norm_(params, max_norm, norm_type, error_if_nonfinite);
 }
 
 // Clips gradient of an iterable of parameters at specified value.

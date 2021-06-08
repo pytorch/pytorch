@@ -14,7 +14,6 @@ operators.
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace
 from caffe2.python import hypothesis_test_util as hu
 
 cpu_do = hu.cpu_do

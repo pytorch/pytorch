@@ -83,6 +83,7 @@ __global__ void AffineChannelNHWCCUDAKernel<float>(
     AffineChannelNCHWCUDAKernel<T>                                           \
         <<<N * C * M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(  \
             C, M, HxW, X, scale, bias, Y);                                   \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                          \
   }                                                                          \
   template <>                                                                \
   CAFFE2_CUDA_EXPORT void AffineChannel<T, CUDAContext, StorageOrder::NHWC>( \
@@ -100,6 +101,7 @@ __global__ void AffineChannelNHWCCUDAKernel<float>(
            CAFFE_CUDA_NUM_THREADS,                                           \
            0,                                                                \
            context->cuda_stream()>>>(C, X, scale, bias, Y);                  \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                          \
   }
 CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(float)
 #undef CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL

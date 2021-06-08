@@ -13,6 +13,7 @@ using namespace nom::repr;
     arg->set_##_type(_val);                 \
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DeviceTest, InsertCopies) {
   caffe2::NetDef net;
   for (auto i = 0; i < 9; ++i) {
@@ -60,10 +61,10 @@ TEST(DeviceTest, InsertCopies) {
         return c2_annot->getDeviceType() == caffe2::PROTO_OPENCL;
       },
       [](NNGraph& g) {
-        return g.createNode(nom::util::make_unique<GenericOperator>());
+        return g.createNode(std::make_unique<GenericOperator>());
       },
       [](NNGraph& g) {
-        return g.createNode(nom::util::make_unique<GenericOperator>());
+        return g.createNode(std::make_unique<GenericOperator>());
       });
 
   auto proto = caffe2::convertToCaffe2Proto(nn, net);

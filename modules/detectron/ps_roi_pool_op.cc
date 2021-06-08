@@ -18,11 +18,14 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PSRoIPool, PSRoIPoolOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     PSRoIPoolGradient,
     PSRoIPoolGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PSRoIPool)
     .NumInputs(2)
     .NumOutputs(2)
@@ -66,6 +69,7 @@ Position Sensitive Region of Interest Pooling as used in R-FCN.
         "except it records the argmax indices rather than the max pooled "
         "values.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PSRoIPoolGradient)
     .NumInputs(4)
     .NumOutputs(1)
@@ -101,6 +105,7 @@ class GetPSRoIPoolGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PSRoIPool, GetPSRoIPoolGradient);
 
 } // namespace caffe2

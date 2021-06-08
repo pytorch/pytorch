@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -9,14 +8,16 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace codegen {
 
 //! Generates a CUDA kernel definition for the given kernel
-TORCH_CUDA_API std::string generateCudaKernel(
+TORCH_CUDA_CU_API std::string generateCudaKernel(
     const Kernel* kernel,
     const std::string& kernel_name = "CUDAGeneratedKernel");
 
 } // namespace codegen
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

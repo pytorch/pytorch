@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
@@ -11,40 +12,40 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
-#include <unordered_map>
-
 #include <ATen/DimVector.h>
 #include <c10/core/DeviceType.h>
+#include <c10/util/irange.h>
 
-#include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
-// [ Note -- cache entry indexing ]
-//
-// CudaFusionManager holds the cache and handles interfacing to CudaFusionGroup
-// node, including selection, construction and execution of FusionExecutors.
-//
-// CudaFusionManager bridges PyTorch IR node CudaFusionGroup to GraphCache.
-// Therefore, we want to cache on stringified graph. But it is expensive to
-// stringify and hash on a computational graph, we cache the hash of a
-// stringified graph on node via cache_id.
-//
-// CudaFusionGroup node stores:
-//     i.  a PyTorch IR in `attr::Subgraph`
-//     ii. an int in `attr::cache_id`, (a cached hash value of `attr::Subgraph`)
-//
-// We have 2 unordered_map at CudaFusionGroup:
-//   std::unordered_map<std::string, int32_t> graph_cache_ids_;
-//   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
-//
-// Mapping from std::string to graph_cache_id ensures that we assign the same
-// cache_id to CudaFusionGroup with identical computational grah, allowing
-// kernel reuse; Direct mapping from cache_id to GraphCache allows efficient
-// graph_cache indexing;
+//! [ Note -- cache entry indexing ]
+//!
+//! CudaFusionManager holds the cache and handles interfacing to CudaFusionGroup
+//! node, including selection, construction and execution of FusionExecutors.
+//!
+//! CudaFusionManager bridges PyTorch IR node CudaFusionGroup to GraphCache.
+//! Therefore, we want to cache on stringified graph. But it is expensive to
+//! stringify and hash on a computational graph, we cache the hash of a
+//! stringified graph on node via cache_id.
+//!
+//! CudaFusionGroup node stores:
+//!     i.  a PyTorch IR in `attr::Subgraph`
+//!     ii. an int in `attr::cache_id`, (a cached hash value of
+//!     `attr::Subgraph`)
+//!
+//! We have 2 unordered_map at CudaFusionGroup:
+//!   std::unordered_map<std::string, int32_t> graph_cache_ids_;
+//!   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
+//!
+//! Mapping from std::string to graph_cache_id ensures that we assign the same
+//! cache_id to CudaFusionGroup with identical computational grah, allowing
+//! kernel reuse; Direct mapping from cache_id to GraphCache allows efficient
+//! graph_cache indexing;
 
 namespace {
 
@@ -119,7 +120,7 @@ class CudaFusionManager {
           // TODO: I think merge cannot handle broadcast - Go verify it later;
           // TODO: Since we are only handling permutation here, we should just
           //       merge the stride_index_;
-          acc_type = acc_type->merge(input_type);
+          acc_type = acc_type->merge(*input_type);
         } else {
           acc_type = input_type;
         }
@@ -132,7 +133,7 @@ class CudaFusionManager {
   at::DimVector restorePermutation(at::DimVector permuted) {
     int rank = static_cast<int>(permuted.size());
     at::DimVector permutation(rank, -1);
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       permutation[permuted[i]] = i;
     }
     return permutation;
@@ -155,7 +156,7 @@ class CudaFusionManager {
     std::set<int> ordered_axes;
 
     // TODO: this does not support broadcast yet;
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       if ((*stride_properties)[i].has_value() &&
           (*stride_properties)[i]->stride_index_.has_value()) {
         ordered_axes.insert((*stride_properties)[i]->stride_index_.value());

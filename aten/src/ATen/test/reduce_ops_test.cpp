@@ -5,10 +5,12 @@
 
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ReduceOpsTest, MaxValuesAndMinValues) {
   const int W = 10;
   const int H = 10;
   if (hasCUDA()) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     for (const auto dtype : {kHalf, kFloat, kDouble, kShort, kInt, kLong}) {
       auto a = at::rand({H, W}, TensorOptions(kCUDA).dtype(at::kHalf));
       ASSERT_FLOAT_EQ(

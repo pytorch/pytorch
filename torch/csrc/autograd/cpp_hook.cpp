@@ -14,6 +14,7 @@ void check_single_result (Variable value, Variable result, std::string hook_name
 
 namespace torch { namespace autograd {
 
+// NOLINTNEXTLINE(modernize-pass-by-value)
 CppFunctionPreHook::CppFunctionPreHook(const std::shared_ptr<hooks_list> &hooks, int value_idx)
 : hooks_(hooks)
 , value_idx_(value_idx)

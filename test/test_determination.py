@@ -32,7 +32,7 @@ class DeterminationTest(unittest.TestCase):
         return [
             test
             for test in cls.TESTS
-            if run_test.determine_target(test, changed_files, DummyOptions())
+            if run_test.determine_target(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
         ]
 
     def test_config_change_only(self):
@@ -74,7 +74,7 @@ class DeterminationTest(unittest.TestCase):
             ["distributed/rpc/test_process_group_agent"],
         )
         self.assertEqual(
-            self.determined_tests(["test/quantization/test_quantize.py"]),
+            self.determined_tests(["test/quantization/eager/test_quantize_eager_ptq.py"]),
             ["test_quantization"],
         )
 
@@ -112,6 +112,7 @@ class DeterminationTest(unittest.TestCase):
                 "distributed/test_distributed_fork",
                 "test_cpp_extensions_aot_ninja",
                 "test_cpp_extensions_aot_no_ninja",
+                "test_utils",
                 "test_determination",
             ],
         )

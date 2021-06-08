@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 
 namespace at {
@@ -26,15 +28,12 @@ class Runtime final {
 
   explicit Runtime(Type type);
   Runtime(const Runtime&) = delete;
-  Runtime(Runtime&&) = default;
   Runtime& operator=(const Runtime&) = delete;
+  Runtime(Runtime&&) = default;
   Runtime& operator=(Runtime&&) = default;
   ~Runtime() = default;
 
-  inline VkInstance instance() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(instance_);
-    return instance_.get();
-  }
+  VkInstance instance() const;
 
   typedef std::function<bool (const Adapter&)> Selector;
   Adapter select(const Selector& selector);
@@ -42,8 +41,8 @@ class Runtime final {
  private:
   class Debug final {
    public:
-    explicit Debug(VkInstance instance);
-    void operator()(VkDebugReportCallbackEXT debug_report_callback) const;
+    explicit Debug(VkInstance);
+    void operator()(VkDebugReportCallbackEXT) const;
 
    private:
     VkInstance instance_;
@@ -55,10 +54,20 @@ class Runtime final {
   Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
 };
 
-bool available();
 Runtime* runtime();
+
+//
+// Impl
+//
+
+inline VkInstance Runtime::instance() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(instance_);
+  return instance_.get();
+}
 
 } // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

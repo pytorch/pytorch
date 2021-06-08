@@ -82,8 +82,10 @@ static inline ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbyt
       reinterpret_cast<char*>(buf), nbytes, rw_flag));
   if (!memview) throw python_error();
 
+  // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
   char* method = "write";
   if (is_read) {
+    // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
     method = "readinto";
   }
   THPObjectPtr r(PyObject_CallMethod(fildes, method, "O", memview.get()));
@@ -120,8 +122,8 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     ssize_t r = doPartialRead(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
-      AT_ASSERTM(err != 0, "read(): impossible! r < 0, but no errno was set");
-      AT_ASSERTM(err != EAGAIN, "read(): non-blocking fd ", fildes,
+      TORCH_INTERNAL_ASSERT(err != 0, "read(): impossible! r < 0, but no errno was set");
+      TORCH_INTERNAL_ASSERT(err != EAGAIN, "read(): non-blocking fd ", fildes,
                                 " read EAGAIN; cowardly refusing to spin-wait");
       if (err == EINTR) {
         continue;
@@ -152,8 +154,8 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
     ssize_t r = doPartialWrite(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
-      AT_ASSERTM(err != 0, "write(): impossible! r < 0, but no errno was set");
-      AT_ASSERTM(err != EAGAIN, "write(): non-blocking fd ", fildes,
+      TORCH_INTERNAL_ASSERT(err != 0, "write(): impossible! r < 0, but no errno was set");
+      TORCH_INTERNAL_ASSERT(err != EAGAIN, "write(): non-blocking fd ", fildes,
                                 " read EAGAIN; cowardly refusing to spin-wait");
       if (err == EINTR) {
         continue;
@@ -167,20 +169,26 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateAllTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateComplexTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateHalfType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateBoolType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateQTypes.h>

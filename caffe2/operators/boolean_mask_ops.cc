@@ -27,6 +27,7 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
     const auto* lengthsPtr = lengths.template data<T>();
     const auto* maskPtr = mask.template data<bool>();
     auto totalLength =
+        // NOLINTNEXTLINE(bugprone-fold-init-type)
         std::accumulate(lengthsPtr, lengthsPtr + lengths.numel(), 0);
     CAFFE_ENFORCE(mask.numel() == totalLength);
     auto* lengthsOut = Output(0, lengths.sizes(), at::dtype<T>());
@@ -90,6 +91,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
     if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
       const auto* src = inPtr + lastStart * innerSizeBytes;
       auto* dst = outPtr + outStart * innerSizeBytes;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int numItems = i - lastStart;
       context_.CopyItemsSameDevice(
           data.dtype(), numItems * innerSize, src, dst);
@@ -135,12 +137,16 @@ bool BooleanMaskOpGradient<CPUContext>::DoRunWithType() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BooleanMask, BooleanMaskOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     BooleanMaskGradient,
     BooleanMaskOpGradient<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BooleanMaskLengths, BooleanMaskLengthsOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BooleanMask)
     .NumInputs(2)
     .NumOutputs(1, 2)
@@ -205,6 +211,7 @@ masked_indices: [0 3 4]
         "masked_indices",
         "(*Tensor`<int>`*): 1D tensor of indices of the True elements in the `mask` tensor");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BooleanMaskLengths)
     .NumInputs(2)
     .NumOutputs(1)
@@ -265,6 +272,7 @@ masked_lengths: [0 2 2]
         "masked_lengths",
         "(*Tensor`<int>`*): 1D tensor of same type as inputs that contains the sequence");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(BooleanMaskGradient).NumInputs(2).NumOutputs(1);
 
 namespace {
@@ -279,11 +287,14 @@ class GetBooleanMaskGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BooleanMask, GetBooleanMaskGradient);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BooleanMaskLengths);
 
 } // namespace
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
 const float minf = -1.0f * std::numeric_limits<float>::infinity();
 
 // Template this on a functor object so we can generate different
@@ -356,6 +367,7 @@ class SequenceFunctor {
   explicit SequenceFunctor(const int* sl, const size_t len)
       : sl_(sl), len_(len) {}
   bool operator()(int i, int j, float /* val*/) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     CAFFE_ENFORCE(i < len_, "Out of bound.");
     return j >= sl_[i];
   }
@@ -450,6 +462,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
 
   // product of dims from 1 to batch
   const int batch_dim =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (canonical_batch >= 0
            ? input->size_to_dim(canonical_batch) * input->size(canonical_batch)
            : -1);
@@ -489,6 +502,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         right,
         batch_dim,
         input->data<T>(),
+        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
         WindowFunctor(window_centers->data<int>(), radius_),
         fill_val,
         output->template mutable_data<T>());
@@ -536,8 +550,10 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SequenceMask, SequenceMaskOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SequenceMask)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -626,6 +642,7 @@ class GetSequenceMaskGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SequenceMask, GetSequenceMaskGradient);
 
 } // namespace caffe2
