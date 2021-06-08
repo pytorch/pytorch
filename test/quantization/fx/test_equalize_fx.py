@@ -130,7 +130,7 @@ class TestEqualizeFx(QuantizationTestCase):
         """
         default_qconfig_dict = {
             "": default_qconfig,
-            "object_type": [(nn.Linear, default_equalization_qconfig), 
+            "object_type": [(nn.Linear, default_equalization_qconfig),
                             (nn.functional.linear, default_equalization_qconfig)]
         }
 
@@ -210,7 +210,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
         fp32_qconfig_dict = {
             "": None,
-            "object_type": [(nn.Linear, default_equalization_qconfig), 
+            "object_type": [(nn.Linear, default_equalization_qconfig),
                             (nn.functional.linear, default_equalization_qconfig)]
         }
 
@@ -232,9 +232,9 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_module(_InputEqualizationObserver): 2,
         }
 
-        tests = [(LinearModule, default_qconfig_dict, linear_node_occurrence), 
-                 (LinearConvModule, default_qconfig_dict, linearConv_node_occurrence), 
-                 (FunctionalLinearModule, default_qconfig_dict, functionalLinear_node_occurrence), 
+        tests = [(LinearModule, default_qconfig_dict, linear_node_occurrence),
+                 (LinearConvModule, default_qconfig_dict, linearConv_node_occurrence),
+                 (FunctionalLinearModule, default_qconfig_dict, functionalLinear_node_occurrence),
                  (FunctionalLinearFP32Module, fp32_qconfig_dict, functionalLinearFP32_node_occurrence),
                  (LinearModule, specified_qconfig_dict, specified_node_occurrence)]
 
