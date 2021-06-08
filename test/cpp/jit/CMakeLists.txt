@@ -81,7 +81,7 @@ if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
 endif()
 
-set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test backend_with_compiler)
+set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test backend_with_compiler torch_python)
 
 if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)

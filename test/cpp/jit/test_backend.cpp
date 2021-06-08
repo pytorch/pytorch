@@ -2,6 +2,7 @@
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
+#include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/torch.h>
 
@@ -127,6 +128,7 @@ TEST(BackendTest, TestCompiler) {
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
   fake_dict.insert("", "");
+  fake_dict.insert("", true);
   compile_spec.insert("forward", fake_dict);
   auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
   // lowered module
@@ -135,6 +137,13 @@ TEST(BackendTest, TestCompiler) {
   auto res = lm.forward(inputs);
   AT_ASSERT(res.toTensor().equal(ref.toTensor()));
 
+  py::dict compile_spec_py();
+  py::dict py_dict;
+  for (auto& pair : compile_spec) {
+    py_dict[toPyObject(IValue{pair.key()})] =
+        toPyObject(IValue{pair.value()});
+  }
+  torch::jit::codegen_func("backend_with_compiler_demo", m, py_dict);
   std::stringstream ss;
   lm._save_for_mobile(ss);
   auto mlm = _load_for_mobile(ss);
