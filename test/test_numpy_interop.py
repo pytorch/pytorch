@@ -156,6 +156,14 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
+    def test_to_numpy_with_force(self, device) -> None:
+        for requires_grad in [False, True]:
+            x = torch.tensor([[1, 2],[3, 4]], dtype = torch.float, requires_grad = requires_grad, device = device)    	
+            y = x.numpy(force = True)
+            self.assertEqual(x, y)
+            y = x.numpy(True)
+            self.assertEqual(x, y)
+
     def test_from_numpy(self, device) -> None:
         dtypes = [
             np.double,
