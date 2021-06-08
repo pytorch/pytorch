@@ -6778,14 +6778,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_renorm,
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/59584
-               SkipInfo('TestGradients', 'test_fn_grad',
-                        device_type='cuda', dtypes=[torch.double, torch.cdouble]),
-               SkipInfo('TestGradients', 'test_inplace_grad',
-                        device_type='cuda', dtypes=[torch.double, torch.cdouble]),
-           )),
+           sample_inputs_func=sample_inputs_renorm),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
