@@ -757,9 +757,11 @@ class BuildExtension(build_ext, object):
         if CUDA_HOME:
             nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
             cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode()
-            cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str).group(1)
-            if cuda_version != torch.version.cuda:
-                warnings.warn(CUDA_MISMATCH_MESSAGE.format(cuda_version, torch.version.cuda))
+            cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
+            if cuda_version is not None:
+                cuda_version = cuda_version.group(1)
+                if cuda_version != torch.version.cuda:
+                    warnings.warn(CUDA_MISMATCH_MESSAGE.format(cuda_version, torch.version.cuda))
 
     def _add_compile_flag(self, extension, flag):
         extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
