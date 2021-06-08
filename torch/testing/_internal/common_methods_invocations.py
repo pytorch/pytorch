@@ -3813,8 +3813,6 @@ def sample_inputs_inner(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
-# Tests for scatter when passing the reduce argument are missing
-# Reference: https://github.com/pytorch/pytorch/issues/56464
 def sample_inputs_scatter(op_info, device, dtype, requires_grad):
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -3834,7 +3832,23 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad):
         (_tensor(()), (0, zero.clone().detach(), 2.5)),
     )
 
-    return [SampleInput(tensor, args=args) for tensor, args in test_cases]
+    samples = []
+    for tensor, args in test_cases:
+        samples.append(SampleInput(tensor, args=args))
+
+        if not requires_grad:
+            samples.append(SampleInput(
+                tensor.clone().detach(),
+                args=args, kwargs={'reduce': 'add'}
+            ))
+
+            if dtype.is_floating_point:
+                samples.append(SampleInput(
+                    tensor.clone().detach(),
+                    args=args, kwargs={'reduce': 'multiply'}
+                ))
+
+    return samples
 
 def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
     def _tensor(shape, dtype=dtype, low=None, high=None):
@@ -6684,12 +6698,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_scatter,
-           supports_out=False),
+           sample_inputs_func=sample_inputs_scatter,),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
            supports_out=False),
     OpInfo('stack',
