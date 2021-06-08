@@ -28,30 +28,9 @@ static const char* backend_to_string(const at::Backend& backend) {
   }
 }
 
-static const char* options_to_module(const at::TensorOptions& options) {
-  switch(options.layout()) {
-    case at::Layout::Strided:
-      switch(options.device().type()) {
-        case at::Device::CPU: return "torch";
-        case at::Device::CUDA: return "torch.cuda";
-        case at::Device::XPU: return "torch.xpu";
-        case at::Device::QuantizedCPU: return "torch.quantized";
-        default: TORCH_CHECK(false, "Unimplemented backend ", options);
-      }
-    case at::Layout::Sparse:
-      switch(options.device().type()) {
-        case at::Device::CPU: return "torch.sparse";
-        case at::Device::CUDA: return "torch.cuda.sparse";
-        case at::Device::XPU: return "torch.xpu.sparse";
-        default: TORCH_CHECK(false, "Unimplemented backend ", options);
-      }
-    default: TORCH_CHECK(false, "Unimplemented backend ", options);
-  }
-}
-
 std::string options_to_string(const at::TensorOptions options) {
   std::ostringstream ss;
-  ss << options_to_module(options) << "." << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";
+  ss << backend_to_string(options.backend()) << "." << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";
   return ss.str();
 }
 
