@@ -178,10 +178,10 @@ void Logger::calculate_avg_time(
     Timer::Event end_event) {
   TORCH_CHECK(num_iterations_stats_recorded_ > 0);
   c10::optional<int64_t> maybe_time_duration = timer.measureDifference(start_event, end_event);
-  if (!time_duration) {
+  if (!maybe_time_duration.has_value()) {
     return;
   }
-  time_duration = *maybe_time_duration;
+  time_duration = maybe_time_duration.value();
   avg_time = (time_duration + avg_time * (num_iterations_stats_recorded_ - 1)) /
       num_iterations_stats_recorded_;
 }
