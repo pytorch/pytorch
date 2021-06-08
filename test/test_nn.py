@@ -3774,6 +3774,7 @@ class TestNN(NNTestCase):
         # Neither weight and bias are parametrized
         self.assertFalse(hasattr(m, 'parametrizations'))
         self.assertTrue('weight' in m._parameters)
+        self.assertFalse(torch.nn.utils.parametrize.is_parametrized(m))
 
         # test correctness in training/eval modes and cpu/multi-gpu settings
         for apply_dp in (True, False):
@@ -3809,10 +3810,23 @@ class TestNN(NNTestCase):
 
                 # TEST TRAINING BEHAVIOR
 
-                # run forward again and assert that u and v are updated
+                # We perform GD first to modify the initial matrix
+                wrapped_m(input).sum().backward()
+                with torch.no_grad():
+                    for p in wrapped_m.parameters():
+                        if p.requires_grad:
+                            p.add_(- p.grad, alpha=0.01)
+
                 out = wrapped_m(input)
-                self.assertNotEqual(u0, spectral_norm_m.u)
-                self.assertNotEqual(v0, spectral_norm_m.v)
+                if requires_grad:
+                    # run forward again and assert that u and v are updated
+                    self.assertNotEqual(u0, spectral_norm_m.u)
+                    self.assertNotEqual(v0, spectral_norm_m.v)
+                else:
+                    # The weight has not been updated and u0 and v0 are already the correct
+                    # singular vectors
+                    self.assertEqual(u0, spectral_norm_m.u)
+                    self.assertEqual(v0, spectral_norm_m.v)
 
                 # assert that backprop reaches original weight
                 # can't use gradcheck because the function changes as we
@@ -3843,13 +3857,6 @@ class TestNN(NNTestCase):
                 m.eval()
                 m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
                 self.assertEqual(wrapped_m(input), pre_remove_out)
-
-                torch.nn.utils.parametrizations.spectral_norm(m)
-                pre_remove_out = wrapped_m(input)
-                m.train()
-                self.assertTrue(m.parametrizations.weight[0].training)
-                m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
-                self.assertNotEqual(wrapped_m(input), pre_remove_out)
 
                 torch.nn.utils.parametrizations.spectral_norm(m)
                 for _ in range(3):

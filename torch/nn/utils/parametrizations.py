@@ -35,7 +35,13 @@ class _SpectralNorm(Module):
         if self.dim != 0:
             # permute dim to front
             weight = weight.permute(self.dim, *(d for d in range(weight.dim()) if d != self.dim))
-        return weight.flatten(1)
+
+        # TODO for weight of ndim == 1 we can do better as SpectralNorm is just:
+        # F.normalize(x, dim=0, eps=self.eps)
+        if weight.ndim > 1:
+            return weight.flatten(1)
+        else:
+            return weight.unsqueeze(1)
 
     @torch.autograd.no_grad()
     def _update_vectors(self, weight_mat: torch.Tensor, n_power_iterations: int) -> None:
