@@ -15,6 +15,7 @@ jobs:
       GPU_FREQUENCY: "5001,900"
       CUDA_VISIBLE_DEVICES: "0"
       CORE_LIST: "24-47"
+      GOMP_CPU_AFFINITY: "24-47"
     steps:
       - name: Check out pytorch/pytorch
         uses: actions/checkout@v2
