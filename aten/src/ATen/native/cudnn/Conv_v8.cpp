@@ -85,11 +85,12 @@ struct CacheKey {
 };
 
 // FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-std::unordered_map<CacheKey, std::unique_ptr<cudnn_frontend::ExecutionPlan>, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
+std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
 
 }
 
 void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+   memset(&key, 0, sizeof(key));
    setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
    key.operation = operation;
    key.x_alignment = getAlignment(x);
@@ -111,7 +112,11 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
-auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+  auto workspace_size = 1LL << 30;;
+  Tensor workspace;
+  workspace = at::empty({workspace_size}, x.options().dtype(kByte));
+
   auto op = cudnn_frontend::OperationBuilder(desc)
       .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
       .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
@@ -125,9 +130,13 @@ auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc
       .build();
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
-  auto variantPack  = cudnn_frontend::VariantPackBuilder().setDataPointers(3, data_ptrs).setUids(3, uids).build();
-  auto sample_predicate_function = [](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return false;
+  auto variantPack  = cudnn_frontend::VariantPackBuilder()
+      .setDataPointers(3, data_ptrs)
+      .setWorkspacePointer(workspace.data_ptr())
+      .setUids(3, uids)
+      .build();
+  auto predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
+    return plan.getWorkspaceSize() > workspace_size;
   };
 
   // Method for engine config generator based on heuristics
@@ -155,17 +164,20 @@ auto get_plans_from_find(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc
 
   std::array<cudnn_frontend::GeneratorSource const, 2> sources = {heurgen_method, fallback_method};
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
-  auto options = generator.cudnnFindPlan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(opGraph), variantPack, sample_predicate_function); 
+  auto options = generator.cudnnFindPlan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(opGraph), variantPack, predicate_function); 
 
   cudnn_frontend::executionPlans_t plans;
   for (auto& option : options) {
     plans.emplace_back(std::move(option.plan));
   }
-  std::cout << "find plans: " << plans.size() << std::endl;
   return plans; 
 }
 
-auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, CacheKey key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, bool deterministic, bool allow_tf32) {
+  auto workspace_size = 1LL << 30;
+  Tensor workspace;
+  workspace = at::empty({workspace_size}, x.options().dtype(kByte));
+
   auto op = cudnn_frontend::OperationBuilder(desc)
       .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
       .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
@@ -179,9 +191,13 @@ auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_
       .build();
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
-  auto variantPack  = cudnn_frontend::VariantPackBuilder().setDataPointers(3, data_ptrs).setUids(3, uids).build();
-  auto sample_predicate_function = [](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return false;
+  auto variantPack  = cudnn_frontend::VariantPackBuilder()
+      .setDataPointers(3, data_ptrs)
+      .setWorkspacePointer(workspace.data_ptr())
+      .setUids(3, uids)
+      .build();
+  auto predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
+    return plan.getWorkspaceSize() > workspace_size;
   };
 
   // Method for engine config generator based on heuristics
@@ -210,34 +226,26 @@ auto get_plans_from_heuristics(cudnnHandle_t handle, cudnnBackendDescriptorType_
 
   std::array<cudnn_frontend::GeneratorSource const, 2> sources = {heurgen_method, fallback_method};
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
-  auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), sample_predicate_function);
-  std::cout << "get plans: " << plans.size() << std::endl;
+  auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), predicate_function);
   return plans;
 }
 
-void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
+void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
   for (auto & plan : plans) {
     try {
-      std::unique_ptr<cudnn_frontend::ExecutionPlan> plan_ptr(new cudnn_frontend::ExecutionPlan(std::move(plan)));
-
-      run_conv_plan(handle, x, y, w, *plan_ptr.get());
-      engine_cache[key] = std::move(plan_ptr);
+      run_conv_plan(handle, x, y, w, plan);
+      engine_cache.emplace(key, std::move(plan));
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
   }
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
 
-void try_options(cudnn_frontend::executionOptions_t & options, const CacheKey key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
-  std::cout << options.size() << std::endl;
-  for (auto& option : options) {
-    std::cout << " option finished in " << option.time_ms << std::endl;
-  }
+void try_options(cudnn_frontend::executionOptions_t & options, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
   for (auto& option : options) {
     try {
-      std::unique_ptr<cudnn_frontend::ExecutionPlan> plan_ptr(new cudnn_frontend::ExecutionPlan(std::move(option.plan)));
-      run_conv_plan(handle, x, y, w, *plan_ptr.get());
-      engine_cache[key] = std::move(plan_ptr);
+      run_conv_plan(handle, x, y, w, option.plan);
+      engine_cache.emplace(key, std::move(option.plan));
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
   }
@@ -255,7 +263,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   get_cachekey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
   auto search = engine_cache.find(key);
   if (search != engine_cache.end()) {
-    run_conv_plan(handle, x, y, w, *(search->second.get()));
+    run_conv_plan(handle, x, y, w, search->second);
     return;
   }
 
