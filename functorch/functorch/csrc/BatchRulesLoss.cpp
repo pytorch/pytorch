@@ -22,10 +22,10 @@ nll_loss_forward_self_target_batch_rule(
     auto self_ = reshape_dim_into(*self_bdim, 0, self);
     auto target_ = reshape_dim_into(*target_bdim, 0, target);
     auto result = at::nll_loss_forward(self_, target_, nullopt, reduction, -100);
-    return {
+    return std::make_tuple(
       reshape_dim_outof(0, batch_size, std::get<0>(result)), 0,
       std::get<1>(result), nullopt
-    };
+    );
   } else if (reduction == Reduction::Sum) {
     int64_t batch_size = self.size(*self_bdim);
     auto self_ = reshape_dim_into(*self_bdim, 0, self);
@@ -34,11 +34,11 @@ nll_loss_forward_self_target_batch_rule(
     auto output = std::get<0>(res);
     output = reshape_dim_outof(0, batch_size, output);
     auto total_weight = self_.new_full({}, output.size(-1));
-    return {
+    return std::make_tuple(
       output.sum(-1), 0,
       // NB: total_weight = 0 after Reduction::None
-      total_weight, nullopt,
-    };
+      total_weight, nullopt
+    );
   } else if (reduction == Reduction::Mean) {
     int64_t batch_size = self.size(*self_bdim);
     auto self_ = reshape_dim_into(*self_bdim, 0, self);
@@ -47,11 +47,11 @@ nll_loss_forward_self_target_batch_rule(
     auto output = std::get<0>(res);
     output = reshape_dim_outof(0, batch_size, output);
     auto total_weight = self_.new_full({}, output.size(-1));
-    return {
+    return std::make_tuple(
       output.mean(-1), 0,
       // NB: total_weight = 0 after Reduction::None
-      total_weight, nullopt,
-    };
+      total_weight, nullopt
+    );
   }
   TORCH_INTERNAL_ASSERT(false);
 }
@@ -88,10 +88,10 @@ std::tuple<at::Tensor,at::Tensor> nll_loss_forward_plumbing(
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     auto results = nll_loss_forward_self_target_batch_rule(
         self_value, self_bdim, target_value, target_bdim, reduction);
-    return {
+    return std::make_tuple(
       makeBatched(std::get<0>(results), std::get<1>(results), cur_level),
       makeBatched(std::get<2>(results), std::get<3>(results), cur_level)
-    };
+    );
   }
 
   static auto op = c10::Dispatcher::singleton()
@@ -122,7 +122,7 @@ nll_loss_backward_self_target_batch_rule(
     auto result = at::nll_loss_backward(
         grad_output_, self_, target_,
         nullopt, reduction, -100, total_weight);
-    return { reshape_dim_outof(0, batch_size, result), 0 };
+    return std::make_tuple(reshape_dim_outof(0, batch_size, result), 0);
   }
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Sum || reduction == Reduction::Mean);
   int64_t batch_size = self.size(*self_bdim);
@@ -143,7 +143,7 @@ nll_loss_backward_self_target_batch_rule(
   auto result = at::nll_loss_backward(
       grad_output_, self_, target_,
       nullopt, Reduction::None, -100, total_weight);
-  return { reshape_dim_outof(0, batch_size, result), 0 };
+  return std::make_tuple(reshape_dim_outof(0, batch_size, result), 0);
 }
 
 at::Tensor nll_loss_backward_plumbing(

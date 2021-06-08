@@ -53,7 +53,7 @@ std::tuple<Tensor,optional<int64_t>> binary_pointwise_batch_rule(
   auto result = Func(tensor_, other_, std::forward<ExtraArgs>(extra_args)...);
   auto result_batch_dim = tensor_batch_dim.has_value() || other_batch_dim.has_value()
     ? optional<int64_t>{0} : nullopt;
-  return { std::move(result), std::move(result_batch_dim) };
+  return std::make_tuple( std::move(result), std::move(result_batch_dim) );
 }
 
 template <typename M, M Meth, typename... ExtraArgs>
@@ -105,13 +105,13 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   auto result = Func(tensor_, other_);
   auto result_batch_dim = tensor_batch_dim.has_value() || other_batch_dim.has_value()
     ? optional<int64_t>{0} : nullopt;
-  return { std::move(result), std::move(result_batch_dim) };
+  return std::make_tuple( std::move(result), std::move(result_batch_dim) );
 }
 
 std::tuple<Tensor,optional<int64_t>> pow_scalar_tensor_batch_rule(
     const Scalar& other,
     const Tensor& tensor, optional<int64_t> tensor_batch_dim) {
-  return { at::pow(other, tensor), tensor_batch_dim };
+  return std::make_tuple( at::pow(other, tensor), tensor_batch_dim );
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {

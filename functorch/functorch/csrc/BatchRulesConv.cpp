@@ -39,7 +39,7 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
       auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
       auto out = at::conv2d(lhs, new_w, unbatched_bias, stride, padding, dilation, groups);
       out = reshape_dim_outof(out_spec[1], rhs.sizes()[*rhs_bdim], out);
-      result =  {out, out_spec[1]};
+      result = std::make_tuple(out, out_spec[1]);
     } else {
       auto new_w = reshape_dim_outof(rhs_spec[0] + (*rhs_bdim <= rhs_spec[0]), groups, rhs);
       new_w = reshape_dim_into(*rhs_bdim + (rhs_spec[0] < rhs_bdim), rhs_spec[0] + 1, new_w);
@@ -48,7 +48,7 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
       out = reshape_dim_outof(out_spec[1], groups, out);
       out = reshape_dim_outof(out_spec[1] + 1, rhs.sizes()[*rhs_bdim], out);
       out = reshape_dim_into(out_spec[1], out_spec[1] + 1, out);
-      result = {out, out_spec[1]};
+      result = std::make_tuple(out, out_spec[1]);
     }
   } else if (lhs_bdim && rhs_bdim) {
     auto new_x = reshape_dim_into(*lhs_bdim, lhs_spec[1], lhs);
@@ -56,9 +56,9 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
     auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
     auto out = at::conv2d(new_x, new_w, unbatched_bias, stride, padding, dilation, groups);
     out = reshape_dim_outof(out_spec[1], lhs.sizes()[*lhs_bdim], out);
-    result = {out, out_spec[1]};
+    result = std::make_tuple(out, out_spec[1]);
   } else {
-    result = {at::conv2d(lhs, rhs, unbatched_bias, stride, padding, dilation, groups), nullopt};
+    result = std::make_tuple(at::conv2d(lhs, rhs, unbatched_bias, stride, padding, dilation, groups), nullopt);
   }
   if (separate_bias) {
     auto A = std::get<0>(result);
@@ -72,7 +72,7 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
     }
     B = maybePadToLogicalRank(B, B_batch_dim, rankWithoutBatchDim(A, A_batch_dim));
 
-    return {at::add(A, B), 0};
+    return std::make_tuple(at::add(A, B), 0);
   } else {
     return result;
   }
