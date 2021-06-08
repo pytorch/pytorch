@@ -3,6 +3,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
@@ -69,6 +70,7 @@ class TORCH_API ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info);
   void serialize_unified_format(Module& module, uint64_t script_module_id);
+  StorageContext& storage_context();
 
   ~ScriptModuleSerializer() = default;
 
@@ -97,6 +99,10 @@ class TORCH_API ScriptModuleSerializer {
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
   OrderedDict<std::string, PythonPrint> file_streams_;
+  // Used to keep references of storages around during serialization to solve
+  // for ABA memory reuse problem hit when storages are created/destroyed
+  // during serializaiton process.
+  StorageContext storage_context_;
 
   // Uniquely identifies a SourceRange in a model.
   // SourceRanges are associated with Nodes of Graphs.
