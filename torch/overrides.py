@@ -533,6 +533,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.logical_not: lambda input, out=None: -1,
         torch.logical_or: lambda input, other, out=None: -1,
         torch.logical_xor: lambda input, other, out=None: -1,
+        torch.logsumexp: lambda input, names, keepdim=False, out=None: -1,
         torch.logit: lambda input, eps=None: -1,
         torch.logsumexp: lambda input, names, keepdim=False, out=None: -1,
         torch.lstm: lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1,

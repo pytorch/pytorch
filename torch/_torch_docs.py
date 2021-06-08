@@ -4891,33 +4891,7 @@ add_docstr(torch.logsumexp,
            r"""
 logsumexp(input, dim, keepdim=False, *, out=None)
 
-Returns the log of summed exponentials of each row of the :attr:`input`
-tensor in the given dimension :attr:`dim`. The computation is numerically
-stabilized.
-
-For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
-
-    .. math::
-        \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
-
-.. note:: Alias for :func:`torch.special.logsumexp`.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {out}
-
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> torch.logsumexp(a, 1)
-    tensor([ 0.8442,  1.4322,  0.8711])
+Alias for :func:`torch.special.logsumexp`.
 """.format(**multi_dim_common))
 
 add_docstr(torch.lstsq,
