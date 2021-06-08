@@ -6,7 +6,7 @@
 #include <ATen/native/Resize.h>
 
 #include <tuple>
-#include "c10/core/ScalarType.h"
+#include <c10/core/ScalarType.h>
 #include <c10/core/DefaultDtype.h>
 
 /* Implements a numpy-like histogram function running on cpu
@@ -89,24 +89,24 @@ void histogram_prepare_out(const Tensor& input, int64_t bin_ct,
 
 /* Determines the outermost bin edges.
  */
-std::pair<double, double> select_outer_bin_edges(const Tensor& input, c10::ArrayRef<double> range,
+std::pair<double, double> select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<double>& min, const c10::optional<double>& max) {
-    TORCH_CHECK(range.empty() || range.size() == 2, "torch.histogram: range should have 2 elements if",
-            " specified, but got ", range.size());
+    TORCH_CHECK(!range.has_value() || range.value().size() == 2, "torch.histogram: range should have 2 elements",
+            " if specified, but got ", range.value().size());
 
     TORCH_CHECK(min.has_value() == max.has_value(), "torch.histogram: min and max should be specified",
             " together, but got min ", min.has_value(), " and max ", max.has_value());
 
-    TORCH_CHECK(range.empty() || !min.has_value(), "torch.histogram: range and min/max arguments",
+    TORCH_CHECK(!range.has_value() || !min.has_value(), "torch.histogram: range and min/max arguments",
             " should not both be specified");
 
     // Default range for empty input matching numpy.histogram's default
     double leftmost_edge = 0., rightmost_edge = 1.;
 
-    if (!range.empty()) {
+    if (range.has_value()) {
         // range is specified
-        leftmost_edge = range[0];
-        rightmost_edge = range[1];
+        leftmost_edge = range.value()[0];
+        rightmost_edge = range.value()[1];
     } else if (min.has_value()) {
         // min and max are specified
         leftmost_edge = min.value();
@@ -183,7 +183,7 @@ histogram_cpu(const Tensor& self, const Tensor& bins,
 /* Versions of histogram in which bins is an integer specifying the number of equal-width bins.
  */
 std::tuple<Tensor&, Tensor&>
-histogram_out_cpu(const Tensor& self, int64_t bin_ct, at::ArrayRef<double> range,
+histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<double> min, const c10::optional<double> max,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, Tensor& bin_edges) {
@@ -196,7 +196,7 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct, at::ArrayRef<double> range
     return std::forward_as_tuple(hist, bin_edges);
 }
 std::tuple<Tensor, Tensor>
-histogram_cpu(const Tensor& self, int64_t bin_ct, at::ArrayRef<double> range,
+histogram_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<double> min, const c10::optional<double> max,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
