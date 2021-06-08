@@ -481,7 +481,7 @@ class TestCommon(JitCommonTestCase):
             [f"s{i}: {type(v).__name__}" for i, v in enumerate(sample.args)] + \
             [f"{k}: {type(v).__name__} = {quote_strs(v)}" for k, v in sample.kwargs.items()]
         args_kw = args + \
-            [f"s{i}" for i in range(len(sample.args))] + \
+            [f"{v}" for v in sample.args] + \
             [f"{k}={quote_strs(v)}" for k, v in sample.kwargs.items()]
 
         # Prepare data for test tracing
@@ -507,23 +507,23 @@ class TestCommon(JitCommonTestCase):
 
                 if variant in method_or_inplace:
                     fn_template = '''
-                        def _fn(t0{c}{args_annot_kw}):
+                        def _fn(t0{c}{args}):
                             return t0.{alias_name}({args_kw})
                     '''
                     # remove the first input tensor
                     script = fn_template.format(
                         c=", " if len(args_kw[1:]) > 1 or len(args_annot_kw[1:]) >= 1 else "",
-                        args_annot_kw=", ".join(args_annot_kw[1:]),
+                        args=", ".join(args),
                         args_kw=", ".join(args_kw[1:]),
                         alias_name=variant_name,
                     )
                 else:
                     fn_template = '''
-                        def _fn({args_annot_kw}):
+                        def _fn({args}):
                             return variant({args_kw})
                     '''
                     script = fn_template.format(
-                        args_annot_kw=", ".join(args_annot_kw),
+                        args=", ".join(args),
                         args_kw=", ".join(args_kw),
                     )
                 scripted = torch.jit.CompilationUnit(script)._fn
@@ -531,15 +531,15 @@ class TestCommon(JitCommonTestCase):
                 if (variant is inplace and not torch.can_cast(expected_dtype, dtype)):
                     try:
                         inp = clone_input_helper(sample.input)
-                        scripted(inp, *sample.args, **sample.kwargs)
+                        scripted(inp)
                     except Exception as e:
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
 
                 inp = clone_input_helper(sample.input)
-                scripted(inp, *sample.args, **sample.kwargs)
+                scripted(inp)
                 inp = clone_input_helper(sample.input)
-                graph = scripted.graph_for(inp, *sample.args, **sample.kwargs)
+                graph = scripted.graph_for(inp)
                 FileCheck().check(op.aten_name).check_not(variant_name).run(graph)
 
             # Test tracing:
