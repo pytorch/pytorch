@@ -1,13 +1,14 @@
 import torch
+import torch.nn as nn
 from torch.quantization.observer import (
-    MinMaxObserver, PerChannelMinMaxObserver, ObserverBase
+    MinMaxObserver, PerChannelMinMaxObserver, _with_args
 )
 from torch.quantization.qconfig import QConfig
 
 import warnings
 
 
-class _InputEqualizationObserver(ObserverBase):
+class _InputEqualizationObserver(nn.Module):
     r"""Observer for tracking the running min/max values of input columns, and
     computing the quantization parameters for the overall min/max input values.
 
@@ -37,7 +38,7 @@ class _InputEqualizationObserver(ObserverBase):
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
                  quant_min=None, quant_max=None, output_obs=None,
                  factory_kwargs=None) -> None:
-        super(_InputEqualizationObserver, self).__init__(dtype=dtype)
+        super(_InputEqualizationObserver, self).__init__()
 
         if qscheme not in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
             raise TypeError("Input qscheme must be per-tensor")
@@ -92,8 +93,10 @@ class _InputEqualizationObserver(ObserverBase):
 
         return scale_input, zero_point_input
 
+    with_args = classmethod(_with_args)
 
-class _WeightEqualizationObserver(ObserverBase):
+
+class _WeightEqualizationObserver(nn.Module):
     r"""Observer for tracking the running min/max values of weight columns and
     rows, and computing the quantization parameters for the weight rows.
 
@@ -124,7 +127,7 @@ class _WeightEqualizationObserver(ObserverBase):
 
     def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine, quant_min=None,
                  quant_max=None, factory_kwargs=None) -> None:
-        super(_WeightEqualizationObserver, self).__init__(dtype=dtype)
+        super(_WeightEqualizationObserver, self).__init__()
 
         self.dtype = dtype
 
@@ -207,6 +210,8 @@ class _WeightEqualizationObserver(ObserverBase):
         (scale_weight, zero_point_weight) = self.weight_row_obs._calculate_qparams(min_weights_scaled, max_weights_scaled)
 
         return scale_weight, zero_point_weight
+
+    with_args = classmethod(_with_args)
 
 
 def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
