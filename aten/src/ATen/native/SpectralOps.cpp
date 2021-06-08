@@ -150,7 +150,7 @@ Tensor fft_r2c(c10::string_view function_name,
 
   if (!forward) {
     // FIXME: _fft_r2c doesn't support native r2c IFFT
-    return out.defined() ? at::conj_out(out, ret) : at::conj(ret);
+    return out.defined() ? at::conj_physical_out(out, ret) : at::conj(ret);
   } else {
     return ret;
   }
@@ -984,8 +984,8 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   // Use TensorIterator to coalesce batch dimensions
   // NOTE: Can't use TensorIterator loops because we need negative strides
   auto iter = TensorIteratorConfig()
-      .add_borrowed_output(input)
-      .add_borrowed_input(input)
+      .add_output(input)
+      .add_input(input)
       .resize_outputs(false)
       .declare_static_shape(input_sizes, dim)
       .build();

@@ -35,10 +35,10 @@ Tensor& addcmul_out(const Tensor& self,
     Tensor& result) {
   checkBackend("addcmul_cpu", result, self.options().backend());
   auto iter = at::TensorIteratorConfig()
-    .add_borrowed_output(result)
-    .add_borrowed_input(self)
-    .add_borrowed_input(tensor1)
-    .add_borrowed_input(tensor2)
+    .add_output(result)
+    .add_input(self)
+    .add_input(tensor1)
+    .add_input(tensor2)
     .build();
   addcmul_stub(iter.device_type(), iter, value);
   return result;
@@ -80,10 +80,10 @@ Tensor& addcdiv_out(const Tensor& self,
   }
   checkBackend("addcdiv_cpu", result, self.options().backend());
   auto iter = at::TensorIteratorConfig()
-    .add_borrowed_output(result)
-    .add_borrowed_input(self)
-    .add_borrowed_input(tensor1)
-    .add_borrowed_input(tensor2)
+    .add_output(result)
+    .add_input(self)
+    .add_input(tensor1)
+    .add_input(tensor2)
     .build();
   addcdiv_stub(iter.device_type(), iter, value);
   return result;
