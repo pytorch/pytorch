@@ -779,10 +779,12 @@ application crashes, rather than a hang or uninformative error message. As an ex
         mp.spawn(worker, nprocs=2, args=())
 
 With the ``NCCL`` backend, such an application would likely result in a hang which can be challenging to root-cause in nontrivial scenarios. If the user enables
-``TORCH_DISTRIBUTED_DEBUG=DETAIL`` and reruns the application, the following error message which reveals the root cause:
+``TORCH_DISTRIBUTED_DEBUG=DETAIL`` and reruns the application, the following error message reveals the root cause:
 
 ::
 
     work = default_pg.allreduce([tensor], opts)
     RuntimeError: Error when verifying shape tensors for collective ALLREDUCE on rank 0. This likely indicates that input shapes into the collective are mismatched across ranks. Got shapes:  10
     [ torch.LongTensor{1} ]
+
+In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected.
