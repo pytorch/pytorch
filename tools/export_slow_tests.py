@@ -17,7 +17,7 @@ def get_test_case_times() -> Dict[str, float]:
     # an entry will be like ("test_doc_examples (__main__.TestTypeHints)" -> [values]))
     test_names_to_times: DefaultDict[str, List[float]] = defaultdict(list)
     for report in reports:
-        if report.get('format_version', 1) != 2:
+        if report.get('format_version', 1) != 2:  # type: ignore[misc]
             raise RuntimeError("S3 format currently handled is version 2 only")
         v2report = cast(Version2Report, report)
         for test_file in v2report['files'].values():
@@ -46,7 +46,7 @@ def export_slow_tests(filename: str) -> None:
         file.write('\n')
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description='Export a JSON of slow test cases in PyTorch unit test suite')
     parser.add_argument(
@@ -61,7 +61,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     options = parse_args()
     export_slow_tests(options.filename)
 

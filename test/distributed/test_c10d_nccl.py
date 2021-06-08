@@ -180,7 +180,7 @@ class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
     def world_size(self) -> int:
         return 2
 
-    def _create_wrapper_pg(self, timeout=10.0):
+    def _create_wrapper_pg(self, with_new_group=False, timeout=10.0):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl",
@@ -189,15 +189,18 @@ class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
             store=store,
             timeout=timedelta(seconds=timeout)
         )
-        _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
-        pg = c10d._create_process_group_wrapper(
-            _pg,
-            "unused",
-            store,
-            self.rank,
-            self.world_size,
-            timeout=timeout,
-        )
+        if with_new_group:
+            pg = c10d.new_group(backend="nccl", timeout=timedelta(seconds=timeout))
+        else:
+            _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
+            pg = c10d._create_process_group_wrapper(
+                _pg,
+                "unused",
+                store,
+                self.rank,
+                self.world_size,
+                timeout=timeout,
+            )
         return pg
 
     @requires_nccl()
@@ -206,17 +209,36 @@ class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
         pg = self._create_wrapper_pg(timeout=2.0)
         self._test_collective_hang(pg)
 
+    # NOTE: these tests are separated by debug level instead of combined into
+    # one due to https://github.com/pytorch/pytorch/issues/55967, they can be
+    # combined after that is resolved.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_collectives_op_mismatch(self):
-        wrapper_pg = self._create_wrapper_pg()
-        self._test_collectives_op_mismatch(wrapper_pg, use_cuda=True)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collectives_op_mismatch_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collectives_op_mismatch(pg, use_cuda=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collectives_op_mismatch(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collectives_op_mismatch(pg, use_cuda=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collective_shape_mismatch_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collective_shape_mismatch(pg, use_cuda=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
     def test_collective_shape_mismatch(self):
-        wrapper_pg = self._create_wrapper_pg()
-        self._test_collective_shape_mismatch(wrapper_pg, use_cuda=True)
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collective_shape_mismatch(pg, use_cuda=True)
 
 
 class ProcessGroupNCCLNoGPUTest(TestCase):
@@ -482,6 +504,30 @@ class ProcessGroupNCCLTest(TestCase):
             allgather_base(output_t, tensor)
 
     @requires_nccl()
+    def test_reduce_scatter_base_basics(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce_scatter_base(output_t, input_t):
+            work = pg._reduce_scatter_base(output_t, input_t)
+            work.wait()
+
+        device_id = self.rank % self.num_gpus
+        # anticpate an error
+        with self.assertRaisesRegex(RuntimeError, "input tensor must be the same size as output size times world size"):
+            input_t = torch.tensor([self.rank]).cuda(device_id)
+            output_t = torch.empty((self.world_size + 1), dtype=input_t.dtype).cuda(device_id)
+            # fails the check because output_t is not correctly sized
+            reduce_scatter_base(output_t, input_t)
+
+        # anticpate an error
+        with self.assertRaisesRegex(RuntimeError, "input tensor must be the same type as the outut tensor."):
+            tensor = torch.tensor([self.rank], dtype=torch.float).cuda(device_id)
+            output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(device_id)
+            # fails the check because the dtype is different
+            reduce_scatter_base(output_t, tensor)
+
+    @requires_nccl()
     def test_reduce_scatter_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -557,6 +603,26 @@ class ProcessGroupNCCLTest(TestCase):
             expected = torch.tensor([float(math.factorial(virtual_world_size))])
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
+
+    @requires_nccl()
+    def test_reduce_scatter_base_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce_scatter_base(output_t, input_t):
+            work = pg._reduce_scatter_base(output_t, input_t)
+            work.wait()
+
+        device_id = self.rank % self.num_gpus
+        # reduce_scatter_base is GPU number agnostic.
+        # Each rank contribute one tensor regardless of GPU counts
+        output_t = torch.empty([1]).cuda(device_id)
+        tensor = torch.arange(self.world_size, dtype=output_t.dtype).cuda(device_id)
+
+        reduce_scatter_base(output_t, tensor)
+
+        # Verification
+        self.assertEqual(output_t[0], self.rank * self.world_size)
 
     @requires_nccl()
     def test_barrier(self):
@@ -1993,6 +2059,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
+    @unittest.skip("Frequently times out see https://github.com/pytorch/pytorch/issues/58920")
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda: os.abort())
 
