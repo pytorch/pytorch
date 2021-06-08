@@ -70,7 +70,7 @@ TorchNNFunctionalTestParams = namedtuple(
         # Unique identifier for this functional config (e.g. "BCELoss_no_reduce_cuda")
         'functional_variant_name',
 
-        # An instance of an NN test class (e.g. `NewModuleTest`) which stores
+        # An instance of an NN test class (e.g. `ModuleTest`) which stores
         # necessary information (e.g. input / target / extra_args) for running the Python test
         'test_instance',
 

@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
-from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
+from torch.testing._internal.common_nn import NNTestCase, ModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
@@ -11328,7 +11328,7 @@ for test_params in module_tests:
         name = test_params.pop('module_name')
         test_params['constructor'] = getattr(nn, name)
     decorator = test_params.pop('decorator', None)
-    test = NewModuleTest(**test_params)
+    test = ModuleTest(**test_params)
     add_test(test, decorator)
     if 'check_eval' in test_params:
         # create a new test that is identical but that sets module.training to False
@@ -11344,7 +11344,7 @@ for test_params in module_tests:
             return eval_constructor
 
         test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
-        test = NewModuleTest(**test_params)
+        test = ModuleTest(**test_params)
         add_test(test, decorator)
     if 'check_with_long_tensor' in test_params:
         fullname = test_params.get('fullname', None)
@@ -11395,7 +11395,7 @@ for test_params in module_tests:
         test_params['check_forward_only'] = True
         # Currently we don't support conv2d/conv3d for LongTensor in CUDA
         test_params['test_cuda'] = False
-        test = NewModuleTest(**test_params)
+        test = ModuleTest(**test_params)
 
         add_test(test, decorator)
 
@@ -11431,19 +11431,19 @@ class UnpoolingNet(nn.Module):
         return self.unpool(*self.pool(input))
 
 
-add_test(NewModuleTest(
+add_test(ModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool1d(2, return_indices=True),
         nn.MaxUnpool1d(2)),
     input_size=(1, 1, 4),
     fullname='MaxUnpool1d_net',))
-add_test(NewModuleTest(
+add_test(ModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool2d(2, return_indices=True),
         nn.MaxUnpool2d(2)),
     input_size=(1, 1, 2, 4),
     fullname='MaxUnpool2d_net',))
-add_test(NewModuleTest(
+add_test(ModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool3d(2, return_indices=True),
         nn.MaxUnpool3d(2)),
@@ -11457,7 +11457,7 @@ class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
         t = torch.tensor([0, 1, 4, 8]).to(input.device)
         return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
 
-add_test(NewModuleTest(
+add_test(ModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax',

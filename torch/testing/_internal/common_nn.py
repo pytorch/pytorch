@@ -23,7 +23,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Dict, Callable, Tuple, List, Sequence, Union, Any
+from typing import Dict, Callable, Tuple, List, Sequence, Union
 
 TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5
@@ -4945,22 +4945,41 @@ class TestBase(object):
         raise NotImplementedError
 
 
-class ModuleTest(TestBase):
+class InputVariableMixin(object):
+    def _get_input(self):
+        input = TestBase._get_input(self, False)  # type: ignore[arg-type]
 
-    @abstractmethod
-    def _do_test(self, test_case: Any, module: nn.Module, input: Any) -> Any:
-        raise NotImplementedError
+        def map_variables(i):
+            if isinstance(i, torch.Tensor):
+                if i.is_floating_point() or i.is_complex():
+                    i.requires_grad = True
+                return i
+            else:
+                return type(i)(map_variables(elem) for elem in i)
 
+        return map_variables(input)
+
+
+class ModuleTest(InputVariableMixin, TestBase):  # type: ignore[misc]
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
         self.should_test_cuda = kwargs.get('test_cuda', True)
         self.should_test_pickle = kwargs.get('pickle', True)
-        self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.FIXME_no_cuda_gradgrad_comparison = \
             kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
         self.precision = kwargs.get('precision', 2e-4)
         self.check_forward_only = kwargs.get('check_forward_only', False)
+        self.cudnn = kwargs.get('cudnn', False)
+        self.check_inplace = kwargs.get('check_inplace', False)
+        self.check_gradgrad = kwargs.get('check_gradgrad', True)
+        self.skip_double = kwargs.get('skip_double', False)
+        self.skip_half = kwargs.get('skip_half', False)
+        self.with_tf32 = kwargs.get('with_tf32', False)
+        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
+        self.test_cpu = kwargs.get('test_cpu', True)
+        self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
+        self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -4987,169 +5006,6 @@ class ModuleTest(TestBase):
                 test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
         self._do_test(test_case, module, input)
-
-    def noncontiguize(self, obj):
-        if isinstance(obj, list):
-            return [self.noncontiguize(o) for o in obj]
-        elif isinstance(obj, tuple):
-            return tuple(self.noncontiguize(o) for o in obj)
-        tensor = obj
-        ndim = tensor.dim()
-        # Always making only the last dimension noncontiguous is easy to hide
-        # bugs because .view(-1) will still work. So try to find a dim with size
-        # > 1 and make that non-contiguous, i.e., stack + select on the
-        # dimension directly after that.
-        dim = ndim
-        for d in range(ndim):
-            if tensor.size(d) > 1:
-                dim = d + 1
-                break
-        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
-        noncontig.requires_grad = tensor.requires_grad
-        return noncontig
-
-    def test_noncontig(self, test_case, module, input):
-        # check no scalars, can't make non-contig
-        if isinstance(input, torch.Tensor) and input.dim() == 0:
-            return
-        if any(i.dim() == 0 for i in input if isinstance(i, torch.Tensor)):
-            return
-
-        test_case._zero_grad_parameters(module)
-        test_case._zero_grad_input(input)
-        with freeze_rng_state():
-            output = test_case._forward(module, input)
-            grad_output = output.new(output.shape).normal_()
-            output = output.clone()
-            d_input = deepcopy(test_case._backward(module, input, output, grad_output))
-            d_param = deepcopy(test_case._get_parameters(module)[1])
-
-        nc_input = self.noncontiguize(input)
-        nc_grad_output = self.noncontiguize(grad_output)
-        for contig_i, contig_g in product((True, False), repeat=2):
-            i = input if contig_i else nc_input
-            # Some ops, e.g., nn.Flatten, return gradient that shares
-            # storage with the grad_output. Hence we copy here.
-            go = deepcopy(grad_output if contig_g else nc_grad_output)
-            test_case._zero_grad_parameters(module)
-            test_case._zero_grad_input(i)
-            with freeze_rng_state():
-                out = test_case._forward(module, i)
-                grad = test_case._backward(module, i, out, go)
-
-                test_case.assertEqual(out, output)
-                test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
-                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
-
-    def test_cuda(self, test_case):
-        if not TEST_CUDA or not self.should_test_cuda:
-            raise unittest.SkipTest('Excluded from CUDA tests')
-
-        cpu_input = self._get_input()
-        type_map = {torch.double: torch.float}
-        cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
-        gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
-
-        cpu_module = self.constructor(*self.constructor_args)
-        gpu_module = self.constructor(*self.constructor_args).float().cuda()
-        cpu_param = test_case._get_parameters(cpu_module)
-        gpu_param = test_case._get_parameters(gpu_module)
-        for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
-            gpu_p.data.copy_(cpu_p)
-
-        test_case._zero_grad_input(cpu_input_tuple)
-        test_case._zero_grad_input(gpu_input_tuple)
-        test_case._zero_grad_parameters(cpu_module)
-        test_case._zero_grad_parameters(gpu_module)
-        cpu_output = test_case._forward(cpu_module, cpu_input_tuple)
-        gpu_output = test_case._forward(gpu_module, gpu_input_tuple)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
-
-        # Run backwards on CPU and GPU and compare results
-        for _ in range(5):
-            cpu_gradOutput = cpu_output.clone().normal_()
-            gpu_gradOutput = cpu_gradOutput.type_as(gpu_output)
-            cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
-            gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
-            for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
-                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
-
-        # Run double-backwards on CPU and GPU and compare results
-        if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
-            cpu_output = cpu_module(*cpu_input_tuple)
-            gpu_output = gpu_module(*gpu_input_tuple)
-
-            cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
-            gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
-            gpu_gradOutput.requires_grad = True
-
-            cpu_gradInputs = torch.autograd.grad(
-                cpu_output,
-                cpu_input_tuple + tuple(cpu_module.parameters()),
-                cpu_gradOutput,
-                create_graph=True)
-            gpu_gradInputs = torch.autograd.grad(
-                gpu_output,
-                gpu_input_tuple + tuple(gpu_module.parameters()),
-                gpu_gradOutput,
-                create_graph=True)
-
-            for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
-
-            # We mix output into the second backwards computation so that
-            # torch.autograd.grad doesn't complain that some inputs
-            # are unreachable (which can happen if you differentiate
-            # only on the gradient.
-            cpu_gg = torch.autograd.grad(
-                cpu_output.sum() + sum(x.sum() for x in cpu_gradInputs),
-                cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
-                retain_graph=True)
-            gpu_gg = torch.autograd.grad(
-                gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs),
-                gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
-                retain_graph=True)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
-            for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
-
-        self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
-
-class InputVariableMixin(object):
-    def _get_input(self):
-        input = TestBase._get_input(self, False)  # type: ignore[arg-type]
-
-        def map_variables(i):
-            if isinstance(i, torch.Tensor):
-                if i.is_floating_point() or i.is_complex():
-                    i.requires_grad = True
-                return i
-            else:
-                return type(i)(map_variables(elem) for elem in i)
-
-        return map_variables(input)
-
-
-class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.cudnn = kwargs.get('cudnn', False)
-        self.check_inplace = kwargs.get('check_inplace', False)
-        self.check_gradgrad = kwargs.get('check_gradgrad', True)
-        self.skip_double = kwargs.get('skip_double', False)
-        self.skip_half = kwargs.get('skip_half', False)
-        self.with_tf32 = kwargs.get('with_tf32', False)
-        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
-        self.test_cpu = kwargs.get('test_cpu', True)
-        self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
-        self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -5328,6 +5184,140 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
     @property
     def constructor_args(self):
         return self._get_arg('constructor_args', False)
+
+    def noncontiguize(self, obj):
+        if isinstance(obj, list):
+            return [self.noncontiguize(o) for o in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self.noncontiguize(o) for o in obj)
+        tensor = obj
+        ndim = tensor.dim()
+        # Always making only the last dimension noncontiguous is easy to hide
+        # bugs because .view(-1) will still work. So try to find a dim with size
+        # > 1 and make that non-contiguous, i.e., stack + select on the
+        # dimension directly after that.
+        dim = ndim
+        for d in range(ndim):
+            if tensor.size(d) > 1:
+                dim = d + 1
+                break
+        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
+        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
+        noncontig.requires_grad = tensor.requires_grad
+        return noncontig
+
+    def test_noncontig(self, test_case, module, input):
+        # check no scalars, can't make non-contig
+        if isinstance(input, torch.Tensor) and input.dim() == 0:
+            return
+        if any(i.dim() == 0 for i in input if isinstance(i, torch.Tensor)):
+            return
+
+        test_case._zero_grad_parameters(module)
+        test_case._zero_grad_input(input)
+        with freeze_rng_state():
+            output = test_case._forward(module, input)
+            grad_output = output.new(output.shape).normal_()
+            output = output.clone()
+            d_input = deepcopy(test_case._backward(module, input, output, grad_output))
+            d_param = deepcopy(test_case._get_parameters(module)[1])
+
+        nc_input = self.noncontiguize(input)
+        nc_grad_output = self.noncontiguize(grad_output)
+        for contig_i, contig_g in product((True, False), repeat=2):
+            i = input if contig_i else nc_input
+            # Some ops, e.g., nn.Flatten, return gradient that shares
+            # storage with the grad_output. Hence we copy here.
+            go = deepcopy(grad_output if contig_g else nc_grad_output)
+            test_case._zero_grad_parameters(module)
+            test_case._zero_grad_input(i)
+            with freeze_rng_state():
+                out = test_case._forward(module, i)
+                grad = test_case._backward(module, i, out, go)
+
+                test_case.assertEqual(out, output)
+                test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
+                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
+
+    def test_cuda(self, test_case):
+        if not TEST_CUDA or not self.should_test_cuda:
+            raise unittest.SkipTest('Excluded from CUDA tests')
+
+        cpu_input = self._get_input()
+        type_map = {torch.double: torch.float}
+        cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
+        gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
+
+        cpu_module = self.constructor(*self.constructor_args)
+        gpu_module = self.constructor(*self.constructor_args).float().cuda()
+        cpu_param = test_case._get_parameters(cpu_module)
+        gpu_param = test_case._get_parameters(gpu_module)
+        for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
+            gpu_p.data.copy_(cpu_p)
+
+        test_case._zero_grad_input(cpu_input_tuple)
+        test_case._zero_grad_input(gpu_input_tuple)
+        test_case._zero_grad_parameters(cpu_module)
+        test_case._zero_grad_parameters(gpu_module)
+        cpu_output = test_case._forward(cpu_module, cpu_input_tuple)
+        gpu_output = test_case._forward(gpu_module, gpu_input_tuple)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+
+        # Run backwards on CPU and GPU and compare results
+        for _ in range(5):
+            cpu_gradOutput = cpu_output.clone().normal_()
+            gpu_gradOutput = cpu_gradOutput.type_as(gpu_output)
+            cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
+            gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
+                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+
+        # Run double-backwards on CPU and GPU and compare results
+        if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
+            cpu_output = cpu_module(*cpu_input_tuple)
+            gpu_output = gpu_module(*gpu_input_tuple)
+
+            cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
+            gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
+            gpu_gradOutput.requires_grad = True
+
+            cpu_gradInputs = torch.autograd.grad(
+                cpu_output,
+                cpu_input_tuple + tuple(cpu_module.parameters()),
+                cpu_gradOutput,
+                create_graph=True)
+            gpu_gradInputs = torch.autograd.grad(
+                gpu_output,
+                gpu_input_tuple + tuple(gpu_module.parameters()),
+                gpu_gradOutput,
+                create_graph=True)
+
+            for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
+
+            # We mix output into the second backwards computation so that
+            # torch.autograd.grad doesn't complain that some inputs
+            # are unreachable (which can happen if you differentiate
+            # only on the gradient.
+            cpu_gg = torch.autograd.grad(
+                cpu_output.sum() + sum(x.sum() for x in cpu_gradInputs),
+                cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
+                retain_graph=True)
+            gpu_gg = torch.autograd.grad(
+                gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs),
+                gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
+                retain_graph=True)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+
+        self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 
 class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
