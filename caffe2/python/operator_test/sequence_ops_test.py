@@ -106,7 +106,7 @@ class TestSequenceOps(serial.SerializedTestCase):
            args=_gen_test_add_padding(with_pad_data=True),
            ret_lengths=st.booleans(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_add_padding(
         self, start_pad_width, end_pad_width, args, ret_lengths, gc, dc
     ):
@@ -278,7 +278,7 @@ class TestSequenceOps(serial.SerializedTestCase):
                              min_size=0,
                              max_size=10),
            **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_find_duplicate_elements(self, elements, gc, dc):
         mapping = {
             0: "a",
