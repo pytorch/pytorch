@@ -754,7 +754,7 @@ bool Value::mustNotBeNone() const {
 std::string Value::debugNameBase() const {
   std::string name = debugName();
   std::string name_base = name;
-  auto last_dot_pos = name.find_last_of('.');
+  auto last_dot_pos = name.find_last_of('_');
   if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
     if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
         std::string::npos) {
