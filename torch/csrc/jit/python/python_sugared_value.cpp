@@ -940,12 +940,11 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   std::vector<IValue> field_defaults;
   std::vector<py::object> objects;
 
-  std::tie(unqualName, field_names, field_types, objects) =
-      py::cast<std::tuple<
-          std::string,
-          std::vector<std::string>,
-          std::vector<TypePtr>,
-          std::vector<py::object>>>(props);
+  std::tie(unqualName, field_names, field_types, objects) = py::cast<std::tuple<
+      std::string,
+      std::vector<std::string>,
+      std::vector<TypePtr>,
+      std::vector<py::object>>>(props);
 
   // In `_get_named_tuple_properties`, we add a dummy value to represent
   // a missing default parameter, This provides a guarantee that the
@@ -967,7 +966,8 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
     field_defaults.emplace_back(ival);
   }
 
-  auto tt = TupleType::createNamed(qualifiedName, field_names, field_types, field_defaults);
+  auto tt = TupleType::createNamed(
+      qualifiedName, field_names, field_types, field_defaults);
   if (auto type = get_python_cu()->get_type(qualifiedName)) {
     TORCH_CHECK(
         type->isSubtypeOf(tt), "Can't redefine NamedTuple: ", tt->repr_str());

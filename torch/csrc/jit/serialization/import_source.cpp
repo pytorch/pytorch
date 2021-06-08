@@ -666,7 +666,8 @@ struct SourceImporterImpl : public Resolver,
       field_defaults.emplace_back(std::move(default_val));
     }
 
-    auto tt = TupleType::createNamed(qualified_name, field_names, field_types, field_defaults);
+    auto tt = TupleType::createNamed(
+        qualified_name, field_names, field_types, field_defaults);
     cu_->register_type(tt);
   }
 
