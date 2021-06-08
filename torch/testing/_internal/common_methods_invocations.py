@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import \
 from setuptools import distutils
 
 if TEST_SCIPY:
+    import scipy
     import scipy.special
 
 
@@ -193,7 +194,6 @@ class OpInfo(object):
                  name,  # the string name of the function
                  *,
                  ref=None,  # Just a reference
-                 check=False,  # If dtype argument in numpy call then True, els False
                  sample_kwargs=lambda device, dtype, input: ({}, {}),
                  op=None,  # the function variant of the operation, populated as torch.<name> if None
                  dtypes=floating_types(),  # dtypes this function is expected to work with
@@ -245,7 +245,6 @@ class OpInfo(object):
 
         self.name = name
         self.ref = ref
-        self.check = check
         self.sample_kwargs = sample_kwargs
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
@@ -4188,19 +4187,24 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     OpInfo('amax',
+           ref=np.amax,
+           variant_test_name='test_amax',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin,),
     OpInfo('amin',
+           ref=np.amin,
+           variant_test_name='test_amin',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin),
     OpInfo('argmax',
            ref=np.argmax,
-           check=False,
            variant_test_name='test_argmax',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_argmax_argmin,),
     OpInfo('argmin',
+           ref=np.argmin,
+           variant_test_name='test_argmin',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_argmax_argmin,),
@@ -4286,6 +4290,8 @@ op_db: List[OpInfo] = [
                                 active_if=IS_WINDOWS),
                    )),
     OpInfo('atan2',
+           ref=np.arctan2,
+           variant_test_name='test_atan2',
            dtypes=all_types_and(torch.bool),
            dtypesIfCPU=all_types_and(torch.bool),
            dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -4322,6 +4328,8 @@ op_db: List[OpInfo] = [
                    dtypes=integral_types_and(torch.bool),
                    supports_autograd=False),
     OpInfo('cdist',
+           ref=scipy.spatial.distance.cdist if TEST_SCIPY else None,
+           variant_test_name='test_cdist',
            dtypes=floating_types(),
            supports_out=False,
            supports_gradgrad=False,
@@ -4333,6 +4341,8 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True),
     OpInfo('cholesky',
+           ref=np.linalg.cholesky,
+           variant_test_name='test_cholesky',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
