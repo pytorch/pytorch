@@ -226,39 +226,30 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             m = torch.nn.Linear(1, 1)
             m.weight.data = torch.tensor([[1.0]])
             m.bias.data = torch.tensor([2.0])
+            m_zero = copy.deepcopy(m)
             m.to(self.device)
+            m_zero.to(self.device)
 
             lr = 0.1
-            o = ZeroRedundancyOptimizer(m.parameters(), optimizer_class=SGD, lr=lr)
+            o = SGD(m.parameters(), lr=lr)
+            o_zero = ZeroRedundancyOptimizer(m_zero.parameters(), optimizer_class=SGD, lr=lr)
+
             y = m(x)
             y.backward(x)
+            y_zero = m_zero(x)
+            y_zero.backward(x)
+
             for p in m.parameters():
                 dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
                 p.grad.data /= self.world_size
             o.step()
+            for p in m_zero.parameters():
+                dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
+                p.grad.data /= self.world_size
+            o_zero.step()
 
-            # for y = wx + b, dy / dw = x and dy / db = 1
-            # however, passing x into y.backward() means an extra factor of x
-            # let k = world_size; then, x_i = i + 1 for i in {0, ..., k - 1}
-            # weight update:
-            #     w = w - lr * (sum_{i=1}^{k} x_i^2) / k
-            #       = w - lr * k(k + 1)(2k + 1) / (6k)
-            #       = w - lr * (k + 1)(2k + 1) / 6
-            # bias update:
-            #     b = b - lr * (sum_{i=1}^{k} x_i) / k
-            #       = b - lr * k(k + 1) / (2k)
-            #       = b - lr * (k + 1) / 2
-            self.assertEqual(
-                m.weight,
-                torch.tensor([[1.0 - lr * (self.world_size + 1) *
-                              (2 * self.world_size + 1) / 6]],
-                             device=self.device)
-            )
-            self.assertEqual(
-                m.bias,
-                torch.tensor([2.0 - lr * (self.world_size + 1) / 2],
-                             device=self.device))
-
+            self.assertEqual(m.weight, m_zero.weight)
+            self.assertEqual(m.bias, m_zero.bias)
 
     @common_distributed.skip_if_rocm
     def test_step_with_closure(self):
