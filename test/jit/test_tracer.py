@@ -1391,7 +1391,6 @@ class TestTracer(JitTestCase):
                 return torch.neg(grad_output)
 
 
-
         class TracedModule(torch.nn.Module):
             def forward(self, x):
                 return torch.relu(TestFunc.apply(x))
@@ -1406,6 +1405,33 @@ class TestTracer(JitTestCase):
                 return self.tm(x)
 
         traced = torch.jit.trace(Wrapper(), (torch.rand(3, 4),))
+
+    def test_trace_multi_output_function(self):
+        # A autograd.Function with two outputs.
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return y, x
+            @staticmethod
+            def backward(ctx, du, dv):
+                return dv, du
+
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                x = x.relu()
+                y = y.relu()
+                z = Foo.apply(x, y)
+                return z
+
+        x = torch.rand(3, 2)
+        y = torch.rand(1, 2)
+
+        traced = torch.jit.trace(Bar(), (x, y))
+
+        u, v = traced(x, y)
+
+        self.assertEqual(u, y)
+        self.assertEqual(v, x)
 
     def test_interpolate_trace(self):
         class test(nn.Module):

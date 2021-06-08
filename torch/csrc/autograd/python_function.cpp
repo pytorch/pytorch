@@ -521,7 +521,7 @@ static void _trace_post_record(
       }
     }
   }
-  // If TuplUunpack operator is created, we copy its output type back
+  // If TupleUnpack operator is created, we copy its output type back
   // to the original tuple type.
   if (!unpack_output) {
     std::vector<TypePtr> new_tuple_values;
