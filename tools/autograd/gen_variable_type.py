@@ -87,7 +87,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
+    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
@@ -101,6 +101,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_view_as_real_physical', '_conj_physical',
+    'scatter', 'scatter_add',
     'conj_physical_'
 }
 
@@ -312,12 +313,12 @@ if (${requires_fw_grad}) {
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
 """)
 
 FW_DERIVATIVE_FORBID_LIST_TEMPLATE = CodeTemplate("""\
 for (const auto& _t: ${arg}) {
-    TORCH_CHECK(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
 }
 """)
 

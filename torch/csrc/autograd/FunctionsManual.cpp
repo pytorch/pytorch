@@ -85,7 +85,7 @@ T not_implemented_base(const char* name, const char* reason) {
   if (strlen(reason) > 0) {
     msg = c10::str(msg, " ", reason);
   };
-  throw std::runtime_error(msg);
+  TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
 }
 
 Tensor not_implemented(const char* name, const char* reason) {
@@ -917,6 +917,13 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
   }
 }
 
+Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value) {
+  auto mask = (input == value);
+  auto count = mask.sum();
+  auto grad_output = fw_grad / count;
+  return at::sum(mask * grad_output);
+}
+
 static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t correction) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
   return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
@@ -1278,9 +1285,8 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   }
   if (reduction == at::Reduction::Mean) {
     return gI / input.numel();
-  } else if (reduction == at::Reduction::Sum) {
-    return gI.sum();
   }
+
   return gI;
 }
 
@@ -3565,6 +3571,18 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
   }
 }
 
+Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim) {
+  auto full_indices = indices;
+  if (!keepdim) {
+    full_indices = indices.unsqueeze(dim);
+  }
+  auto out_fw_grad = at::gather(input, dim, full_indices);
+  if (!keepdim) {
+    out_fw_grad = out_fw_grad.squeeze(dim);
+  }
+
+  return out_fw_grad;
+}
 
 } // namespace details
 } // namespace generated
