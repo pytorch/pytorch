@@ -590,7 +590,7 @@ static void setupBiasDropoutAddLayernormBwd2(Fusion* fusion, DataType dtype) {
                         .ndims(3)
                         .dtype(dtype)
                         .contiguity({true, true, true})
-                        .shape({-1, -1, -1})
+                        .shape({-1, -1, 1})
                         .build();
   fusion->addInput(tv4);
 
