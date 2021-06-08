@@ -1042,7 +1042,7 @@ def _adjusted_atol(atol, u, v):
     u = u[0] if isinstance(u, tuple) else u
     sum_u = torch.sparse.sum(u) if u.layout == torch.sparse_coo else u.sum()
     sum_v = 1. if v is None else torch.sparse.sum(v) if v.layout == torch.sparse_coo else v.sum()
-    return atol * float(sum_u) * float(sum_v)
+    return atol # * float(sum_u) * float(sum_v)
 
 
 FAST_FAIL_SLOW_OK_MSG = """
