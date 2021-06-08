@@ -301,13 +301,15 @@ void setOutput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
 }
 
 at::Tensor pinnedLike(at::Tensor& tensor) {
-  return at::empty_like(
-      tensor,
-      /*dtype=*/c10::nullopt,
-      /*layout=*/c10::nullopt,
-      /*device=*/c10::kCPU,
-      /*pin_memory=*/true,
-      /*memory_format=*/c10::nullopt);
+  auto* allocator = at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+  auto storage = c10::Storage(
+      c10::Storage::use_byte_size_t(),
+      at::detail::computeStorageNbytes(
+          tensor.sizes(), tensor.strides(), tensor.dtype().itemsize()),
+      allocator,
+      /*resizable=*/false);
+  return at::empty({0}, tensor.options().device(at::kCPU))
+      .set_(storage, 0, tensor.sizes(), tensor.strides());
 }
 
 // This function initializes a vector of CUDA streams, one for every
