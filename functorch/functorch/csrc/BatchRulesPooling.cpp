@@ -14,12 +14,12 @@ namespace at { namespace functorch {
 std::tuple<Tensor,optional<int64_t>> adaptive_avg_pool2d_batch_rule(
     const Tensor& tensor, optional<int64_t> batch_dim, IntArrayRef output_size) {
   if (!batch_dim) {
-    return { at::adaptive_avg_pool2d(tensor, output_size), nullopt };
+    return std::make_tuple( at::adaptive_avg_pool2d(tensor, output_size), nullopt );
   }
   auto batch_size = tensor.size(*batch_dim);
   auto tensor_ = reshape_dim_into(*batch_dim, 0, tensor);
   auto result = at::adaptive_avg_pool2d(tensor_, output_size);
-  return { reshape_dim_outof(0, batch_size, result), 0 };
+  return std::make_tuple( reshape_dim_outof(0, batch_size, result), 0 );
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
