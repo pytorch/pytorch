@@ -174,7 +174,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     int srcRank_;
   };
 
-  struct Options : public ProcessGroup::Options {
+  struct TORCH_API Options : public ProcessGroup::Options {
     explicit Options(
         std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
 

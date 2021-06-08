@@ -177,7 +177,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // when constructing a ProcessGroup. Each ProcessGroup subclass should
   // extend this struct and define its options if it wants to provide more
   // config options (beyond basic ones defined here) to end user.
-  struct Options : torch::CustomClassHolder {
+  struct TORCH_API Options : torch::CustomClassHolder {
     explicit Options(
         std::string backend,
         std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
