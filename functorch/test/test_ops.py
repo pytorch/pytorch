@@ -148,6 +148,7 @@ vjp_fail = {
     'tensor_split',
     'norm',
     'to_sparse',
+    'cross',
 }
 
 
