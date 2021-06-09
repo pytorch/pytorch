@@ -436,7 +436,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*tensor_cdata_naming_scheme=*/true);
+        /*tensor_cdata_naming_scheme=*/false);
 
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -643,8 +643,8 @@ void ScriptModuleSerializer::writeByteCode(
       telements,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*tensor_dir=*/"bytecode/",
+      /*tensor_cdata_naming_scheme=*/false);
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
