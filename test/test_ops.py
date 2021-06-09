@@ -2,7 +2,6 @@ from functools import partial, wraps
 import warnings
 
 import torch
-from torch import tensor
 
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
@@ -452,6 +451,9 @@ class TestCommon(JitCommonTestCase):
 
     @_alias_ops((op for op in op_db if op.aliases))
     def test_jit_alias_remapping(self, device, dtype, op):
+        # Local import needed for test scripting
+        from torch import tensor
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
