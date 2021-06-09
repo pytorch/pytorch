@@ -24,4 +24,7 @@ def main() -> None:
 
 if __name__ == '__main__':
     signal(SIGPIPE, SIG_DFL)  # https://stackoverflow.com/a/30091579
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
