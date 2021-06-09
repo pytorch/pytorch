@@ -1838,6 +1838,25 @@ class TestQuantizedOps(TestCase):
 
         self.assertEqual(Y, qY.dequantize())
 
+    @given(engine=st.one_of(st.just('fbgemm'), st.just('qnnpack')), keep=st.booleans())
+    @override_qengines
+    def test_quantized_mean(self, engine, keep):
+        if engine not in torch.backends.quantized.supported_engines:
+            skipTest("This Pytorch Build has not been built with or does not support {0}".format(engine.toupper()))
+        else:
+            torch.backends.quantized.engine = engine
+            in_dim = (3, 3, 3, 3)
+            if keep:
+                out_dim = (3, 3, 1, 1)
+            else:
+                out_dim = (3, 3)
+            X = torch.ones(in_dim)
+            Y = torch.ones(out_dim)
+            XQ = torch.quantize_per_tensor(X, scale=0.2, zero_point=0, dtype=torch.quint8)
+            YQ = torch.quantize_per_tensor(Y, scale=0.2, zero_point=0, dtype=torch.quint8)
+            MQ = XQ.mean((2, 3), keepdim=keep)
+            self.assertTrue(torch.equal(MQ, YQ))
+
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),
