@@ -5040,7 +5040,7 @@ class TestLinalg(TestCase):
             lambda: torch.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device), dim=-5))
 
     def test_renorm(self, device):
-        m1 = torch.randn(10, 5, device=device)
+        m1 = torch.randn(20, 20, device=device)  # big enough to exercise vectorized path
         res1 = torch.tensor((), device=device)
 
         def renorm(matrix, value, dim, max_norm):
@@ -6234,17 +6234,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 b2 = torch.randn(shape2, dtype=dtype, device=device)
                 yield b1, b2
 
-        for num_batches in batch_sizes:
-            for (b1, b2), perm3 in itertools.product(generate_inputs(num_batches), itertools.permutations((0, 1, 2))):
-                res1 = torch.bmm(b1, b2)
-                res2 = torch.full((num_batches, M, O), math.nan, dtype=dtype, device=device) \
-                    .permute(perm3).contiguous().permute(invert_perm(perm3))
-                torch.bmm(b1, b2, out=res2)
-                expect = torch.from_numpy(
-                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
-                self.assertEqual(expect, res1)
-                self.assertEqual(expect, res2)
-        torch.set_num_threads(num_threads)
+        try:
+            for num_batches in batch_sizes:
+                for (b1, b2), perm3 in itertools.product(generate_inputs(num_batches), itertools.permutations((0, 1, 2))):
+                    res1 = torch.bmm(b1, b2)
+                    res2 = torch.full((num_batches, M, O), math.nan, dtype=dtype, device=device) \
+                        .permute(perm3).contiguous().permute(invert_perm(perm3))
+                    torch.bmm(b1, b2, out=res2)
+                    expect = torch.from_numpy(
+                        b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
+                    self.assertEqual(expect, res1)
+                    self.assertEqual(expect, res2)
+        finally:
+            torch.set_num_threads(num_threads)
 
     def _test_addbmm_baddbmm(self, func, b1, b2, ref, out_tensor):
         getattr(out_tensor, func + "_")(b1, b2)
