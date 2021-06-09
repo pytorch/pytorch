@@ -6,9 +6,9 @@ namespace c10 {
 namespace impl {
 
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
-  LocalDispatchKeySetWrapper current_keyset;
-  current_keyset.unsafe_set_included(key_set.included_);
-  current_keyset.unsafe_set_excluded(key_set.excluded_);
+  LocalDispatchKeySetWrapper current_keyset { _get_thread_local_state() };
+  current_keyset.set_included(key_set.included_);
+  current_keyset.set_excluded(key_set.excluded_);
 }
 
 // An RAII guard could snapshot and restore the entire state (entire
@@ -35,71 +35,59 @@ void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
 IncludeDispatchKeyGuard::IncludeDispatchKeyGuard(DispatchKeySet include)
     : tls_wrapper_(_get_thread_local_state()), include_(include - tls_wrapper_.included()) {
   if (!include_.empty()) {
-    tls_wrapper_.unsafe_set_included(tls_wrapper_.included() | include_);
+    tls_wrapper_.set_included(tls_wrapper_.included() | include_);
   }
 }
 
 IncludeDispatchKeyGuard::~IncludeDispatchKeyGuard() {
   if (!include_.empty()) {
-    tls_wrapper_.unsafe_set_included(tls_wrapper_.included() - include_);
+    tls_wrapper_.set_included(tls_wrapper_.included() - include_);
   }
 }
 
-ExcludeDispatchKeyGuard::ExcludeDispatchKeyGuard(DispatchKeySet exclude)
-    : tls_wrapper_(_get_thread_local_state()), exclude_(exclude - tls_wrapper_.excluded()) {
-  if (!exclude_.empty()) {
-    tls_wrapper_.unsafe_set_excluded(tls_wrapper_.excluded() | exclude_);
-  }
-}
-
-ExcludeDispatchKeyGuard::~ExcludeDispatchKeyGuard() {
-  if (!exclude_.empty()) {
-    tls_wrapper_.unsafe_set_excluded(tls_wrapper_.excluded() - exclude_);
-  }
-}
 
 // Non-RAII API
 // Please prefer using the RAII API. See declarations in LocalDispatchKeySet.h
 // for details.
 
 bool tls_is_dispatch_key_excluded(DispatchKey x) {
-  return LocalDispatchKeySetWrapper().excluded().has(x);
+  return LocalDispatchKeySetWrapper(_get_thread_local_state()).excluded().has(x);
 }
 
 void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state) {
-  LocalDispatchKeySetWrapper tls_wrapper;
+  LocalDispatchKeySetWrapper tls_wrapper { _get_thread_local_state() };
   bool current_state = tls_wrapper.excluded().has(x);
   if (desired_state != current_state) {
     if (desired_state) {
-      tls_wrapper.unsafe_set_excluded(tls_wrapper.excluded().add(x));
+      tls_wrapper.set_excluded(tls_wrapper.excluded().add(x));
     } else {
-      tls_wrapper.unsafe_set_excluded(tls_wrapper.excluded().remove(x));
+      tls_wrapper.set_excluded(tls_wrapper.excluded().remove(x));
     }
   }
 }
 
 bool tls_is_dispatch_key_included(DispatchKey x) {
-  return LocalDispatchKeySetWrapper().included().has(x);
+  return LocalDispatchKeySetWrapper(_get_thread_local_state()).included().has(x);
 }
 
 void tls_set_dispatch_key_included(DispatchKey x, bool desired_state) {
-  LocalDispatchKeySetWrapper tls_wrapper;
+  LocalDispatchKeySetWrapper tls_wrapper { _get_thread_local_state() };
   bool current_state = tls_wrapper.included().has(x);
   if (desired_state != current_state) {
     if (desired_state) {
-      tls_wrapper.unsafe_set_included(tls_wrapper.included().add(x));
+      tls_wrapper.set_included(tls_wrapper.included().add(x));
     } else {
-      tls_wrapper.unsafe_set_included(tls_wrapper.included().remove(x));
+      tls_wrapper.set_included(tls_wrapper.included().remove(x));
     }
   }
 }
 
 bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks) {
-  return LocalDispatchKeySetWrapper().excluded().isSupersetOf(ks);
+  return LocalDispatchKeySetWrapper(_get_thread_local_state()).excluded().isSupersetOf(ks);
 }
 
 bool tls_is_dispatch_keyset_included(DispatchKeySet ks) {
-  return LocalDispatchKeySetWrapper().included().isSupersetOf(ks);
+  return LocalDispatchKeySetWrapper(_get_thread_local_state()).included().isSupersetOf(ks);
 }
 } // namespace impl
 } // namespace c10
