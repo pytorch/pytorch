@@ -81,7 +81,7 @@ inline bool is_complex_autograd(const Tensor& tensor) {
 }
 
 inline bool is_complex_autograd(const TensorList& tensorlist) {
-  for (auto tensor: tensorlist) {
+  for (const auto& tensor: tensorlist) {
     if (is_complex_autograd(tensor)) {
       return true;
     }
@@ -91,7 +91,7 @@ inline bool is_complex_autograd(const TensorList& tensorlist) {
 
 // TODO: Once we have C++17, this can be a template function rather than a macro.
 #define THROW_ERROR_FOR_COMPLEX_AUTOGRAD( t, name ) \
-  TORCH_CHECK( !is_complex_autograd(t), name, " does not support automatic differentiation for outputs with complex dtype." );
+  TORCH_CHECK( !is_complex_autograd(t), #name " does not support automatic differentiation for outputs with complex dtype." );
 
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
   // NOLINTNEXTLINE(performance-for-range-copy)

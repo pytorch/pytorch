@@ -6,7 +6,10 @@
 namespace c10 {
 
 struct TORCH_API GradMode {
-  // NB: We inline this overload because it allows us to fully inline hot paths.
+  // TLS lookup is expensive and this API boils down to a single access on the
+  // struct, so if we already have the TLS handy there is a significant
+  // performance gain from reusing it and inlining the access. Otherwise, the
+  // no argument overload serves as a generic fallback.
   static inline bool is_enabled(const impl::PODLocalState* const tls) {
     return !(tls->GradMode_disabled);
   }
