@@ -16,9 +16,9 @@ TSLoweringContext::TSLoweringContext(
     ir::Util::EmissionMap emit_status)
     : ir::LoweringContext(name, device, post_order, emit_status),
       graph_(std::make_shared<torch::jit::Graph>()) {
-  auto lowering = NodeLowering::Create(this);
+  lowering_ = NodeLowering::Create(this);
   for (auto node : post_order) {
-    bool ok = lowering->Lower(node);
+    bool ok = lowering_->Lower(node);
     LTC_CHECK(ok) << "Failed to lower: " << *node;
   }
 }
@@ -45,7 +45,8 @@ torch::jit::Value* TSLoweringContext::GetOutputOp(const ir::Output& output) {
   if (it == emitted_outputs_.end()) {
     auto post_order = ir::Util::ComputePostOrder(output.node, &emit_status_);
     for (auto node : post_order) {
-      LowerNode(node);
+      bool ok = lowering_->Lower(node);
+      LTC_CHECK(ok) << "Failed to lower: " << *node;
     }
     // At this point the outpout better be present, otherwise there is an issue
     // with the lowering code.
@@ -79,10 +80,6 @@ torch::jit::Value* TSLoweringContext::GetParameter(
 size_t TSLoweringContext::AddResult(torch::jit::Value* op) {
   root_tuple_.push_back(std::move(op));
   return root_tuple_.size() - 1;
-}
-
-TSOpVector TSLoweringContext::LowerNode(const ir::Node* node) {
-  return LowerNodeToTS(node, this);
 }
 
 }  // namespace ts_backend

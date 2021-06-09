@@ -240,18 +240,6 @@ class TSNodeLowering : public NodeLowering {
   std::shared_ptr<torch::jit::GraphFunction> function_;
 };
 
-namespace ts_backend {
-
-TSOpVector LowerNodeToTS(const ir::Node* node,
-                         ts_backend::TSLoweringContext* loctx) {
-  auto node_lowering = NodeLowering::Create(loctx);
-  TSNodeLowering* ts_node_lowering =
-      static_cast<TSNodeLowering*>(node_lowering.get());
-  return ts_node_lowering->LowerToTS(node);
-}
-
-}  // namespace ts_backend
-
 NodeLowering* GetTSNodeLowering() {
   static TSNodeLowering* ts_node_lowering =
       new TSNodeLowering("ltc-ts", nullptr);
