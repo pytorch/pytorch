@@ -77,7 +77,7 @@ class ParametrizationList(ModuleList):
 
     .. warning::
         This class is used internally by :func:`register_parametrization`. It is documented
-        here for completeness. It should not be instantiated by the user.
+        here for completeness. It shall not be instantiated by the user.
 
     Args:
         modules (sequence): sequence of modules representing the parametrizations
@@ -95,6 +95,11 @@ class ParametrizationList(ModuleList):
 
         super().__init__(modules)
 
+        # In plain words:
+        # module.weight must keep its dtype and shape.
+        # Furthermore, if there is no right_inverse or the right_inverse returns a tensor,
+        # this should be of the same dtype as the original tensor
+        #
         # We check that the following invariants hold:
         #    X = module.weight
         #    Y = param.right_inverse(X)
@@ -109,6 +114,7 @@ class ParametrizationList(ModuleList):
         #    if isinstance(Y, Tensor)
         #      assert X.dtype == Y.dtype
         # Below we use original = X, new = Y
+
         original_shape = original.shape
         original_dtype = original.dtype
 
@@ -118,11 +124,11 @@ class ParametrizationList(ModuleList):
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     new = module.right_inverse(new)
-                # else, we assume that it's the identity
+                # else, we assume that right_inverse is the identity
 
         if not isinstance(new, Tensor) and not isinstance(new, collections.Sequence):
-            raise ValueError("'right_inverse' should return a Tensor or a Sequence of tensors (list, tuple...). "
-                             f"Got {new.__class__.__name__}")
+            raise ValueError("'right_inverse' must return a Tensor or a Sequence of tensors (list, tuple...). "
+                             f"Got {type(new).__name__}")
 
         # If it is a sequence of one tensor, we unpack it
         if not isinstance(new, Tensor) and len(new) == 1:
@@ -150,7 +156,7 @@ class ParametrizationList(ModuleList):
                 if not isinstance(originali, Tensor):
                     raise ValueError("'right_inverse' must return a Tensor or a Sequence of tensors "
                                      "(list, tuple...). "
-                                     f"Got a sequence with an element {originali.__class__.__name__}.")
+                                     f"Got element {i} of the sequence with type {type(originali).__name__}.")
 
                 # If the original tensor was a Parameter that required grad, we expect the user to
                 # add the new parameters to the optimizer after registering the parametrization
@@ -164,6 +170,10 @@ class ParametrizationList(ModuleList):
         # Since f : A -> B, right_inverse : B -> A, Z and original should live in B
         # Z = forward(right_inverse(original))
         Z = self()
+        if not isinstance(Z, Tensor):
+            raise ValueError(
+                f"A parametrization must return a tensor. Got {type(Z).__name__}."
+            )
         if Z.dtype != original_dtype:
             raise ValueError(
                 "Registering a parametrization may not change the dtype of the tensor.\n"
@@ -186,6 +196,10 @@ class ParametrizationList(ModuleList):
         Args:
             value (Tensor): Value to which initialize the module
         """
+        # All the exceptions in this function should almost never throw.
+        # They could throw if, for example, right_inverse function does not return the same dtype
+        # for every input, which should most likely be caused by a bug in the code
+
         with torch.no_grad():
             # See https://github.com/pytorch/pytorch/issues/53103
             for module in reversed(self):  # type: ignore[call-overload]
@@ -193,7 +207,12 @@ class ParametrizationList(ModuleList):
                     value = module.right_inverse(value)
                 # else we assume that right_inverse is the identity
             if self.ntensors == 1:
-                # This check should never fail as it is an invariant, but we check it again juts in case
+                # These exceptions should only throw when a right_inverse function does not
+                # return the same dtype for every input, which should most likely be caused by a bug
+                if not isinstance(value, Tensor):
+                    raise ValueError(
+                        f"`right_inverse` should return a tensor. Got {type(value).__name__}"
+                    )
                 if value.dtype != self.original.dtype:
                     raise ValueError(
                         f"The tensor returned by `right_inverse` has dtype {value.dtype} "
@@ -202,12 +221,27 @@ class ParametrizationList(ModuleList):
                 # We know that the result is going to have the same dtype
                 self.original.set_(value)  # type: ignore[call-overload]
             else:
+                if not isinstance(value, collections.Sequence):
+                    raise ValueError(
+                        "'right_inverse' must return a sequence of tensors. "
+                        f"Got {type(value).__name__}."
+                    )
+                if len(value) != self.ntensors:
+                    raise ValueError(
+                        "'right_inverse' must return a sequence of tensors of length "
+                        f"{self.ntensors}. Got a sequence of lenght {len(value)}."
+                    )
                 for i, tensor in enumerate(value):
                     original_i = getattr(self, f"original{i}")
+                    if not isinstance(tensor, Tensor):
+                        raise ValueError(
+                            f"`right_inverse` must return a sequence of tensors. "
+                            f"Got element {i} of type {type(tensor).__name__}"
+                        )
                     if original_i.dtype != tensor.dtype:
                         raise ValueError(
                             f"Tensor {i} returned by `right_inverse` has dtype {tensor.dtype} "
-                            f"while `original{i}` has dtype {originali.dtype}"
+                            f"while `original{i}` has dtype {original_i.dtype}"
                         )
                     original_i.set_(tensor)
 
@@ -403,11 +437,17 @@ def register_parametrization(
     """
     parametrization.train(module.training)
     if is_parametrized(module, tensor_name):
-        # Correctness checks
-        assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
-        parametrization_list = module.parametrizations[tensor_name]
-        Y = parametrization_list()
+        # Correctness checks.
+        # If A is the space of tensors with shape and dtype equal to module.weight
+        # we check that parametrization.forward and parametrization.right_inverse are
+        # functions from A to A
+
+        Y = getattr(module, tensor_name)
         X = parametrization(Y)
+        if not isinstance(X, Tensor):
+            raise ValueError(
+                f"A parametrization must return a tensor. Got {type(X).__name__}."
+            )
         if X.dtype != Y.dtype:
             raise ValueError(
                 "Registering a parametrization may not change the dtype of the tensor.\n"
@@ -422,24 +462,29 @@ def register_parametrization(
             )
         if hasattr(parametrization, "right_inverse"):
             Z = parametrization.right_inverse(X)  # type: ignore[operator]
-            if Z.dtype != X.dtype:
+            if not isinstance(Z, Tensor):
                 raise ValueError(
-                    "parametrization.right_inverse(X) may not change the dtype of X for "
-                    f"X = parametrization(module.{tensor_name}).\n"
-                    f"X.dtype: {X.dtype}\n"
-                    f"parametrization.right_inverse(X).dtype: {Z.dtype}"
+                    f"parametrization.right_inverse must return a tensor. Got: {type(Z).__name__}"
                 )
-            if Z.shape != X.shape:
+            if Z.dtype != Y.dtype:
                 raise ValueError(
-                    "parametrization.right_inverse(X) may not change the shape of X for "
-                    f"X = parametrization(module.{tensor_name}).\n"
-                    f"X.shape: {X.shape}\n"
-                    f"parametrization.right_inverse(X).shape: {Z.shape}"
+                    "The tensor returned by parametrization.right_inverse must have the same dtype "
+                    f"as module.{tensor_name}.\n"
+                    f"module.{tensor_name}.dtype: {Y.dtype}\n"
+                    f"returned dtype: {Z.dtype}"
+                )
+            if Z.shape != Y.shape:
+                raise ValueError(
+                    "The tensor returned by parametrization.right_inverse must have the same shape "
+                    f"as module.{tensor_name}.\n"
+                    f"module.{tensor_name}.shape: {Y.shape}\n"
+                    f"returned shape: {Z.shape}"
                 )
         # else right_inverse is assumed to be the identity
 
         # add the new parametrization to the parametrization list
-        parametrization_list.append(parametrization)
+        assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
+        module.parametrizations[tensor_name].append(parametrization)
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
