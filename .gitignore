@@ -15,6 +15,7 @@ coverage.xml
 .hypothesis
 .mypy_cache
 /.extracted_scripts/
+**/.pytorch_specified_test_cases.csv
 **/.pytorch-test-times.json
 **/.pytorch-slow-tests.json
 */*.pyc
