@@ -932,8 +932,8 @@ def prepare(
         model: GraphModule,
         qconfig_dict: Any,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        prepare_custom_config_dict: Optional[Dict[str, Any]],
-        is_standalone_module: bool) -> ObservedGraphModule:
+        prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
+        is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
