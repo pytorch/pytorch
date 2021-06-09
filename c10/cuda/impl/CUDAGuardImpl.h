@@ -173,21 +173,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // Stream-related functions
   bool queryStream(const Stream& stream) const override {
-    DeviceGuard guard{stream.device()};
-    cudaError_t err = cudaStreamQuery(CUDAStream(stream));
-
-    if (err == cudaSuccess) {
-      return true;
-    } else if (err != cudaErrorNotReady) {
-      C10_CUDA_CHECK(err);
-    }
-
-    return false;
+    CUDAStream cuda_stream{stream};
+    return cuda_stream.query();
   }
 
   void synchronizeStream(const Stream& stream) const override {
-    DeviceGuard guard{stream.device()};
-    C10_CUDA_CHECK(cudaStreamSynchronize(CUDAStream(stream)));
+    CUDAStream cuda_stream{stream};
+    cuda_stream.synchronize();
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
