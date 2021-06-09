@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/VmapMode.h>
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 
 #ifndef _WIN32
@@ -123,7 +124,7 @@ variable_list PythonEngine::execute(
   }
 }
 
-std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
+c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
@@ -182,7 +183,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
   roots.reserve(num_tensors);
   variable_list grads;
   grads.reserve(num_tensors);
-  for (int i = 0; i < num_tensors; i++) {
+  for(const auto i : c10::irange(num_tensors)) {
     PyObject *_tensor = PyTuple_GET_ITEM(tensors, i);
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
@@ -267,7 +268,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
-    for (int i = 0; i < num_inputs; i++) {
+    for(const auto i : c10::irange(num_inputs)) {
       THPUtils_assert(allow_unreachable || outputs[i].defined(), "One of the "
                       "differentiated Tensors appears to not have been used "
                       "in the graph. Set allow_unused=True if this is the "

@@ -26,6 +26,13 @@ c10::optional<Method> Object::find_method(const std::string& basename) const {
       return Method(_ivalue(), fn);
     }
   }
+
+
+  for (Function* fn : type()->overloaded_methods()) {
+    if (fn->name() == basename) {
+      return Method(_ivalue(), fn);
+    }
+  }
   return c10::nullopt;
 }
 

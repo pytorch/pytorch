@@ -48,6 +48,9 @@ std::string parse_env(const char* env_var_name);
 
 DistributedDebugLevel parseDistDebugLevel();
 
+// Retrieve tensor shapes from a given tensor.
+std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
+
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;

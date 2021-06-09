@@ -3,6 +3,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/string_utils.h>
+#include <c10/util/string_view.h>
 
 #include <cstddef>
 #include <ostream>
@@ -134,7 +135,7 @@ inline static bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 
-inline void printQuotedString(std::ostream& stmt, const std::string& str) {
+inline void printQuotedString(std::ostream& stmt, const string_view str) {
   stmt << "\"";
   for (auto s : str) {
     switch (s) {

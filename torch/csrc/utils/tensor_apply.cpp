@@ -34,7 +34,7 @@ static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t di
   if (dim == ndim) {
     auto args = THPObjectPtr(PyTuple_New(N));
     if (!args) throw python_error();
-    for (size_t i = 0; i < N; i++) {
+    for(const auto i : c10::irange(N)) {
       PyObject* arg = load_scalar(strided_data[i].data, scalarType);
       if (!arg) throw python_error();
       PyTuple_SET_ITEM(args.get(), i, arg);

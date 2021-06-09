@@ -3,7 +3,7 @@ name: Lint
 on:
   push:
     branches:
-    - master
+      - master
   pull_request:
 
 jobs:
@@ -23,39 +23,11 @@ jobs:
       - name: Ensure consistent CircleCI YAML config
         if: always() && steps.requirements.outcome == 'success'
         run: cd .circleci && ./ensure-consistency.py
-      - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
-        if: always() && steps.requirements.outcome == 'success'
-        run: |
-          pip install ruamel.yaml==0.17.4
-          echo "Please locally run .github/scripts/regenerate_cancel_redundant_workflow.py and commit if this step fails."
-          .github/scripts/regenerate_cancel_redundant_workflow.py
-          git diff --exit-code .github/workflows/cancel_redundant_workflows.yml
       - name: Lint native_functions.yaml
         if: always() && steps.requirements.outcome == 'success'
         run: |
           pip install ruamel.yaml==0.17.4
           .github/scripts/lint_native_functions.py
-      - name: Extract scripts from GitHub Actions workflows
-        if: always() && steps.requirements.outcome == 'success'
-        run: |
-          # For local lints, remove the .extracted_scripts folder if it was already there
-          rm -rf .extracted_scripts
-          tools/extract_scripts.py --out=.extracted_scripts
-      - name: Install ShellCheck
-        id: install_shellcheck
-        if: always()
-        # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
-        run: |
-          set -x
-          scversion="v0.7.2"
-          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
-          sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
-          rm -r "shellcheck-${scversion}"
-          shellcheck --version
-      - name: Run ShellCheck
-        if: always() && steps.install_shellcheck.outcome == 'success'
-        run: |
-          tools/run_shellcheck.sh .jenkins/pytorch .extracted_scripts
       - name: Ensure correct trailing newlines
         if: always() && steps.requirements.outcome == 'success'
         run: |
@@ -109,7 +81,7 @@ jobs:
         if: always() && steps.requirements.outcome == 'success'
         run: |
           set -eux
-          python torch/testing/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+          python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
       - name: Ensure no direct cub include
         if: always()
         run: |
@@ -129,7 +101,7 @@ jobs:
         run: |
           python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
 
-  templates:
+  shellcheck:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -137,14 +109,47 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Install requirements
+        id: requirements
+        run: |
+          pip install -r requirements.txt
       - name: Install Jinja2
-        run: pip install Jinja2
+        run: |
+          pip install Jinja2==3.0.1
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Regenerate workflows
+        id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
       - name: Assert that regenerating the workflows didn't change them
-        run: .github/scripts/report_git_status.sh
+        run: .github/scripts/report_git_status.sh .github/workflows
+      - name: Install ShellCheck
+        id: install_shellcheck
+        if: always()
+        # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
+        run: |
+          set -x
+          scversion="v0.7.2"
+          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
+          sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
+          rm -r "shellcheck-${scversion}"
+          shellcheck --version
+      - name: Extract scripts from GitHub Actions workflows
+        if: always() && steps.install_shellcheck.outcome == 'success'
+        run: |
+          # For local lints, remove the .extracted_scripts folder if it was already there
+          rm -rf .extracted_scripts
+          tools/extract_scripts.py --out=.extracted_scripts
+      - name: Run ShellCheck
+        if: always() && steps.install_shellcheck.outcome == 'success'
+        run: |
+          tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch
+      - name: Check that jobs will be cancelled
+        if: always() && steps.generate_workflows.outcome == 'success'
+        run: |
+          .github/scripts/ensure_actions_will_cancel.py
 
   toc:
     runs-on: ubuntu-18.04
@@ -222,12 +227,10 @@ jobs:
   clang-tidy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-18.04
+    container:
+      # ubuntu18.04-cuda10.2-py3.6-tidy11
+      image: ghcr.io/pytorch/cilint-clang-tidy:e2cfc57ce4fa3a257a4b78fdfdc2b065c167b9c5
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.x
-          architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -236,47 +239,32 @@ jobs:
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          cd "${GITHUB_WORKSPACE}"
           mkdir clang-tidy-output
           cd clang-tidy-output
           echo "$HEAD_SHA" > commit-sha.txt
-      - name: Install dependencies
-        run: |
-          set -eux
-          # Install CUDA
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/cuda-ubuntu1804.pin
-          sudo mv cuda-ubuntu1804.pin /etc/apt/preferences.d/cuda-repository-pin-600
-          sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
-          sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
-          sudo apt-get update
-          sudo apt-get --no-install-recommends -y install cuda-toolkit-10-2
-          # Install dependencies
-          pip install pyyaml typing_extensions
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-11 main"
-          sudo apt-get update
-          sudo apt-get install -y clang-tidy-11
-          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 1000
       - name: Generate build files
         run: |
+          cd "${GITHUB_WORKSPACE}"
           set -eux
           git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
 
-          if [[ ! -d build ]]; then
+          if [ ! -d build ]; then
             git submodule update --init --recursive
 
             export USE_NCCL=0
             export USE_DEPLOY=1
             # We really only need compile_commands.json, so no need to build!
-            time python setup.py --cmake-only build
+            time python3 setup.py --cmake-only build
 
             # Generate ATen files.
-            time python -m tools.codegen.gen \
+            time python3 -m tools.codegen.gen \
               -s aten/src/ATen \
               -d build/aten/src/ATen
 
             # Generate PyTorch files.
-            time python tools/setup_helpers/generate_code.py            \
+            time python3 tools/setup_helpers/generate_code.py            \
               --declarations-path build/aten/src/ATen/Declarations.yaml \
               --native-functions-path aten/src/ATen/native/native_functions.yaml \
               --nn-path aten/src
@@ -286,6 +274,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          cd "${GITHUB_WORKSPACE}"
           set -eux
 
           # Run Clang-Tidy
@@ -296,7 +285,7 @@ jobs:
           # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
           # deploy/interpreter files are excluded due to using macros and other techniquies
           # that are not easily converted to accepted c++
-          python tools/clang_tidy.py                               \
+          python3 tools/clang_tidy.py                               \
             --verbose                                              \
             --paths torch/csrc/                                    \
             --diff "$BASE_SHA"                                   \
@@ -380,3 +369,7 @@ jobs:
         run: |
           set -eux
           for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true

@@ -9,48 +9,6 @@
 #include <thread>
 #include <vector>
 
-/* Torch Deploy intentionally embeds multiple copies of c++ libraries
-   providing python bindings necessary for torch::deploy users in the same
-   process space in order to provide a multi-python environment.  As a result,
-   any exception types defined by these duplicated libraries can't be safely
-   caught or handled outside of the originating dynamic library (.so).
-
-   In practice this means that you must either
-   catch these exceptions inside the torch::deploy API boundary or risk crashing
-   the client application.
-
-   It is safe to throw exception types that are defined once in
-   the context of the client application, such as c10::Error, which is defined
-   in libtorch, which isn't duplicated in torch::deploy interpreters.
-
-   ==> Use TORCH_DEPLOY_TRY, _SAFE_CATCH_RETHROW around _ALL_ torch::deploy APIs
-
-   For more information, see
-    https://gcc.gnu.org/wiki/Visibility (section on c++ exceptions)
-    or https://stackoverflow.com/a/14364055
-    or
-   https://stackoverflow.com/questions/14268736/symbol-visibility-exceptions-runtime-error
-    note- this may be only a serious problem on versions of gcc prior to 4.0,
-   but still seems worth sealing off.
-
-*/
-#define TORCH_DEPLOY_TRY try {
-#define TORCH_DEPLOY_SAFE_CATCH_RETHROW                                        \
-  }                                                                            \
-  catch (std::exception & err) {                                               \
-    throw c10::Error(                                                          \
-        std::string(                                                           \
-            "Exception Caught inside torch::deploy embedded library: \n") +    \
-            err.what(),                                                        \
-        "");                                                                   \
-  }                                                                            \
-  catch (...) {                                                                \
-    throw c10::Error(                                                          \
-        std::string(                                                           \
-            "Unknown Exception Caught inside torch::deploy embedded library"), \
-        "");                                                                   \
-  }
-
 namespace torch {
 namespace deploy {
 
@@ -261,14 +219,6 @@ struct TORCH_API Package {
     auto I = acquire_session();
     auto loaded = I.self.attr("load_pickle")({module, file});
     return I.create_movable(loaded);
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
-  }
-
-  std::string load_text(const std::string& module, const std::string& file) {
-    TORCH_DEPLOY_TRY
-    auto I = acquire_session();
-    auto loaded = I.self.attr("load_text")({module, file});
-    return loaded.toIValue().toStringRef();
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 

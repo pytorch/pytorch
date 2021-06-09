@@ -232,10 +232,8 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *obj;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *doc_obj;
+  PyObject *obj = nullptr;
+  PyObject *doc_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &obj, &doc_obj)) {
     return nullptr;
   }
@@ -933,7 +931,7 @@ PyObject* initModule() {
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
-    if (torch::crash_handler::is_enabled()) {
+    if (torch::crash_handler::is_enabled_on_exceptions()) {
       torch::crash_handler::write_minidump();
     }
 

@@ -34,12 +34,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 
       out << "(";
       size_t i = 0;
+      bool symbolic = type_verbosity() == TypeVerbosity::Symbolic;
       for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
         if (auto s = value->sizes()[i]) {
           out << *s;
+        } else if (symbolic) {
+          out << value->symbolic_sizes().at(i);
         } else {
           out << "*";
         }
@@ -711,7 +714,11 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
-  os << "SS(" << s.value_ << ')';
+  if (s.value_ >= 0) {
+    os << s.value_;
+  } else {
+    os << "SS(" << s.value_ << ')';
+  }
   return os;
 }
 
@@ -1090,23 +1097,33 @@ void ClassType::addMethod(torch::jit::Function* method) {
 void ClassType::addOverloadedMethod(torch::jit::Function* method) {
   // we can't use old findMethod because it searches based on the string name of
   // function
-  for (auto added_method : methods_) {
-    if (method == added_method) {
-      return;
-    }
+  auto check_duplicate_in_methods = std::find(methods_.begin(), methods_.end(), method);
+  if (check_duplicate_in_methods != methods_.end()) {
+    return;
   }
 
-  auto it = overloaded_methods_.insert(
-      std::pair<std::string, std::vector<std::string>>(
-          method->name(), std::vector<std::string>()));
+  std::cout << "S: " << method->name() << std::endl;
+
+  auto it = overloaded_name_map.insert(std::make_pair(method->name(), std::vector<string>()));
+  // check to ensure same method is not getting registered twice
+  auto check_duplicate_in_overloaded_methods = std::find(overloaded_methods_.begin(), overloaded_methods_.end(), method);
+  if (check_duplicate_in_overloaded_methods != overloaded_methods_.end()) {
+    return;
+  }
+
+  std::cout << "F: " << method->name() << std::endl;
+
   // create a mangled name for this function and bookkeep
   // the mangled name and its corresponding function.
+  auto method_offset = it.first->second.size();
   const std::string& mangled_name =
-      method->name() + "__" + c10::guts::to_string(it.first->second.size());
+      method->name() + "__" + c10::guts::to_string(method_offset);
+  overloaded_methods_.push_back(method);
   it.first->second.push_back(mangled_name);
-  // registers where this overloaded function is stored in the methods map.
-  mangled_to_function_[mangled_name] = methods_.size();
-  methods_.push_back(method);
+  // registers where this overloaded function is stored in the overloaded_methods vector.
+  mangled_to_function_[mangled_name] = overloaded_methods_.size() - 1;
+
+  std::cout << "D: " << method->name() << std::endl;
 }
 
 const std::vector<torch::jit::Function*>& ClassType::getForwardHooks() const {
@@ -1416,6 +1433,7 @@ torch::jit::Function* ClassType::findMethod(const std::string& name) const {
   // same name. Since this method is expected to work correctly
   // only for normal methods, we just return nullptr
   if (auto overloaded_methods = findOverloadedMethod(name)) {
+    std::cout << "SD: " << name << overloaded_methods.value().size() << std::endl;
     if (overloaded_methods.value().size() == 1) {
       return getMangledOverloadedMethod(overloaded_methods.value()[0]);
     }
@@ -1450,17 +1468,19 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
 
 c10::optional<std::vector<std::string>> ClassType::findOverloadedMethod(
     const std::string& name) const {
-  if (overloaded_methods_.find(name) != overloaded_methods_.end()) {
-    return overloaded_methods_.find(name)->second;
+  auto it = overloaded_name_map.find(name);
+  if (it != overloaded_name_map.end()) {
+    return it->second;
   }
   return c10::nullopt;
 }
 
 torch::jit::Function* ClassType::getMangledOverloadedMethod(
     const std::string& name) const {
-  if (mangled_to_function_.find(name) != mangled_to_function_.end()) {
-    auto actual_method_idx = mangled_to_function_.find(name)->second;
-    return methods_[actual_method_idx];
+  auto it = mangled_to_function_.find(name);
+  if (it != mangled_to_function_.end()) {
+    std::cout << "TACH: " << name << std::endl;
+    return overloaded_methods_[it->second];
   }
   return nullptr;
 }
@@ -1682,6 +1702,10 @@ const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
 }
 
+const std::vector<torch::jit::Function*>& ClassType::overloaded_methods() const {
+  return overloaded_methods_;
+}
+
 void ClassType::checkNotExist(const std::string& name, const std::string& what) const {
   // Check no overlap with existing constants
   for (size_t i = 0; i < constantNames_.size(); ++i) {
@@ -1890,6 +1914,10 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return SymbolicShape(std::move(dims));
+}
+
+void SymbolicShape::dump() const {
+  std::cout << *this << "\n";
 }
 
 bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {

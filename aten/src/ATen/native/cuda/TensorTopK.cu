@@ -156,7 +156,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
    const Tensor& values,
    const Tensor& indices) {
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
-  checkAllSameGPU("topk_out_cuda", {topK_arg, indices_arg, input_arg});
+  checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
   dim = at::maybe_wrap_dim(dim, self);
 
   int numDims = self.dim();
