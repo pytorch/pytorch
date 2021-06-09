@@ -224,7 +224,7 @@ class TestGradients(TestCase):
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
-            with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
+            with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
 
 
