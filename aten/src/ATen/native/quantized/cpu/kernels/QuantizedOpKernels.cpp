@@ -1409,13 +1409,21 @@ void do_avg_pool_nhwc_on_AVX_n(
   // buffer for channel accumulator, used to interchange channel-loop
   // to inner-most, so that memory access of the input tensor data is
   // continuous.
+#ifdef CPU_CAPABILITY_AVX2
   constexpr int cb_size = 16;
+#else
+  constexpr int cb_size = 8;
+#endif
   constexpr int vec_width = Vectorized<T>::size() / 4;
   constexpr int cb_step = cb_size * vec_width;
   Vectorized<int32_t> acc_buffer[cb_size];
   Vectorized<float> acc_buffer_fp[cb_size];
 
+#ifdef CPU_CAPABILITY_AVX2
   if (vec_width == 8) {
+#else
+  if (vec_width == 16) {
+#endif 
     for (int c = c_start; c < csize; c += cb_step) {
       int cend = std::min(cb_size, (csize - c) / vec_width);
       // initialize loop
@@ -1486,7 +1494,11 @@ void do_avg_pool_on_AVX_n(
     int64_t stride_W) {
 #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
   constexpr int vec_width = Vectorized<T>::size() / 4;
+#ifdef CPU_CAPABILITY_AVX2
   if (vec_width == 8) {
+#else
+  if (vec_width == 16) {
+#endif   
     for (; c + vec_width <= channel_size; c += vec_width) {
       int64_t tcntr = 0;
 

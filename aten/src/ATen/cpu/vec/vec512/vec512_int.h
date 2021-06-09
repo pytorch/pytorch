@@ -1030,12 +1030,12 @@ Vectorized<int32_t> inline convert_to_int32(const T* ptr) {
 
 template<>
 Vectorized<int32_t> inline convert_to_int32<int8_t>(const int8_t* ptr) {
-  return _mm512_cvtepi8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
+  return _mm512_cvtepi8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr)));
 }
 
 template<>
 Vectorized<int32_t> inline convert_to_int32<uint8_t>(const uint8_t* ptr) {
-  return _mm512_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
+  return _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr)));
 }
 
 template <>

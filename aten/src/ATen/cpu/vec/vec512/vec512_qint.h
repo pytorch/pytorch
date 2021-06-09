@@ -199,9 +199,9 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
 
     x_clipped_v = _mm512_shuffle_epi8(x_clipped_v, shuffle_mask_v);
     x_clipped_v = _mm512_permutexvar_epi32(permute_mask_l8_v, x_clipped_v);
-    _mm256_store_si256(
-        reinterpret_cast<__m256i*>(dst + i),
-        _mm512_castsi512_si256(x_clipped_v));
+    _mm_storeu_si128(
+        reinterpret_cast<__m128i*>(dst + i),
+        _mm512_castsi512_si128(x_clipped_v));
   }
 
   for (; i < len; ++i) {
