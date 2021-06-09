@@ -689,10 +689,15 @@ def build_info() -> ReportMetaMeta:
     }
 
 
-def build_message(test_file: TestFile, test_suite: TestSuite, test_case: TestCase) -> Dict[str, Dict[str, Any]]:
+def build_message(
+    test_file: TestFile,
+    test_suite: TestSuite,
+    test_case: TestCase,
+    meta_info: ReportMetaMeta
+) -> Dict[str, Dict[str, Any]]:
     return {
         "normal": {
-            **build_info(),
+            **meta_info,
             "test_filename": test_file.name,
             "test_suite_name": test_suite.name,
             "test_case_name": test_case.name,
@@ -716,6 +721,7 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
         return
     print("Scribe access token provided, sending report...")
     url = "https://graph.facebook.com/scribe_logs"
+    meta_info = build_info()
     r = requests.post(
         url,
         data={
@@ -724,7 +730,7 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
                 [
                     {
                         "category": "perfpipe_pytorch_test_times",
-                        "message": json.dumps(build_message(test_file, test_suite, test_case)),
+                        "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
                         "line_escape": False,
                     }
                     for test_file in reports.values()
