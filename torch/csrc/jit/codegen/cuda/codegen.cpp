@@ -182,6 +182,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
     print_inline_ = true;
     const auto result = gen(stmt);
     print_inline_ = saved_inline;
+    // NOLINTNEXTLINE(performance-no-automatic-move)
     return result;
   }
 

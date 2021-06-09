@@ -3,7 +3,6 @@ from typing import NamedTuple
 import collections
 import gc
 import io
-import os
 import pickle
 import queue
 import sys
@@ -14,7 +13,6 @@ import unittest
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
-from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
@@ -25,7 +23,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
-    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+    slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -384,7 +382,10 @@ class TestCuda(TestCase):
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device='cuda')
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 8000000000.00 GiB"):
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
+            torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device='cuda')
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate more than 1EB memory"):
             torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device='cuda')
 
         # ensure out of memory error doesn't disturb subsequent kernel
@@ -1455,38 +1456,42 @@ class TestCuda(TestCase):
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
-    @staticmethod
-    def mute():
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
-
-    def _spawn_method(self, method, arg):
-        ctx = mp.get_context("spawn")
-        with ctx.Pool(1, initializer=self.mute) as pool:
-            errors = pool.map(method, [arg])
-            for e in errors:
-                if 'device-side assert triggered' not in str(e):
-                    self.fail(e)
-
-    @staticmethod
-    def _test_multinomial_invalid_probs_cuda(probs):
+    def _spawn_test_multinomial_invalid_probs_cuda(self, probs):
+        import subprocess
         try:
-            with torch.random.fork_rng(devices=[0]):
-                torch.multinomial(probs.to('cuda'), 2, replacement=True)
-                torch.cuda.synchronize()
-            return False  # Should not be reached
-        except RuntimeError as e:
-            return e
+            p = subprocess.Popen([sys.executable, '-c', f"""\
+import sys
+import torch
+from torch._six import inf, nan
+try:
+    with torch.random.fork_rng(devices=[0]):
+        torch.multinomial(torch.tensor({probs}).to('cuda'), 2, replacement=True)
+        torch.cuda.synchronize()
+    sys.exit(-1) # Should not be reached
+except RuntimeError as e:
+    sys.exit(-2)
+"""], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            out, err = p.communicate(timeout=10)
+            p.wait(timeout=10)
+        except subprocess.TimeoutExpired as e:
+            p.kill()
+            out, err = p.communicate()
+        expected_messages = [
+            'device-side assert triggered',  # CUDA
+            'Assertion',  # CUDA
+            'HSA_STATUS_ERROR_EXCEPTION',  # ROCm
+            'Device-side assertion'  # ROCm
+        ]
+        self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
 
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
-    @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
-        test_method = TestCuda._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.tensor([1., -1., 1.]))
-        self._spawn_method(test_method, torch.tensor([1., inf, 1.]))
-        self._spawn_method(test_method, torch.tensor([1., -inf, 1.]))
-        self._spawn_method(test_method, torch.tensor([1., 1., nan]))
+        self._spawn_test_multinomial_invalid_probs_cuda([1., -1., 1.])
+        self._spawn_test_multinomial_invalid_probs_cuda([1., inf, 1.])
+        self._spawn_test_multinomial_invalid_probs_cuda([1., -inf, 1.])
+        self._spawn_test_multinomial_invalid_probs_cuda([1., 1., nan])
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -1832,8 +1837,6 @@ t1.start()
 t2.start()
 """])
 
-    # ROCm doesn't support device side asserts
-    @skipIfRocm
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -1905,15 +1908,18 @@ torch.cuda.synchronize()
                 for grad in grads:
                     self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
 
-        # Passing lists with mismatched devices or dtypes to a raw
-        # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
-        with self.assertRaisesRegex(RuntimeError, r"must have the same dtype"):
-            torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(dtype=torch.float16)],
-                                                             found_inf,
-                                                             inv_scale)
+        # When passing lists with mismatched dtypes to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call,
+        # it's expected to fall back to single-tensor TensorIterator kernel.
+        grads = [g.clone(), g.to(dtype=torch.float16)]
+        torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
+        for grad in grads:
+            self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
 
+        # Passing lists with mismatched devices to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
         if TEST_MULTIGPU:
-            with self.assertRaisesRegex(RuntimeError, r"scaled_grads must be on the same device."):
+            with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
                 torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
                                                                  found_inf,
                                                                  inv_scale)
@@ -1962,16 +1968,16 @@ torch.cuda.synchronize()
         found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")
 
         # Simulates 2 consecutive unskipped iterations
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 1)
         self.assertEqual(scale, 4.0)
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 8.0)
 
         # Simulates a skipped iteration
         found_inf.fill_(1.0)
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 2.0)
 
@@ -2450,6 +2456,8 @@ torch.cuda.synchronize()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
+    # Test is flaky on Windows (https://github.com/pytorch/pytorch/issues/57401)
+    @unittest.skipIf(IS_WINDOWS, 'Test is flaky on Windows (see issue 57401)')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
@@ -2952,6 +2960,7 @@ torch.cuda.synchronize()
         with torch.cuda.stream(s):
             a = torch.full((1000,), 1, device="cuda")
             g = torch.cuda._Graph()
+            torch.cuda.empty_cache()
             g.capture_begin()
             b = a
             for _ in range(10):
@@ -2987,6 +2996,7 @@ torch.cuda.synchronize()
                 torch.cuda.manual_seed(5)
 
                 g = torch.cuda._Graph()
+                torch.cuda.empty_cache()
                 g.capture_begin()
                 graph_out = graph_in
                 for _ in range(2):
@@ -3073,6 +3083,7 @@ torch.cuda.synchronize()
                 torch.cuda.manual_seed(5)
 
                 g = torch.cuda._Graph()
+                torch.cuda.empty_cache()
                 if (module == "torch"):
                     g.capture_begin()
                     t1 = getattr(torch, op)(*args, **kwargs)
@@ -3184,6 +3195,8 @@ torch.cuda.synchronize()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
+    @unittest.skip("Temporarily disabled due to a graphs bug in libcuda.so, " +
+                   "see https://github.com/pytorch/pytorch/pull/57556")
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
@@ -3423,6 +3436,8 @@ torch.cuda.synchronize()
     def test_graph_record_stream(self):
         # Makes sure graph capture defers attempting to reclaim allocations used across streams. See
         # "Q. Why skip process_events if a capture might be underway?" in c10/cuda/CUDACachingAllocator.cpp
+        torch.cuda.empty_cache()
+
         potential_problem = torch.zeros((3,), device="cuda")
         a = torch.zeros((3,), device="cuda")
         s0 = torch.cuda.Stream()
@@ -3456,6 +3471,82 @@ torch.cuda.synchronize()
 
         # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
         c = torch.zeros((3,), device="cuda")
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    # If this test is the first in the process to try cudnn rnns with dropout, it'll initialize
+    # DropoutState's long-lived internal buffer. Calling code perceives this (correct) behavior
+    # as a memory leak unless we skip the leak check.
+    @skipCUDAMemoryLeakCheckIf(True)
+    def test_graph_cudnn_dropout(self):
+        # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
+        # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
+        # avoid syncing noncapturing streams with captured events or vice versa.
+        torch.cuda.empty_cache()
+
+        model = torch.nn.LSTM(512, 512, 2, dropout=0.5).cuda()
+        x = torch.ones(100, 192, 512, device="cuda")
+
+        y = model(x)
+
+        g = torch.cuda._Graph()
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            y = model(x)
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        y = model(x)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_grad_scaling(self):
+        scaler = torch.cuda.amp.GradScaler(init_scale=4.)
+        g = torch.cuda._Graph()
+        s = torch.cuda.Stream()
+
+        weight = torch.ones((100,), device="cuda", requires_grad=True)
+        opt = torch.optim.SGD([weight], lr=0.1)
+        static_input = torch.ones_like(weight)
+        static_grad = torch.ones_like(weight)
+
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            # warmup
+            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
+            # capture
+            g.capture_begin()
+            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
+            # The above simulates a rudimentary backward pass.
+            # TODO: Once full-backward() capture is enabled (see https://github.com/pytorch/pytorch/pull/54227)
+            # change to
+            # loss = (w.half() * static_input).sum()
+            # scaler.scale(loss).backward()
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        input_vals = [5, 20000, 5, 40000]
+        # If the scale gets updated properly, these are the scale, growth tracker,
+        # and grad values we expect.
+        expected_scales = [4, 2, 2, 1]
+        expected_growth_trackers = [1, 0, 1, 0]
+        expected_grad_vals = [5 * 4, float("inf"), 5 * 2, float("inf")]
+
+        for data, scale, growth_tracker, grad_val in zip(input_vals,
+                                                         expected_scales,
+                                                         expected_growth_trackers,
+                                                         expected_grad_vals):
+            static_input.fill_(data)
+            g.replay()
+            self.assertEqual(weight.grad, torch.full_like(weight.grad, grad_val))
+            scaler.step(opt)
+            scaler.update()
+            self.assertEqual(scaler._scale, scale)
+            self.assertEqual(scaler._growth_tracker, growth_tracker)
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
@@ -3832,16 +3923,16 @@ class TestCudaComm(TestCase):
     def test_matmul_device_mismatch(self):
         cpu = torch.rand((10, 10))
         cuda = cpu.cuda()
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             cpu @ cuda
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             cuda @ cpu
 
         for s, m1, m2 in product((cpu, cuda), repeat=3):
             if s.device == m1.device == m2.device:
                 torch.addmm(s, m1, m2)
             else:
-                with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, m1, m2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")

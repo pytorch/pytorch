@@ -31,6 +31,7 @@ const char* OpInfo(OpCode op) {
 #define OP_INFO(x, info) \
   case x:                \
     return info;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     FORALL_OPCODES(OP_INFO)
 #undef OP_INFO
   }
@@ -54,6 +55,7 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   return out;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static constexpr const char* strOpCode[] = {
 #define STR_OP(x, _) #x,
     FORALL_OPCODES(STR_OP)
@@ -71,6 +73,7 @@ OpCode parseOpCode(const char* str) {
 
 bool isOpSupportedInMobile(OpCode op) {
   // clang-format off
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   static constexpr OpCode supported_ops_in_mobile[] {
       OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP,
       RET, GET_ATTR, SET_ATTR, LIST_CONSTRUCT, TUPLE_CONSTRUCT, WARN,

@@ -26,12 +26,12 @@ class RendezvousBackendTestMixin(ABC):
         """Corrupts the state stored in the backend."""
         pass
 
-    def _set_state(self, state: bytes, token: Optional[Any] = None) -> Tuple[bytes, Token]:
+    def _set_state(self, state: bytes, token: Optional[Any] = None) -> Tuple[bytes, Token, bool]:
         result = self._backend.set_state(state, token)
 
         self.assertIsNotNone(result)
 
-        return cast(Tuple[bytes, Token], result)
+        return cast(Tuple[bytes, Token, bool], result)
 
     def test_get_state_returns_backend_state(self) -> None:
         self._backend.set_state(b"x")
@@ -57,41 +57,47 @@ class RendezvousBackendTestMixin(ABC):
             self._backend.get_state()
 
     def test_set_state_sets_backend_state_if_it_does_not_exist(self) -> None:
-        state, token = self._set_state(b"x")
+        state, token, has_set = self._set_state(b"x")
 
         self.assertEqual(b"x", state)
         self.assertIsNotNone(token)
+        self.assertTrue(has_set)
 
     def test_set_state_sets_backend_state_if_token_is_current(self) -> None:
-        state1, token1 = self._set_state(b"x")
+        state1, token1, has_set1 = self._set_state(b"x")
 
-        state2, token2 = self._set_state(b"y", token1)
+        state2, token2, has_set2 = self._set_state(b"y", token1)
 
         self.assertEqual(b"y", state2)
         self.assertNotEqual(token1, token2)
+        self.assertTrue(has_set1)
+        self.assertTrue(has_set2)
 
     def test_set_state_returns_current_backend_state_if_token_is_old(self) -> None:
-        state1, token1 = self._set_state(b"x")
+        state1, token1, _ = self._set_state(b"x")
 
-        state2, token2 = self._set_state(b"y", token1)
+        state2, token2, _ = self._set_state(b"y", token1)
 
-        state3, token3 = self._set_state(b"z", token1)
+        state3, token3, has_set = self._set_state(b"z", token1)
 
         self.assertEqual(state2, state3)
         self.assertEqual(token2, token3)
+        self.assertFalse(has_set)
 
     def test_set_state_returns_current_backend_state_if_token_is_none(self) -> None:
-        state1, token1 = self._set_state(b"x")
+        state1, token1, _ = self._set_state(b"x")
 
-        state2, token2 = self._set_state(b"y")
+        state2, token2, has_set = self._set_state(b"y")
 
         self.assertEqual(state1, state2)
         self.assertEqual(token1, token2)
+        self.assertFalse(has_set)
 
     def test_set_state_returns_current_backend_state_if_token_is_invalid(self) -> None:
-        state1, token1 = self._set_state(b"x")
+        state1, token1, _ = self._set_state(b"x")
 
-        state2, token2 = self._set_state(b"y", token="invalid")
+        state2, token2, has_set = self._set_state(b"y", token="invalid")
 
         self.assertEqual(state1, state2)
         self.assertEqual(token1, token2)
+        self.assertFalse(has_set)

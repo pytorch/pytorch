@@ -11,8 +11,11 @@ namespace enumtype {
   // error: default initialization of an object of const type 'const enumtype::Enum1'
   // without a user-provided default constructor
   // ```
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   struct Enum1 { Enum1() {}; };
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   struct Enum2 { Enum2() {}; };
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   struct Enum3 { Enum3() {}; };
 } // namespace enumtype
 
@@ -46,6 +49,7 @@ std::string func(c10::variant<testns::enumtype::Enum1, testns::enumtype::Enum2, 
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VariantTest, Basic) {
   ASSERT_EQ(func(testns::kEnum1), "Enum1");
   ASSERT_EQ(func(testns::kEnum2), "Enum2");

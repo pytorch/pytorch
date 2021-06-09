@@ -7,7 +7,7 @@ import time
 from typing import List
 
 from torch.testing._internal.common_distributed import requires_nccl, create_tcp_store
-from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -34,7 +34,6 @@ def unique_process_group_name(prefix):
     TEST_WITH_TSAN,
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class ProcessGroupNCCLJitTest(JitTestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -159,7 +158,6 @@ class StoreTest(JitTestCase):
         create_prefix_file_store(self.filestore, self.prefix)
 
 
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class C10dFrontendJitTest(JitTestCase):
     def setUp(self):
         self.rank = 0
@@ -184,7 +182,6 @@ class C10dFrontendJitTest(JitTestCase):
         ProcessGroupNCCL2 = frontend2.get_process_group_by_name(pg_name)
         self.assertEqual(frontend2.get_name_of_process_group(ProcessGroupNCCL2), pg_name)
 
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class C10dProcessGroupSerialization(JitTestCase):
     def setUp(self):
         self.num_gpus = torch.cuda.device_count()

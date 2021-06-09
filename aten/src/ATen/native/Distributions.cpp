@@ -21,7 +21,9 @@
 
 #include <type_traits>
 #include <functional>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <float.h>
 
 namespace {
@@ -62,7 +64,9 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t k;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double U, V, a, b, invalpha, vr, us;
 
     double slam = std::sqrt(lambda);
@@ -72,6 +76,7 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
     invalpha = 1.1239 + 1.1328 / (b - 3.4);
     vr = 0.9277 - 3.6224 / (b - 2);
 
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     while (1) {
       U = standard_uniform(generator) - 0.5;
       V = standard_uniform(generator);
@@ -91,12 +96,15 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
   } else if (lambda == 0) {
     return 0;
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t X;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double prod, U, enlam;
 
     enlam = std::exp(-lambda);
     X = 0;
     prod = 1.0;
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     while (1) {
       U = standard_uniform(generator);
       prod *= U;
@@ -114,17 +122,29 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bernoulli_tensor_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bernoulli_scalar_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cauchy_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(exponential_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(multinomial_with_replacement_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(geometric_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_normal_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(uniform_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(normal_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_from_to_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(random_full_64_bits_range_stub);
 
 // ==================================================== Bernoulli =====================================================
@@ -543,6 +563,7 @@ Tensor& multinomial_out(const Tensor& self,
     TORCH_CHECK(
         is_valid.to<bool>(),
         "probability tensor contains either `inf`, `nan` or element < 0");
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     bool zero_prob_condition;
     if (self.dim() == 1){
       zero_prob_condition = (self.sum() == 0).item().to<bool>();

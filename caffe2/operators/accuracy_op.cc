@@ -38,13 +38,16 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
     }
   }
   CAFFE_ENFORCE_LE(correct, N);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   *(Y->template mutable_data<float>()) = static_cast<float>(correct) / N;
 
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Accuracy, AccuracyOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Accuracy)
     .NumInputs(2)
     .NumOutputs(1)
@@ -77,5 +80,6 @@ classes, it is considered a correct prediction.
         "1-D tensor (Tensor<float>) of size 1 containing "
         "accuracy");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Accuracy);
 }  // namespace caffe2

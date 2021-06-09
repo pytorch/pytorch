@@ -370,7 +370,7 @@ def owner_create_rref_my_script_class(a):
 
 
 def owner_create_rref_my_script_module(a):
-    return rpc.RRef(MyScriptModule(a), MyModuleInterface)
+    return rpc.RRef(MyScriptModule(a), type_hint=MyModuleInterface)
 
 
 @torch.jit.script
@@ -1308,7 +1308,10 @@ class JitRpcTest(
 
     @dist_init
     def test_async_function_wrong_return_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected Future but got Tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Async functions must return an IValue of Future type, but got Tensor",
+        ):
             rpc.rpc_sync(
                 worker_name((self.rank + 1) % self.world_size), async_wrong_type
             )
@@ -1368,5 +1371,8 @@ class JitRpcTest(
             worker_name((self.rank + 1) % self.world_size), async_wrong_type
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Expected Future but got Tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Async functions must return an IValue of Future type, but got Tensor",
+        ):
             rref.to_here()

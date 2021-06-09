@@ -55,10 +55,11 @@ using StreamId = int32_t;
  * wrapper classes which provide this functionality, e.g., CUDAStream.
  */
 class Stream final {
-private:
+ private:
   Device device_;
   StreamId id_;
-public:
+
+ public:
   enum Unsafe { UNSAFE };
   enum Default { DEFAULT };
 
@@ -69,16 +70,13 @@ public:
   /// we don't require backends to give any guarantees about non-zero
   /// StreamIds; they are welcome to allocate in whatever way they like.
   explicit Stream(Unsafe, Device device, StreamId id)
-    : device_(device)
-    , id_(id) {}
+      : device_(device), id_(id) {}
 
   /// Construct the default stream of a Device.  The default stream is
   /// NOT the same as the current stream; default stream is a fixed stream
   /// that never changes, whereas the current stream may be changed by
   /// StreamGuard.
-  explicit Stream(Default, Device device)
-    : device_(device)
-    , id_(0) {}
+  explicit Stream(Default, Device device) : device_(device), id_(0) {}
 
   bool operator==(const Stream& other) const noexcept {
     return this->device_ == other.device_ && this->id_ == other.id_;
@@ -87,10 +85,18 @@ public:
     return !(*this == other);
   }
 
-  Device device() const noexcept { return device_; }
-  DeviceType device_type() const noexcept { return device_.type(); }
-  DeviceIndex device_index() const noexcept { return device_.index(); }
-  StreamId id() const noexcept { return id_; }
+  Device device() const noexcept {
+    return device_;
+  }
+  DeviceType device_type() const noexcept {
+    return device_.type();
+  }
+  DeviceIndex device_index() const noexcept {
+    return device_.index();
+  }
+  StreamId id() const noexcept {
+    return id_;
+  }
 
   // Enqueues a wait instruction in the stream's work queue.
   // This instruction is a no-op unless the event is marked
@@ -116,10 +122,10 @@ public:
     static_assert(sizeof(StreamId) == 4, "DeviceIndex is not 32-bit");
     // Concat these together into a 64-bit integer
     // See Note [Hazard when concatenating signed integers]
-    uint64_t bits =
-        static_cast<uint64_t>(static_cast<uint8_t>(device_type())) << 48
-      | static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 32
-      | static_cast<uint64_t>(static_cast<uint32_t>(id()));
+    uint64_t bits = static_cast<uint64_t>(static_cast<uint8_t>(device_type()))
+            << 48 |
+        static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 32 |
+        static_cast<uint64_t>(static_cast<uint32_t>(id()));
     return bits;
   }
 
@@ -145,10 +151,10 @@ C10_API std::ostream& operator<<(std::ostream& stream, const Stream& s);
 } // namespace c10
 
 namespace std {
-  template <>
-  struct hash<c10::Stream> {
-    size_t operator()(c10::Stream s) const noexcept {
-      return std::hash<uint64_t>{}(s.pack());
-    }
-  };
+template <>
+struct hash<c10::Stream> {
+  size_t operator()(c10::Stream s) const noexcept {
+    return std::hash<uint64_t>{}(s.pack());
+  }
+};
 } // namespace std

@@ -52,6 +52,8 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
 void Logger::set_env_variables() {
   ddp_logging_data_->strs_map["master_port"] = parse_env("MASTER_PORT");
   ddp_logging_data_->strs_map["master_addr"] = parse_env("MASTER_ADDR");
+  ddp_logging_data_->strs_map["torch_distributed_debug"] =
+      parse_env("TORCH_DISTRIBUTED_DEBUG");
   ddp_logging_data_->strs_map["cuda_visible_devices"] =
       parse_env("CUDA_VISIBLE_DEVICES");
   if (reducer_->process_group_->getBackendName() == "nccl") {
@@ -114,6 +116,10 @@ void Logger::set_comm_hook(const std::string& hook) {
 // inputs.
 void Logger::set_uneven_input_join() {
   ddp_logging_data_->ints_map["join_uneven_inputs"] = true;
+}
+
+void Logger::set_static_graph() {
+  ddp_logging_data_->ints_map["static_graph"] = reducer_->static_graph_;
 }
 
 // Data that can be got during DistributedDataParallel construction time
@@ -237,8 +243,7 @@ void Logger::set_runtime_stats_and_log() {
   // unused_parameters_ is calculated in forward call of
   // each iteration.
   for (const auto& unused_index : reducer_->unused_parameters_) {
-    const auto& v = reducer_->replicas_[unused_index.replica_index]
-                                       [unused_index.variable_index];
+    const auto& v = reducer_->replicas_[0][unused_index];
     ddp_logging_data_->ints_map["unused_parameter_size"] +=
         v.numel() * v.element_size();
   }
@@ -257,12 +262,11 @@ void Logger::set_runtime_stats_and_log() {
 
   if (reducer_->replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
-    // Cuda time stats are only collected for single process single
-    // device and single device module.
-    if (reducer_->replicas_.size() > 1 || reducer_->is_multi_device_module_) {
+    // Cuda time stats are only collected for single device modules.
+    if (reducer_->is_multi_device_module_) {
       TORCH_WARN_ONCE(
-          "Cuda time stats are not collected for single process "
-          "multiple device program or multi-device modules.");
+        "Cuda time stats are not collected for multi-device modules."
+      );
       return;
     }
     // Check events on the replicas_[0][0].device().

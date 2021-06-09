@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -226,12 +228,13 @@ void HashProvider::visit(const Intrinsics* v) {
   // calls to rand are not symbolic and have a different value each time, they
   // should not hash to anything and this is the best we can do.
   if (v->op_type() == kRand) {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     putHash(v, (SimplifierHashType)rand());
     return;
   }
 
   SimplifierHashType hash(te_hash(v->func_name()));
-  for (int i = 0; i < v->nparams(); i++) {
+  for (const auto i : c10::irange(v->nparams())) {
     v->param(i)->accept(this);
     hash = hash_combine(hash, hashOf(v->param(i)));
   }

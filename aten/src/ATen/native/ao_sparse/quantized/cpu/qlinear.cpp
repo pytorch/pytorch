@@ -34,6 +34,7 @@ at::Tensor PackedLinearWeight::apply_impl(
   TORCH_CHECK(
       input.dim() >= 2,
       "The dimension of input tensor should be larger than or equal to 2");
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int64_t batch_size = size_to_dim_(input.dim() - 1, input.sizes());
 
   auto packW = w.get();
@@ -45,6 +46,7 @@ at::Tensor PackedLinearWeight::apply_impl(
       "The number of columns in the packW should be equal to K: " +
           std::to_string(K));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float input_scale_float = input.q_scale();
   int32_t input_zero_point_int32 = input.q_zero_point();
 

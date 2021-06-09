@@ -20,9 +20,8 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
 
   // find the size of islands
   int island_size = 0;
-  while ((keys[tid + ++island_size] & mask) == (keys[tid] & mask));
-
-  printf("tid = %d, island_size = %d\n", tid, island_size);
+  do { island_size++; }
+  while ((tid + island_size < n) && (keys[tid + island_size] & mask) == (keys[tid] & mask));
 
   // do random permutation inside each island.
   data += tid;
@@ -53,6 +52,7 @@ void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n
   T mask = static_cast<T>((1UL << bits) - 1);
   randperm_handle_duplicate_keys_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
     keys, data, mask, n, rng_engine_inputs);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 }

@@ -28,7 +28,7 @@ def fork(func, *args, **kwargs):
     `fork` will not execute in parallel. `fork` will also not execute in parallel when invoked
     while tracing, however the `fork` and `wait` calls will be captured in the exported IR Graph.
     Warning:
-        `fork` tasks will execute non-deterministicly. We recommend only spawning
+        `fork` tasks will execute non-deterministically. We recommend only spawning
         parallel fork tasks for pure functions that do not modify their inputs,
         module attributes, or global state.
     Args:

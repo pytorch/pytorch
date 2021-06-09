@@ -186,9 +186,4 @@ private:
 
 };
 
-// Temporary functions to disable forward AD
-// TODO(alband) remove these when perf issues are solved
-bool TORCH_API isForwardADEnabled();
-void TORCH_API setForwardADEnabled(bool value);
-
 }} // namespace torch::autograd

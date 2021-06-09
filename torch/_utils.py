@@ -259,10 +259,7 @@ def _flatten_dense_tensors(tensors):
     Returns:
         A contiguous 1D buffer containing input tensors.
     """
-    if len(tensors) == 1:
-        return tensors[0].contiguous().view(-1)
-    flat = torch.cat([t.contiguous().view(-1) for t in tensors], dim=0)
-    return flat
+    return torch._C._nn.flatten_dense_tensors(tensors)
 
 
 def _flatten_sparse_tensors(tensors):
@@ -276,8 +273,8 @@ def _flatten_sparse_tensors(tensors):
         A tuple of two contiguous 1D buffers, one containing input tensors'
         indices and the other containing the values.
     """
-    flat_indices = _flatten_dense_tensors([torch.Tensor._indices(t) for t in tensors])
-    flat_values = _flatten_dense_tensors([torch.Tensor._values(t) for t in tensors])
+    flat_indices = torch._C._nn.flatten_dense_tensors([torch.Tensor._indices(t) for t in tensors])
+    flat_values = torch._C._nn.flatten_dense_tensors([torch.Tensor._values(t) for t in tensors])
     return flat_indices, flat_values
 
 
@@ -294,13 +291,7 @@ def _unflatten_dense_tensors(flat, tensors):
         Unflattened dense tensors with sizes same as tensors and values from
         flat.
     """
-    outputs = []
-    offset = 0
-    for tensor in tensors:
-        numel = tensor.numel()
-        outputs.append(flat.narrow(0, offset, numel).view_as(tensor))
-        offset += numel
-    return tuple(outputs)
+    return torch._C._nn.unflatten_dense_tensors(flat, tensors)
 
 
 def _unflatten_sparse_tensors(flat, tensors):
@@ -319,8 +310,8 @@ def _unflatten_sparse_tensors(flat, tensors):
         flat.
     """
     flat_indices, flat_values = flat
-    indices = _unflatten_dense_tensors(flat_indices, [torch.Tensor._indices(t) for t in tensors])
-    values = _unflatten_dense_tensors(flat_values, [torch.Tensor._values(t) for t in tensors])
+    indices = torch._C._nn.unflatten_dense_tensors(flat_indices, [torch.Tensor._indices(t) for t in tensors])
+    values = torch._C._nn.unflatten_dense_tensors(flat_values, [torch.Tensor._values(t) for t in tensors])
     outputs = []
     for t, i, v in zip(tensors, indices, values):
         outputs.append(t.new(i, v, t.size()))

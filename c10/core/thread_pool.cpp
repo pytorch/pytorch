@@ -3,9 +3,9 @@
 namespace c10 {
 
 ThreadPool::ThreadPool(
-      int pool_size,
-      int numa_node_id,
-      std::function<void()> init_thread)
+    int pool_size,
+    int numa_node_id,
+    std::function<void()> init_thread)
     : threads_(pool_size < 0 ? defaultNumThreads() : pool_size),
       running_(true),
       complete_(true),
@@ -13,7 +13,7 @@ ThreadPool::ThreadPool(
       total_(threads_.size()),
       numa_node_id_(numa_node_id) {
   for (std::size_t i = 0; i < threads_.size(); ++i) {
-    threads_[i] = std::thread([this, i, init_thread](){
+    threads_[i] = std::thread([this, i, init_thread]() {
       if (init_thread) {
         init_thread();
       }
@@ -43,6 +43,7 @@ size_t ThreadPool::size() const {
 }
 
 size_t ThreadPool::numAvailable() const {
+  std::unique_lock<std::mutex> lock(mutex_);
   return available_;
 }
 

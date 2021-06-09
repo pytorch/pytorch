@@ -98,7 +98,9 @@ Tensor upsample_linear1d_backward(
   return at::upsample_linear1d_backward(grad_output, osize, input_size, align_corners, scale_w);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_linear1d_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_linear1d_backward_kernel);
 
 } // namespace native

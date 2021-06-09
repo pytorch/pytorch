@@ -48,6 +48,7 @@ struct T {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Train, TrainBasic) {
   {
     VGraph graph;
@@ -55,6 +56,7 @@ TEST(Train, TrainBasic) {
     auto B = graph.create_tensor({"K"});
     auto C = call("mul", {A, B})[0];
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -84,6 +86,7 @@ TEST(Train, TrainBasic) {
     // dD/dA = 2*(A*B)*B = 2*A*B^2
     auto dA = grad(D, A, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -116,6 +119,7 @@ TEST(Train, TrainBasic) {
     auto B = T(g.create_tensor({"K"}));
     auto C = A + B;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -145,6 +149,7 @@ TEST(Train, TrainBasic) {
     // dD/dA = 2*(A*B)*B = 2*A*B^2
     auto dA = D.grad(A, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -180,6 +185,7 @@ TEST(Train, TrainBasic) {
     // d (A^2 / B)^2 / dB = -2 A^4 / B^3
     auto dC = (C * C).grad(B, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -208,6 +214,7 @@ TEST(Train, TrainBasic) {
     VGraph g;
     auto X = T(g, {"K"});
     auto Y = X.sum();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -228,6 +235,7 @@ TEST(Train, TrainBasic) {
     auto X = T(g, {"K"});
     auto Y = X.sum();
     auto Z = Y.broadcast_like(X);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -265,6 +273,7 @@ TEST(Train, TrainBasic) {
     W_grad = W_grad * LR.broadcast_like(W_grad);
     auto new_W = W - W_grad;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;

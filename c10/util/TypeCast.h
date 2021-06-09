@@ -1,27 +1,27 @@
 #pragma once
 #include <c10/core/ScalarType.h>
-#include <c10/util/Half.h>
-#include <c10/util/BFloat16.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 
 #include <type_traits>
 
-
 namespace c10 {
 
-template<typename dest_t, typename src_t>
+template <typename dest_t, typename src_t>
 struct needs_real {
-  constexpr static bool value = (is_complex<src_t>::value && !is_complex<dest_t>::value);
+  constexpr static bool value =
+      (is_complex<src_t>::value && !is_complex<dest_t>::value);
 };
 
-template<bool, typename src_t>
+template <bool, typename src_t>
 struct maybe_real {
   C10_HOST_DEVICE static inline src_t apply(src_t src) {
     return src;
   }
 };
 
-template<typename src_t>
+template <typename src_t>
 struct maybe_real<true, src_t> {
   C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
     return src.real();
@@ -34,7 +34,8 @@ struct maybe_real<true, src_t> {
 // Some of this undefined behavior is addressed below.
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(src_t src) {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(
+      src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
   }
@@ -51,10 +52,11 @@ struct static_cast_with_inter_type {
 // and divergent behavior.
 template <typename src_t>
 struct static_cast_with_inter_type<uint8_t, src_t> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline uint8_t apply(src_t src) {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline uint8_t apply(
+      src_t src) {
     constexpr bool real = needs_real<uint8_t, src_t>::value;
     return static_cast<uint8_t>(
-      static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+        static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
   }
 };
 
@@ -110,10 +112,15 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
 #define ERROR_UNSUPPORTED_CAST TORCH_CHECK(false, "Unexpected scalar type");
 #endif
 
-// Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
-#define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t, type>::apply(*(const type *)ptr);
-template<typename dest_t>
-C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
+// Fetch a value with dynamic type src_type from ptr, and cast it to static type
+// dest_t.
+#define FETCH_AND_CAST_CASE(type, scalartype) \
+  case ScalarType::scalartype:                \
+    return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
+template <typename dest_t>
+C10_HOST_DEVICE inline dest_t fetch_and_cast(
+    const ScalarType src_type,
+    const void* ptr) {
   switch (src_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
     default:
@@ -122,10 +129,17 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
   return dest_t(0); // just to avoid compiler warning
 }
 
-// Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
-#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type, src_t>::apply(value); return;
-template<typename src_t>
-C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
+// Cast a value with static type src_t into dynamic dest_type, and store it to
+// ptr.
+#define CAST_AND_STORE_CASE(type, scalartype)                             \
+  case ScalarType::scalartype:                                            \
+    *(type*)ptr = static_cast_with_inter_type<type, src_t>::apply(value); \
+    return;
+template <typename src_t>
+C10_HOST_DEVICE inline void cast_and_store(
+    const ScalarType dest_type,
+    void* ptr,
+    src_t value) {
   switch (dest_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
     default:;
@@ -133,17 +147,19 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
   ERROR_UNSUPPORTED_CAST
 }
 
-#define DEFINE_UNCASTABLE(T, scalartype_)                                                         \
-template<>                                                                                        \
-C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
-  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);                                        \
-  return *(const T *)ptr;                                                                         \
-}                                                                                                 \
-template<>                                                                                        \
-C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
-  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type);                                       \
-  *(T *)ptr = value;                                                                              \
-}
+#define DEFINE_UNCASTABLE(T, scalartype_)                     \
+  template <>                                                 \
+  C10_HOST_DEVICE inline T fetch_and_cast<T>(                 \
+      const ScalarType src_type, const void* ptr) {           \
+    CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);  \
+    return *(const T*)ptr;                                    \
+  }                                                           \
+  template <>                                                 \
+  C10_HOST_DEVICE inline void cast_and_store<T>(              \
+      const ScalarType dest_type, void* ptr, T value) {       \
+    CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type); \
+    *(T*)ptr = value;                                         \
+  }
 
 AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
 
@@ -164,11 +180,12 @@ To checked_convert(From f, const char* name) {
     std::ostringstream oss;
     oss << "value cannot be converted to type " << name
         << " without overflow: " << f;
-    throw std::runtime_error(oss.str());  // rather than domain_error (issue 33562)
+    throw std::runtime_error(
+        oss.str()); // rather than domain_error (issue 33562)
   }
   return convert<To, From>(f);
 }
 
-}  // namespace c10
+} // namespace c10
 
 // Trigger tests for D25440771. TODO: Remove this line any time you want.

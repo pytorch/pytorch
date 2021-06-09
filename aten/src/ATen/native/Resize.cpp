@@ -101,6 +101,7 @@ const Tensor& resize_(
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
     auto memory_format =

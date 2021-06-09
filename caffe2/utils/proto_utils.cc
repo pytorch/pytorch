@@ -197,6 +197,7 @@ C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
   }
 
   return ::google::protobuf::TextFormat::ParseFromString(
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(bc_spec), proto);
 }
 } // namespace TextFormat
@@ -591,6 +592,7 @@ C10_EXPORT bool GetFlagArgument(
     bool default_value) {
   int index = GetArgumentIndex(args, name);
   if (index != -1) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto arg = args.Get(index);
     CAFFE_ENFORCE(
         arg.has_i(), "Can't parse argument as bool: ", ProtoDebugString(arg));

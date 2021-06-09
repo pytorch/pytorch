@@ -27,14 +27,14 @@ gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
 # is not meet the requirement.
+@functools.lru_cache(maxsize=None)
 def has_bf16_support():
-    import subprocess
-    try:
-        cmd = "grep avx512bw /proc/cpuinfo | grep avx512vl | grep avx512dq"
-        subprocess.check_output(cmd, shell=True)
-        return True
-    except subprocess.CalledProcessError:
+    import sys
+    if sys.platform != 'linux':
         return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
 
 types = [torch.float, torch.bfloat16]
 

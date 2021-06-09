@@ -12,10 +12,11 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
     void* ptr,
     const std::function<void(void*)>& deleter,
     Device device) {
-  return {ptr,
-          new InefficientStdFunctionContext({ptr, deleter}),
-          &deleteInefficientStdFunctionContext,
-          device};
+  return {
+      ptr,
+      new InefficientStdFunctionContext({ptr, deleter}),
+      &deleteInefficientStdFunctionContext,
+      device};
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

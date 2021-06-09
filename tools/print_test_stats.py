@@ -631,12 +631,14 @@ class TestFile:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
             # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork,
-            # and distributed/test_distributed_spawn. In these cases, we store the test case that took the longest,
+            # and distributed/test_distributed_spawn and test_c10d_gloo.
+            # In these cases, we store the test case that took the longest,
             # as in these jobs, the duplicate tests are run in parallel.
             # For other unexpected cases, we should raise a warning.
             if self.name == 'test_cpp_extensions_aot' or \
                self.name == 'distributed/test_distributed_fork' or \
                self.name == 'distributed/test_distributed_spawn' or \
+               self.name == 'distributed/test_c10d_gloo' or \
                self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
                 time_difference = self.test_suites[suite_name].replace(test_case)
                 self.total_time += time_difference
@@ -679,11 +681,12 @@ def build_info() -> ReportMetaMeta:
     }
 
 
-def build_message(test_case: TestCase) -> Dict[str, Dict[str, Any]]:
+def build_message(test_file: TestFile, test_suite: TestSuite, test_case: TestCase) -> Dict[str, Dict[str, Any]]:
     return {
         "normal": {
             **build_info(),
-            "test_suite_name": test_case.class_name,
+            "test_filename": test_file.name,
+            "test_suite_name": test_suite.name,
             "test_case_name": test_case.name,
         },
         "int": {
@@ -713,7 +716,7 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
                 [
                     {
                         "category": "perfpipe_pytorch_test_times",
-                        "message": json.dumps(build_message(test_case)),
+                        "message": json.dumps(build_message(test_file, test_suite, test_case)),
                         "line_escape": False,
                     }
                     for test_file in reports.values()
@@ -763,12 +766,12 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.environ.get('CIRCLE_JOB')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
-    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
-        print("S3 upload only enabled on master, nightly and release branches.")
-        print(f"skipping test report on branch: {branch}")
-        return
     now = datetime.datetime.utcnow().isoformat()
-    key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
+        pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
+        key = f'pr_test_time/{pr}/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+    else:
+        key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
@@ -916,7 +919,7 @@ if __name__ == '__main__':
     try:
         send_report_to_scribe(reports_by_file)
     except Exception as e:
-        print(f"error encountered when uploading to scribe: {e}")
+        print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
     # longest_tests can contain duplicates as the same tests can be spawned from different files
     longest_tests : List[TestCase] = []
@@ -935,7 +938,7 @@ if __name__ == '__main__':
         try:
             send_report_to_s3(obj)
         except Exception as e:
-            print(f"error encountered when uploading to s3: {e}")
+            print(f"ERROR ENCOUNTERED WHEN UPLOADING TO S3: {e}")
 
     print(f"Total runtime is {datetime.timedelta(seconds=total_time)}")
     print(
@@ -949,4 +952,7 @@ if __name__ == '__main__':
         head_json = obj
         if args.use_json:
             head_json = json.loads(Path(args.use_json).read_text())
-        print_regressions(head_json, num_prev_commits=args.num_prev_commits)
+        try:
+            print_regressions(head_json, num_prev_commits=args.num_prev_commits)
+        except Exception as e:
+            print(f"ERROR ENCOUNTERED WHEN COMPARING AGAINST S3: {e}")

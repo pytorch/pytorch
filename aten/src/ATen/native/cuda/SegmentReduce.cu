@@ -45,20 +45,11 @@ Tensor _segment_reduce_cuda_kernel(
     const Tensor& data,
     const Tensor& lengths,
     int64_t axis,
-    bool unsafe) {
-  if (!unsafe) {
-    TORCH_CHECK(
-        (lengths.min().item<int64_t>() > 0),
-        "lengths contains non positive value!");
-    TORCH_CHECK(lengths.sum().item<int64_t>() == data.numel());
-  }
-
+    const c10::optional<Scalar>& initial) {
   int64_t segment_count = lengths.numel();
-  const auto data_contig = data.contiguous();
   auto output = at::empty({segment_count}, data.options());
 
-  const auto lengths_contig = lengths.contiguous();
-  auto offsets = _get_complete_sum(lengths_contig);
+  auto offsets = _get_complete_sum(lengths);
   auto* offsets_data_ptr = offsets.data_ptr<int64_t>();
 
   AT_DISPATCH_ALL_TYPES_AND2(
@@ -67,14 +58,16 @@ Tensor _segment_reduce_cuda_kernel(
       data.scalar_type(),
       "segment_reduce_cuda",
       [&]() {
-        auto* data_contig_data_ptr = data_contig.data_ptr<scalar_t>();
+        auto* data_data_ptr = data.data_ptr<scalar_t>();
         auto* output_data_ptr = output.data_ptr<scalar_t>();
 
         CustomMax max_op{};
-        scalar_t initial_value = std::numeric_limits<scalar_t>::lowest();
+        scalar_t initial_value = initial.has_value()
+            ? initial.value().to<scalar_t>()
+            : std::numeric_limits<scalar_t>::lowest();
         CUB_WRAPPER(
             cub::DeviceSegmentedReduce::Reduce,
-            data_contig_data_ptr,
+            data_data_ptr,
             output_data_ptr,
             segment_count,
             offsets_data_ptr,

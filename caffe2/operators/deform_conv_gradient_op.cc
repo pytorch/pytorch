@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DeformConvGradient).NumInputs(4, 4).NumOutputs(2, 4);
 
 namespace {
@@ -16,6 +17,7 @@ class GetDeformConvGradient : public GradientMakerBase {
     ArgumentHelper argsHelper(def_);
 
     auto compute_dX =
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         !argsHelper.GetSingleArgument<bool>("no_gradient_to_input", 0);
 
     if (def_.input_size() == 4) {
@@ -51,6 +53,7 @@ class GetDeformConvGradient : public GradientMakerBase {
     }
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DeformConv, GetDeformConvGradient);
 
 } // namespace

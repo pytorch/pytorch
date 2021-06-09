@@ -60,7 +60,9 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
       break;
     }
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double expMin;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double expMax;
   if(offset == size) {
     expMin = 1;
@@ -91,6 +93,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     }
   }
   double scale = 1;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t sz;
   if(intMode) {
     if(expMax > 9) {
@@ -138,7 +141,9 @@ static void printScale(std::ostream & stream, double scale) {
 }
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double scale;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t sz;
   std::tie(scale, sz) = __printFormat(stream, self);
 
@@ -252,7 +257,9 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double scale;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int64_t sz;
         std::tie(scale, sz) =  __printFormat(stream, tensor);
         if(scale != 1) {

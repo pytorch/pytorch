@@ -365,6 +365,21 @@ you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
 `device_guard: False` to your function definition.
 
+### `device_check`
+
+```
+device_check: NoCheck
+```
+
+By default, ATen code generation will generate device check,
+which will ensure all the tensor parameters passed to kernel are
+on the same device.
+
+However, in some cases, checking the device is unncessary, becuase,
+e.g., you call a function allows to work on multiple devices.
+In that case, code generation of the device check can e disabled by adding
+`device_check: NoCheck` to your function definition.
+
 ### `manual_kernel_registration`
 
 ```

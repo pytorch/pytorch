@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -147,12 +148,6 @@ class ShapePropagator {
     return dim;
   }
 
-  // TODO: Would be better to make JIT not assume that CUDA devices
-  // are the only thing that exist.
-  static at::Device jitDeviceIndexToDevice(int device) {
-    return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
-  }
-
   IValue representativeValue(Value* v) {
     TypePtr type_ = v->type();
     // if the value is actually constant, just use it!
@@ -161,13 +156,12 @@ class ShapePropagator {
     }
     if (TensorTypePtr type = type_->cast<TensorType>()) {
       if (type->isComplete()) {
-        auto attype = type->device()->is_cpu() ? at::CPU(*type->scalarType())
-                                               : at::CUDA(*type->scalarType());
         at::DeviceGuard device_guard(*type->device());
         return at::empty_strided(
                    *type->sizes().concrete_sizes(),
                    *type->strides().concrete_sizes(),
-                   attype.options())
+                   at::TensorOptions(*type->device())
+                       .dtype(*type->scalarType()))
             .zero_();
       }
       // fallthrough
@@ -238,7 +232,7 @@ class ShapePropagator {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
     // binary arithmetic ops, more than 2 args is alpha.
-    for (size_t i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       auto dtt = node->inputs()[i]->type()->expect<TensorType>();
       auto inputDtype = dtt->scalarType();
       if (!dtt || !inputDtype) {
@@ -490,6 +484,7 @@ class ShapePropagator {
         cat_node->kind() == prim::FusedConcat) {
       auto tensors = list_node->inputs();
       if (!tensors.empty()) {
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         if (propagate_complete(cat_node, tensors)) {
           return;
         } else if (propagate(cat_node, tensors)) {
@@ -1295,6 +1290,7 @@ class ShapePropagator {
         } else if (upcast_integer && !at::isFloatingType(*type->scalarType())) {
           type = type->withScalarType(at::kLong);
         }
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         if (*type->dim() >= num_reduced_dim && num_reduced_dim > 0) {
           return {type->withDim(*type->dim() - num_reduced_dim)};
         } else {
@@ -1826,6 +1822,7 @@ class ShapePropagator {
         if (dim1 == 1 && dim2 == 1) {
           // Dot product
           return tensor_types.at(0)->withDim(0);
+          // NOLINTNEXTLINE(bugprone-branch-clone)
         } else if (dim1 == 2 && dim2 == 2) {
           // Matrix multiply
           return tensor_types.at(0);
@@ -2069,6 +2066,7 @@ class ShapePropagator {
                    /*const_inputs=*/attr::size)) {
       auto sizes = node->get<c10::List<int64_t>>(attr::size).value();
       bool inferred = false;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t inferred_idx;
       int64_t size_product = 1;
       for (size_t i = 0; i < sizes.size(); ++i) {
@@ -2114,8 +2112,8 @@ class ShapePropagator {
           tp->sizes().concrete_sizes().value(),
           tp->strides().concrete_sizes().value(),
           node->get<c10::List<int64_t>>(attr::size).value().vec());
-      node->output()->setType(tp->withSizesStrides(
-          std::get<0>(sizesAndStrides), std::get<1>(sizesAndStrides)));
+      node->output()->setType(
+          tp->withSizesStrides(sizesAndStrides.sizes, sizesAndStrides.strides));
       return true;
     } else if (
         node->matches(

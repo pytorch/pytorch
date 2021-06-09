@@ -94,9 +94,11 @@ class IrParser {
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
       if (node->kind() == aten::rand_like) {
+        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         disable_unroll = true;
       }
       if (node->kind() == aten::sum) {
+        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         has_reduction = true;
       }
     }
@@ -540,6 +542,7 @@ class IrParser {
 
   bool registerScalar(const JitValue* val) {
     if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<float>(val)) {
         cg_val = new Float(ival.value());
@@ -550,6 +553,7 @@ class IrParser {
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(IntType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<int>(val)) {
         cg_val = new Int(ival.value());
@@ -560,6 +564,7 @@ class IrParser {
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(BoolType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<bool>(val)) {
         cg_val = new Bool(ival.value());
@@ -582,6 +587,7 @@ class IrParser {
   }
 
   bool registerTensor(const JitValue* val) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CgValue cg_val;
     if (auto tensor_type = val->type()->cast<TensorType>()) {
       // TODO: make this a static function in Tensor class;

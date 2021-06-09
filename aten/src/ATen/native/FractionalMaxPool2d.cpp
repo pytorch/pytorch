@@ -112,6 +112,7 @@ static void fractional_max_pool2d_out_single_batch_frame(
           randomSamplesForPlane[1], inputH, outputH, poolSizeH);
 
       /* loop over output */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int h, w;
 
       scalar_t* inputForPlane = input + plane * inputW * inputH;
@@ -253,6 +254,7 @@ static void fractional_max_pool2d_backward_out_single_batch_frame(
       scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
       int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int h, w;
       for (h = 0; h < outputH; ++h) {
         for (w = 0; w < outputW; ++w) {

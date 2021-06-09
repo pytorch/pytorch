@@ -27,4 +27,4 @@ struct TORCH_API NoGradGuard : public AutoGradMode {
   NoGradGuard() : AutoGradMode(/*enabled=*/false) {}
 };
 
-}
+} // namespace c10

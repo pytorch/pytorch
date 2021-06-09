@@ -9,6 +9,7 @@ namespace jit {
 
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::vector<Call> calls;
 #endif // C10_MOBILE
 

@@ -655,7 +655,7 @@ class TestTensorCreation(TestCase):
         res2 = torch.cat((x, y), out=z)
         self.assertEqual(res1, res2)
 
-    @onlyCPU
+    @onlyOnCPUAndCUDA
     def test_cat_in_channels_last(self, device):
         for dim in range(4):
             x = torch.randn((4, 15, 8, 8), device=device)
@@ -677,7 +677,7 @@ class TestTensorCreation(TestCase):
             self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
             self.assertEqual(res1, res2)
 
-    @onlyCUDA
+    @onlyOnCPUAndCUDA
     def test_cat_preserve_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8), device=device)
         y = torch.randn(x.shape, device=device)
@@ -685,6 +685,15 @@ class TestTensorCreation(TestCase):
         res2 = torch.cat((x.contiguous(memory_format=torch.channels_last), y.contiguous(memory_format=torch.channels_last)))
         self.assertEqual(res1, res2)
         self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+        # discontiguous channels-last inputs
+        x = torch.arange(24, dtype=torch.float, device=device).reshape(2, 2, 3, 2).to(memory_format=torch.channels_last)
+        x1 = x[:, :, :2]
+        x2 = x[:, :, 1:]
+        res1 = torch.cat((x1, x2), dim=-1)
+        res2 = torch.cat((x1.contiguous(), x2.contiguous()), dim=-1)
+        self.assertEqual(res1, res2)
+        self.assertTrue(res1.is_contiguous(memory_format=torch.channels_last))
+
 
     @onlyCUDA
     @deviceCountAtLeast(2)
@@ -692,11 +701,11 @@ class TestTensorCreation(TestCase):
         cuda0 = torch.randn((3, 3), device=devices[0])
         cuda1 = torch.randn((3, 3), device=devices[1])
         with self.assertRaisesRegex(RuntimeError,
-                                    "input tensors must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.cat((cuda0, cuda1))
 
         with self.assertRaisesRegex(RuntimeError,
-                                    "all input tensors and out must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.cat((cuda0, cuda0), out=cuda1)
 
     @onlyCUDA
@@ -706,42 +715,42 @@ class TestTensorCreation(TestCase):
         out_cpu = cpu.clone()
         out_cuda = cuda.clone()
         with self.assertRaisesRegex(RuntimeError,
-                                    "input tensors must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.cat((cuda, cpu))
         with self.assertRaisesRegex(RuntimeError,
-                                    "input tensors must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.cat((cpu, cuda))
 
         with self.assertRaisesRegex(RuntimeError,
-                                    "input tensors must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.cat((cpu, cuda), out=out_cuda)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    "all input tensors and out must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.cat((cpu, cpu), out=out_cuda)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    "all input tensors and out must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.cat((cuda, cuda), out=out_cpu)
 
         # Stack
         with self.assertRaisesRegex(RuntimeError,
-                                    "input tensors must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.stack((cuda, cpu))
         with self.assertRaisesRegex(RuntimeError,
-                                    "input tensors must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.stack((cpu, cuda))
 
         with self.assertRaisesRegex(RuntimeError,
-                                    "input tensors must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.stack((cpu, cuda), out=out_cuda)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    "all input tensors and out must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.stack((cpu, cpu), out=out_cuda)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    "all input tensors and out must be on the same device"):
+                                    "Expected all tensors to be on the same device"):
             torch.stack((cuda, cuda), out=out_cpu)
 
     # TODO: reconcile with other cat tests
@@ -1281,6 +1290,7 @@ class TestTensorCreation(TestCase):
             ('new_full', [size, 1]),
             ('new_empty', [size]),
             ('new_zeros', [size]),
+            ('new_ones', [size]),
         ]
         for method_name, args in test_cases:
             x = torch.randn(size)
@@ -1929,6 +1939,13 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cuda'))
         self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cuda'))
 
+        # Tensor constructor/new with Tensor argument shouldn't work with device specified
+        i = torch.tensor([1], device='cpu')
+        self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cpu'))
+        self.assertRaises(RuntimeError, lambda: i.new(i, device='cpu'))
+        self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cuda'))
+        self.assertRaises(RuntimeError, lambda: i.new(i, device='cuda'))
+
         x = torch.randn((3,), device='cpu')
         self.assertRaises(RuntimeError, lambda: x.new(device='cuda'))
         self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cuda'))
@@ -1938,6 +1955,13 @@ class TestTensorCreation(TestCase):
             self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(device='cpu'))
             self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
             self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor((2.0, 3.0), device='cpu'))
+
+            # Tensor constructor/new with Tensor argument shouldn't work with device specified
+            i = torch.tensor([1], device='cuda')
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cuda'))
+            self.assertRaises(RuntimeError, lambda: i.new(i, device='cuda'))
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cpu'))
+            self.assertRaises(RuntimeError, lambda: i.new(i, device='cpu'))
 
             default_type = torch.Tensor().type()
             torch.set_default_tensor_type(torch.cuda.FloatTensor)
@@ -3304,8 +3328,28 @@ class TestRandomTensorCreation(TestCase):
     def test_randperm_device_compatibility(self, device):
         cuda_gen = torch.Generator(device='cuda')
         cpu_gen = torch.Generator(device='cpu')
-        for n in (0, 3, 100, 30000):
-            regex = 'Expected a .* generator device but found .*'
+
+        # n=0 is a special case that we don't need to use generator, thus no error even if
+        # device and generator don't match
+        torch.randperm(0, device='cuda:0', generator=torch.Generator(device='cuda:1'))
+        if torch.cuda.device_count() > 1:
+            torch.randperm(0, device='cuda:1', generator=torch.Generator(device='cuda:0'))
+        torch.randperm(0, device='cuda', generator=torch.Generator(device='cpu'))
+        torch.randperm(0, device='cpu', generator=torch.Generator(device='cuda'))
+
+        for n in (1, 3, 100, 30000):
+            torch.randperm(n, device='cuda', generator=torch.Generator(device='cuda:0'))
+            torch.randperm(n, device='cuda:0', generator=torch.Generator(device='cuda'))
+            # For cuda:0 to match cuda:1, we are making consistent device type matching
+            # behavior just like torch.randint. Longer term, generator should ignore
+            # device ordinal, since it's not used anyway.
+            torch.randint(low=0, high=n + 1, size=(1,), device="cuda:0", generator=torch.Generator(device='cuda:1'))
+            torch.randperm(n, device='cuda:0', generator=torch.Generator(device='cuda:1'))
+            if torch.cuda.device_count() > 1:
+                torch.randint(low=0, high=n + 1, size=(1,), device="cuda:1", generator=torch.Generator(device='cuda:0'))
+                torch.randperm(n, device='cuda:1', generator=torch.Generator(device='cuda:0'))
+
+            regex = 'Expected a .* device type for generator but found .*'
             cuda_t = torch.tensor(n, device='cuda')
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen, out=cuda_t))

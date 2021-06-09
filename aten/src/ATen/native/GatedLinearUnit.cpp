@@ -6,7 +6,9 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_backward_stub);
 
 Tensor& glu_out(const Tensor& self, int64_t dim, Tensor &result) {
@@ -26,7 +28,7 @@ Tensor& glu_out(const Tensor& self, int64_t dim, Tensor &result) {
   Tensor firstHalf = self.narrow(wrap_dim, 0, selfSize);
   Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
 
-  auto iter = TensorIterator::binary_op(result, firstHalf, secondHalf);
+  auto iter = TensorIterator::borrowing_binary_op(result, firstHalf, secondHalf);
   glu_stub(iter.device_type(), iter);
   return result;
 }

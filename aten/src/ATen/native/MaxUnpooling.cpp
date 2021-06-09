@@ -47,6 +47,7 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
       scalar_t* input_p_k = rawInput + finalInputOffset;
       int64_t* ind_p_k = rawIndices + finalInputOffset;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t maxp;
       for (int64_t i = 0; i < inputHeight; i++) {
         for (int64_t j = 0; j < inputWidth; j++) {
@@ -173,6 +174,7 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
       scalar_t* output_p_k = output_data + finalOutputOffset;
       scalar_t* input_p_k = input_data + finalInputOffset;
       int64_t* ind_p_k = indices_data + finalInputOffset;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int maxp;
       for (int64_t t = 0; t < iT; t++) {
         for (int64_t i = 0; i < iH; i++) {
@@ -352,7 +354,9 @@ static void max_unpooling2d_backward_out_cpu_frame(
     scalar_t* gradOutput_p_k = gradOutput_p + k * owidth * oheight;
     int64_t* ind_p_k = ind_p + k * iwidth * iheight;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t i, j;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t maxp;
 
     for (i = 0; i < iheight; i++) {
@@ -392,8 +396,11 @@ Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
   int dimw = 2;
   int dimh = 1;
   int nbatch = 1;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int nslices;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int iheight;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int iwidth;
   TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
@@ -488,7 +495,9 @@ static void max_unpooling3d_backward_out_cpu_frame(
     scalar_t* gradOutput_p_k = gradOutput_p + k * oT * oH * oW;
     int64_t* ind_p_k = ind_p + k * iT * iH * iW;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t t, i, j, index;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t maxp;
     for (t = 0; t < iT; t++) {
       for (i = 0; i < iH; i++) {
@@ -535,9 +544,13 @@ Tensor& max_unpooling3d_backward_out_cpu(const Tensor& grad_output_,
   int dimh = 2;
   int dimt = 1;
   int nbatch = 1;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int nslices;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int iT;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int iH;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int iW;
 
   max_unpooling3d_shape_check(

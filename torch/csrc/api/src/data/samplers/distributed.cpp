@@ -21,6 +21,7 @@ DistributedRandomSampler::DistributedRandomSampler(
       end_index_(0),
       sample_index_(0) {
   // shuffle first time.
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset(size_);
 }
 

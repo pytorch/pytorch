@@ -1,8 +1,8 @@
 #pragma once
 
+#include <c10/util/complex.h>
 #include <functional>
 #include <vector>
-#include <c10/util/complex.h>
 namespace c10 {
 
 // NOTE: hash_combine is based on implementation from Boost
@@ -146,6 +146,5 @@ struct hash<c10::complex<T>> {
     return get_hash(c.real(), c.imag());
   }
 };
-
 
 } // namespace c10

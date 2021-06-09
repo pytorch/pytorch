@@ -92,6 +92,7 @@ class LoadOp final : public Operator<Context> {
       }
     }
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         blob_names_.empty() || blob_names_.size() == OutputSize(),
         "Number of output blobs and source_blob_names mismatch.");
     CAFFE_ENFORCE(
@@ -132,6 +133,7 @@ class LoadOp final : public Operator<Context> {
         extract(i, reader.cursor(), &blob_states, &total_loaded_blobs);
       }
     } else {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < db_names_.size(); ++i) {
         string full_db_name = absolute_path_
             ? db_names_[i]
@@ -351,6 +353,7 @@ std::string FormatString(const std::string& pattern, Ts... values) {
   if (bytes_written < 0) {
     throw std::runtime_error("FormatString failed");
   }
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (bytes_written > buffer.size()) {
     // Our initial buffer size wasn't enough, resize and run again.
     buffer.resize(bytes_written + 1);

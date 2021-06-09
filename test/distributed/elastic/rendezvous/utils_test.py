@@ -226,9 +226,7 @@ class UtilsTest(TestCase):
     def test_matches_machine_hostname_returns_true_if_hostname_is_machine_address(
         self,
     ) -> None:
-        addr_list = socket.getaddrinfo(
-            socket.gethostname(), None, proto=socket.IPPROTO_TCP
-        )
+        addr_list = socket.getaddrinfo(socket.gethostname(), None, proto=socket.IPPROTO_TCP)
 
         for addr in (addr_info[4][0] for addr_info in addr_list):
             with self.subTest(addr=addr):
@@ -256,7 +254,7 @@ class UtilsTest(TestCase):
 
 
 class PeriodicTimerTest(TestCase):
-    def test_start_can_be_called_only_once(self):
+    def test_start_can_be_called_only_once(self) -> None:
         timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
 
         timer.start()
@@ -266,7 +264,7 @@ class PeriodicTimerTest(TestCase):
 
         timer.cancel()
 
-    def test_cancel_can_be_called_multiple_times(self):
+    def test_cancel_can_be_called_multiple_times(self) -> None:
         timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
 
         timer.start()
@@ -274,29 +272,47 @@ class PeriodicTimerTest(TestCase):
         timer.cancel()
         timer.cancel()
 
-    def test_cancel_stops_background_thread(self):
+    def test_cancel_stops_background_thread(self) -> None:
+        name = "PeriodicTimer_CancelStopsBackgroundThreadTest"
+
         timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
+
+        timer.set_name(name)
 
         timer.start()
 
-        self.assertTrue(any(t.name == "PeriodicTimer" for t in threading.enumerate()))
+        self.assertTrue(any(t.name == name for t in threading.enumerate()))
 
         timer.cancel()
 
-        self.assertTrue(all(t.name != "PeriodicTimer" for t in threading.enumerate()))
+        self.assertTrue(all(t.name != name for t in threading.enumerate()))
 
-    def test_delete_stops_background_thread(self):
+    def test_delete_stops_background_thread(self) -> None:
+        name = "PeriodicTimer_DeleteStopsBackgroundThreadTest"
+
         timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
+
+        timer.set_name(name)
 
         timer.start()
 
-        self.assertTrue(any(t.name == "PeriodicTimer" for t in threading.enumerate()))
+        self.assertTrue(any(t.name == name for t in threading.enumerate()))
 
         del timer
 
-        self.assertTrue(all(t.name != "PeriodicTimer" for t in threading.enumerate()))
+        self.assertTrue(all(t.name != name for t in threading.enumerate()))
 
-    def test_timer_calls_background_thread_at_regular_intervals(self):
+    def test_set_name_cannot_be_called_after_start(self) -> None:
+        timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
+
+        timer.start()
+
+        with self.assertRaisesRegex(RuntimeError, r"^The timer has already started.$"):
+            timer.set_name("dummy_name")
+
+        timer.cancel()
+
+    def test_timer_calls_background_thread_at_regular_intervals(self) -> None:
         timer_begin_time: float
 
         # Call our function every 200ms.

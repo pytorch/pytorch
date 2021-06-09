@@ -95,9 +95,9 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(grad_out_restrided)
-    .add_input(grad_in_restrided)
-    .add_input(idx_dim_restrided)
+    .add_owned_output(grad_out_restrided)
+    .add_owned_input(grad_in_restrided)
+    .add_owned_input(idx_dim_restrided)
     .build();
 
   return iter;
@@ -167,10 +167,10 @@ static TensorIterator _make_unfold_backward_iter_over_grad_in(
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_output(grad_out_restrided)
-    .add_input(grad_in)
-    .add_input(idx_dim_restrided)
-    .add_input(idx_last_dim_restrided)
+    .add_owned_output(grad_out_restrided)
+    .add_owned_input(grad_in)
+    .add_owned_input(idx_dim_restrided)
+    .add_owned_input(idx_last_dim_restrided)
     .build();
 
   return iter;

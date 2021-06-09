@@ -3,11 +3,14 @@
 namespace caffe2 {
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CopyRowsToTensor, CopyRowsToTensorOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     CopyRowsToTensorGradient,
     CopyRowsToTensorGradientOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CopyRowsToTensor)
     .NumInputs(3)
     .NumOutputs(1)
@@ -34,6 +37,7 @@ OPERATOR_SCHEMA(CopyRowsToTensor)
       return out;
     });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(CopyRowsToTensorGradient)
     .NumInputs(1)
     .NumOutputs(1)
@@ -63,6 +67,7 @@ class GetCopyRowsToTensorGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(CopyRowsToTensor, GetCopyRowsToTensorGradient);
 
 } // namespace

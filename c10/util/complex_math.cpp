@@ -13,7 +13,8 @@
 // In libstdc++ complex square root yield invalid results
 // for -x-0.0j unless C99 csqrt/csqrtf fallbacks are used
 
-#if defined(_LIBCPP_VERSION) || (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
+#if defined(_LIBCPP_VERSION) || \
+    (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
 
 namespace {
 template <typename T>
@@ -21,9 +22,10 @@ c10::complex<T> compute_csqrt(const c10::complex<T>& z) {
   constexpr auto half = T(.5);
 
   // Trust standard library to correctly handle infs and NaNs
-  if (std::isinf(z.real()) || std::isinf(z.imag()) ||
-      std::isnan(z.real()) || std::isnan(z.imag())) {
-    return static_cast<c10::complex<T>>(std::sqrt(static_cast<std::complex<T>>(z)));
+  if (std::isinf(z.real()) || std::isinf(z.imag()) || std::isnan(z.real()) ||
+      std::isnan(z.imag())) {
+    return static_cast<c10::complex<T>>(
+        std::sqrt(static_cast<std::complex<T>>(z)));
   }
 
   // Special case for square root of pure imaginary values
@@ -42,9 +44,9 @@ c10::complex<T> compute_csqrt(const c10::complex<T>& z) {
   }
 
   auto t = std::sqrt((-z.real() + std::abs(z)) * half);
-  return c10::complex<T>(half * std::abs(z.imag() / t), std::copysign(t, z.imag()));
+  return c10::complex<T>(
+      half * std::abs(z.imag() / t), std::copysign(t, z.imag()));
 }
-
 
 // Compute complex arccosine using formula from W. Kahan
 // "Branch Cuts for Complex Elementary Functions" 1986 paper:
@@ -54,12 +56,13 @@ template <typename T>
 c10::complex<T> compute_cacos(const c10::complex<T>& z) {
   auto constexpr one = T(1);
   // Trust standard library to correctly handle infs and NaNs
-  if (std::isinf(z.real()) || std::isinf(z.imag()) ||
-      std::isnan(z.real()) || std::isnan(z.imag())) {
-    return static_cast<c10::complex<T>>(std::acos(static_cast<std::complex<T>>(z)));
+  if (std::isinf(z.real()) || std::isinf(z.imag()) || std::isnan(z.real()) ||
+      std::isnan(z.imag())) {
+    return static_cast<c10::complex<T>>(
+        std::acos(static_cast<std::complex<T>>(z)));
   }
   auto a = compute_csqrt(c10::complex<T>(one - z.real(), -z.imag()));
-  auto b = compute_csqrt(c10::complex<T>(one + z.real(),  z.imag()));
+  auto b = compute_csqrt(c10::complex<T>(one + z.real(), z.imag()));
   auto c = compute_csqrt(c10::complex<T>(one + z.real(), -z.imag()));
   auto r = T(2) * std::atan2(a.real(), b.real());
   // Explicitly unroll (a*c).imag()
@@ -68,8 +71,8 @@ c10::complex<T> compute_cacos(const c10::complex<T>& z) {
 }
 } // anonymous namespace
 
-
-namespace c10_complex_math { namespace _detail {
+namespace c10_complex_math {
+namespace _detail {
 c10::complex<float> sqrt(const c10::complex<float>& in) {
   return compute_csqrt(in);
 }
@@ -86,5 +89,6 @@ c10::complex<double> acos(const c10::complex<double>& in) {
   return compute_cacos(in);
 }
 
-}} // namespace c10_complex_math::_detail
+} // namespace _detail
+} // namespace c10_complex_math
 #endif

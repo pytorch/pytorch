@@ -122,6 +122,7 @@ bool MulFunctor<CPUContext>::Backward(
       C_broadcast_dims.cbegin(),
       C_broadcast_dims.cbegin() + ndim,
       1,
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int>());
   if (C_size == 0) {
     const auto A_size = c10::multiply_integers(A_dims);
@@ -261,6 +262,7 @@ template bool MulFunctor<CPUContext>::Backward<int64_t, int64_t, int64_t>(
     int64_t* dB,
     CPUContext* context) const;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MulGradient,
     BinaryElementwiseGradientOp<
@@ -284,6 +286,7 @@ class GetMulGradient final : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Mul, GetMulGradient);
 
 } // namespace caffe2

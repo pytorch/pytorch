@@ -7,6 +7,7 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // Delegate to local conv operator
   for (int i = 0; i < this->InputSize(); ++i) {
     local_input_blobs_[i]->ShareExternal(
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<void*>(this->Inputs()[i]->GetRaw()),
         this->Inputs()[i]->meta());
   }
@@ -38,6 +39,7 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // Delegate to local conv operator
   for (int i = 0; i < this->InputSize(); ++i) {
     local_input_blobs_[i]->ShareExternal(
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<void*>(this->Inputs()[i]->GetRaw()),
         this->Inputs()[i]->meta());
   }
@@ -64,6 +66,7 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ConvRelu)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -71,6 +74,7 @@ OPERATOR_SCHEMA(ConvRelu)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         ConvPoolOpBase<CPUContext>::CostInferenceForConv));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ConvRelu, ConvReluOp<float, CPUContext>);
 
 } // namespace caffe2

@@ -71,7 +71,9 @@ void CopyICFirst3dTensorToChannelsLast3dTensor(
   for (int64_t i = 0; i < G * OC_G; ++i) {
     for (int64_t j = 0; j < inner_size; ++j) {
       for (int64_t ic = 0; ic < IC_G; ++ic) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         int g = i / OC_G;
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         int oc = i % OC_G;
         dst[(i * inner_size + j) * IC_G + ic] =
             src[((g * IC_G + ic) * OC_G + oc) * inner_size + j];
@@ -95,11 +97,17 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
     const std::vector<int>& dilations,
     const std::vector<int>& output_padding,
     bool transposed) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> image_shape_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> kernels_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> strides_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim * 2> pads_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> dilations_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> output_padding_;
   std::move(image_shape.begin(), image_shape.begin() + image_shape.size(), image_shape_.begin());
   std::move(
@@ -490,6 +498,7 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
             std::vector<at::Tensor> tensors;
             std::vector<double> doubles;
             std::vector<int64_t> longs;
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int64_t version;
             std::tie(version, tensors, doubles, longs) = std::move(state);
 
@@ -508,9 +517,13 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto conv2d_params = register_conv_params<2>();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto conv3d_params = register_conv_params<3>();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto linear_params = register_linear_params();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto embedding_params = register_embedding_params();
 
 } // namespace

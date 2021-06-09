@@ -60,6 +60,7 @@ void test(DeprecatedTypeProperties &T) {
     ASSERT_EQ(t.numel(), numel);
     // verify we can output
     std::stringstream ss;
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_NO_THROW(ss << t << std::endl);
 
     // set_
@@ -136,6 +137,7 @@ void test(DeprecatedTypeProperties &T) {
       ASSERT_EQ(std::get<0>(ret).dim(), std::max<int64_t>(t.dim() - 1, 0));
       ASSERT_EQ(std::get<1>(ret).dim(), std::max<int64_t>(t.dim() - 1, 0));
     } else {
+      // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       ASSERT_ANY_THROW(t.min(0));
     }
 
@@ -143,6 +145,7 @@ void test(DeprecatedTypeProperties &T) {
     if (t.dim() > 0 && t.numel() != 0) {
       ASSERT_EQ(t[0].dim(), std::max<int64_t>(t.dim() - 1, 0));
     } else {
+      // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       ASSERT_ANY_THROW(t[0]);
     }
 
@@ -152,6 +155,7 @@ void test(DeprecatedTypeProperties &T) {
   }
 
   for (auto lhs_it = sizes.begin(); lhs_it != sizes.end(); ++lhs_it) {
+    // NOLINTNEXTLINE(modernize-loop-convert)
     for (auto rhs_it = sizes.begin(); rhs_it != sizes.end(); ++rhs_it) {
       // is_same_size should only match if they are the same shape
       {
@@ -279,11 +283,13 @@ void test(DeprecatedTypeProperties &T) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalarTensor, TestScalarTensorCPU) {
   manual_seed(123);
   test(CPU(kFloat));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalarTensor, TestScalarTensorCUDA) {
   manual_seed(123);
 

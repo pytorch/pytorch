@@ -46,6 +46,7 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
 
 TensorNames::TensorNames(ArrayRef<Dimname> names) {
   names_.reserve(names.size());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int64_t idx = 0; idx < names.size(); ++idx) {
     names_.emplace_back(names, idx);
   }
@@ -61,6 +62,7 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
 }
 
 TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,clang-diagnostic-absolute-value,cppcoreguidelines-narrowing-conversions)
   size_t size_diff = std::labs(names_.size() - other.names_.size());
 
   if (names_.size() > other.names_.size()) {
@@ -73,6 +75,7 @@ TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const 
         names_.begin(),
         other.names_.begin(),
         other.names_.begin() + size_diff);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
       names_[idx] = names_[idx].unify(other.names_[idx], op_name);
     }

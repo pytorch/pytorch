@@ -15,7 +15,9 @@
 #include <c10/core/Stream.h>
 #include <c10/core/Event.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
+#include <c10/util/ThreadLocal.h>
 #include <c10/core/StreamGuard.h>
 
 #include <atomic>
@@ -38,6 +40,7 @@
 namespace torch { namespace autograd {
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool in_bad_autograd_fork =
     false; // True for children forked after engine's thread pool init
 
@@ -63,24 +66,30 @@ static void track_bad_autograd_forks() {
 //    backward call we use the caller thread to drive engine execution.
 // This is used when handling reentrant backwards calls;
 // See Note [Reentrant backwards]
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int worker_device = NO_DEVICE;
 
 // This variable is true if ALL invocations in the stack of re-entrant engine
 // invocations are imperative backwards. This special variable is needed for the
 // gradient checkpointing feature only.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int current_depth = 0;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total nested
 //   reentrant backwards depths over all device threads.
 // For CPU devices, it is the total depth associated with the original backward call.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int total_depth = 0;
 
 // The current GraphTask being executed by this thread. This helps
 // queue_callback() to find the target GraphTask to append final callbacks.
-static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
+#define current_graph_task (tls_current_graph_task.get())
 
 // Every autograd worker thread is associated with a ready queue, which specifies
 // the stream of work of this thread to do. This shared_ptr is a thread_local
@@ -96,7 +105,9 @@ static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 // because we reached the maximum depth, the new thread will just reuse the same
 // ReadyQueue with the parent thread for performance improvement.
 // see Note [Reentrant backwards] for more details.
-static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
+#define local_ready_queue (tls_local_ready_queue.get())
 
 // Note [Reentrant backwards]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -502,6 +513,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Need to unlock before we call markCompleted to avoid holding locks
     // when the callbacks are called.
     lock.unlock();
+    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
     future_result_->setErrorIfNeeded(std::current_exception());
@@ -556,6 +568,7 @@ void GraphTask::set_exception(
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
+    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->setError(std::move(eptr));
   }
 }
@@ -590,7 +603,7 @@ void set_device(int device) {
   // Don't use DeviceGuard here because its destructor may be called before the
   // device is reset. This is fine because the device is thread local.
   if (device != CPU_DEVICE) {
-    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+    for(const auto i : c10::irange(static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
         impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
@@ -610,7 +623,7 @@ void validate_outputs(
     ss << edges.size() << ", but got " << grads.size();
     AT_ERROR(format_error(ss.str()));
   }
-  for (size_t i = 0; i < grads.size(); i++) {
+  for(const auto i : c10::irange(grads.size())) {
     const auto& edge = edges[i];
     if (!edge.is_valid()) continue;
 
@@ -894,7 +907,14 @@ auto Engine::execute(const edge_list& roots,
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
-
+  if (accumulate_grad && create_graph) {
+    TORCH_WARN_ONCE(
+      "Using backward() with create_graph=True will create a reference cycle "
+      "between the parameter and its gradient which can cause a memory leak. "
+      "We recommend using autograd.grad when creating the graph to avoid this. "
+      "If you have to use this function, make sure to reset the .grad fields of "
+      "your parameters to None after use to break the cycle and avoid the leak.");
+  }
   // A fresh first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
   // allocated already, i.e. consecutive backward calls, re-entrant backward calls),
@@ -954,7 +974,7 @@ void Engine::initialize_device_threads_pool() {
   std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 
-std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
+c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
@@ -1036,6 +1056,7 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
@@ -1121,6 +1142,7 @@ auto Engine::start_device_threads() -> void {
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : device_ready_queues_)    {
+    // NOLINTNEXTLINE(modernize-make-shared)
     queue.reset(new ReadyQueue());
   }
 

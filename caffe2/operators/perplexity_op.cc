@@ -20,8 +20,10 @@ bool PerplexityOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Perplexity, PerplexityOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Perplexity).NumInputs(1).NumOutputs(1)
 .SetDoc(R"DOC(
 Perplexity calculates how well a probability distribution predicts a sample.
@@ -35,5 +37,6 @@ single (float) perplexity value for the batch.
 .Output(0, "output", "The output- a single (float) perplexity value for the "
         "batch");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Perplexity);
 }  // namespace caffe2

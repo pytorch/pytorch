@@ -87,9 +87,13 @@ class PYBIND11_EXPORT PythonRpcHandler {
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
 
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   PythonRpcHandler(const PythonRpcHandler&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   PythonRpcHandler& operator=(const PythonRpcHandler&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   PythonRpcHandler(PythonRpcHandler&&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   PythonRpcHandler& operator=(PythonRpcHandler&&) = delete;
 
   // Ref to `torch.distributed.rpc.internal._run_function`.

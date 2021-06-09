@@ -134,11 +134,19 @@ class ErrorHandler:
 
     def _rm(self, my_error_file):
         if os.path.isfile(my_error_file):
+            # Log the contents of the original file.
             with open(my_error_file, "r") as fp:
-                original = json.dumps(json.load(fp), indent=2)
-                log.warning(
-                    f"{my_error_file} already exists"
-                    f" and will be overwritten."
-                    f" Original contents:\n{original}"
-                )
+                try:
+                    original = json.dumps(json.load(fp), indent=2)
+                    log.warning(
+                        f"{my_error_file} already exists"
+                        f" and will be overwritten."
+                        f" Original contents:\n{original}"
+                    )
+                except json.decoder.JSONDecodeError as err:
+                    log.warning(
+                        f"{my_error_file} already exists"
+                        f" and will be overwritten."
+                        f" Unable to load original contents:\n"
+                    )
             os.remove(my_error_file)

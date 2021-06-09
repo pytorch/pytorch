@@ -8,6 +8,7 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Type, Test01) {
   KernelScope kernel_scope;
   {
@@ -43,29 +44,34 @@ TEST(Type, Test01) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Type, BitCasting) {
   {
     KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     ExprHandle y = bitcast<int32_t>(x);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     ASSERT_EQ(y.dtype(), kInt);
   }
   {
     KernelScope kernel_scope;
     VarHandle x("x", kInt);
     ExprHandle y = bitcast<float>(x);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     ASSERT_EQ(y.dtype(), kFloat);
   }
   {
     KernelScope kernel_scope;
     VarHandle x("x", kShort);
     ExprHandle y = bitcast<at::Half>(x);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     ASSERT_EQ(y.dtype(), kHalf);
   }
   {
     KernelScope kernel_scope;
     VarHandle x("x", kHalf);
     ExprHandle y = bitcast<int16_t>(x);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     ASSERT_EQ(y.dtype(), kShort);
   }
 
@@ -152,6 +158,7 @@ TEST(Type, BitCasting) {
   }*/
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Type, Propagation) {
   // Same types:
   {

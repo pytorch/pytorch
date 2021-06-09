@@ -14,6 +14,7 @@ namespace nn {
 // ========================TransformerEncoderLayerImpl=========================
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
   const TransformerEncoderLayerOptions& options_) : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -81,6 +82,7 @@ Tensor TransformerEncoderLayerImpl::forward(
 // ========================TransformerDecoderLayerImpl=========================
 TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
   const TransformerDecoderLayerOptions& options_ ) : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -193,6 +195,7 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input){
 // ========================TransformerEncoderImpl=========================
 TransformerEncoderImpl::TransformerEncoderImpl(
   TransformerEncoderOptions options_) : options(std::move(options_)) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -210,6 +213,7 @@ void TransformerEncoderImpl::reset() {
 
 void TransformerEncoderImpl::reset_parameters() {
   TORCH_CHECK(
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     layers->size() == options.num_layers(),
     "TransformerEncoder should have", options.num_layers(), " encoder layers, but got ", layers->size());
 
@@ -252,6 +256,7 @@ Tensor TransformerEncoderImpl::forward(
 // ========================TransformerDecoderImpl=========================
 TransformerDecoderImpl::TransformerDecoderImpl(
   TransformerDecoderOptions options_ ) : options(std::move(options_)){
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -270,6 +275,7 @@ void TransformerDecoderImpl::reset() {
 
 void TransformerDecoderImpl::reset_parameters() {
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(layers->size() == options.num_layers(),
     "TransformerDecoder should have", options.num_layers(),
     " decoder layers, but got ", layers->size());
@@ -329,6 +335,7 @@ Tensor TransformerDecoderImpl::forward(
 
 // =======================================TransformerImpl================================
 TransformerImpl::TransformerImpl(TransformerOptions options_ ) : options(std::move(options_)){
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

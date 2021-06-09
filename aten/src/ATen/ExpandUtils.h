@@ -13,12 +13,26 @@ namespace at {
 
 TORCH_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
 TORCH_API DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b);
+
+// Named type instead of a pair/tuple so that we can be sure to
+// construct the vectors in place and get NRVO.
+template <typename Container>
+struct InferExpandGeometryResult {
+  Container sizes;
+  Container strides;
+  explicit InferExpandGeometryResult(size_t ndim)
+      : sizes(ndim), strides(ndim) {}
+  explicit InferExpandGeometryResult(IntArrayRef sizes_, size_t ndim)
+      : sizes(sizes_.begin(), sizes_.end()), strides(ndim) {}
+};
+
 TORCH_API std::tuple<std::vector<int64_t>, std::vector<int64_t>>
 inferExpandGeometry(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes);
-TORCH_API std::tuple<DimVector, DimVector>
+
+TORCH_API InferExpandGeometryResult<DimVector>
 inferExpandGeometry_dimvector(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,

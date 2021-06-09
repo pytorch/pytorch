@@ -686,11 +686,13 @@ const Term* PolynomialTransformer::mulTerms(const Term* lhs, const Term* rhs) {
 const Expr* PolynomialTransformer::polyByTerm(
     const Polynomial* poly,
     const Term* term) {
+  // poly * term
+  //    = (poly_terms + poly_scalar) * term
+  //    = poly_terms * term + poly_scalar * term
+
+  // First, multiply all variables (terms) in the polynomial by the input
+  // term.
   std::vector<const Term*> newTerms;
-
-  // scalar Term
-  const Expr* scalar = evaluateOp(new Mul(poly->scalar(), term->scalar()));
-
   for (auto* var : poly->variables()) {
     const Term* newTerm = mulTerms(var, term);
     if (newTerm) {
@@ -698,11 +700,23 @@ const Expr* PolynomialTransformer::polyByTerm(
     }
   }
 
-  if (newTerms.empty()) {
-    return scalar;
+  // If the scalar in poly is not 0, it must be multiplied by term.
+  // If there are no variables in term, this becomes the scalar in the result
+  // polynomial. If there are variables in term, this becomes a new term in
+  // the result polynomial.
+  if (!immediateEquals(poly->scalar(), 0)) {
+    const Expr* scalar = evaluateOp(new Mul(poly->scalar(), term->scalar()));
+    if (term->variables().empty()) {
+      return new Polynomial(hasher_, scalar, newTerms);
+    }
+    newTerms.push_back(new Term(hasher_, scalar, term->variables()));
   }
 
-  return new Polynomial(hasher_, scalar, std::move(newTerms));
+  // The only case when the result polynomial has a scalar is when the input
+  // term does not have any variables and the input polynomial has a non-zero
+  // scalar. That case is handled above. So, at this point, we do not have any
+  // scalars in the result polynomial.
+  return new Polynomial(hasher_, std::move(newTerms));
 }
 
 // Does multiplying these two expressions make a Rounding Off operation.
@@ -1127,6 +1141,7 @@ const Expr* combineMinMaxTerms(
       scalar = opterm->scalar();
       variables = opterm->variables();
     }
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (expr->isConstant()) {
       scalar = combine_scalars(scalar, expr);
     } else {

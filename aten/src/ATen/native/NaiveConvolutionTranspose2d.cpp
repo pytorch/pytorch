@@ -585,6 +585,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
       dilation_width,
       true);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t n_output_plane;
   if (grad_weight.defined()) {
     n_output_plane = grad_weight.size(1);

@@ -812,26 +812,26 @@ See :func:`torch.cholesky_inverse`
 
 add_docstr_all('clamp',
                r"""
-clamp(min, max) -> Tensor
+clamp(min=None, max=None) -> Tensor
 
 See :func:`torch.clamp`
 """)
 
 add_docstr_all('clamp_',
                r"""
-clamp_(min, max) -> Tensor
+clamp_(min=None, max=None) -> Tensor
 
 In-place version of :meth:`~Tensor.clamp`
 """)
 
 add_docstr_all('clip', r"""
-clip(min, max) -> Tensor
+clip(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp`.
 """)
 
 add_docstr_all('clip_', r"""
-clip_(min, max) -> Tensor
+clip_(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp_`.
 """)
@@ -891,6 +891,27 @@ add_docstr_all('conj',
 conj() -> Tensor
 
 See :func:`torch.conj`
+""")
+
+add_docstr_all('conj_physical',
+               r"""
+conj_physical() -> Tensor
+
+See :func:`torch.conj_physical`
+""")
+
+add_docstr_all('conj_physical_',
+               r"""
+conj_physical_() -> Tensor
+
+In-place version of :meth:`~Tensor.conj_physical`
+""")
+
+add_docstr_all('resolve_conj',
+               r"""
+resolve_conj() -> Tensor
+
+See :func:`torch.resolve_conj`
 """)
 
 add_docstr_all('copysign',
@@ -1970,6 +1991,20 @@ is_complex() -> bool
 Returns True if the data type of :attr:`self` is a complex data type.
 """)
 
+add_docstr_all('is_inference',
+               r"""
+is_inference() -> bool
+
+See :func:`torch.is_inference`
+""")
+
+add_docstr_all('is_conj',
+               r"""
+is_conj() -> bool
+
+Returns True if the conjugate bit of :attr:`self` is set to true.
+""")
+
 add_docstr_all('is_signed',
                r"""
 is_signed() -> bool
@@ -2942,7 +2977,7 @@ Example::
 
 add_docstr_all('repeat_interleave',
                r"""
-repeat_interleave(repeats, dim=None) -> Tensor
+repeat_interleave(repeats, dim=None, *, output_size=None) -> Tensor
 
 See :func:`torch.repeat_interleave`.
 """)
@@ -3385,15 +3420,22 @@ In-place version of :meth:`~Tensor.sinh`
 
 add_docstr_all('size',
                r"""
-size() -> torch.Size
+size(dim=None) -> torch.Size or int
 
-Returns the size of the :attr:`self` tensor. The returned value is a subclass of
-:class:`tuple`.
+Returns the size of the :attr:`self` tensor. If ``dim`` is not specified,
+the returned value is a :class:`torch.Size`, a subclass of :class:`tuple`.
+If ``dim`` is specified, returns an int holding the size of that dimension.
+
+Args:
+  dim (int, optional): The dimension for which to retrieve the size.
 
 Example::
 
-    >>> torch.empty(3, 4, 5).size()
+    >>> t = torch.empty(3, 4, 5)
+    >>> t.size()
     torch.Size([3, 4, 5])
+    >>> t.size(dim=1)
+    4
 
 """)
 
@@ -3528,7 +3570,12 @@ In-place version of :meth:`~Tensor.squeeze`
 
 add_docstr_all('std',
                r"""
-std(dim=None, unbiased=True, keepdim=False) -> Tensor
+std(dim, unbiased=True, keepdim=False) -> Tensor
+
+See :func:`torch.std`
+
+.. function:: std(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.std`
 """)
@@ -3810,6 +3857,26 @@ add_docstr_all('float',
 float(memory_format=torch.preserve_format) -> Tensor
 
 ``self.float()`` is equivalent to ``self.to(torch.float32)``. See :func:`to`.
+
+Args:
+    {memory_format}
+""".format(**common_args))
+
+add_docstr_all('cdouble',
+               r"""
+cdouble(memory_format=torch.preserve_format) -> Tensor
+
+``self.cdouble()`` is equivalent to ``self.to(torch.complex128)``. See :func:`to`.
+
+Args:
+    {memory_format}
+""".format(**common_args))
+
+add_docstr_all('cfloat',
+               r"""
+cfloat(memory_format=torch.preserve_format) -> Tensor
+
+``self.cfloat()`` is equivalent to ``self.to(torch.complex64)``. See :func:`to`.
 
 Args:
     {memory_format}
@@ -4185,7 +4252,12 @@ In-place version of :meth:`~Tensor.unsqueeze`
 
 add_docstr_all('var',
                r"""
-var(dim=None, unbiased=True, keepdim=False) -> Tensor
+var(dim, unbiased=True, keepdim=False) -> Tensor
+
+See :func:`torch.var`
+
+.. function:: var(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.var`
 """)
@@ -4422,6 +4494,27 @@ tensor_split(indices_or_sections, dim=0) -> List of Tensors
 See :func:`torch.tensor_split`
 """)
 
+add_docstr_all('hsplit',
+               r"""
+hsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.hsplit`
+""")
+
+add_docstr_all('vsplit',
+               r"""
+vsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.vsplit`
+""")
+
+add_docstr_all('dsplit',
+               r"""
+dsplit(split_size_or_sections) -> List of Tensors
+
+See :func:`torch.dsplit`
+""")
+
 add_docstr_all('stft',
                r"""
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
@@ -4551,6 +4644,20 @@ add_docstr_all('masked_fill',
 masked_fill(mask, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
+""")
+
+add_docstr_all('retain_grad',
+               r"""
+retain_grad() -> None
+
+Enables this Tensor to have their :attr:`grad` populated during
+:func:`backward`. This is a no-op for leaf tensors.
+""")
+
+add_docstr_all('retains_grad',
+               r"""
+Is ``True`` if this Tensor is non-leaf and its :attr:`grad` is enabled to be
+populated during :func:`backward`, ``False`` otherwise.
 """)
 
 add_docstr_all('requires_grad',

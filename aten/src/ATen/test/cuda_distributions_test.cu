@@ -154,10 +154,10 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallMultinomialTensor) {
 
 __managed__ int keys[] = {
   1, (1 << 15) + 1,  (1 << 16) + 1,
-  2, (1 << 14) + 2
+  2, (1 << 14) + 2, 2
 };
 
-__managed__ int values[] = { 1, 2, 3, 4, 5 };
+__managed__ int values[] = { 1, 2, 3, 4, 5, 9999 };
 
 std::vector<std::vector<int>> valid_perms1 = {
   {1, 2, 3}, {1, 3, 2}, {2, 1, 3}, {2, 3, 1}, {3, 1, 2}, {3, 2, 1}

@@ -8,7 +8,7 @@ namespace {
 
 class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
-}
+} // namespace
 
 CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
 CAFFE_KNOWN_TYPE(TypeMetaTestBar);
@@ -73,10 +73,8 @@ TEST(TypeMetaTest, TypeMeta) {
   EXPECT_NE(bar_meta.name().find("TypeMetaTestBar"), c10::string_view::npos);
 }
 
-
 class ClassAllowAssignment {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ClassAllowAssignment() : x(42) {}
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ClassAllowAssignment(const ClassAllowAssignment& src) : x(src.x) {}
@@ -86,13 +84,12 @@ class ClassAllowAssignment {
 
 class ClassNoAssignment {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ClassNoAssignment() : x(42) {}
   ClassNoAssignment(const ClassNoAssignment& src) = delete;
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
   int x;
 };
-}
+} // namespace
 
 CAFFE_KNOWN_TYPE(ClassAllowAssignment);
 CAFFE_KNOWN_TYPE(ClassNoAssignment);
@@ -111,7 +108,6 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
   EXPECT_TRUE(meta_a.placementDelete() != nullptr);
   EXPECT_TRUE(meta_a.copy() != nullptr);
   ClassAllowAssignment src;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   src.x = 10;
   ClassAllowAssignment dst;
   EXPECT_EQ(dst.x, 42);
@@ -135,5 +131,5 @@ TEST(TypeMetaTest, Float16IsNotUint16) {
   EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }
 
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

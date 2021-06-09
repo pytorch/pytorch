@@ -130,7 +130,10 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   TORCH_CHECK(
-      id >= 0 && id < allWorkerInfo_.size(), "Invalid destination: ", id);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+      id >= 0 && id < allWorkerInfo_.size(),
+      "Invalid destination: ",
+      id);
   return allWorkerInfo_[id];
 }
 
@@ -263,11 +266,11 @@ void ProcessGroupAgent::shutdownImpl() {
   threadPool_.waitWorkComplete();
 }
 
-std::shared_ptr<JitFuture> ProcessGroupAgent::send(
+c10::intrusive_ptr<JitFuture> ProcessGroupAgent::send(
     const WorkerInfo& to,
-    Message&& message,
+    c10::intrusive_ptr<Message> message,
     const float rpcTimeoutSeconds,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
+    const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -284,7 +287,7 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
         "Node ",
         RpcAgent::getWorkerInfo().id_,
         "tried to send() a message of type ",
-        message.type(),
+        message->type(),
         " but RPC is no longer running on this node.");
     throw std::runtime_error(err);
   }
@@ -296,8 +299,8 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
       pg_->getRank());
 
   auto requestId = nextId();
-  auto future = std::make_shared<JitFuture>(at::AnyClassType::get());
-  if (message.isRequest()) {
+  auto future = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
+  if (message->isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
     // if passed in timeout is unset, then use the currently set default timeout
@@ -336,7 +339,7 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
       // so watchdog can acquire lock on waking up.
       futureTimeoutCV_.notify_one();
     }
-    message.setId(requestId);
+    message->setId(requestId);
     ++clientActiveCalls_;
   } else {
     future->markCompleted(IValue());
@@ -364,14 +367,15 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
 }
 
 void ProcessGroupAgent::handleSend(const SendWork& work) {
+  // NOLINTNEXTLINE(clang-diagnostic-pessimizing-move)
   auto serializedPayload = std::make_unique<std::string>(std::move(
-      wireSerialize(work.message_.payload(), work.message_.tensors())));
+      wireSerialize(work.message_->payload(), work.message_->tensors())));
 
   std::vector<torch::Tensor> preamble = {torch::tensor(
       {(int64_t)pg_->getRank(),
        (int64_t)serializedPayload->length(),
-       (int64_t)work.message_.type(),
-       (int64_t)work.message_.id()},
+       (int64_t)work.message_->type(),
+       (int64_t)work.message_->id()},
       {torch::kInt64})};
 
   // ProcessGroup is not thread-safe when sending with the same tag,
@@ -425,21 +429,22 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   }
 }
 
-void ProcessGroupAgent::sendToSelf(Message&& message) {
+void ProcessGroupAgent::sendToSelf(c10::intrusive_ptr<Message> message) {
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   threadPool_.run(std::bind(
-      [this](const Message& message) {
+      [this](c10::intrusive_ptr<Message> message) {
         // Unlike the other cases, need to add a tensor deleter, since the
         // data outlives the scope of this function. It's shared_ptr<> due
         // to c++11 lambda capture limitations with unique_ptr<>.
         std::unique_ptr<std::string> payload;
         try {
           payload = std::make_unique<std::string>(
-              wireSerialize(message.payload(), message.tensors()));
+              wireSerialize(message->payload(), message->tensors()));
           // only increment sendCounts when the message is indeed added into
           // local recv.
           sendCounts_.increment(pg_->getRank());
         } catch (std::exception& e) {
-          markFutureWithError(message.id(), e.what());
+          markFutureWithError(message->id(), e.what());
           return;
         }
         const char* data = payload->data();
@@ -447,8 +452,8 @@ void ProcessGroupAgent::sendToSelf(Message&& message) {
         std::string* delete_when_done = payload.release();
         enqueueRecv(RecvWork(
             getWorkerInfo(pg_->getRank()),
-            message.type(),
-            message.id(),
+            message->type(),
+            message->id(),
             torch::from_blob(
                 (void*)data,
                 len,
@@ -460,6 +465,7 @@ void ProcessGroupAgent::sendToSelf(Message&& message) {
 
 void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
         try {
@@ -471,11 +477,11 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
               " on node: ",
               RpcAgent::getWorkerInfo().id_);
           auto exceptionMsg =
-              rpc::createExceptionResponse(errorStr, work.message_.id());
-          if (work.message_.isRequest()) {
+              rpc::createExceptionResponse(errorStr, work.message_->id());
+          if (work.message_->isRequest()) {
             // Mark the future with corresponding to this request with an error.
-            markFutureWithError(exceptionMsg);
-          } else if (work.message_.isResponse()) {
+            markFutureWithError(*exceptionMsg);
+          } else if (work.message_->isResponse()) {
             // Try sending the error along.
             handleSend(SendWork(work.to_, std::move(exceptionMsg)));
           }
@@ -487,60 +493,52 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
 bool ProcessGroupAgent::handleRecv(RecvWork& work) {
   torch::Tensor& payload = work.payload_;
   auto data = wireDeserialize(payload.storage().data(), payload.numel());
-  Message message(
+  auto message = c10::make_intrusive<Message>(
       std::move(data.first), std::move(data.second), work.type_, work.id_);
-  if (message.isRequest()) {
+  if (message->isRequest()) {
     ++serverActiveCalls_;
-    std::shared_ptr<JitFuture> futureResponse;
+    c10::intrusive_ptr<JitFuture> futureResponse;
     try {
-      futureResponse = cb_->operator()(message, {});
+      futureResponse = cb_->operator()(*message, {});
     } catch (const std::exception& e) {
-      futureResponse = std::make_shared<JitFuture>(at::AnyClassType::get());
+      futureResponse = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
       futureResponse->setError(std::current_exception());
     }
     if (futureResponse->completed()) {
       --serverActiveCalls_;
       if (!futureResponse->hasError()) {
-        send(
-            work.from_,
-            std::move(*futureResponse->value().toCustomClass<Message>()));
+        send(work.from_, futureResponse->value().toCustomClass<Message>());
       } else {
         send(
             work.from_,
             createExceptionResponse(
-                futureResponse->tryRetrieveErrorMessage(), message.id()));
+                futureResponse->tryRetrieveErrorMessage(), message->id()));
       }
     } else {
       ++serverActiveAsyncCalls_;
       // Callback processing returned an incomplete future. Add sending the
       // response as a callback which fires when the future completes.
-      // Use a weak_ptr, so we can std::move the future's value.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
       futureResponse->addCallback(
-          [this,
-           fromId,
-           requestId,
-           weak = std::weak_ptr<JitFuture>(futureResponse)]() {
-            auto futureResponse = weak.lock();
-            TORCH_INTERNAL_ASSERT(futureResponse);
+          [this, fromId, requestId](JitFuture& futureResponse) {
             --serverActiveCalls_;
             --serverActiveAsyncCalls_;
-            if (!futureResponse->hasError()) {
+            if (!futureResponse.hasError()) {
               send(
                   getWorkerInfo(fromId),
-                  std::move(*futureResponse->value().toCustomClass<Message>()));
+                  futureResponse.value().toCustomClass<Message>());
             } else {
               send(
                   getWorkerInfo(fromId),
                   createExceptionResponse(
-                      futureResponse->tryRetrieveErrorMessage(), requestId));
+                      futureResponse.tryRetrieveErrorMessage(), requestId));
             }
           });
     }
-  } else if (message.isResponse()) {
-    auto id = message.id();
-    std::shared_ptr<JitFuture> jitFuture = nullptr;
+  } else if (message->isResponse()) {
+    auto id = message->id();
+    c10::intrusive_ptr<JitFuture> jitFuture;
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       const auto& futureInfo = futures_.find(id);
@@ -570,21 +568,21 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     }
     futureCV_.notify_all();
     --clientActiveCalls_;
-    if (message.type() == MessageType::EXCEPTION) {
+    if (message->type() == MessageType::EXCEPTION) {
       jitFuture->setError(std::make_exception_ptr(std::runtime_error(
-          std::string(message.payload().begin(), message.payload().end()))));
+          std::string(message->payload().begin(), message->payload().end()))));
     } else {
-      jitFuture->markCompleted(
-          IValue(c10::make_intrusive<Message>(std::move(message))));
+      jitFuture->markCompleted(std::move(message));
     }
   } else {
     // TODO: pass the error back to the caller instead of crashing here.
-    TORCH_INTERNAL_ASSERT(false, "unrecognized message type ", message.type());
+    TORCH_INTERNAL_ASSERT(false, "unrecognized message type ", message->type());
   }
   return true;
 }
 
 void ProcessGroupAgent::enqueueRecv(RecvWork work) {
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         try {
@@ -626,7 +624,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
 }
 
 void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
-  std::shared_ptr<JitFuture> jitFuture = nullptr;
+  c10::intrusive_ptr<JitFuture> jitFuture;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
     const auto& futureInfo = futures_.find(id);

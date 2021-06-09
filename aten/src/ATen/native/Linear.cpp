@@ -92,6 +92,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // then the permuted output is a view of bmm(left, right)
   // finally, opermutation reverts the permutation to the original order of dimensions
   std::vector<int64_t> out_size;
+  // NOLINTNEXTLINE(performance-inefficient-vector-operation)
   for (auto& d : lro) out_size.push_back(left.size(d));
   for (auto& d : lo) out_size.push_back(left.size(d));
   for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
@@ -134,6 +135,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // finally squeeze summed dimensions if desired
   if (! keepdim) {
     auto sizes = result.sizes().vec();
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     for (int i = dim-1; i>=0; i--) {
       if (sum_dims[i]) {
         sizes.erase(sizes.begin() + i);
@@ -162,7 +164,7 @@ uint8_t einsum_label_to_index(unsigned char label) {
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
 // 3. Compute result by multiplying input operands and summing contraction
 //    dimensions We do the last part by reducing to bmm.
-Tensor einsum(std::string equation, TensorList operands) {
+Tensor einsum(c10::string_view equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
   checkDeviceType("einsum():", operands, operands[0].device().type());
 

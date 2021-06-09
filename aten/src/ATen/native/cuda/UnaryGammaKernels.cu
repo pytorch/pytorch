@@ -19,7 +19,7 @@ void digamma_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void trigamma_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trigamma_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "trigamma_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return calc_trigamma(a);
     });
@@ -32,7 +32,7 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   } else if (n == 1) {
     trigamma_kernel_cuda(iter);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "polygamma_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "polygamma_cuda", [&]() {
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
         return calc_polygamma(int(n), a);
       });

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -600,7 +601,7 @@ struct GraphFuser {
     //   a_broadcasted, b_broadcasted = listUnpack(output_list)
     // `a_broadcasted` should receive the same aliasing info as `a`
     TORCH_INTERNAL_ASSERT(unpack_node->outputs().size() == inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for (const auto i : c10::irange(inputs.size())) {
       Value* original_input = inputs[i];
       Value* broadcasted_output = unpack_node->outputs()[i];
       aliasDb_->copyValue(original_input, broadcasted_output);
@@ -753,7 +754,7 @@ struct GraphFuser {
     WithInsertPoint guard(bchunk->next());
 
     std::vector<Value*> producer_chunk_outputs;
-    for (size_t i = 0; i < nchunks; i++) {
+    for (const auto i : c10::irange(nchunks)) {
       producer_chunk_outputs.push_back(
           bchunk->output(nchunks * producer_index + i));
     }
@@ -815,6 +816,7 @@ struct GraphFuser {
         if (original_input->type()->isSubtypeOf(TensorType::get())) {
           AT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(
+              // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
               chunked_inputs_it->at(chunk_sel->offset() % nchunks));
           ++chunked_inputs_it;
         } else {
@@ -827,7 +829,7 @@ struct GraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    for (size_t i = 0; i < nchunks; i++) {
+    for (const auto i : c10::irange(nchunks)) {
       bchunk->eraseOutput(nchunks * producer_index);
     }
 
@@ -1154,6 +1156,7 @@ struct GraphFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
