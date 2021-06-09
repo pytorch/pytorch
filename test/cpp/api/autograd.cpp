@@ -855,6 +855,26 @@ TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
   ASSERT_THROWS_WITH(w.backward(torch::ones({5, 5}), false, false, {z}), "is not a leaf Tensor");
 }
 
+TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
+  c10::Warning::WarnAlways guard(true);
+
+  torch::Tensor x = torch::randn({5,5}).set_requires_grad(true);
+  auto z = x * x;
+  {
+    WarningCapture warnings;
+    z.backward(torch::ones({5, 5}), c10::nullopt, true);
+    ASSERT_TRUE(
+        warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
+  }
+
+  {
+    WarningCapture warnings;
+    torch::autograd::backward({z}, {torch::ones({5, 5})}, c10::nullopt, true);
+    ASSERT_TRUE(
+        warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
+  }
+}
+
 // TODO add these tests if needed
 // test_once_differentiable
 // test_sparse_backward
