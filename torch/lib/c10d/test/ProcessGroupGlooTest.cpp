@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/cuda.h>
 
+#include <c10/util/irange.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -179,10 +180,10 @@ class CollectiveTest {
 std::vector<std::vector<at::Tensor>> copyTensors(
     const std::vector<std::vector<at::Tensor>>& inputs) {
   std::vector<std::vector<at::Tensor>> outputs(inputs.size());
-  for (size_t i = 0; i < inputs.size(); i++) {
+  for(const auto i : c10::irange(inputs.size())) {
     const auto& input = inputs[i];
     std::vector<at::Tensor> output(input.size());
-    for (size_t j = 0; j < input.size(); j++) {
+    for(const auto j : c10::irange(input.size())) {
       output[j] = input[j].cpu();
     }
     outputs[i] = output;
@@ -509,7 +510,7 @@ void testMonitoredBarrier(const std::string& path) {
   };
   std::vector<std::thread> threads;
   threads.reserve(size);
-  for (int r = 0; r < size; r++) {
+  for(const auto r : c10::irange(size)) {
     threads.emplace_back(std::thread([=]() { runMonitoredBarrier(r); }));
   }
   for (auto & t : threads) {
@@ -530,7 +531,7 @@ void testMonitoredBarrier(const std::string& path) {
       }
   };
   threads.clear();
-  for (int r = 0; r < size; r++) {
+  for(const auto r : c10::irange(size)) {
       threads.emplace_back(std::thread([=]() { runMonitoredBarrierWithException(r); }));
   }
   for (auto & t : threads) {

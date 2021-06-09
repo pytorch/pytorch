@@ -23,7 +23,7 @@ inline void incref(intrusive_ptr_target* self);
 }
 
 template <typename TTarget>
-class ExclusivelyOwnedTraits;
+struct ExclusivelyOwnedTraits;
 
 // constructor tag used by intrusive_ptr constructors
 struct DontIncreaseRefcount {};
@@ -90,7 +90,7 @@ class C10_API intrusive_ptr_target {
       intrusive_ptr_target* self);
 
   template <typename T>
-  friend class ExclusivelyOwnedTraits;
+  friend struct ExclusivelyOwnedTraits;
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -234,7 +234,7 @@ class intrusive_ptr final {
   TTarget* target_;
 
   template <typename T>
-  friend class ExclusivelyOwnedTraits;
+  friend struct ExclusivelyOwnedTraits;
   template <class TTarget2, class NullType2>
   friend class intrusive_ptr;
   friend class weak_intrusive_ptr<TTarget, NullType>;
@@ -568,6 +568,9 @@ template <typename T>
 struct ExclusivelyOwnedTraits<c10::intrusive_ptr<T>> {
   using repr_type = T*;
   using pointer_type = T*;
+  // You can still have non-const access to the T in the const methods
+  // because it's not stored by value.
+  using const_pointer_type = T*;
 
   static constexpr repr_type nullRepr() {
     return nullptr;

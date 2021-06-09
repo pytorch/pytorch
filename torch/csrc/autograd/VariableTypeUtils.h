@@ -147,7 +147,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   // If Inplace and View were separate dispatch keys we can just put Inplace
   // in the default_included_set, so that view ops on inference tensor doesn't
   // have to go through as_view even outside InferenceMode.
-  if (base.unsafeGetTensorImpl()->is_inference_tensor()) return tensor;
+  if (base.is_inference()) return tensor;
 
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
 
@@ -205,7 +205,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
 inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& tensors, bool is_bw_differentiable,
                                    bool is_fw_differentiable, CreationMeta creation_meta=CreationMeta::DEFAULT) {
   // See Note [View of inference tensor]
-  if (base.unsafeGetTensorImpl()->is_inference_tensor()) return tensors;
+  if (base.is_inference()) return tensors;
 
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
 
@@ -298,7 +298,7 @@ inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
     std::string msg = "the derivative for '";
     msg += name;
     msg += "' is not implemented";
-    throw std::runtime_error(msg);
+    TORCH_CHECK(false, msg);
   }
 }
 

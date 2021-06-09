@@ -61,6 +61,13 @@ class ExclusivelyOwned {
     return *this;
   }
 
+  // XXX: add test
+  ExclusivelyOwned& operator=(T&& rhs) noexcept {
+    EOT::destroyOwned(repr_);
+    repr_ = EOT::moveToRepr(std::move(rhs));
+    return *this;
+  }
+
   ~ExclusivelyOwned() {
     EOT::destroyOwned(repr_);
     // End the lifetime of repr_ without executing its dtor, since we
@@ -88,18 +95,29 @@ class ExclusivelyOwned {
     return EOT::take(repr_);
   }
 
-  typename EOT::pointer_type operator->() const {
+  typename EOT::const_pointer_type operator->() const {
     return get();
   }
 
-  typename EOT::pointer_type get() const {
+  typename EOT::const_pointer_type get() const {
     return EOT::getImpl(repr_);
   }
 
-  std::remove_pointer_t<typename EOT::pointer_type>& operator*() const {
+  typename EOT::pointer_type operator->() {
+    return get();
+  }
+
+  typename EOT::pointer_type get() {
+    return EOT::getImpl(repr_);
+  }
+
+  std::remove_pointer_t<typename EOT::const_pointer_type>& operator*() const {
     return *get();
   }
 
+  std::remove_pointer_t<typename EOT::pointer_type>& operator*() {
+    return *get();
+  }
 };
 
 } // namespace c10
