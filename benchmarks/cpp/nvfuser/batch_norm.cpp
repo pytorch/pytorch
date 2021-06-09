@@ -94,8 +94,7 @@ static void BatchNorm(benchmark::State& benchmark_state) {
   }
 }
 
-static void BatchNorm_Baseline(
-    benchmark::State& benchmark_state) {
+static void BatchNorm_Baseline(benchmark::State& benchmark_state) {
   const float kMomentum = 0.1;
   const float kEps = 1e-5;
   std::vector<int64_t> input_shape{

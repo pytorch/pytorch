@@ -150,8 +150,7 @@ static void Softmax_Dropout(benchmark::State& benchmark_state) {
   }
 }
 
-static void Softmax_Dropout_Baseline(
-    benchmark::State& benchmark_state) {
+static void Softmax_Dropout_Baseline(benchmark::State& benchmark_state) {
   std::vector<int64_t> input_shape{256, 12, 100, benchmark_state.range(0)};
   const int kReductionAxis = 3;
 

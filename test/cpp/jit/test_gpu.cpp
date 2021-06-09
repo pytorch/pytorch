@@ -10964,24 +10964,6 @@ TEST(NVFuserTest, FusionIssue363_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue477_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(1);
-  fusion.addInput(tv0);
-  auto tv1 = broadcast(tv0, {true, true, false});
-  auto tv2 = broadcast(tv1, {true, false, false, false});
-  auto tv3 = makeSymbolicTensor(4);
-  fusion.addInput(tv3);
-  auto tv4 = add(tv2, tv3);
-  fusion.addOutput(tv4);
-
-  tv0->computeAt(tv4, -3);
-
-  TORCH_CHECK(tv1->getComputeAtPosition() == 1);
-}
-
 TEST(NVFuserTest, FusionIssue484_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -14352,6 +14334,7 @@ TEST(NVFuserTest, FusionIssue757_CUDA) {
 
   tv1->computeAt(tv4, -1);
 
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
 
@@ -14391,6 +14374,8 @@ TEST(NVFuserTest, FusionPredicatedBlockBroadcast_CUDA) {
   tv4->split(0, 4);
   tv1->computeAt(tv4, -1);
 
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDy);
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
   tv4->axis(1)->parallelize(ParallelType::TIDy);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
@@ -15290,6 +15275,81 @@ TEST(NVFuserTest, TestSegmentIslands_CUDA) {
 
   FusionExecutorCache fusion_executor_cache(std::move(fusion));
   fusion_executor_cache.runFusionWithInputs({t0, t1});
+}
+
+TEST(NVFuserTest, TestBackOffInnerBroadcast_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1);
+  auto tv1 = makeSymbolicTensor(2);
+  auto tv2 = makeSymbolicTensor(4);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  auto tv3 = broadcast(tv0, {false, true, true, true});
+  auto tv4 = broadcast(tv1, {false, false, true, true});
+  auto tv5 = unaryOp(UnaryOpType::Rsqrt, tv2);
+
+  auto tv6 = add(tv3, tv5);
+  auto tv7 = add(tv4, tv5);
+  auto tv8 = add(tv3, tv4);
+
+  auto tv9 = add(tv6, tv7);
+  auto tv10 = add(tv9, tv8);
+
+  fusion->addOutput(tv10);
+
+  tv0->computeAt(tv10, -2);
+  tv1->computeAt(tv10, -2);
+  tv2->computeAt(tv10, -2);
+
+  TORCH_CHECK(tv3->getComputeAtPosition() == 1);
+  TORCH_CHECK(tv4->getComputeAtPosition() == 2);
+  TORCH_CHECK(tv5->getComputeAtPosition() == 3);
+
+  TORCH_CHECK(tv6->getMaxProducerPosition() == 3);
+  TORCH_CHECK(tv7->getMaxProducerPosition() == 3);
+  TORCH_CHECK(tv8->getMaxProducerPosition() == 2);
+}
+
+TEST(NVFuserTest, TestBackOffInnerBroadcast2_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(3);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  auto tv2 = broadcast(tv0, {false, false, true});
+  auto tv3 = add(tv2, tv1);
+
+  fusion->addOutput(tv3);
+  tv3->split(-2, 4);
+  tv3->reorder({{-1, -2}});
+  tv0->computeAt(tv3, -2);
+  tv1->computeAt(tv3, -2);
+  TORCH_CHECK(tv2->getComputeAtPosition() == 2);
+  TORCH_CHECK(tv3->getMaxProducerPosition() == 2);
+}
+
+TEST(NVFuserTest, TestBackOffInnerBroadcast3_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(4);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  auto tv2 = broadcast(tv0, {false, false, true});
+  auto tv3 = broadcast(tv2, {false, true, false, false});
+  auto tv4 = add(tv3, tv1);
+
+  fusion->addOutput(tv4);
+  tv0->computeAt(tv4, -1);
+  tv1->computeAt(tv4, -1);
+  TORCH_CHECK(tv2->getComputeAtPosition() == 2);
+  TORCH_CHECK(tv3->getMaxProducerPosition() == 3);
 }
 
 TEST(NVFuserTest, FusionSegfaultReduction_CUDA) {

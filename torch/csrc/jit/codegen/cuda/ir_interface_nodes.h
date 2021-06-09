@@ -354,9 +354,9 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     domain_ = td;
   }
 
-  void setComputeAt(unsigned int this_pos);
+  void setComputeAt(unsigned int this_pos, bool decrease = false);
 
-  void setMaxProducer(unsigned int this_pos);
+  void setMaxProducer(unsigned int this_pos, bool decrease = false);
 
  private:
   int normalizeAxisPos(int pos) const {

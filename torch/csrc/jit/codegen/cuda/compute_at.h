@@ -72,6 +72,10 @@ class ComputeAt {
   // of producer
   void traverseForward();
 
+  // Undo the inlining of block broadcast at the innermost positions
+  //  to avoid generating repeated block broadcasts
+  void hoistInnermostBroadcast();
+
   // Run the computeAt pass
   void runPass();
 

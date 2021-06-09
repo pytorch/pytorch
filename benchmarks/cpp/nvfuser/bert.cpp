@@ -244,23 +244,19 @@ static void MagicScheduler_DivMaxSoftDropBwd(
       bytes * int64_t(benchmark_state.iterations()));
 }
 
-static void DivMaxSoftDropFwd_fp32(
-    benchmark::State& benchmark_state) {
+static void DivMaxSoftDropFwd_fp32(benchmark::State& benchmark_state) {
   MagicScheduler_DivMaxSoftDropFwd(benchmark_state, DataType::Float);
 }
 
-static void DivMaxSoftDropBwd_fp32(
-    benchmark::State& benchmark_state) {
+static void DivMaxSoftDropBwd_fp32(benchmark::State& benchmark_state) {
   MagicScheduler_DivMaxSoftDropBwd(benchmark_state, DataType::Float);
 }
 
-static void DivMaxSoftDropFwd_fp16(
-    benchmark::State& benchmark_state) {
+static void DivMaxSoftDropFwd_fp16(benchmark::State& benchmark_state) {
   MagicScheduler_DivMaxSoftDropFwd(benchmark_state, DataType::Half);
 }
 
-static void DivMaxSoftDropBwd_fp16(
-    benchmark::State& benchmark_state) {
+static void DivMaxSoftDropBwd_fp16(benchmark::State& benchmark_state) {
   MagicScheduler_DivMaxSoftDropBwd(benchmark_state, DataType::Half);
 }
 

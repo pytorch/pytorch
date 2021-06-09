@@ -166,8 +166,8 @@ IterDomain* TensorView::axis(int pos) const {
   return domain()->axis(pos);
 }
 
-void TensorView::setComputeAt(unsigned int pos) {
-  if (pos <= compute_at_pos_) {
+void TensorView::setComputeAt(unsigned int pos, bool decrease) {
+  if (pos <= compute_at_pos_ && !decrease) {
     return;
   }
 
@@ -181,8 +181,8 @@ void TensorView::setComputeAt(unsigned int pos) {
   compute_at_pos_ = pos;
 }
 
-void TensorView::setMaxProducer(unsigned int pos) {
-  if (pos <= max_producer_pos_) {
+void TensorView::setMaxProducer(unsigned int pos, bool decrease) {
+  if (pos <= max_producer_pos_ && !decrease) {
     return;
   }
 

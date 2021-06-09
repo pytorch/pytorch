@@ -67,8 +67,7 @@ static void LayerNorm(benchmark::State& benchmark_state) {
   }
 }
 
-static void LayerNorm_Baseline(
-    benchmark::State& benchmark_state) {
+static void LayerNorm_Baseline(benchmark::State& benchmark_state) {
   std::vector<int64_t> input_shape{656, benchmark_state.range(0)};
   const int kReductionAxis = 1;
   std::vector<int64_t> norm_shape;

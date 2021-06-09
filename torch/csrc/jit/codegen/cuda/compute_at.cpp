@@ -506,6 +506,117 @@ void ComputeAt::traverseForward() {
   }
 }
 
+namespace {
+
+unsigned int getInnermostNonBroadcastIdFrom(TensorView* tv) {
+  unsigned int ret = tv->getComputeAtPosition();
+
+  // Still assuming we only have block broadcast for now.
+  //  This part may change
+  while (ret > 0 && tv->axis(ret - 1)->isBroadcast()) {
+    ret--;
+  }
+
+  return ret;
+}
+
+// Try to find the aligned position on consumer's domain corresponding to the
+//  compute at position of producer domain. Used in computeAt pass only. No
+//  checking on actual producer-consumer relationship.
+unsigned int getConsumerPosAlignedToProducerCA(
+    TensorView* consumer,
+    TensorView* producer,
+    ComputeAtRootDomainMap& root_map) {
+  unsigned int producer_ca_pos = producer->getComputeAtPosition();
+  // Locate consumer's position that aligns with
+  //  the producer's new compute at axis.
+  auto p2c_map = BestEffortReplay::replayCasP(
+                     consumer, producer, producer_ca_pos, root_map)
+                     .getReplay();
+
+  // Collect the set of iterdomains that are mapped from
+  //  producer ids within the compute at pos
+  std::unordered_set<IterDomain*> mapped_id_from_producer;
+  for (unsigned int producer_i = 0; producer_i < producer_ca_pos;
+       producer_i++) {
+    auto mapped_it = p2c_map.find(producer->axis(producer_i));
+    TORCH_INTERNAL_ASSERT(mapped_it != p2c_map.end());
+    mapped_id_from_producer.insert(mapped_it->second);
+  }
+
+  // Find the innermost position of consumer that has
+  //  been mapped within the producer ca axis.
+  unsigned int consumer_pos = consumer->nDims();
+  while (consumer_pos > 0 &&
+         !mapped_id_from_producer.count(consumer->axis(consumer_pos - 1))) {
+    consumer_pos--;
+  }
+
+  return consumer_pos;
+}
+
+} // namespace
+
+void ComputeAt::hoistInnermostBroadcast() {
+  auto fusion = producer_->fusion();
+
+  std::unordered_set<TensorView*> consumers_to_update;
+
+  auto all_vals = fusion->usedMathVals();
+  auto all_tvs = ir_utils::filterByType<TensorView>(all_vals);
+
+  for (auto running_producer : all_tvs) {
+    if (!running_producer->isFusionInput()) {
+      auto producer_ca_pos = running_producer->getComputeAtPosition();
+      // Find the innermost iterdomain that is not a broadcast
+      auto new_ca_pos = getInnermostNonBroadcastIdFrom(running_producer);
+      // Update the compute at pos of this producer if the original
+      //  compute at is within inner most broadcast axes
+      if (new_ca_pos < producer_ca_pos) {
+        running_producer->setComputeAt(new_ca_pos, true);
+      }
+      // Mark all consumers of this producer for later produce
+      //  position update.
+      // This is safe with segmented fusion. TV uses will reset
+      //  when FusionSegmentGuard try to change the IO.
+      for (auto expr_consumer : fusion->unordered_uses(running_producer)) {
+        auto tv_consumers =
+            ir_utils::filterByType<TensorView>(expr_consumer->outputs());
+        consumers_to_update.insert(tv_consumers.begin(), tv_consumers.end());
+      }
+    }
+  }
+
+  // Update the produce positions of all affected consumers
+  for (auto running_consumer : consumers_to_update) {
+    TORCH_INTERNAL_ASSERT(running_consumer->definition() != nullptr);
+    unsigned int new_consummer_pa_pos = 0;
+
+    // Re-compute the max producer position as one or more
+    //  of the producers of this consumer have updated their
+    //  compute at position.
+    for (auto inp : ir_utils::filterByType<TensorView>(
+             running_consumer->definition()->inputs())) {
+      if (!inp->isFusionInput()) {
+        // Locate consumer's position that aligns with
+        //  the producer's new compute at axis.
+        unsigned int inp_ca_pos_to_consumer =
+            getConsumerPosAlignedToProducerCA(running_consumer, inp, root_map_);
+
+        // Populate the max consumer position required by
+        //  producer compute at.
+        new_consummer_pa_pos =
+            std::max(new_consummer_pa_pos, inp_ca_pos_to_consumer);
+      }
+    }
+    // After going through all the producers, decrease the produce
+    //  position of current consumer if needed.
+    if (new_consummer_pa_pos < running_consumer->getMaxProducerPosition()) {
+      running_consumer->setMaxProducer(new_consummer_pa_pos, true);
+    }
+  }
+}
+
 void ComputeAt::runPass() {
   FUSER_PERF_SCOPE("ComputeAt::runPass");
 
@@ -514,6 +625,9 @@ void ComputeAt::runPass() {
 
   // Start at producer and traverse forward through all chains
   traverseForward();
+
+  // Back off on inlining the inner broadcast axes
+  hoistInnermostBroadcast();
 }
 
 ComputeAt::ComputeAt(
