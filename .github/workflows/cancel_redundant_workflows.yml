@@ -9,6 +9,7 @@ on:
     - Linux CI (pytorch-linux-xenial-py3.6-gcc5.4)
     - Test tools
     - TorchBench CI (pytorch-linux-py3.7-cu102)
+    - Windows CI (pytorch-win-vs2019-cpu-py3)
     - clang-format
 jobs:
   cancel:

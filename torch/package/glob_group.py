@@ -35,6 +35,7 @@ class GlobGroup:
             named in Python. Another common value for this is "/", which is
             the Unix path separator.
     """
+
     def __init__(
         self, include: GlobPattern, *, exclude: GlobPattern = (), separator: str = "."
     ):

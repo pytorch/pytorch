@@ -10,7 +10,7 @@ namespace at {
 namespace meta {
 
 TORCH_META_FUNC2(pow, Tensor_Tensor) (const Tensor& base, const Tensor& exp) {
-  build_binary_op(maybe_get_output(), base, exp);
+  build_borrowing_binary_op(maybe_get_output(), base, exp);
 }
 
 TORCH_META_FUNC2(pow, Tensor_Scalar) (const Tensor& base, const Scalar& exp) {

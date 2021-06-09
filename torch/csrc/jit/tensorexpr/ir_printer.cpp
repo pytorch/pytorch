@@ -283,7 +283,6 @@ void IRPrinter::visit(const Polynomial* v) {
   bool first = true;
   os() << "Polynomial(";
   for (auto* t : v->variables()) {
-    emitIndent();
     if (!first) {
       os() << " + ";
     }
@@ -353,20 +352,15 @@ void IRPrinter::visit(const ReduceOp* v) {
 }
 
 // === Stmt visitors below ===
-// Some invariants to keep in mind when changing printer visitors for statement:
-//  1) every statement first outputs the indendation with emitIndent
-//  2) every statement ends with a new line
-//
-// Block is an exception here as we want to allow it to be printed in the same
-// line as its parent stmt. Thus, block does not outputs the indentation in the
-// beginning and does not output a new line in the end - this should be done in
-// the parent stmt.
+
+// Newlines and indentation are handled solely by the `Block` printer.  For
+// each statement in a `Block` the printer will insert indentation before
+// the statement and a newline after the statement.
 
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
-  emitIndent();
   if (v->indices().size() == 0) {
-    os() << *v->base_handle() << " = " << *v->value() << ";" << std::endl;
+    os() << *v->base_handle() << " = " << *v->value() << ";";
     return;
   }
 
@@ -382,13 +376,11 @@ void IRPrinter::visit(const Store* v) {
     os() << "0";
   }
   os() << "] = " << *v->value() << ";";
-  os() << std::endl;
 }
 
 void IRPrinter::visit(const For* v) {
   const Var* var = v->var();
   VarHandle vv(var);
-  emitIndent();
   os() << "for (" << var->dtype().ToCppString() << " " << vv << " = "
        << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop())
        << "; " << vv << "++) ";
@@ -401,15 +393,15 @@ void IRPrinter::visit(const For* v) {
   } else {
     os() << "{}";
   }
-  os() << std::endl;
 }
 
 void IRPrinter::visit(const Block* v) {
-  os() << "{" << std::endl;
+  os() << "{\n";
   indent_++;
 
   for (Stmt* s : *v) {
-    os() << *s;
+    emitIndent();
+    os() << *s << "\n";
   }
   indent_--;
   emitIndent();
@@ -417,30 +409,27 @@ void IRPrinter::visit(const Block* v) {
 }
 
 void IRPrinter::visit(const Allocate* v) {
-  emitIndent();
   os() << "Allocate(" << *v->buffer_var()
        << "); // dtype=" << v->dtype().ToCppString();
   os() << ", dims=[";
   const std::vector<const Expr*>& dims = v->dims();
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     if (i != 0) {
       os() << ", ";
     }
     os() << *dims[i];
   }
-  os() << "]" << std::endl;
+  os() << "]";
 }
 
 void IRPrinter::visit(const Free* v) {
-  emitIndent();
-  os() << "Free(" << *v->buffer_var() << ");" << std::endl;
+  os() << "Free(" << *v->buffer_var() << ");";
 }
 
 void IRPrinter::visit(const Let* v) {
-  emitIndent();
   os() << v->dtype().ToCppString() << " " << *v->var();
   os() << " = " << *v->value();
-  os() << "; " << std::endl;
+  os() << ";";
 }
 
 void IRPrinter::visit(const Cond* v) {
@@ -448,23 +437,19 @@ void IRPrinter::visit(const Cond* v) {
   Stmt* true_stmt = v->true_stmt();
   Stmt* false_stmt = v->false_stmt();
   if (!true_stmt) {
-    emitIndent();
     os() << "if (!" << *cond << ") ";
-    os() << *false_stmt << std::endl;
+    os() << *false_stmt;
   } else {
-    emitIndent();
     os() << "if (" << *cond << ") ";
     os() << *true_stmt;
     if (false_stmt) {
       os() << " else ";
       os() << *false_stmt;
     }
-    os() << std::endl;
   }
 }
 
 void IRPrinter::visit(const AtomicAdd* v) {
-  emitIndent();
   os() << "atomicAdd(&" << *v->base_handle() << "[";
   size_t i = 0;
   for (const Expr* ind : v->indices()) {
@@ -477,16 +462,13 @@ void IRPrinter::visit(const AtomicAdd* v) {
     os() << "0";
   }
   os() << "], " << *v->value() << ");";
-  os() << std::endl;
 }
 
 void IRPrinter::visit(const SyncThreads* v) {
-  emitIndent();
-  os() << "__syncthreads();\n";
+  os() << "__syncthreads();";
 }
 
 void IRPrinter::visit(const ExternalCall* v) {
-  emitIndent();
   os() << *v->buf() << " = " << v->func_name() << "(";
 
   os() << "buf_args={";
@@ -506,7 +488,7 @@ void IRPrinter::visit(const ExternalCall* v) {
     }
     os() << *arg;
   }
-  os() << "})" << std::endl;
+  os() << "})";
 }
 
 void IRPrinter::emitIndent() {
@@ -601,7 +583,7 @@ std::string to_string(const Tensor* t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
   oss << "Tensor " << t->buf()->name_hint() << "[";
-  for (size_t i = 0; i < t->buf()->ndim(); i++) {
+  for (const auto i : c10::irange(t->buf()->ndim())) {
     if (i != 0) {
       oss << ", ";
     }

@@ -138,19 +138,32 @@ class TestSlice(JitTestCase):
         self.assertTrue('Tuple' not in str(tuple_graph))
 
     def test_module_list_slicing(self):
+        class Bar(torch.nn.Module):
+            def __init__(self, identifier: str):
+                super().__init__()
+                self.identifier = identifier
+
+            def forward(self):
+                return 0
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                m1 = torch.nn.Linear(1, 2)
-                m2 = torch.nn.ReLU()
-                m3 = torch.nn.GRU(1, 2)
-                self.test = torch.nn.ModuleList([m1, m2, m3])
+                module_list = [Bar("A"), Bar("B"), Bar("C"), Bar("D"), Bar("E")]
+                self.test = torch.nn.ModuleList(module_list)
 
             def forward(self):
-                return self.test[::-2]
+                return self.test[::-2], self.test[1:4:]
 
         scripted_foo = torch.jit.script(Foo())
-        result = scripted_foo()
-        self.assertEqual(len(result), 2)
-        self.assertEqual(str(result[0]._type()), "__torch__.torch.nn.modules.rnn.GRU")
-        self.assertEqual(str(result[1]._type()), "__torch__.torch.nn.modules.linear.Linear")
+        result1, result2 = scripted_foo()
+
+        self.assertEqual(len(result1), 3)
+        self.assertEqual(result1[0].identifier, "E")
+        self.assertEqual(result1[1].identifier, "C")
+        self.assertEqual(result1[2].identifier, "A")
+
+        self.assertEqual(len(result2), 3)
+        self.assertEqual(result2[0].identifier, "B")
+        self.assertEqual(result2[1].identifier, "C")
+        self.assertEqual(result2[2].identifier, "D")

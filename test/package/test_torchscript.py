@@ -1,10 +1,15 @@
-from unittest import skipIf
 from io import BytesIO
 from tempfile import TemporaryDirectory
+from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    run_tests,
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+)
 
 try:
     from torchvision.models import resnet18
