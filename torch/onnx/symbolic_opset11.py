@@ -7,7 +7,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
-from torch.onnx.symbolic_opset9 import expand, unused, div, sub
+from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -530,12 +530,6 @@ def arange(g, *args):
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
     return arange_tensor
 
-def linspace(g, start, end, steps, dtype, layout, device, pin_memory):
-    dtype = sym_help._maybe_get_const(dtype, "i")
-    step = div(g, sub(g, end, start), sub(g, steps, g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))))
-    end_epsilon = g.op("Add", step, end)
-    type, end, start, step = sym_help._arange_cast_helper(g, start=start, end=end_epsilon, step=step, dtype=dtype)
-    return g.op("Range", start, end, step)
 
 @parse_args("v", "i")
 def _dim_arange(g, like, dim):
