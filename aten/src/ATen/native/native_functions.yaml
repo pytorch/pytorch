@@ -1792,7 +1792,8 @@
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
 
-- func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
+- func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  category_override: factory
   variants: function
   dispatch:
     QuantizedCPU, QuantizedCUDA: empty_quantized
