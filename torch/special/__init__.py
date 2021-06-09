@@ -377,28 +377,9 @@ Example::
 log1p = _add_docstr(_special.special_log1p,
                     r"""
 log1p(input, *, out=None) -> Tensor
-Computes the natural logarithm of (1 + :attr:`input`), elementwise.
 
-.. math::
-    y_i = \log_{e} (x_i + 1)
-
-""" + r"""
-.. note:: This function is more accurate than :func:`torch.log` for small
-          values of :attr:`input`
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-    >>> t = torch.randn(5)
-    >>> t
-    tensor([-1.0090, -0.9923,  1.0249, -0.5372,  0.2492])
-    >>> torch.special.log1p(t)
-    tensor([    nan, -4.8653,  0.7055, -0.7705,  0.2225])
-""".format(**common_args))
+Alias for :func:`torch.log1p`.
+""")
 
 sinc = _add_docstr(_special.special_sinc,
                    r"""
@@ -432,19 +413,5 @@ round = _add_docstr(_special.special_round,
                     r"""
 round(input, *, out=None) -> Tensor
 
-Returns a new tensor with each of the elements of :attr:`input` rounded
-to the closest integer.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-    >>> t = torch.randn(4)
-    >>> t
-    tensor([ 0.9920,  0.6077,  0.9734, -1.0362])
-    >>> torch.special.round(t)
-    tensor([ 1.,  1.,  1., -1.])
-""".format(**common_args))
+Alias for :func:`torch.round`.
+""")
