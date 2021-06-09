@@ -2690,14 +2690,17 @@ class TestNN(NNTestCase):
         # Multiplying by a scalar does not change the rank
         self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
 
-        # Test backward
+        # The model has now three parameters
+        self.assertEqual(len(list(model.parameters())), 3)
+
+        sgd = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        # Test backward. Should not throw
         for _ in range(2):
-            # The model has now three parameters
-            self.assertEqual(len(list(model.parameters())), 3)
-            (model.weight.T @ model.bias).sum().backward()
-            with torch.no_grad():
-                for p in model.parameters():
-                    p.add_(- p.grad, alpha=0.01)
+            sgd.zero_grad()
+            loss = (model.weight.T @ model.bias).sum()
+            loss.backward()
+            sgd.step()
 
         # Same drill as before, removing should work as expected
         with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
@@ -2713,12 +2716,14 @@ class TestNN(NNTestCase):
 
         # The model has now two parameters
         self.assertEqual(len(list(model.parameters())), 2)
-        # Should not throw
+
+        # Test backward. Should not throw
+        sgd = torch.optim.SGD(model.parameters(), lr=0.1)
         for _ in range(2):
-            (model.weight.T @ model.bias).sum().backward()
-            with torch.no_grad():
-                for p in model.parameters():
-                    p.add_(- p.grad, alpha=0.01)
+            sgd.zero_grad()
+            loss = (model.weight.T @ model.bias).sum()
+            loss.backward()
+            sgd.step()
 
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
