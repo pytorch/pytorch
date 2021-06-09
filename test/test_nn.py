@@ -11306,12 +11306,11 @@ def add_test(test, decorator=None):
             add(cuda_test_name + '_cdouble', test_cdouble)
 
     else:
+        def with_tf32_off(self, test=test, kwargs=kwargs):
+            with tf32_off():
+                test.test_cuda(self, **kwargs)
+
         if tf32_is_not_fp32() and test.with_tf32:
-
-            def with_tf32_off(self, test=test, kwargs=kwargs):
-                with tf32_off():
-                    test.test_cuda(self, **kwargs)
-
             add(cuda_test_name + '_fp32', with_tf32_off)
 
             def with_tf32_on(self, test=test, kwargs=kwargs):
@@ -11320,7 +11319,7 @@ def add_test(test, decorator=None):
 
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
-            add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
+            add(cuda_test_name, with_tf32_off)
 
 for test_params in module_tests + new_module_tests:
     # TODO: CUDA is not implemented yet
