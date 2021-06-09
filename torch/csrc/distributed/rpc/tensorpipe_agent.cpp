@@ -874,7 +874,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
         "tried to send() a message of type ",
         requestMessage->type(),
         " but RPC is no longer running on this node.");
-    throw std::runtime_error(err);
+    TORCH_CHECK(false, err);
   }
 
   const auto& url = findWorkerURL(toWorkerInfo);
