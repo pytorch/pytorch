@@ -70,6 +70,7 @@ class TORCH_API ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info);
   void serialize_unified_format(Module& module, uint64_t script_module_id);
+  StorageContext& storage_context();
 
   ~ScriptModuleSerializer() = default;
 

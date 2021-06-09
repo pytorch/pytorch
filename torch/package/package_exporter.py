@@ -192,7 +192,6 @@ class PackageExporter:
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
         self.serialized_reduces: Dict[int, Any] = {}
-        self.serialized_storages: Set[str] = set()
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -717,16 +716,14 @@ node [shape=box];
             obj_key = str(obj._cdata)
             location = location_tag(obj)
             name = f".data/{obj_key}.storage"
-
-            if name not in self.serialized_storages:
-                # check to see if storage was previously serialized
-                serialized_files = self.zip_file.get_all_written_records()
-                if name not in serialized_files:
-                    if obj.device.type != "cpu":
-                        obj = obj.cpu()
-                    num_bytes = obj.size() * obj.element_size()
-                    self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
-                self.serialized_storages.add(name)
+            
+            # serialize storage if not already written
+            if not self.script_module_serializer.has_storage(name):
+                if obj.device.type != "cpu":
+                    obj = obj.cpu()
+                num_bytes = obj.size() * obj.element_size()
+                self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
+                self.script_module_serializer.track_storage(name, obj)
             return ("storage", storage_type, obj_key, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/python/script_init.h>
 
 #include <torch/csrc/Device.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
@@ -994,7 +995,17 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "write_files",
           &ScriptModuleSerializer::writeFiles,
-          py::arg("code_dir") = ".data/ts_code/code/");
+          py::arg("code_dir") = ".data/ts_code/code/")
+      .def(
+          "has_storage",
+          [](ScriptModuleSerializer& m, const std::string& name) {
+            return m.storage_context().hasStorage(name);
+          })
+      .def(
+          "track_storage",
+          [](ScriptModuleSerializer& m, const std::string& name, const c10::Storage& storage) {
+            m.storage_context().addStorage(name, storage);
+          });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be

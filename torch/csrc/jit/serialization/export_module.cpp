@@ -773,6 +773,10 @@ void ScriptModuleSerializer::serialize_unified_format(
   // function to have the code actually saved (tensors are saved)
 }
 
+StorageContext& ScriptModuleSerializer::storage_context() {
+  return storage_context_;
+}
+
 void ExportModule(
     const Module& module,
     std::ostream& out,
