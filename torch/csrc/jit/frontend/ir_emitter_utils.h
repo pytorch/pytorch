@@ -3,6 +3,7 @@
 #include <aten/src/ATen/core/jit_type.h>
 
 #include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
