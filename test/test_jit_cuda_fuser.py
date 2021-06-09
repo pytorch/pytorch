@@ -452,7 +452,8 @@ class TestCudaFuser(JitTestCase):
                       torch.relu,
                       torch.sigmoid,
                       torch.tanh,
-                      torch.nn.functional.gelu]
+                      torch.nn.functional.gelu,
+                      torch.nn.functional.silu]
         for op in operations:
             self._unary_test_helper(op)
 
@@ -530,7 +531,8 @@ class TestCudaFuser(JitTestCase):
                       torch.relu,
                       torch.sigmoid,
                       torch.tanh,
-                      torch.nn.functional.gelu]
+                      torch.nn.functional.gelu,
+                      torch.nn.functional.silu]
         prev_fallback = os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK']
         os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '0'
         for op, dtype in itertools.product(operations, dtypes):

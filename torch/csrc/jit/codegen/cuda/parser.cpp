@@ -21,7 +21,7 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
-constexpr auto kNumUnaryOps = 32;
+constexpr auto kNumUnaryOps = 33;
 constexpr auto kNumBinaryOps = 29;
 constexpr auto kNumBinaryOpsWithAlpha = 4;
 constexpr auto kNumLerpOps = 2;
@@ -384,6 +384,7 @@ class IrParser {
         "aten::relu(Tensor self) -> Tensor",
         "aten::sigmoid(Tensor self) -> Tensor",
         "aten::gelu(Tensor self) -> Tensor",
+        "aten::silu(Tensor self) -> Tensor",
     };
     for (auto signature : UnaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
@@ -423,6 +424,7 @@ class IrParser {
                 {aten::relu, UnaryOpType::Relu},
                 {aten::sigmoid, UnaryOpType::Sigmoid},
                 {aten::gelu, UnaryOpType::Gelu},
+                {aten::silu, UnaryOpType::Silu},
             });
             auto operand = value_map[node->input()->unique()];
 

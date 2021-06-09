@@ -85,6 +85,7 @@ class NaiveTypePropagator {
       case aten::clamp:
       case aten::gelu:
       case aten::gelu_backward:
+      case aten::silu:
       case aten::tanh: {
         TORCH_CHECK(
             hasTypeAndDevice(node->input(0)->type()->cast<TensorType>()),

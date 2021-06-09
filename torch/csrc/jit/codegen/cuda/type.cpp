@@ -162,6 +162,7 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::Cast:
     case UnaryOpType::Frac:
     case UnaryOpType::Gelu:
+    case UnaryOpType::Silu:
     case UnaryOpType::Neg:
     case UnaryOpType::Relu:
     case UnaryOpType::Reciprocal:
@@ -207,6 +208,8 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "frac";
     case UnaryOpType::Gelu:
       return "gelu";
+    case UnaryOpType::Silu:
+      return "silu";
     case UnaryOpType::Lgamma:
       return "lgamma";
     case UnaryOpType::Log:

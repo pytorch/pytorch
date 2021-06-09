@@ -86,6 +86,7 @@ enum class UnaryOpType {
   Floor,
   Frac,
   Gelu,
+  Silu,
   Lgamma,
   Log,
   Log10,

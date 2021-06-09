@@ -69,6 +69,14 @@ __device__ float sigmoid(float x) {
   return 1 / (1 + exp(-x));
 }
 
+__device__ double silu(double x) {
+  return x * sigmoid(x);
+}
+
+__device__ float silu(float x) {
+  return x * sigmoid(x);
+}
+
 __device__ double threshold(double x, double t, double v) {
   return x <= t ? v : x;
 }
