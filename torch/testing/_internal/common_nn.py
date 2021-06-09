@@ -4977,6 +4977,9 @@ class ModuleTest(TestBase):  # type: ignore[misc]
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def __call__(self, test_case):
+        return self._module_test_call(test_case)
+
+    def _module_test_call(self, test_case):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
 
@@ -5231,6 +5234,9 @@ class ModuleTest(TestBase):  # type: ignore[misc]
                 test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
 
     def test_cuda(self, test_case):
+        return self._module_test_cuda(test_case)
+
+    def _module_test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
 
@@ -5330,6 +5336,9 @@ class CriterionTest(TestBase):  # type: ignore[misc]
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def __call__(self, test_case):
+        return self._criterion_test_call(test_case)
+
+    def _criterion_test_call(self, test_case):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
 
@@ -5366,6 +5375,9 @@ class CriterionTest(TestBase):  # type: ignore[misc]
             gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def test_cuda(self, test_case, dtype, extra_args=None):
+        return self._criterion_test_cuda(test_case, dtype, extra_args)
+
+    def _criterion_test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)
