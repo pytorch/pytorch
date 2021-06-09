@@ -5798,13 +5798,18 @@
 
 - func: bitwise_left_shift.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
-  variants: method, function
-  dispatch:
-    CPU, CUDA: bitwise_left_shift
+  variants: function, method
+  structured_delegate: bitwise_left_shift.Tensor_out
+
+- func: bitwise_left_shift_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  structured_delegate: bitwise_left_shift.Tensor_out
 
 - func: bitwise_left_shift.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  variants: function
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: bitwise_left_shift_out
 
@@ -5813,6 +5818,12 @@
   variants: method, function
   dispatch:
     CPU, CUDA: bitwise_left_shift
+
+- func: bitwise_left_shift_.Tensor_Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  dispatch:
+    CPU, CUDA: bitwise_left_shift_
 
 - func: bitwise_left_shift.Tensor_Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5852,13 +5863,18 @@
 
 - func: bitwise_right_shift.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
-  variants: method, function
-  dispatch:
-    CPU, CUDA: bitwise_right_shift
+  variants: function, method
+  structured_delegate: bitwise_right_shift.Tensor_out
+
+- func: bitwise_right_shift_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  structured_delegate: bitwise_right_shift.Tensor_out
 
 - func: bitwise_right_shift.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  variants: function
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: bitwise_right_shift_out
 
@@ -5867,6 +5883,12 @@
   variants: method, function
   dispatch:
     CPU, CUDA: bitwise_right_shift
+
+- func: bitwise_right_shift_.Tensor_Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  dispatch:
+    CPU, CUDA: bitwise_right_shift_
 
 - func: bitwise_right_shift.Tensor_Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
