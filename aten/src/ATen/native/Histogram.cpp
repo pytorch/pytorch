@@ -118,6 +118,10 @@ std::pair<double, double> select_outer_bin_edges(const Tensor& input, c10::optio
         rightmost_edge = std::get<1>(extrema).item<double>();
     }
 
+    TORCH_CHECK(!(std::isinf(leftmost_edge) || std::isinf(rightmost_edge) ||
+            std::isnan(leftmost_edge) || std::isnan(rightmost_edge)),
+            "torch.histogram: range of [", leftmost_edge, ", ", rightmost_edge, "] is not finite");
+
     TORCH_CHECK(leftmost_edge <= rightmost_edge, "torch.histogram: min should not exceed max, but got",
             " min ", leftmost_edge, " max ", rightmost_edge);
 
@@ -150,7 +154,7 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
 
     TORCH_CHECK(!(std::isinf(leftmost_edge) || std::isinf(rightmost_edge) ||
             std::isnan(leftmost_edge) || std::isnan(rightmost_edge)),
-            "range of [", leftmost_edge, ", ", rightmost_edge, "] is not finite");
+            "torch.histc: range of [", leftmost_edge, ", ", rightmost_edge, "] is not finite");
 
     TORCH_CHECK(leftmost_edge < rightmost_edge, "torch.histc: max must be larger than min");
 
