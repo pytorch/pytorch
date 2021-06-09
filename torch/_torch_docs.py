@@ -4662,11 +4662,10 @@ add_docstr(torch.log1p,
            r"""
 log1p(input, *, out=None) -> Tensor
 
-Computes the natural logarithm of (1 + :attr:`input`), elementwise.
+Returns a new tensor with the natural logarithm of (1 + :attr:`input`).
 
 .. math::
     y_i = \log_{e} (x_i + 1)
-
 """ + r"""
 .. note:: This function is more accurate than :func:`torch.log` for small
           values of :attr:`input`
@@ -4678,12 +4677,13 @@ Keyword args:
     {out}
 
 Example::
-    >>> t = torch.randn(5)
-    >>> t
+
+    >>> a = torch.randn(5)
+    >>> a
     tensor([-1.0090, -0.9923,  1.0249, -0.5372,  0.2492])
-    >>> torch.log1p(t)
+    >>> torch.log1p(a)
     tensor([    nan, -4.8653,  0.7055, -0.7705,  0.2225])
-""")
+""".format(**common_args))
 
 add_docstr(torch.log2,
            r"""
@@ -7856,12 +7856,13 @@ Keyword args:
     {out}
 
 Example::
-    >>> t = torch.randn(4)
-    >>> t
+
+    >>> a = torch.randn(4)
+    >>> a
     tensor([ 0.9920,  0.6077,  0.9734, -1.0362])
-    >>> torch.round(t)
+    >>> torch.round(a)
     tensor([ 1.,  1.,  1., -1.])
-""")
+""".format(**common_args))
 
 add_docstr(torch.rsqrt,
            r"""
