@@ -36,7 +36,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           IntArrayRef batch_sizes,
                           const c10::optional<Tensor>& dropout_state) {
 #if AT_CUDNN_ENABLED()
-  c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+  c10::impl::ExcludeSingleDispatchKeyGuard<DispatchKey::Autocast, /*has_overlap=*/> no_autocast;
 
   for (const auto& t : weight) {
     TORCH_CHECK(weight[0].scalar_type() == t.scalar_type(), "Weight scalar types do not match.");

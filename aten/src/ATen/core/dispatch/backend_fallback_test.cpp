@@ -25,7 +25,7 @@ static int64_t override_call_count = 0;
 
 void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   override_call_count++;
-  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
+  c10::impl::ExcludeSingleDispatchKeyGuard<DispatchKey::TESTING_ONLY_GenericMode, /*has_overlap=*/false guard;
   op.callBoxed(stack);
 }
 
