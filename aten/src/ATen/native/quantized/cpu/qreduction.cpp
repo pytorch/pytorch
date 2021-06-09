@@ -31,18 +31,17 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
   initQNNPACK();
   const auto scale = input_contig.q_scale();
   const auto zero_point = input_contig.q_zero_point();
-
   const auto outC = inC;
 
-  if (keepdim)
-    output = at::_empty_affine_quantized(
-        {batch_size, outC, 1, 1},
-        at::device(kCPU).dtype(kQUInt8),
-        scale,
-        zero_point);
-  else
-    output = at::_empty_affine_quantized(
-        {batch_size, outC}, at::device(kCPU).dtype(kQUInt8), scale, zero_point);
+  // something must be wrong with IntArrayRef copy construtor
+  // have to construct IntArrayRef() directly from data
+  IntArrayRef::value_type output_size_data[]{batch_size, outC, 1, 1};
+  output = at::_empty_affine_quantized(
+      (keepdim ? IntArrayRef(output_size_data, 4)
+               : IntArrayRef(output_size_data, 2)),
+      at::device(kCPU).dtype(kQUInt8),
+      scale,
+      zero_point);
 
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
   const pytorch_qnnp_status createStatus =
