@@ -71,7 +71,6 @@ WINDOWS_WORKFLOWS = [
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cpu-py3",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
-        on_pull_request=True
     )
 ]
 
@@ -80,7 +79,6 @@ LINUX_WORKFLOWS = [
         build_environment="pytorch-linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        on_pull_request=True,
         enable_doc_jobs=True,
     ),
     # PyTorchLinuxWorkflow(
@@ -116,6 +114,7 @@ LINUX_WORKFLOWS = [
     PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        on_pull_request=True,
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
     ),
     # PyTorchLinuxWorkflow(
