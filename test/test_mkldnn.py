@@ -951,7 +951,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(y, y_bf16.float(), atol=1e-1, rtol=1e-3)
                 self.assertEqual(cpu_y_bf16, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+                msg = "mkldnn_reorder_linear_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
                                        lambda: mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16))
