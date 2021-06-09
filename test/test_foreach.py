@@ -1,7 +1,7 @@
 import re
 import torch
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW, skipIfOnGHA
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, skipCUDAIfRocm, skipMeta, ops)
 from torch._six import inf, nan
@@ -41,8 +41,6 @@ class ForeachFuncWrapper:
         else:
             return self.func(*inputs, **kwargs)
 
-# Skipping on GHA for now, see https://github.com/pytorch/pytorch/issues/59746
-@skipIfOnGHA
 class TestForeach(TestCase):
     # todo(mkozuki): remove this once `TestForeach` is refactored with `@op` decorator.
     bin_ops = [
