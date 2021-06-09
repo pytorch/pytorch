@@ -165,9 +165,24 @@ TEST(AutogradAPITests, RetainGrad) {
   auto h1 = input * 3;
   auto out = (h1 * h1).sum();
 
+  {
+    // Warning when grad is accessed for non-leaf tensor
+    WarningCapture warnings;
+    ASSERT_FALSE(h1.grad().defined());
+    ASSERT_TRUE(
+      warnings.str().find("is not a leaf") != std::string::npos);
+  }
   // It should be possible to call retain_grad() multiple times
   h1.retain_grad();
   h1.retain_grad();
+  {
+    // If retain_grad is true for a non-leaf tensor,
+    // there should not be any warning when grad is accessed
+    WarningCapture warnings;
+    ASSERT_FALSE(h1.grad().defined());
+    ASSERT_FALSE(
+      warnings.str().find("is not a leaf") != std::string::npos);
+  }
 
   // Gradient should be accumulated
   // NOLINTNEXTLINE(bugprone-argument-comment)
