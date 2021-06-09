@@ -287,7 +287,13 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 self.assertEqual(m.bias, torch.tensor([2.1]))
 
     def test_sharding(self):
-        """ Check the sharding at construction time"""
+        """ Check the sharding at construction time
+
+        NOTE: The correctness of this test depends on the ZeRO implementation
+        using the sorted-greedy partitioning algorithm. For details, see
+        `ZeroRedundancyOptimizer.partition_parameters()` in
+        `zero_redundancy_optimizer.py`.
+        """
         self.dist_init(self.rank)
         sizes = [9, 7, 5, 3]
         params = []
@@ -299,6 +305,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def test_add_param_group(self):
         """Check that ZeroRedundancyOptimizer properly handles adding a new param_group a posteriori,
         and that all ranks get a shard
+
+        NOTE: The correctness of this test depends on the ZeRO implementation
+        using the sorted-greedy partitioning algorithm. For details, see
+        `ZeroRedundancyOptimizer.partition_parameters()` in
+        `zero_redundancy_optimizer.py`.
         """
         self.dist_init(self.rank)
 
