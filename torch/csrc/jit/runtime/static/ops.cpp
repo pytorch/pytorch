@@ -1582,7 +1582,7 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
 
-        if (!packed_weight) {
+        if (packed_weight) {
           packed_weight->apply_out(
               input, output_scale, output_zero_point, out_t);
         } else {

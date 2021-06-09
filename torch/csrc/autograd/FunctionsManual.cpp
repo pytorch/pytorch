@@ -85,7 +85,7 @@ T not_implemented_base(const char* name, const char* reason) {
   if (strlen(reason) > 0) {
     msg = c10::str(msg, " ", reason);
   };
-  throw std::runtime_error(msg);
+  TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
 }
 
 Tensor not_implemented(const char* name, const char* reason) {
@@ -248,7 +248,7 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
   Tensor cond;
   if (exponent.is_complex()) {
-    auto is_real_exp = at::logical_and(at::imag(exponent) == 0, at::real(exponent) >= 0);
+    auto is_real_exp = at::logical_and(at::imag(exponent.resolve_conj()) == 0, at::real(exponent) >= 0);
     cond = at::logical_and(self == 0, is_real_exp);
   } else {
     cond = at::logical_and(self == 0, exponent >= 0);
@@ -264,7 +264,7 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exp
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
-        return at::logical_and(at::imag(exp) == 0, at::real(exp) >= 0);
+        return at::logical_and(at::imag(exp.resolve_conj()) == 0, at::real(exp) >= 0);
       } else {
         return exp >=0;
       }
@@ -764,33 +764,33 @@ Tensor sparse_sparse_matmul_backward(
 
   c = a @ b
       then
-  a_grad = c_grad @ b^T
-  b_grad = a^T @ c_grad
+  a_grad = c_grad @ b^H
+  b_grad = a^H @ c_grad
 
   So for sparse matrices we can use the following definition:
 
   if grad_order == 0:
-      a_grad = sparse_matrix_mask(c_grad @ b^T, mask=a)
+      a_grad = sparse_matrix_mask(c_grad @ b^H, mask=a)
   else:
-      b_grad = sparse_matrix_mask(a^T @ c_grad, mask=b)
+      b_grad = sparse_matrix_mask(a^H @ c_grad, mask=b)
   */
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
   if (grad_order == 0) {
-    auto a_grad = _sparse_sparse_matmul(grad, b.t());
+    auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
     return _sparse_matrix_mask(a_grad.coalesce(), a.coalesce());
   }
-  auto b_grad = _sparse_sparse_matmul(a.t(), grad);
+  auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
   return _sparse_matrix_mask(b_grad.coalesce(), b.coalesce());
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p_s, int64_t dim, const Scalar& maxnorm) {
   auto self_sizes = self.sizes();
+  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
   at::DimVector reduce_dims(self_sizes.size());
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
-
   auto dtype = self.scalar_type();
   auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
   const auto p = p_s.toDouble();
@@ -1164,6 +1164,26 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
   return grad_target;
 }
 
+Tensor binary_cross_entropy_target_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& target,
+  const c10::optional<Tensor>& weight,
+  int64_t reduction) {
+  auto grad_target = (1. - self).log_().sub_(self.log()).mul_(grad);
+
+  if (isDefined(weight)) {
+    grad_target.mul_(weight.value());
+  }
+
+  if (reduction == at::Reduction::Mean) {
+    grad_target.div_(target.numel());
+  }
+
+  return grad_target;
+}
+
+
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const c10::optional<Tensor>& weight, const c10::optional<Tensor>& pos_weight, int64_t reduction) {
   Tensor grad_target;
   if (isDefined(pos_weight)) {
@@ -1258,9 +1278,8 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   }
   if (reduction == at::Reduction::Mean) {
     return gI / input.numel();
-  } else if (reduction == at::Reduction::Sum) {
-    return gI.sum();
   }
+
   return gI;
 }
 
@@ -2154,7 +2173,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   if (self.is_complex() && gu.defined()) {
     Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
     at::real(L).zero_();
-    at::imag(L).mul_(sigma_inv);
+    at::imag(L.resolve_conj()).mul_(sigma_inv);
     Tensor imag_term = at::matmul(u * L.unsqueeze(-2), vh);
     return u_term + sigma_term + v_term + imag_term;
   }
@@ -2195,7 +2214,7 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     // path for torch.linalg.eig with always a complex tensor of eigenvalues
     else {
-      is_imag_eigvals_zero = (at::imag(D) == 0.0).min().item<bool>();
+      is_imag_eigvals_zero = (at::imag(D.resolve_conj()) == 0.0).min().item<bool>();
       // insert an additional dimension to be compatible with torch.eig.
       // Recall that it produces 2D tensors.
       // We extract only the real parts as there is no support for

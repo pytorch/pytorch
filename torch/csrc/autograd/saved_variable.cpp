@@ -32,7 +32,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // is saved for backward.  Whether a tensor is saved for backward is determined
     // by derivative formula and thus varies op by op, so by saying "no inference
     // tensor in autograd" it's easier for users to understand and follow.
-    TORCH_CHECK(!variable.unsafeGetTensorImpl()->is_inference_tensor(),
+    TORCH_CHECK(!variable.is_inference(),
       "Inference tensors cannot be saved for backward. To work around "
       "you can make a clone to get a normal tensor and use it in autograd.")
 
