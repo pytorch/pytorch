@@ -802,6 +802,45 @@ class Graph:
         with override_node_repr(self):
             return self._python_code(root_module, namespace)
 
+    def stripped_python_code(self, root_module : str) -> str:
+        """
+        Return the string representation of this ``Graph`` with no names. This
+        helps facilitiate debugging by showing just the structure of the code.
+        It can be used with, for example, ``difflib`` to show differences
+        between two graphs.
+
+        Args:
+
+            root_module (str): The name of the root module on which to look-up
+                qualified name targets. This is usually 'self'.
+
+        Returns:
+
+            The string representation of the ``Graph`` code with no names.
+        """
+        namespace = _Namespace()
+
+
+        def node_repr(n: Node):
+            namespace.create_name(n.name, n)
+            return ''
+
+        @contextmanager
+        def override_node_repr(graph: Graph):
+            orig_repr_fns = {}
+            for node in graph.nodes:
+                orig_repr_fns[node] = node._repr_fn
+                node._repr_fn = node_repr
+            try:
+                yield None
+            finally:
+                # restore the original repr functions
+                for node in graph.nodes:
+                    node._repr_fn = orig_repr_fns[node]
+
+        with override_node_repr(self):
+            return self._python_code(root_module, namespace).src
+
     def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []

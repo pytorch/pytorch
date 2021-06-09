@@ -1846,6 +1846,41 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(Foo())
         assert(all('constant' not in node.target for node in traced.graph.nodes))
 
+    def test_stripped_code(self):
+        def a(x):
+            return torch.neg(torch.relu(torch.relu(x)))
+
+        code = torch.fx.symbolic_trace(a).graph.stripped_python_code('self')
+
+        self.assertNotIn('relu =', code)
+        self.assertNotIn('relu_1 =', code)
+        self.assertNotIn('neg =', code)
+
+    def test_graph_compare(self):
+        def a(x):
+            return torch.neg(torch.relu(torch.relu(x)))
+
+        def b(x):
+            return torch.relu(torch.neg(torch.relu(x)))
+
+        import re
+
+        class DebugNamespace(torch.fx.graph._Namespace):
+            def __init__(self):
+                super().__init__()
+                self.re_pattern = re.compile(r'_\d+$')
+
+            def create_name(self, candidate: str, obj: Optional[Any]) -> str:
+                return self.re_pattern.sub('', candidate)
+
+        traced_a = torch.fx.symbolic_trace(a).graph.stripped_python_code('self').splitlines(keepends=True)
+        traced_b = torch.fx.symbolic_trace(b).graph.stripped_python_code('self').splitlines(keepends=True)
+
+        import difflib
+
+        diff_str = '\n'.join(difflib.ndiff(traced_a, traced_b))
+        FileCheck().check('+').check('= torch.neg').check('-').check('= torch.neg').run(diff_str)
+
     def test_single_default_arg(self):
         class M(torch.nn.Module):
             def __init__(self):
