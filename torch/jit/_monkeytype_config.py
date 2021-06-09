@@ -1,6 +1,5 @@
 import inspect
 import typing
-import torch
 from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
 
@@ -73,10 +72,11 @@ if _IS_MONKEYTYPE_INSTALLED:
                     if inspect.getmodule(_type) == typing:
                         _type_to_string = str(_type)
                         _all_type += _type_to_string.replace('typing.', '') + ','
-                    elif inspect.getmodule(_type) == torch.nn.parameter:
-                        # Since torch.nn.parameter is a subclass of tensor,
-                        # replace the type to torch.Tensor
-                        _all_type += 'torch.Tensor' + ','
+                    elif "torch.nn.parameter.Parameter" in str(_type):
+                        # Check if the type is torch.nn.parameter.Parameter,
+                        # use the entire quaalified name `torch.nn.parameter.Parameter`
+                        # for type
+                        _all_type += 'torch.nn.parameter.Parameter' + ','
                     else:
                         _all_type += _type.__name__ + ','
                 _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
