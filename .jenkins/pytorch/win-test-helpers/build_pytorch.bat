@@ -122,3 +122,6 @@ python setup.py install && sccache --show-stats && (
     python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
   )
 )
+
+rem testing rerun
+python setup.py install && sccache --zero-stats && sccache --show-stats
