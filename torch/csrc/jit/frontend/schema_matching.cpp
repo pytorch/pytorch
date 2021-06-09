@@ -3,6 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
@@ -63,7 +64,12 @@ Value* tryConvertToType(
     if (value->type()->kind() != OptionalType::Kind &&
         !value->type()->isSubtypeOf(NoneType::get())) {
       return tryConvertToType(
-          loc, graph, additions, op->getElementType(), value, allow_conversions);
+          loc,
+          graph,
+          additions,
+          op->getElementType(),
+          value,
+          allow_conversions);
     }
   }
 
@@ -187,7 +193,8 @@ static Value* tryMatchArgument(
 
   // Check if the value can be matched to the arg through any implicit
   // conversions
-  value = tryConvertToType(loc, graph, additions, concrete_type, value, allow_conversions);
+  value = tryConvertToType(
+      loc, graph, additions, concrete_type, value, allow_conversions);
   std::stringstream ss;
   if (!value->type()->isSubtypeOfExt(
           concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
@@ -575,7 +582,6 @@ std::pair<size_t, MatchedSchema> matchSchemas(
                          << "\nThe original call is";
   throw ErrorReport(loc) << failure_messages.str();
 }
-
 
 } // namespace jit
 } // namespace torch

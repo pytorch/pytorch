@@ -2,6 +2,15 @@
 
 #include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 
+#include <aten/src/ATen/core/jit_type.h>
+
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/frontend/tree_views.h>
+
+#include <torch/csrc/jit/ir/ir.h>
+
 namespace torch {
 namespace jit {
 
@@ -36,16 +45,6 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  Function& method;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  ResolverPtr resolver;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::unordered_map<std::string, std::function<std::string()>> error_messages;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  Block* b;
-
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
@@ -104,6 +103,13 @@ struct Environment {
   void removeVar(const Ident& ident, bool check_if_removed = false);
 
   std::vector<std::string> definedVariables();
+
+ protected:
+  Function& method;
+  ResolverPtr resolver;
+  std::unordered_map<std::string, std::function<std::string()>> error_messages;
+  Block* b;
+  friend struct to_ir;
 
  private:
   TypeTable type_table;

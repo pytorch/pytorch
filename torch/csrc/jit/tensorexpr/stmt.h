@@ -597,7 +597,7 @@ class TORCH_API LoopOptions {
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
-class TORCH_API For : public StmtNode<For> {
+class TORCH_API For : public StmtNode<tensorexpr::For> {
  public:
   const Var* var() const {
     return var_;

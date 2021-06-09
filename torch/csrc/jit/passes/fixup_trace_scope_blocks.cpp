@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
-#include <torch/csrc/jit/frontend/schema_emitter.h>
+#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
