@@ -42,6 +42,9 @@
 namespace torch {
 namespace jit {
 
+using FunctionTable = std::unordered_map<std::string, Function&>;
+using AttributeMap = std::unordered_map<std::string, Const>;
+using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 /* ============================================================ */
 /*                    Internal Utility Methods                  */
