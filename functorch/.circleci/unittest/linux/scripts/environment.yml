@@ -1,0 +1,13 @@
+channels:
+  - defaults
+dependencies:
+  - numpy
+  - pytest
+  - pytest-cov
+  - codecov
+  - pip
+  - ca-certificates
+  - pip:
+      - pillow>=4.1.1
+      - scipy
+      - av
