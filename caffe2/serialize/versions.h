@@ -67,6 +67,10 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  0x3L: (Comment missing)
 //  0x4L: (Comment missing)
 //  0x4L: (update) Added schema to function tuple. Forward-compatible change.
+//  0x5L: (update) Update bytecode is sharing constant tensor files from torchscript, and only serialize
+//  0x6L: Implicit opereator versioning using number of specified argument.
+//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845
+//  for details.
 constexpr uint64_t kProducedBytecodeVersion = 0x4L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
