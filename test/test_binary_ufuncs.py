@@ -223,44 +223,56 @@ class TestBinaryUfuncs(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             self.assertTrue(ts2 != t2)
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
     def test_bitwise_ops(self, device):
+        def check_op(x, y):
+            x_np = x.cpu().numpy() if isinstance(x, torch.Tensor) else x
+            y_np = y.cpu().numpy() if isinstance(y, torch.Tensor) else y
+
+            and_result = x & y
+            and_expect = torch.tensor(x_np & y_np, device=device)
+            self.assertEqual(and_expect, and_result)
+
+            or_result = x | y
+            or_expect = torch.tensor(x_np | y_np, device=device)
+            self.assertEqual(or_expect, or_result)
+
+            xor_result = x ^ y
+            xor_expect = torch.tensor(x_np ^ y_np, device=device)
+            self.assertEqual(xor_expect, xor_result)
+
+        def check_iop(x, y):
+            and_result = x & y
+            or_result = x | y
+            xor_result = x ^ y
+
+            x_clone = x.clone()
+            x_clone &= y
+            self.assertEqual(x_clone, and_result)
+
+            x_clone = x.clone()
+            x_clone |= y
+            self.assertEqual(x_clone, or_result)
+
+            x_clone = x.clone()
+            x_clone ^= y
+            self.assertEqual(x_clone, xor_result)
+
         x = torch.randn(5, 5).gt(0)
         y = torch.randn(5, 5).gt(0)
 
-        and_result = x & y
-        for idx in iter_indices(x):
-            if and_result[idx]:
-                self.assertTrue(x[idx] and y[idx])
-            else:
-                self.assertFalse(x[idx] and y[idx])
+        # Tensor x Tensor
+        check_op(x, y)
+        check_iop(x, y)
 
-        or_result = x | y
-        for idx in iter_indices(x):
-            if or_result[idx]:
-                self.assertTrue(x[idx] or y[idx])
-            else:
-                self.assertFalse(x[idx] or y[idx])
+        # Tensor x Scalar
+        check_op(x, True)
+        check_op(x, False)
+        check_iop(x, True)
+        check_iop(x, False)
 
-        xor_result = x ^ y
-        for idx in iter_indices(x):
-            if xor_result[idx]:
-                self.assertTrue(x[idx] ^ y[idx])
-            else:
-                self.assertFalse(x[idx] ^ y[idx])
-
-        x_clone = x.clone()
-        x_clone &= y
-        self.assertEqual(x_clone, and_result)
-
-        x_clone = x.clone()
-        x_clone |= y
-        self.assertEqual(x_clone, or_result)
-
-        x_clone = x.clone()
-        x_clone ^= y
-        self.assertEqual(x_clone, xor_result)
+        # Scalar x Tensor
+        check_op(True, y)
+        check_op(False, y)
 
     def test_inplace_division(self, device):
         t = torch.rand(5, 5, device=device)
