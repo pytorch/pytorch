@@ -7,6 +7,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <ATen/core/ivalue_inl.h>
+#include <ATen/ThreadLocalState.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Utils.hpp>
@@ -14,7 +17,9 @@
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#ifndef _WIN32
 #include <torch/csrc/distributed/autograd/context/context.h>
+#endif
 
 namespace c10d {
 
@@ -26,7 +31,7 @@ constexpr int kDDPRuntimeLoggingSampleRate = 100;
 // Forward declaration
 class Logger;
 
-class Timer {
+class TORCH_API Timer {
  public:
   enum class Event {
     kForwardStart,
@@ -48,7 +53,7 @@ class Timer {
 
 C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
-class Reducer {
+class TORCH_API Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
   // The bucket assignment for this reducer is specified as a list of
@@ -224,8 +229,12 @@ class Reducer {
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
 
-  using GradCallback =
-      torch::distributed::autograd::DistAutogradContext::GradCallback;
+  using GradCallback = std::function<bool(at::Tensor&)>;
+#ifndef _WIN32
+  static_assert(std::is_same<
+    GradCallback,
+    torch::distributed::autograd::DistAutogradContext::GradCallback>::value, "");
+#endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
   // A bucket replica represents [1..N] gradients to be reduced,
@@ -318,7 +327,7 @@ class Reducer {
     // Keep future work handle around DDP comm hook.
     // If no hook is registered, a temporary vanilla allreduce hook will be
     // used.
-    c10::intrusive_ptr<torch::jit::Future> future_work;
+    c10::intrusive_ptr<at::ivalue::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
@@ -381,6 +390,7 @@ class Reducer {
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
 
+#ifndef _WIN32
   struct RpcContext {
     using ContextPtr = torch::distributed::autograd::ContextPtr;
     // The shared_ptr is to hold the context instance.
@@ -390,6 +400,7 @@ class Reducer {
     void set(ContextPtr&& new_context_ptr);
   };
   RpcContext rpc_context_;
+#endif
 
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
@@ -475,7 +486,7 @@ class Reducer {
 // The index of tensors[i] assigned to bucket is tensor_indices[i],
 // when tensor_indices is empty, the index of tensors[i] assigned to
 // bucket is i.
-std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+TORCH_API std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
@@ -483,7 +494,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
-void verify_replica0_across_processes(
+TORCH_API void verify_replica0_across_processes(
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<at::Tensor>> model_replicas);
 } // namespace c10d
