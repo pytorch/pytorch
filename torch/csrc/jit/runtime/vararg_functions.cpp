@@ -159,9 +159,9 @@ void einsum(Stack& stack, size_t num_inputs) {
           " to be within the range [0, 52), but got ",
           l[i]);
       if (l[i] < 26) {
-        ss << static_cast<char>(l[i] + 'a');
+        ss << static_cast<char>(l[i] + 'A');
       } else {
-        ss << static_cast<char>(l[i] - 26 + 'A');
+        ss << static_cast<char>(l[i] - 26 + 'a');
       }
     }
   };
