@@ -54,10 +54,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *cuda11* ]]; then
 fi
 
 run_tests() {
-    # Run nvidia-smi if available
-    for path in  /c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe /c/Windows/System32/nvidia-smi.exe; do
-        if [ -x $path ]; then
-            $path;
+    # Run nvidia-smi if available and using CUDA
+    for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
+        if [[ -x "$path" ]]; then
+            # NOTE: more informational than anything, this will also run on cpu nodes so let's just ignore errors
+            "$path" || echo "true";
             break
         fi
     done
