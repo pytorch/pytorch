@@ -44,8 +44,6 @@ void MaybeDumpGraph(const at::Tensor& tensor) {
     std::string graph_str;
     if (dump_graph == "text") {
       graph_str = GetTensorTextGraph(tensor);
-    } else if (dump_graph == "hlo") {
-      // graph_str = GetTensorHloGraph(tensor);
     } else if (dump_graph == "dot") {
       graph_str = GetTensorDotGraph(tensor);
     }
