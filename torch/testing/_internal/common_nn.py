@@ -4938,16 +4938,11 @@ class TestBase(object):
 
         return self._unpack(self._arg_cache[name]) if unpack else self._arg_cache[name]
 
-    def _get_input(self, unpack=True):
-        return self._get_arg('input', unpack)
-
     def __call__(self, test_case):
         raise NotImplementedError
 
-
-class InputVariableMixin(object):
     def _get_input(self):
-        input = TestBase._get_input(self, False)  # type: ignore[arg-type]
+        input = self._get_arg('input', False)  # type: ignore[arg-type]
 
         def map_variables(i):
             if isinstance(i, torch.Tensor):
@@ -4960,7 +4955,7 @@ class InputVariableMixin(object):
         return map_variables(input)
 
 
-class ModuleTest(InputVariableMixin, TestBase):  # type: ignore[misc]
+class ModuleTest(TestBase):  # type: ignore[misc]
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
@@ -5320,7 +5315,7 @@ class ModuleTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 
-class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
+class CriterionTest(TestBase):  # type: ignore[misc]
     # TODO: check that criterions don't ignore grad_output
 
     _required_arg_names = TestBase._required_arg_names.union({'target'})
