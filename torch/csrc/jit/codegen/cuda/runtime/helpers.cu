@@ -1,7 +1,5 @@
 
-__device__ constexpr int ceilDiv(int a, int b) {
-  return (a + b - 1) / b;
-}
+#define ceilDiv(a, b) (a + b - 1) / b
 
 __device__ constexpr int alignBufferSize(int buffer, int size) {
   return (buffer + (size - 1)) & ~(size - 1);

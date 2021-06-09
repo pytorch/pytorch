@@ -155,7 +155,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
         if (has_parallel_welford) {
           // Unpack shared mem pointer
           auto space_type = kernel_summary.largest_smem_data_type;
-          indent() << "size_t block_size = blockDim.x*blockDim.y*blockDim.z;\n";
+          indent()
+              << "int64_t block_size = blockDim.x*blockDim.y*blockDim.z;\n";
           indent() << space_type << " *shared_mem_var = "
                    << "static_cast<" << space_type << "*>("
                    << "shared_mem);\n";
@@ -956,7 +957,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else {
       step_code << gen_index << " += " << gen_step;
     }
-    indent() << "for(size_t " << gen_index << " = " << gen_start << "; "
+    indent() << "for(int64_t " << gen_index << " = " << gen_start << "; "
              << gen_index << " < " << gen_stop << "; " << step_code.str()
              << ") ";
     startBlock(true);
