@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# encoding: utf-8
+# -*- coding: utf-8 -*-
 
 from sys import maxsize
 
@@ -12,7 +12,6 @@ from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_li
 from torch.onnx.symbolic_opset9 import expand, expand_as, mul, sqrt, unused, zeros_like
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
-
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py

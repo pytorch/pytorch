@@ -9246,6 +9246,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(0)
         self.run_test(M(), (x,))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_broad_cast_tensors(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -9268,6 +9269,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x, y))
 
     @disableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_normal(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -9279,6 +9281,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (torch.tensor([[[0.0], [10.0]], [[2.0], [8.0]], [[2.0], [8.0]]]), torch.tensor([[1.0], [3.0]])))
 
     @disableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_normal_correctness(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -9305,13 +9308,14 @@ class TestONNXRuntime(unittest.TestCase):
                "the gap of variance between ort outputs and expected one is unacceptable."
 
     @disableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_uniform(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
                 return torch.distributions.Uniform(x, y).sample().size(0), x , y
 
-
     @disableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_uniform_correctness(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
