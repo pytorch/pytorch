@@ -36,7 +36,7 @@ TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(
       self.layout() == Layout::Strided,
-      name, " only supports strided layout, got: ",
+      "all only supports strided layout, got: ",
       self.layout());
 
   const auto& result = maybe_get_output();
@@ -47,7 +47,7 @@ TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
     TORCH_CHECK(
         result.scalar_type() == ScalarType::Bool ||
             result.scalar_type() == ScalarType::Byte,
-        name, " only supports bool tensor for result, got: ",
+        "all only supports bool tensor for result, got: ",
         result.scalar_type());
     out_dtype = result.scalar_type();
   } else {
