@@ -3042,7 +3042,7 @@ def new_subgroups_by_enumeration(
     subgroups = []
     cur_subgroup = None
     # Create a mapping from rank to subgroup to check if there is any subgroup overlap.
-    rank_to_ranks_dict = {}
+    rank_to_ranks_dict = {}  # type: ignore[var-annotated]
     for ranks in ranks_per_subgroup_list:
         subgroup = new_group(
             ranks=ranks,
