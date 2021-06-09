@@ -45,7 +45,7 @@ def compute_file_sha256(path: str) -> str:
     return hash.hexdigest()
 
 
-def report_download_progress(chunk_number, chunk_size, file_size):
+def report_download_progress(chunk_number: int, chunk_size: int, file_size: int) -> None:
     """
     Pretty printer for file download progress.
     """
@@ -55,7 +55,7 @@ def report_download_progress(chunk_number, chunk_size, file_size):
         sys.stdout.write("\r0% |{:<64}| {}%".format(bar, int(percent * 100)))
 
 
-def download_clang_format(path):
+def download_clang_format(path: str) -> bool:
     """
     Downloads a clang-format binary appropriate for the host platform and stores it at the given location.
     """
@@ -81,7 +81,7 @@ def download_clang_format(path):
     return True
 
 
-def get_and_check_clang_format(verbose=False):
+def get_and_check_clang_format(verbose: bool = False) -> bool:
     """
     Download a platform-appropriate clang-format binary if one doesn't already exist at the expected location and verify
     that it is the right binary by checking its SHA256 hash against the expected hash.
