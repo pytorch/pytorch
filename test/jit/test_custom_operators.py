@@ -127,7 +127,7 @@ graph(%0 : Float(5, 5)):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
 graph(%x.1 : Tensor):
-  %1 : Tensor = aten::relu(%x.1)
+  %1 : Tensor = aten::relu(%x_1)
   return (%1)
 ''')
 
