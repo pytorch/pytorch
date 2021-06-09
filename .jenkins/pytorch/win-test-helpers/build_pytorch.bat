@@ -124,4 +124,4 @@ python setup.py install && sccache --show-stats && (
 )
 
 rem testing rerun
-python setup.py install && sccache --zero-stats && sccache --show-stats
+sccache --zero-stats && python setup.py install && sccache --show-stats
