@@ -116,6 +116,13 @@ def nccl_skip_if_lt_x_gpu(backend, x):
     return decorator
 
 
+def verify_ddp_error_logged(model_DDP, err_substr):
+    # Verify error was logged in ddp_logging_data.
+    ddp_logging_data = model_DDP._get_ddp_logging_data()
+    assert "has_error" in ddp_logging_data
+    assert "error" in ddp_logging_data
+    assert err_substr in ddp_logging_data["error"]
+
 def with_nccl_blocking_wait(func):
     """
     Convenience decorator to set/unset NCCL_BLOCKING_WAIT flag. Note that use of
