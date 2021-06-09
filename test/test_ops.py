@@ -2,6 +2,7 @@ from functools import partial, wraps
 import warnings
 
 import torch
+from torch import tensor
 
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
