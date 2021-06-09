@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/resolver.h>
-#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
@@ -42,6 +41,10 @@
 
 namespace torch {
 namespace jit {
+
+using FunctionTable = std::unordered_map<std::string, Function&>;
+using AttributeMap = std::unordered_map<std::string, Const>;
+using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 /* ============================================================ */
 /*                    Internal Utility Methods                  */

@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/frontend/environment.h>
 
-#include <torch/csrc/jit/frontend/schema_emitter.h>
-
+#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 
 namespace torch {
 namespace jit {

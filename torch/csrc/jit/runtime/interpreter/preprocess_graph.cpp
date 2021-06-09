@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
-#include <torch/csrc/jit/frontend/schema_emitter.h>
+#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 #include <torch/csrc/jit/runtime/interpreter/can_emit_inline.h>
 
 namespace torch {

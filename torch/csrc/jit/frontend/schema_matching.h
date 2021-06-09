@@ -12,14 +12,6 @@ namespace jit {
 // if it works return the flat list of positional inputs to the call
 // if it returns nullopt, then failure_messages contains a good error report
 
-struct MatchedSchema {
-  std::vector<Value*> inputs;
-  std::vector<TypePtr> return_types;
-  // Holds the extra Nodes that need to be added to the Graph
-  std::shared_ptr<Graph> additions;
-  c10::OptNameList return_field_names;
-};
-
 TORCH_API MatchedSchema matchSchema(
     const ::c10::FunctionSchema& schema,
     const SourceRange& loc,
@@ -56,7 +48,6 @@ TORCH_API Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions);
-
 
 } // namespace jit
 } // namespace torch

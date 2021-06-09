@@ -14,7 +14,7 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/frontend/schema_emitter.h>
+#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
