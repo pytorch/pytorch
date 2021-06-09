@@ -195,7 +195,7 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
-  USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
+  USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" ON
     "USE_STATIC_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 cmake_dependent_option(
