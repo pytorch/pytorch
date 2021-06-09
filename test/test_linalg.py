@@ -5040,7 +5040,7 @@ class TestLinalg(TestCase):
             lambda: torch.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device), dim=-5))
 
     def test_renorm(self, device):
-        m1 = torch.randn(10, 5, device=device)
+        m1 = torch.randn(20, 20, device=device)  # big enough to exercise vectorized path
         res1 = torch.tensor((), device=device)
 
         def renorm(matrix, value, dim, max_norm):
