@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <TH/THTensor.hpp>
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -45,6 +46,28 @@ struct type_caster<at::Tensor> {
   static handle
   cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
     return handle(THPVariable_Wrap(src));
+  }
+};
+
+// torch._StorageBase <-> at::Storage
+template <>
+struct type_caster<at::Storage> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::Storage, _("at::Storage"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (torch::isStorage(obj)) {
+      value = torch::createStorage(obj);
+      return true;
+    }
+    return false;
+  }
+
+  static handle
+  cast(const at::Storage& src, return_value_policy /* policy */, handle /* parent */) {
+    return handle(torch::createPyObject(src, caffe2::TypeMeta()));
   }
 };
 
