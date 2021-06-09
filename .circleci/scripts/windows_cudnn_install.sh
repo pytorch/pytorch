@@ -24,7 +24,6 @@ cudnn_install_folder="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA
 
 curl --retry 3 -O "$cudnn_installer_link"
 7z x "${cudnn_installer_name}.zip" -ocudnn
-rm -rf "${cudnn_install_folder}"
-cp -r cudnn/cuda/* "${cudnn_install_folder}"
+cp -rf cudnn/cuda/* "${cudnn_install_folder}"
 rm -rf cudnn
 rm -f "${cudnn_installer_name}.zip"
