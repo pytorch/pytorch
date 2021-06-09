@@ -30,6 +30,8 @@ from .quantization_patterns import (
 
 from .quantization_types import Pattern
 
+from ._equalize import EqualizationQConfig
+
 from .graph_module import (
     ObservedGraphModule,
     ObservedStandaloneGraphModule,
@@ -273,8 +275,12 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
         assert qconfig is not None
+
         act_post_process_ctr = qconfig.weight if is_weight else \
             qconfig.activation
+        if isinstance(qconfig, EqualizationQConfig) and not is_weight:
+            act_post_process_ctr = qconfig.input_activation
+
         is_bias = node_arg_is_bias(node, arg)
         is_activation = not (is_weight or is_bias)
         weight_needs_obs = is_weight and weight_is_quantized(qconfig)
@@ -415,7 +421,7 @@ def maybe_insert_input_observers_for_node(
 
 def maybe_insert_output_observer_for_node(
     node: Node,
-    model: torch.nn.Module,
+    model: GraphModule,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
     matches: Dict[str, MatchResult],
@@ -458,7 +464,23 @@ def maybe_insert_output_observer_for_node(
                     get_default_output_activation_post_process_map().get(
                         matched_pattern,
                         act_post_process_ctr)
+
+            # Find the next node in the graph
+            next_node = node.next
+            while next_node.op not in ('call_module', 'call_method', 'call_function', 'output'):
+                next_node = next_node.next
+
+            if next_node:
+                _, _, _, _, next_qconfig = matches.get(
+                    next_node.name, (None, None, None, None, None))
+
+                # If the current and next layer need to be equalized, then we
+                # will set the output observer to be the input observer
+                if isinstance(qconfig, EqualizationQConfig) and isinstance(next_qconfig, EqualizationQConfig):
+                    act_post_process_ctr = next_qconfig.input_activation
+
             observer = act_post_process_ctr()
+
             new_obs = insert_observer(node, observer, model, modules, graph)
             # set the type, so the next node can read it
             node_name_to_target_dtype[new_obs.name] = \

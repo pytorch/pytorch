@@ -41,6 +41,8 @@ class _InputEqualizationObserver(nn.Module):
         if qscheme not in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
             raise TypeError("Input qscheme must be per-tensor")
 
+        self.dtype = dtype
+
         self.input_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
                                                   qscheme=qscheme,
                                                   quant_min=quant_min,
@@ -119,6 +121,8 @@ class _WeightEqualizationObserver(nn.Module):
     def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine, quant_min=None,
                  quant_max=None, factory_kwargs=None) -> None:
         super(_WeightEqualizationObserver, self).__init__()
+
+        self.dtype = dtype
 
         self.weight_col_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
                                                        qscheme=qscheme,

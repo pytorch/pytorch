@@ -1,8 +1,20 @@
 import torch
-from torch.testing._internal.common_quantization import QuantizationTestCase
+import torch.nn as nn
+from torch.quantization import default_qconfig
+from torch.quantization.observer import MinMaxObserver
+from torch.quantization.quantize_fx import prepare_fx
 from torch.quantization.fx._equalize import (
-    _InputEqualizationObserver, _WeightEqualizationObserver, calculate_equalization_scale
+    _InputEqualizationObserver,
+    _WeightEqualizationObserver,
+    calculate_equalization_scale,
+    EqualizationQConfig,
+    input_equalization_observer,
+    weight_equalization_observer,
+    default_equalization_qconfig,
 )
+
+from torch.testing._internal.common_quantization import NodeSpec as ns
+from torch.testing._internal.common_quantization import QuantizationTestCase
 
 # Standard Libraries
 import numpy as np
@@ -19,6 +31,9 @@ class TestEqualizeFx(QuantizationTestCase):
            weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric,
                                            torch.per_channel_affine_float_qparams)))
     def test_input_weight_observer(self, input_qdtype, input_qscheme, weight_qdtype, weight_qscheme):
+        """ Tests that the Input- and Weight- EqualizationObservers perform as expected
+        """
+
         input_obs = _InputEqualizationObserver(dtype=input_qdtype, qscheme=input_qscheme)
         weight_obs = _WeightEqualizationObserver(dtype=weight_qdtype, qscheme=weight_qscheme)
 
@@ -110,3 +125,102 @@ class TestEqualizeFx(QuantizationTestCase):
             ref_scales, dtype=weight_qparams[0].dtype), atol=0.0001))
         self.assertTrue(torch.allclose(weight_qparams[1], torch.tensor(
             ref_zero_points, dtype=weight_qparams[1].dtype), atol=1))
+
+    def test_input_weight_equalization_prepare(self):
+        """ Tests that graphs created after prepare_fx is as expected
+        """
+        default_qconfig_dict = {
+            "": default_qconfig,
+            "object_type": [(nn.Linear, default_equalization_qconfig),
+                            (nn.functional.linear, default_equalization_qconfig)]
+        }
+
+        # Basic test with one linear layer
+        class LinearModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        linear_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(MinMaxObserver): 1,
+        }
+
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return nn.functional.linear(x, self.w, self.b)
+
+        # Test where we have two functional linear layers
+        class FunctionalLinearModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = Linear()
+                self.linear2 = Linear()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                return x
+
+        functionalLinear_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 2,
+            ns.call_module(_WeightEqualizationObserver): 2,
+            ns.call_module(MinMaxObserver): 1,
+        }
+
+        # Test where we have a Linear layer followed by a fp32 operation
+        # (conv layer) without a qconfig
+        class FunctionalLinearFP32Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = Linear()
+                self.conv = nn.Conv2d(3, 3, 1, 1)
+                self.linear2 = Linear()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.conv(x)
+                x = self.linear2(x)
+                return x
+
+        fp32_qconfig_dict = {
+            "": None,
+            "object_type": [(nn.Linear, default_equalization_qconfig),
+                            (nn.functional.linear, default_equalization_qconfig)]
+        }
+
+        functionalLinearFP32_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 2,
+            ns.call_module(_WeightEqualizationObserver): 2,
+            ns.call_module(MinMaxObserver): 2,
+        }
+
+        # Test where the output observer to be an InputEqualizationObserver
+        equalization_qconfig = EqualizationQConfig(input_activation=input_equalization_observer,
+                                                   output_activation=input_equalization_observer,
+                                                   weight=weight_equalization_observer)
+        specified_qconfig_dict = {"": default_qconfig,
+                                  "object_type": [(nn.Linear, equalization_qconfig)]}
+
+        specified_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 2,
+            ns.call_module(MinMaxObserver): 0,
+        }
+
+        tests = [(LinearModule, default_qconfig_dict, linear_node_occurrence),
+                 (FunctionalLinearModule, default_qconfig_dict, functionalLinear_node_occurrence),
+                 (FunctionalLinearFP32Module, fp32_qconfig_dict, functionalLinearFP32_node_occurrence),
+                 (LinearModule, specified_qconfig_dict, specified_node_occurrence)]
+
+        for (M, qconfig_dict, node_occurrence) in tests:
+            m = M().eval()
+            prepared = prepare_fx(m, qconfig_dict)
+            self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
