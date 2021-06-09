@@ -4578,24 +4578,23 @@ class TestLinalg(TestCase):
             if label == Ellipsis:
                 return '...'
             elif label < 26:
-                return chr(ord('a') + label)
+                return chr(ord('A') + label)
             else:
-                return chr(ord('A') + label - 26)
+                return chr(ord('a') + label - 26)
 
         def convert_sublist(sublist):
             return ''.join(convert_label(label) for label in sublist)
 
-        def test(
-                seed=None,
-                n=10,                       # how many tests to generate
-                n_labels=5,                 # how many labels available
-                min_ops=1, max_ops=3,       # min and max number of operands per test
-                min_dims=0, max_dims=2,     # min and max number of dimensions per operand
-                min_size=0, max_size=8,    # min and max size of each dimension
-                max_out_dim=3,              # max number of dimensions for the output
-                enable_diagonals=True,      # controls if labels can be repeated for diagonals
-                ellipsis_prob=0.5,          # probability of including ellipsis in operand
-                broadcasting_prob=0.1):     # probability of turning some dim sizes 1 for broadcasting
+        def test(seed=None,
+                 n=10,                       # how many tests to generate
+                 n_labels=5,                 # how many labels available
+                 min_ops=1, max_ops=3,       # min and max number of operands per test
+                 min_dims=0, max_dims=2,     # min and max number of dimensions per operand
+                 min_size=0, max_size=8,    # min and max size of each dimension
+                 max_out_dim=3,              # max number of dimensions for the output
+                 enable_diagonals=True,      # controls if labels can be repeated for diagonals
+                 ellipsis_prob=0.5,          # probability of including ellipsis in operand
+                 broadcasting_prob=0.1):     # probability of turning some dim sizes 1 for broadcasting
 
             MAX_LABELS = 52
 
