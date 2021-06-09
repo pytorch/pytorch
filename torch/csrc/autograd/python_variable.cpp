@@ -263,7 +263,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 // NB: this will overreport _Py_RefTotal but based on inspection of object.c
 // there is no way to avoid this
 #ifdef Py_TRACE_REFS
-  _Py_AddToAllObjects(op, 1);
+  _Py_AddToAllObjects(reinterpret_cast<PyObject *>(self), 1);
 #endif
   Py_INCREF(self);
 
