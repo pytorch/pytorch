@@ -69,6 +69,9 @@ class TestBatchSparseToDense(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op2, [L, I, V, S], [0])
         self.assertReferenceChecks(gc, op2, [L, I, V, S], batch_sparse_to_dense_ref)
         self.assertGradientChecks(gc, op2, [L, I, V, S], 2, [0])
+        self.assertDeviceChecks(dc, op, [L.astype(np.int32), I, V], [0])
+        self.assertReferenceChecks(gc, op, [L.astype(np.int32), I, V], batch_sparse_to_dense_ref)
+        self.assertGradientChecks(gc, op, [L.astype(np.int32), I, V], 2, [0])
 
     @given(
         batch_size=st.integers(5, 10),
@@ -106,3 +109,6 @@ class TestBatchSparseToDense(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [L, I, D], [0])
         self.assertReferenceChecks(gc, op, [L, I, D], batch_dense_to_sparse_ref)
         self.assertGradientChecks(gc, op, [L, I, D], 2, [0])
+        self.assertDeviceChecks(dc, op, [L.astype(np.int32), I, D], [0])
+        self.assertReferenceChecks(gc, op, [L.astype(np.int32), I, D], batch_dense_to_sparse_ref)
+        self.assertGradientChecks(gc, op, [L.astype(np.int32), I, D], 2, [0])

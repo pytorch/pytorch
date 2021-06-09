@@ -137,11 +137,7 @@ class TORCH_API LoopNest {
   // So, the pointer to the input loop should be valid after splitting and
   // will point to the outer loop. The `inner` and `tail` parameters will be
   // set to point to the inner and tail loops that are generated.
-  static void splitWithTail(
-      For* f,
-      int factor,
-      For** inner,
-      For** tail);
+  static void splitWithTail(For* f, int factor, For** inner, For** tail);
   // A convenience wrapper when the caller does not need to access the
   // split loops.
   static void splitWithTail(For* f, int factor);

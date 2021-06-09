@@ -118,48 +118,47 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, WIN32, makeUVDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
 #endif
 
-static const char* glooDeviceTransport = getenv("GLOO_DEVICE_TRANSPORT");
-
-std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
-    makeDeviceForInterface(const std::string& interfaceName) {
-  if (glooDeviceTransport) {
-    return GlooDeviceRegistry()->Create(glooDeviceTransport, interfaceName, "");
+namespace {
+std::shared_ptr<::gloo::transport::Device>
+makeGlooDevice(const std::string& interfaceName, const std::string& hostName)
+{
+  static auto transportName = getenv("GLOO_DEVICE_TRANSPORT");
+  if (transportName) {
+    return GlooDeviceRegistry()->Create(transportName, interfaceName, hostName);
   }
 
 #ifdef __linux__
-  return GlooDeviceRegistry()->Create("LINUX", interfaceName, "");
+  return GlooDeviceRegistry()->Create("LINUX", interfaceName, hostName);
 #endif
 
 #ifdef __APPLE__
-  return GlooDeviceRegistry()->Create("APPLE", interfaceName, "");
+  return GlooDeviceRegistry()->Create("APPLE", interfaceName, hostName);
 #endif
 
 #ifdef _WIN32
-  return GlooDeviceRegistry()->Create("WIN32", interfaceName, "");
+  return GlooDeviceRegistry()->Create("WIN32", interfaceName, hostName);
 #endif
 
-  throw std::runtime_error("makeDeviceForInterface(): unsupported gloo device");
+  return nullptr;
+}
+} // anonymous namespace
+
+std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
+    makeDeviceForInterface(const std::string& interfaceName) {
+  auto device = makeGlooDevice(interfaceName, "");
+  if (!device) {
+    throw std::runtime_error("makeDeviceForInterface(): unsupported gloo device");
+  }
+  return device;
 }
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForHostname(const std::string& hostname) {
-  if (glooDeviceTransport) {
-    return GlooDeviceRegistry()->Create(glooDeviceTransport, "", hostname);
+  auto device = makeGlooDevice("", hostname);
+  if (!device) {
+    throw std::runtime_error("makeDeviceForHostname(): unsupported gloo device");
   }
-
-#ifdef __linux__
-  return GlooDeviceRegistry()->Create("LINUX", "", hostname);
-#endif
-
-#ifdef __APPLE__
-  return GlooDeviceRegistry()->Create("APPLE", "", hostname);
-#endif
-
-#ifdef _WIN32
-  return GlooDeviceRegistry()->Create("WIN32", "", hostname);
-#endif
-
-  throw std::runtime_error("makeDeviceForHostname(): unsupported gloo device");
+  return device;
 }
 
 } // namespace c10d
