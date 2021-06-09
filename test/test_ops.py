@@ -124,8 +124,8 @@ class TestOpInfo(TestCase):
             # Crafts a custom error message for smaller, printable tensors
             if sample_torch_input.numel() < 10:
                 msg = ("Failed to produce expected results! Input tensor was"
-                        " {0}, torch result is {1}, and reference result is"
-                        " {2}.").format(sample_torch_input, actual, expected)
+                       " {0}, torch result is {1}, and reference result is"
+                       " {2}.").format(sample_torch_input, actual, expected)
             else:
                 msg = None
 
