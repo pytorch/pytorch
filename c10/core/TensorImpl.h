@@ -1536,7 +1536,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Query the PyObject interpreter.  This may return null if there is no
   // interpreter.  This is racy!
   impl::PyInterpreter* pyobj_interpreter() {
-    return pyobj_interpreter_.load(std::memory_order_acq_rel);
+    return pyobj_interpreter_.load(std::memory_order_acquire);
   }
 
   // Test the interpreter tag.  If tagged for the current interpreter, return
