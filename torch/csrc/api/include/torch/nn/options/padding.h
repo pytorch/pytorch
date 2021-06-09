@@ -38,6 +38,14 @@ using ReflectionPad1dOptions = ReflectionPadOptions<1>;
 /// ```
 using ReflectionPad2dOptions = ReflectionPadOptions<2>;
 
+/// `ReflectionPadOptions` specialized for the `ReflectionPad3d` module.
+///
+/// Example:
+/// ```
+/// ReflectionPad3d model(ReflectionPad3dOptions({1, 1, 2, 0}));
+/// ```
+using ReflectionPad3dOptions = ReflectionPadOptions<3>;
+
 // ============================================================================
 
 /// Options for a `D`-dimensional ReplicationPad module.

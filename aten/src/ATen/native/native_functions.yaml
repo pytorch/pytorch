@@ -8740,6 +8740,7 @@
   structured: True
   dispatch:
     CPU: reflection_pad3d_out_cpu
+    CUDA: reflection_pad3d_out_cuda
 
 - func: reflection_pad3d(Tensor self, int[6] padding) -> Tensor
   python_module: nn
@@ -8750,6 +8751,7 @@
   structured: True
   dispatch:
     CPU: reflection_pad3d_backward_out_cpu
+    CUDA: reflection_pad3d_backward_out_cuda
 
 - func: reflection_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
   python_module: nn

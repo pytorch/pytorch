@@ -3988,6 +3988,53 @@ TEST_F(ModulesTest, ReflectionPad2d) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(ModulesTest, ReflectionPad3d) {
+  {
+    ReflectionPad3d m(ReflectionPad3dOptions(1));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{7., 6., 7., 6.},
+                                      {5., 4., 5., 4.},
+                                      {7., 6., 7., 6.},
+                                      {5., 4., 5., 4.}},
+                                     {{3., 2., 3., 2.},
+                                      {1., 0., 1., 0.},
+                                      {3., 2., 3., 2.},
+                                      {1., 0., 1., 0.}},
+                                     {{7., 6., 7., 6.},
+                                      {5., 4., 5., 4.},
+                                      {7., 6., 7., 6.},
+                                      {5., 4., 5., 4.}},
+                                     {{3., 2., 3., 2.},
+                                      {1., 0., 1., 0.},
+                                      {3., 2., 3., 2.},
+                                      {1., 0., 1., 0.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReflectionPad3d m(ReflectionPad3dOptions({1, 1, 1, 1, 1, 2}));
+    auto input = torch::arange(12, torch::kFloat).reshape({1, 1, 2, 2, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{10., 9., 10., 11., 10.},
+                                      {7., 6., 7., 8., 7.},
+                                      {10., 9., 10., 11., 10.},
+                                      {7., 6., 7., 8., 7.}},
+                                     {{4., 3., 4., 5., 4.},
+                                      {1., 0., 1., 2., 1.},
+                                      {4., 3., 4., 5., 4.},
+                                      {1., 0., 1., 2., 1.}},
+                                     {{10., 9., 10., 11., 10.},
+                                      {7., 6., 7., 8., 7.},
+                                      {10., 9., 10., 11., 10.},
+                                      {7., 6., 7., 8., 7.}},
+                                     {{4., 3., 4., 5., 4.},
+                                      {1., 0., 1., 2., 1.},
+                                      {4., 3., 4., 5., 4.},
+                                      {1., 0., 1., 2., 1.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReplicationPad1d) {
   {
     ReplicationPad1d m(ReplicationPad1dOptions(2));

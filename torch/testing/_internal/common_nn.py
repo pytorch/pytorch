@@ -2192,6 +2192,12 @@ new_module_tests = [
         desc='complex'
     ),
     dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 3, 4, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 3, 4, 1, 2})',
+        input_size=(2, 3, 8, 8, 8),
+    ),
+    dict(
         module_name='ReplicationPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',

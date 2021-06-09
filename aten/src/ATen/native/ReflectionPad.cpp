@@ -137,6 +137,22 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
   int64_t output_h = input_h + pad_top + pad_bottom;
   int64_t output_w = input_w + pad_left + pad_right;
 
+  TORCH_CHECK(
+      pad_left < input_w && pad_right < input_w,
+      "Argument #4: Padding size "
+      "should be less than the corresponding input dimension, but got: padding (",
+      pad_left, ", ", pad_right, ") at dimension ", dim_w, " of input ", input.sizes());
+  TORCH_CHECK(
+      pad_top < input_h && pad_bottom < input_h,
+      "Argument #6: Padding size "
+      "should be less than the corresponding input dimension, but got: padding (",
+      pad_top, ", ", pad_bottom, ") at dimension ", dim_h, " of input ", input.sizes());
+  TORCH_CHECK(
+      pad_front < input_d && pad_back < input_d,
+      "Argument #8: Padding size "
+      "should be less than the corresponding input dimension, but got: padding (",
+      pad_front, ", ", pad_back, ") at dimension ", dim_d, " of input ", input.sizes());
+
   TORCH_CHECK(output_w >= 1 || output_h >=1 || output_d >= 1,
       "input (D: ", input_d, " H: ", input_h, ", W: ", input_w,
       ") is too small."
@@ -661,15 +677,13 @@ static void reflection_pad3d_out_frame(
     int64_t nplane,
     int64_t input_w, int64_t input_h, int64_t input_d,
     int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_right,
-    int64_t pad_top, int64_t pad_bottom,
-    int64_t pad_front, int64_t pad_back)
+    int64_t pad_left, int64_t pad_top, int64_t pad_front)
 {
   auto i_start_x = std::max(int64_t(0), -pad_left);
-  auto i_start_y = std::max(int64_t(0), -pad_right);
+  auto i_start_y = std::max(int64_t(0), -pad_top);
   auto i_start_z = std::max(int64_t(0), -pad_front);
   auto o_start_x = std::max(int64_t(0), pad_left);
-  auto o_start_y = std::max(int64_t(0), pad_right);
+  auto o_start_y = std::max(int64_t(0), pad_top);
   auto o_start_z = std::max(int64_t(0), pad_front);
 
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
@@ -677,23 +691,23 @@ static void reflection_pad3d_out_frame(
     int64_t ip_x, ip_y, ip_z;
     for (int64_t k = start; k < end; k++) {
       for (int64_t z = 0; z < output_d; z++) {
-        for (int64_t y = 0; y < output_h; y++) {
-          for (int64_t x = 0; x < output_w; x++) {
-            if (x < pad_left) {
-              ip_x = pad_left * 2 - x;
-            } else if (x >= pad_left && x < input_w + pad_left) {
-              ip_x = x;
+        for (int64_t i = 0; i < output_h; i++) {
+          for (int64_t j = 0; j < output_w; j++) {
+            if (j < pad_left) {
+              ip_x = pad_left * 2 - j;
+            } else if (j >= pad_left && j < input_w + pad_left) {
+              ip_x = j;
             } else {
-              ip_x = (input_w + pad_left - 1) * 2 - x;
+              ip_x = (input_w + pad_left - 1) * 2 - j;
             }
             ip_x = ip_x - o_start_x + i_start_x;
 
-            if (y < pad_top) {
-              ip_y = pad_top * 2 - y;
-            } else if (y >= pad_top && y < input_h + pad_top) {
-              ip_y = y;
+            if (i < pad_top) {
+              ip_y = pad_top * 2 - i;
+            } else if (i >= pad_top && i < input_h + pad_top) {
+              ip_y = i;
             } else {
-              ip_y = (input_h + pad_top - 1) * 2 - y;
+              ip_y = (input_h + pad_top - 1) * 2 - i;
             }
             ip_y = ip_y - o_start_y + i_start_y;
 
@@ -707,9 +721,9 @@ static void reflection_pad3d_out_frame(
             ip_z = ip_z - o_start_z + i_start_z;
 
             scalar_t *dest_p = output_p + k * output_w * output_h * output_d +
-              z * output_w * output_h + y * output_w + x;
+              z * output_w * output_h + i * output_w + j;
             scalar_t *src_p = input_p + k * input_w * input_h * input_d +
-              z * input_w * input_h + y * input_w + x;
+              ip_z * input_w * input_h + ip_y * input_w + ip_x;
             *dest_p = *src_p;
           }
         }
@@ -724,18 +738,14 @@ static void reflection_pad3d_out_loop(
     int64_t nbatch, int64_t nplane,
     int64_t input_w, int64_t input_h, int64_t input_d,
     int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_right,
-    int64_t pad_top, int64_t pad_bottom,
-    int64_t pad_front, int64_t pad_back)
+    int64_t pad_left, int64_t pad_top, int64_t pad_front)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
     for (int64_t p = start; p < end; p++)
     {
       scalar_t *input_p_inner = input_p + p * nplane * input_w * input_h * input_d;
       scalar_t *output_p_inner = output_p + p * nplane * output_w * output_h * output_d;
-      reflection_pad3d_out_frame(input_p_inner, output_p_inner, nplane, input_w, input_h, input_d,
-          output_w, output_h, output_d, pad_left, pad_right, pad_top, pad_bottom,
-          pad_front, pad_back);
+      reflection_pad3d_out_frame(input_p_inner, output_p_inner, nplane, input_w, input_h, input_d, output_w, output_h, output_d, pad_left, pad_top, pad_front);
      }
   });
 }
@@ -746,15 +756,13 @@ static void reflection_pad3d_backward_out_frame(
     int64_t nplane,
     int64_t input_w, int64_t input_h, int64_t input_d,
     int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_right,
-    int64_t pad_top, int64_t pad_bottom,
-    int64_t pad_front, int64_t pad_back
+    int64_t pad_left, int64_t pad_top, int64_t pad_front
 ) {
   auto i_start_x = std::max(int64_t(0), -pad_left);
-  auto i_start_y = std::max(int64_t(0), -pad_right);
+  auto i_start_y = std::max(int64_t(0), -pad_top);
   auto i_start_z = std::max(int64_t(0), -pad_front);
   auto o_start_x = std::max(int64_t(0), pad_left);
-  auto o_start_y = std::max(int64_t(0), pad_right);
+  auto o_start_y = std::max(int64_t(0), pad_top);
   auto o_start_z = std::max(int64_t(0), pad_front);
 
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
@@ -762,23 +770,23 @@ static void reflection_pad3d_backward_out_frame(
     int64_t ip_x, ip_y, ip_z;
     for (int64_t k = start; k < end; k++) {
       for (int64_t z = 0; z < output_d; z++) {
-        for (int64_t y = 0; y < output_h; y++) {
-          for (int64_t x = 0; x < output_w; x++) {
-            if (x < pad_left) {
-              ip_x = pad_left * 2 - x;
-            } else if (x >= pad_left && x < input_w + pad_left) {
-              ip_x = x;
+        for (int64_t i = 0; i < output_h; i++) {
+          for (int64_t j = 0; j < output_w; j++) {
+            if (j < pad_left) {
+              ip_x = pad_left * 2 - j;
+            } else if (j >= pad_left && j < input_w + pad_left) {
+              ip_x = j;
             } else {
-              ip_x = (input_w + pad_left - 1) * 2 - x;
+              ip_x = (input_w + pad_left - 1) * 2 - j;
             }
             ip_x = ip_x - o_start_x + i_start_x;
 
-            if (y < pad_top) {
-              ip_y = pad_top * 2 - y;
-            } else if (y >= pad_top && y < input_h + pad_top) {
-              ip_y = y;
+            if (i < pad_top) {
+              ip_y = pad_top * 2 - i;
+            } else if (i >= pad_top && i < input_h + pad_top) {
+              ip_y = i;
             } else {
-              ip_y = (input_h + pad_top - 1) * 2 - y;
+              ip_y = (input_h + pad_top - 1) * 2 - i;
             }
             ip_y = ip_y - o_start_y + i_start_y;
 
@@ -792,10 +800,10 @@ static void reflection_pad3d_backward_out_frame(
             ip_z = ip_z - o_start_z + i_start_z;
 
             scalar_t *src_p = grad_output + k * output_w * output_h * output_d +
-              z * output_w * output_h + y * output_w + x;
+              z * output_w * output_h + i * output_w + j;
             scalar_t *dest_p = grad_input + k * input_w * input_h * input_d +
-              z * input_w * input_h + y * input_w + x;
-            *dest_p = *src_p;
+              ip_z * input_w * input_h + ip_y * input_w + ip_x;
+            *dest_p += *src_p;
           }
         }
       }
@@ -809,22 +817,17 @@ static void reflection_pad3d_backward_out_loop(
     int64_t nbatch, int64_t nplane,
     int64_t input_w, int64_t input_h, int64_t input_d,
     int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_right,
-    int64_t pad_top, int64_t pad_bottom,
-    int64_t pad_front, int64_t pad_back
+    int64_t pad_left, int64_t pad_top, int64_t pad_front
 ) {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
     for (int64_t p = start; p < end; p++)
     {
-      scalar_t* grad_input_inner =
-          grad_input + p * nplane * input_w * input_h * input_d;
-      scalar_t* grad_output_inner =
-          grad_output + p * nplane * output_w * output_h * output_d;
-      reflection_pad3d_out_frame(grad_input_inner, grad_output_inner,
+      scalar_t* grad_input_inner = grad_input + p * nplane * input_w * input_h * input_d;
+      scalar_t* grad_output_inner = grad_output + p * nplane * output_w * output_h * output_d;
+      reflection_pad3d_backward_out_frame(grad_input_inner, grad_output_inner,
           nplane, input_w, input_h, input_d,
           output_w, output_h, output_d,
-          pad_left, pad_right, pad_top,
-          pad_bottom, pad_front, pad_back);
+          pad_left, pad_top, pad_front);
      }
   });
 }
@@ -955,39 +958,34 @@ Tensor reflection_pad2d_backward_cpu(
 }
 
 TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
-(const Tensor& input, IntArrayRef padding, const Tensor& output) {
+(const Tensor& input_, IntArrayRef padding, const Tensor& output) {
   int64_t pad_left = padding[0];
-  int64_t pad_right = padding[1];
   int64_t pad_top = padding[2];
-  int64_t pad_bottom = padding[3];
   int64_t pad_front = padding[4];
-  int64_t pad_back = padding[4];
   int64_t dim_w = 3;
   int64_t dim_h = 2;
   int64_t dim_d = 1;
   int64_t dim_plane = 0;
+  bool batch_mode = (input_.dim() == 5);
 
-  if (input.dim() == 5)
-  {
-    // batch mode
+  if (batch_mode) {
     dim_w++;
     dim_h++;
     dim_d++;
     dim_plane++;
   }
 
-  int64_t nplane = input.size(dim_plane);
-  int64_t input_d = input.size(dim_d);
-  int64_t input_h = input.size(dim_h);
-  int64_t input_w = input.size(dim_w);
-  int64_t output_d = output.size(dim_d);
-  int64_t output_h = output.size(dim_h);
+  int64_t nplane = input_.size(dim_plane);
+  int64_t input_w = input_.size(dim_w);
+  int64_t input_h = input_.size(dim_h);
+  int64_t input_d = input_.size(dim_d);
   int64_t output_w = output.size(dim_w);
+  int64_t output_h = output.size(dim_h);
+  int64_t output_d = output.size(dim_d);
 
-  auto input_ = input.contiguous();
+  auto input = input_.contiguous();
 
-  if (input.dim() == 5) {
-    // batch mode
+  if (batch_mode) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
       auto input_data = input.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
@@ -997,19 +995,18 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
           nbatch, nplane,
           input_w, input_h, input_d,
           output_w, output_h, output_d,
-          pad_left, pad_right, pad_top,
-          pad_bottom, pad_front, pad_back);
+          pad_left, pad_top, pad_front);
       });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
       auto input_data = input.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       reflection_pad3d_out_frame(
-          input_data, output_data, nplane,
+          input_data, output_data,
+          nplane,
           input_w, input_h, input_d,
           output_w, output_h, output_d,
-          pad_left, pad_right, pad_top,
-          pad_bottom, pad_front, pad_back);
+          pad_left, pad_top, pad_front);
     });
   }
 }
@@ -1019,19 +1016,15 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
     IntArrayRef padding,
     const Tensor& grad_input) {
   int64_t pad_left = padding[0];
-  int64_t pad_right = padding[1];
   int64_t pad_top = padding[2];
-  int64_t pad_bottom = padding[3];
   int64_t pad_front = padding[4];
-  int64_t pad_back = padding[4];
   int64_t dim_w = 3;
   int64_t dim_h = 2;
   int64_t dim_d = 1;
   int64_t dim_plane = 0;
+  bool batch_mode = (input.dim() == 5);
 
-  if (input.dim() == 5)
-  {
-    // batch mode
+  if (batch_mode) {
     dim_w++;
     dim_h++;
     dim_d++;
@@ -1053,7 +1046,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
 
   grad_input.zero_();
 
-  if (input.dim() == 5) {
+  if (batch_mode) {
     // batch mode
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
       auto grad_input_p = grad_input.data_ptr<scalar_t>();
@@ -1064,8 +1057,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
           nbatch, nplane,
           input_w, input_h, input_d,
           output_w, output_h, output_d,
-          pad_left, pad_right, pad_top,
-          pad_bottom, pad_front, pad_back);
+          pad_left, pad_top, pad_front);
       });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
@@ -1076,8 +1068,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
           nplane,
           input_w, input_h, input_d,
           output_w, output_h, output_d,
-          pad_left, pad_right, pad_top,
-          pad_bottom, pad_front, pad_back);
+          pad_left, pad_top, pad_front);
       });
   }
 }
