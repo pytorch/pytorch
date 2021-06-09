@@ -1278,7 +1278,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     // benchmarks/operator_benchmarks/pt/bmm_test.py Ran this benchmark for
     // various matrix sizes on Samsung S8U
     const bool enable_multithreaded_bmm = c10::InferenceMode::is_enabled() &&
-        bs >= 4 && res_rows >= 32 && res_cols >= 32 && contraction_size >= 32;
+        bs >= 4 && res_rows >= 4 && res_cols >= 16 && contraction_size >= 16;
 #else
     const bool enable_multithreaded_bmm{false};
 #endif
