@@ -27,7 +27,12 @@ c10::optional<Method> Object::find_method(const std::string& basename) const {
     }
   }
 
-
+  // Even though we are returning any matching method here,
+  // ScriptMethod::__call__ will be able to figure out the
+  // correct overloaded method as it would have the arguments
+  // to do schema match. This overloaded method is only used to
+  // find the corresponding owner object Foo that owns this method.
+  // By using Foo, we will able to find the correct overloaded method.
   for (Function* fn : type()->overloaded_methods()) {
     if (fn->name() == basename) {
       return Method(_ivalue(), fn);

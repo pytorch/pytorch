@@ -23,7 +23,9 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
       auto resolved_init_method = match_overloaded_methods(
           instance._ivalue(), "__init__", input_args, input_kwargs);
       invokeScriptMethodFromPython(
-          resolved_init_method.value(), std::move(input_args), std::move(input_kwargs));
+          resolved_init_method.value(),
+          std::move(input_args),
+          std::move(input_kwargs));
       return py::cast(instance);
     }
     TORCH_CHECK(
@@ -35,7 +37,8 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   }
 
   Method init_method(instance._ivalue(), init_fn);
-  invokeScriptMethodFromPython(init_method, std::move(input_args), std::move(input_kwargs));
+  invokeScriptMethodFromPython(
+      init_method, std::move(input_args), std::move(input_kwargs));
   return py::cast(instance);
 }
 

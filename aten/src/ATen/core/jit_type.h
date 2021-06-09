@@ -2249,14 +2249,20 @@ struct TORCH_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
+  // List of overloaded methods with this class.
+  // We keep them seperate from methods_ to not break
+  // previous logic.
   std::vector<torch::jit::Function*> overloaded_methods_;
   std::vector<torch::jit::Function*> staticmethods_;
 
-  // Map that maps from a non-unique name to unique mangled overload names for overloaded
-  // functions only
+  // Map that maps from a non-unique name to unique mangled overload names for
+  // overloaded functions only. The reason we don't store function pointers here
+  // is because getMangledOverloadedName would have harder time finding a method
+  // as it has to demangle.
   std::unordered_map<std::string, std::vector<std::string>> overloaded_name_map;
 
-  // Map of mangled name to the index of the actual overloaded function pointer index in overloaded_methods_.
+  // Map of mangled name to the index of the actual overloaded function pointer
+  // index in overloaded_methods_.
   std::unordered_map<std::string, int> mangled_to_function_;
 
   // List of hooks to be run before/after forward.
