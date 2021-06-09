@@ -2922,7 +2922,7 @@ def new_subgroups(
     """
     if not torch.cuda.is_available():
         raise ValueError(
-            "'new_subgroups' should only be called when CUDA is avaiable"
+            "Subgroups can only be created when CUDA is avaiable"
         )
 
     if group_size is None:
