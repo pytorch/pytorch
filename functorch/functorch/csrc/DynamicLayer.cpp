@@ -13,6 +13,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/variable.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace functorch {
@@ -196,7 +197,7 @@ static void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64
       bool modified = false;
       // TODO: might be more efficient if we scan first then not copy? Depends.
       auto list = ivalue.toList().copy();
-      for (int64_t list_idx = 0; list_idx < list.size(); list_idx++) {
+      for (const auto list_idx : c10::irange(0, list.size())) {
         const auto& elt = list.get(list_idx);
         if (elt.isTensor()) {
           list.set(list_idx, func(elt.toTensor()));
@@ -210,7 +211,7 @@ static void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64
     }
     if (ivalue.isTensorList()) {
       auto list = ivalue.toTensorList();
-      for (int64_t list_idx = 0; list_idx < list.size(); list_idx++) {
+      for (const auto list_idx : c10::irange(0, list.size())) {
         list[list_idx] = func(list[list_idx]);
       }
       args[idx] = list;
@@ -364,7 +365,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     auto args_size = op.schema().arguments().size();
     // Step 1
     auto front = stack->size() - args_size;
-    for (int64_t arg_idx = 0; arg_idx < args_size; arg_idx++) {
+    for (const auto arg_idx : c10::irange(0, args_size)) {
       stack->push_back((*stack)[front + arg_idx]);
     }
     // Step 2
@@ -395,7 +396,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     // Step 5
     auto args_size = op.schema().arguments().size();
     auto args_front = stack->size() - args_size - ret_size;
-    for (int64_t arg_idx = 0; arg_idx < args_size; arg_idx++) {
+    for (const auto arg_idx : c10::irange(0, args_size)) {
       auto& ivalue = (*stack)[args_front + arg_idx];
       if (!ivalue.isTensor()) {
         continue;

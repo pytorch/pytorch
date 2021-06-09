@@ -196,17 +196,6 @@ static void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64
   }
 }
 
-static Tensor unwrapIfDead(const Tensor& tensor) {
-  auto* wrapped = maybeGetTensorWrapper(tensor);
-  if (!wrapped) {
-    return tensor;
-  }
-  if (wrapped->is_alive()) {
-    return tensor;
-  }
-  return wrapped->value();
-}
-
 void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto args_size = op.schema().arguments().size();
   int64_t unwrapped_count = 0;
