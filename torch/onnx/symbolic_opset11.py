@@ -1,7 +1,4 @@
-# EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
-
-# This file exports ONNX ops for opset 11
+#!/usr/bin/env python3
 
 from sys import maxsize
 
@@ -14,6 +11,13 @@ from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_li
 from torch.onnx.symbolic_opset9 import expand, expand_as, mul, sqrt, unused, zeros_like
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
+
+
+# EDITING THIS FILE? READ THIS FIRST!
+# see Note [Edit Symbolic Files] in symbolic_helper.py
+
+# This file exports ONNX ops for opset 11
+
 
 @parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
