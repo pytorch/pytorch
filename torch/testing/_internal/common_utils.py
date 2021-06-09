@@ -392,7 +392,7 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
 
 # Disables tests for when on Github Actions
-ON_GHA = os.getenv("GITHUB_ACTIONS")
+ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
