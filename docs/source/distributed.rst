@@ -787,4 +787,6 @@ With the ``NCCL`` backend, such an application would likely result in a hang whi
     RuntimeError: Error when verifying shape tensors for collective ALLREDUCE on rank 0. This likely indicates that input shapes into the collective are mismatched across ranks. Got shapes:  10
     [ torch.LongTensor{1} ]
 
-In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected.
+In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected. These
+collective desynchronization checks will work for all applications that use ``c10d`` collective calls backed by process groups created with the
+ :func:`torch.distributed.init_process_group` and :func:`torch.distributed.new_group` APIs.
