@@ -1758,6 +1758,8 @@
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    CPU, CUDA, QuantizedCPU, QuantizedCUDA, MkldnnCPU, Meta: new_empty_strided
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
