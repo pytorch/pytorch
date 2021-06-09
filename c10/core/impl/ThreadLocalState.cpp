@@ -3,7 +3,6 @@
 namespace c10 {
 namespace impl {
 
-// static_assert(false, "test");
 thread_local PODLocalState raw_thread_local_state;
 
 #if defined(_MSC_VER) || defined(C10_ANDROID)
