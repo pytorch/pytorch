@@ -9246,6 +9246,95 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(0)
         self.run_test(M(), (x,))
 
+    def test_broad_cast_tensors(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                m = torch.broadcast_tensors(x, y)
+                return m
+
+        x = torch.randint(5, (1,))
+        y = torch.randint(5, (5,))
+
+        self.run_test(M(), (x, y))
+
+        x = torch.randint(5, (4, 2, 1, 4))
+        y = torch.randint(5, (2, 3, 1))
+
+        self.run_test(M(), (x, y))
+
+        x = torch.randn(2, 1, 4)
+        y = torch.randn(5, 2, 3, 1)
+
+        self.run_test(M(), (x, y))
+
+    @disableScriptTest()
+    def test_dist_normal(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.distributions.Normal(x, y).sample().size(0), x, y
+
+        self.run_test(M(), (torch.tensor([0.0]), torch.tensor([[1.0], [2.0]])))
+        self.run_test(M(), (torch.tensor([0.0]), torch.tensor([1.0])))
+
+        self.run_test(M(), (torch.tensor([[[0.0], [10.0]], [[2.0], [8.0]], [[2.0], [8.0]]]), torch.tensor([[1.0], [3.0]])))
+
+    @disableScriptTest()
+    def test_dist_normal_correctness(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.distributions.Normal(x, y).sample()
+
+        expected_mean = 5.0
+        expected_var = 10.0
+
+        model_export = M()
+        dummy_input = (torch.tensor([expected_mean]), torch.tensor([expected_var]))
+        ort_sess = convert_to_onnx(model_export, input=dummy_input, opset_version=self.opset_version,
+                                   training=torch.onnx.TrainingMode.EVAL)
+
+        ort_out = []
+        for i in range(1500):
+            ort_out.append(run_ort(ort_sess, input=dummy_input))
+
+        actual_var = np.var(ort_out)
+        actual_mean = np.mean(ort_out)
+
+        assert abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.15, \
+               "the gap of mean between ort outputs and expected one is unacceptable."
+        assert abs(abs(actual_var) - expected_var) <= expected_var * 0.15, \
+               "the gap of variance between ort outputs and expected one is unacceptable."
+
+    @disableScriptTest()
+    def test_dist_uniform(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.distributions.Uniform(x, y).sample().size(0), x , y
+
+
+    @disableScriptTest()
+    def test_dist_uniform_correctness(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.distributions.Uniform(x, y).sample()
+
+        expected_min = 5.0
+        expected_max = 10.0
+
+        model_export = M()
+        dummy_input = (torch.tensor([expected_min]), torch.tensor([expected_max]))
+        ort_sess = convert_to_onnx(model_export, input=dummy_input, opset_version=self.opset_version,
+                                   training=torch.onnx.TrainingMode.EVAL)
+
+        ort_out = []
+        for i in range(500):
+            ort_out.append(run_ort(ort_sess, input=dummy_input))
+
+        actual_min = min(ort_out)
+        actual_max = max(ort_out)
+
+        assert actual_min[0] >= expected_min, "the minimum value of ort outputs is out of scope."
+        assert actual_max[0] <= expected_max, "the maximum value of ort outputs is out of scope."
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
