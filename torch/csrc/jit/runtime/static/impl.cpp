@@ -872,6 +872,69 @@ float StaticRuntime::benchmark_model(
   return millis / static_cast<float>(main_runs);
 }
 
+bool display_ivalue(const IValue& iv) {
+  if (iv.isTensor()) {
+    std::cout << "Tensor " << iv.toTensor().toString() << " {";
+    for (auto i = 0; i < iv.toTensor().sizes().size(); ++i) {
+      std::cout << iv.toTensor().sizes()[i];
+      if (iv.toTensor().sizes().size() > i + 1) {
+        std::cout << ", ";
+      }
+    }
+    std::cout << "}\n";
+    return true;
+  } else if (iv.isTensorList()) {
+    std::cout << "TensorList {" << iv.toTensorList().size() << "}\n";
+    return true;
+  } else if (iv.isGenericDict()) {
+    std::cout << "Dict {" << iv.toGenericDict().size() << "}\n";
+    return true;
+  } else if (iv.isTuple()) {
+    std::cout << "Tuple {" << iv.toTuple()->elements().size() << "}\n";
+    return true;
+  } else if (iv.isInt()) {
+    std::cout << "int {" << iv.toInt() << "}\n";
+    return true;
+  } else if (iv.isBool()) {
+    std::cout << "bool {" << iv.toBool() << "}\n";
+    return true;
+  } else if (iv.isDouble()) {
+    std::cout << "double {" << iv.toDouble() << "}\n";
+    return true;
+  }
+  return false;
+}
+
+void display_pnode_info(const ProcessedNode& pnode) {
+  pnode.node()->print(std::cout, 0, nullptr, false);
+  const std::vector<const IValue*>& inputs = pnode.inputs();
+  for (auto i = 0; i < inputs.size(); ++i) {
+    std::cout << "\ti" << i << ": ";
+    if (!display_ivalue(*inputs[i])) {
+      std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
+    }
+  }
+  const std::vector<IValue>& outputs = pnode.outputs();
+  for (auto i = 0; i < outputs.size(); ++i) {
+    std::cout << "\to" << i << ": ";
+    if (!display_ivalue(outputs[i])) {
+      std::cout << *(pnode.node()->outputs()[i]->type()) << '\n';
+    }
+  }
+}
+
+void StaticRuntime::display_nodes(const std::vector<c10::IValue>& args) {
+  c10::InferenceMode mode;
+  std::vector<IValue> stack(args);
+  for (size_t i = 0; i < stack.size(); i++) {
+    Input(i) = stack[i];
+  }
+  for (auto& node : nodes_) {
+    node.run();
+    display_pnode_info(node);
+  }
+}
+
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
