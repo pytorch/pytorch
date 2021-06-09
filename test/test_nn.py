@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
-from torch.testing._internal.common_nn import NNTestCase, ModuleTest, CriterionTest, \
+from torch.testing._internal.common_nn import NNTestCase, ModuleTest, \
     module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
@@ -11263,10 +11263,10 @@ def add_test(test, decorator=None):
     cuda_test_name = test_name + '_cuda'
     # With dtype enable, it's good enough to test against three floating types
     kwargs = {}
-    if 'extra_args' in get_function_arglist(test.test_cuda):
+    if test.is_criterion_test:
         kwargs['extra_args'] = test.extra_args
 
-    if 'dtype' in get_function_arglist(test.test_cuda):
+    if test.is_criterion_test:
         if tf32_is_not_fp32() and test.with_tf32:
 
             def with_tf32_off(self, test=test, kwargs=kwargs):
@@ -11402,7 +11402,7 @@ for test_params in module_tests:
 for test_params in criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
-    test = CriterionTest(**test_params)
+    test = ModuleTest(**test_params)
     decorator = test_params.pop('decorator', None)
     add_test(test, decorator)
     if 'check_sum_reduction' in test_params:
@@ -11417,7 +11417,7 @@ for test_params in criterion_tests:
             return sum_reduction_constructor
 
         test_params['constructor'] = gen_sum_reduction_constructor(test_params['constructor'])
-        test = CriterionTest(**test_params)
+        test = ModuleTest(**test_params)
         add_test(test, decorator)
 
 

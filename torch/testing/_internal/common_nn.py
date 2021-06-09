@@ -4867,15 +4867,17 @@ class NNTestCase(TestCase):
             self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
-class TestBase(object):
-
-    _required_arg_names = {'constructor_args', 'input', 'extra_args'}
-
+class ModuleTest(object):
     def __init__(self, constructor, desc='', reference_fn=None, fullname=None, **kwargs):
         self.desc = desc
         self.fullname = fullname
         self.constructor = constructor
         self.reference_fn = reference_fn
+        self.is_criterion_test = any(
+            [name in kwargs for name in ['target', 'target_fn', 'target_size']])
+        self._required_arg_names = {'constructor_args', 'input', 'extra_args'}
+        if self.is_criterion_test:
+            self._required_arg_names.add('target')
         for name in self._required_arg_names:
             if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
                 if name in {'constructor_args', 'extra_args'}:
@@ -4885,6 +4887,37 @@ class TestBase(object):
                                      .format(self.get_name(), name))
         self._extra_kwargs = kwargs
         self._arg_cache = {}
+
+        if self.is_criterion_test:
+            self._required_arg_names.add('target')
+            self.should_test_cuda = kwargs.get('test_cuda', True)
+            self.check_forward_only = kwargs.get('check_forward_only', False)
+            self.check_gradgrad = kwargs.get('check_gradgrad', True)
+            self.check_half = kwargs.get('check_half', True)
+            self.check_bfloat16 = kwargs.get('check_bfloat16', False)
+            self.check_complex = kwargs.get('check_complex', False)
+            self.test_cpu = kwargs.get('test_cpu', True)
+            self.with_tf32 = kwargs.get('with_tf32', True)
+            self.tf32_precision = kwargs.get('tf32_precision', 0.001)
+            self.check_batched_grad = kwargs.get('check_batched_grad', True)
+        else:
+            self.jacobian_input = kwargs.get('jacobian_input', True)
+            self.should_test_cuda = kwargs.get('test_cuda', True)
+            self.should_test_pickle = kwargs.get('pickle', True)
+            self.FIXME_no_cuda_gradgrad_comparison = \
+                kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
+            self.precision = kwargs.get('precision', 2e-4)
+            self.check_forward_only = kwargs.get('check_forward_only', False)
+            self.cudnn = kwargs.get('cudnn', False)
+            self.check_inplace = kwargs.get('check_inplace', False)
+            self.check_gradgrad = kwargs.get('check_gradgrad', True)
+            self.skip_double = kwargs.get('skip_double', False)
+            self.skip_half = kwargs.get('skip_half', False)
+            self.with_tf32 = kwargs.get('with_tf32', False)
+            self.tf32_precision = kwargs.get('tf32_precision', 0.001)
+            self.test_cpu = kwargs.get('test_cpu', True)
+            self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
+            self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def get_name(self):
         if self.fullname is not None:
@@ -4938,9 +4971,6 @@ class TestBase(object):
 
         return self._unpack(self._arg_cache[name]) if unpack else self._arg_cache[name]
 
-    def __call__(self, test_case):
-        raise NotImplementedError
-
     def _get_input(self):
         input = self._get_arg('input', False)  # type: ignore[arg-type]
 
@@ -4954,30 +4984,17 @@ class TestBase(object):
 
         return map_variables(input)
 
-
-class ModuleTest(TestBase):  # type: ignore[misc]
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.jacobian_input = kwargs.get('jacobian_input', True)
-        self.should_test_cuda = kwargs.get('test_cuda', True)
-        self.should_test_pickle = kwargs.get('pickle', True)
-        self.FIXME_no_cuda_gradgrad_comparison = \
-            kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
-        self.precision = kwargs.get('precision', 2e-4)
-        self.check_forward_only = kwargs.get('check_forward_only', False)
-        self.cudnn = kwargs.get('cudnn', False)
-        self.check_inplace = kwargs.get('check_inplace', False)
-        self.check_gradgrad = kwargs.get('check_gradgrad', True)
-        self.skip_double = kwargs.get('skip_double', False)
-        self.skip_half = kwargs.get('skip_half', False)
-        self.with_tf32 = kwargs.get('with_tf32', False)
-        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
-        self.test_cpu = kwargs.get('test_cpu', True)
-        self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
-        self.check_batched_grad = kwargs.get('check_batched_grad', True)
-
     def __call__(self, test_case):
-        return self._module_test_call(test_case)
+        if self.is_criterion_test:
+            return self._criterion_test_call(test_case)
+        else:
+            return self._module_test_call(test_case)
+
+    def test_cuda(self, test_case, dtype=None, extra_args=None):
+        if self.is_criterion_test:
+            return self._criterion_test_cuda(test_case, dtype, extra_args)
+        else:
+            return self._module_test_cuda(test_case)
 
     def _module_test_call(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -5176,9 +5193,6 @@ class ModuleTest(TestBase):  # type: ignore[misc]
                     assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
         torch.set_num_threads(num_threads)
 
-    def _get_target(self):
-        return self._get_arg('target', False)
-
     def noncontiguize(self, obj):
         if isinstance(obj, list):
             return [self.noncontiguize(o) for o in obj]
@@ -5232,9 +5246,6 @@ class ModuleTest(TestBase):  # type: ignore[misc]
                 test_case.assertEqual(out, output)
                 test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
                 test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
-
-    def test_cuda(self, test_case):
-        return self._module_test_cuda(test_case)
 
     def _module_test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
@@ -5316,28 +5327,6 @@ class ModuleTest(TestBase):  # type: ignore[misc]
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
-
-class CriterionTest(TestBase):  # type: ignore[misc]
-    # TODO: check that criterions don't ignore grad_output
-
-    _required_arg_names = TestBase._required_arg_names.union({'target'})
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.should_test_cuda = kwargs.get('test_cuda', True)
-        self.check_forward_only = kwargs.get('check_forward_only', False)
-        self.check_gradgrad = kwargs.get('check_gradgrad', True)
-        self.check_half = kwargs.get('check_half', True)
-        self.check_bfloat16 = kwargs.get('check_bfloat16', False)
-        self.check_complex = kwargs.get('check_complex', False)
-        self.test_cpu = kwargs.get('test_cpu', True)
-        self.with_tf32 = kwargs.get('with_tf32', True)
-        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
-        self.check_batched_grad = kwargs.get('check_batched_grad', True)
-
-    def __call__(self, test_case):
-        return self._criterion_test_call(test_case)
-
     def _criterion_test_call(self, test_case):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
@@ -5373,9 +5362,6 @@ class CriterionTest(TestBase):  # type: ignore[misc]
 
         if self.check_gradgrad:
             gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
-
-    def test_cuda(self, test_case, dtype, extra_args=None):
-        return self._criterion_test_cuda(test_case, dtype, extra_args)
 
     def _criterion_test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):

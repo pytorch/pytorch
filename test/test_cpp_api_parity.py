@@ -29,7 +29,7 @@ for test_params_dicts, test_instance_class in [
     (sample_module.module_tests, common_nn.ModuleTest),
     (sample_functional.functional_tests, common_nn.ModuleTest),
     (common_nn.module_tests, common_nn.ModuleTest),
-    (common_nn.criterion_tests, common_nn.CriterionTest),
+    (common_nn.criterion_tests, common_nn.ModuleTest),
 ]:
     for test_params_dict in test_params_dicts:
         if test_params_dict.get('test_cpp_api_parity', True):
