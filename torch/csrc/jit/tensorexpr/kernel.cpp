@@ -3,6 +3,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorGeometry.h>
+#include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -118,6 +119,22 @@ c10::optional<at::Device> pickDeviceType(
       device = *tt->device();
     }
   }
+  return device;
+}
+
+c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
+  c10::optional<at::Device> device = c10::nullopt;
+  for (auto const& node : graph->nodes()) {
+    for (auto const& input : node->inputs()) {
+      if (auto tt = input->type()->cast<TensorType>()) {
+        if (auto inputDevice = tt->device()) {
+          TORCH_INTERNAL_ASSERT(!device || *device == *inputDevice);
+          device = inputDevice;
+        }
+      }
+    }
+  }
+  TORCH_INTERNAL_ASSERT(device);
   return device;
 }
 
@@ -502,7 +519,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
-  for (size_t i = 0; i < *shape.size(); i++) {
+  for (const auto i : c10::irange(*shape.size())) {
     dims.push_back(IntImm::make(*shape[i]));
   }
   return dims;
@@ -567,6 +584,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::atan:
     case aten::tanh:
     case aten::hardtanh:
+    case aten::hardsigmoid:
     case aten::hardswish:
     case aten::sqrt:
     case aten::rsqrt:
@@ -603,7 +621,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::remainder:
     case aten::atan2: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 2; idx++) {
+      for (const auto idx : c10::irange(2)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -614,7 +632,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::threshold:
     case aten::where: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 3; idx++) {
+      for (const auto idx : c10::irange(3)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -623,7 +641,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
 
     case aten::addcmul: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 4; idx++) {
+      for (const auto idx : c10::irange(4)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -2255,6 +2273,21 @@ Tensor* tensorexpr::computeOperandValue(
             return CompareSelect::make(mm, max_val, max_val, mm, kGT);
           });
     } break;
+
+    case aten::hardsigmoid: {
+      return computeOneOperand(
+          "aten_hardsigmoid",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            auto zero = Cast::make(a.dtype(), 0.0);
+            auto three = Cast::make(a.dtype(), 3.0);
+            auto six = Cast::make(a.dtype(), 6.0);
+            return clamp(zero, six, a + three) / six;
+          });
+    } break;
+
     case aten::hardswish: {
       return computeOneOperand(
           "aten_hardswish",
@@ -2507,15 +2540,17 @@ Tensor* tensorexpr::computeOperandValue(
           c10::fmap<DimArg>(outputShape),
           [&](const std::vector<VarHandle>& axes) {
             std::vector<VarHandle> new_axes;
+            new_axes.resize(axes.size());
             assert(permute_dims.size() == axes.size());
-            for (auto i : permute_dims) {
-              auto new_dim = at::maybe_wrap_dim(i, A.ndim());
-              new_axes.push_back(axes[new_dim]);
+            for (unsigned i = 0; i < axes.size(); i++) {
+              auto new_dim = at::maybe_wrap_dim(permute_dims[i], A.ndim());
+              new_axes[new_dim] = axes[i];
             }
             return A.load(new_axes);
           });
     }
-    case aten::expand: {
+    case aten::expand:
+    case aten::expand_as: {
       auto A = c10::get<BufHandle>(inputs[0]);
       return Compute(
           "aten_expand",
@@ -2523,6 +2558,57 @@ Tensor* tensorexpr::computeOperandValue(
           [&](const std::vector<VarHandle>& axes) {
             std::vector<ExprHandle> indices(axes.begin(), axes.end());
             return broadcast(A, indices);
+          });
+    }
+    case aten::reshape:
+    case aten::view: {
+      auto A = c10::get<BufHandle>(inputs[0]);
+      auto view_dims = c10::get<IntList>(inputs[1]);
+      return Compute(
+          "aten_reshape",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<VarHandle> new_axes;
+            assert(view_dims.size() == axes.size());
+            /*
+            Example for the index transformation. Assume we have a tensor A and
+            its view B:
+              A.size() = [6,2,3]
+              B = A.view(2,1,9,1,2)
+
+            In TE IR we would want to represent B as the following loopnest:
+              for (i1 in 0..2)
+                for (i2 in 0..1)
+                  for (i3 in 0..9)
+                    for (i4 in 0..1)
+                      for (i5 in 0..2)
+                        idx = i5 + i4*2 + i3*2 + i2*18 + i1*18
+                        B[i1,i2,i3,i4,i5] = A[idx/(3*2), (idx/3)%2, idx%3]
+            */
+            ExprHandle cur_stride = 1;
+            std::vector<const Expr*> dims, indices;
+            for (size_t idx = 0; idx < view_dims.size(); idx++) {
+              dims.push_back(new IntImm(view_dims[idx]));
+              indices.push_back(axes[idx].node());
+            }
+            ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
+            std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
+            ExprHandle stride = IntImm::make(1);
+            for (size_t idx = 0; idx < A.ndim(); idx++) {
+              size_t dim_idx = A.ndim() - idx - 1;
+              // We don't need to generate mod-div for the first dimension -
+              // ideally IRSimlifier would get rid of that for us, but for now
+              // let's just avoid generating it in the first place.
+              if (dim_idx > 0) {
+                orig_buf_indexes[dim_idx] = flat_idx / stride % A.dim(dim_idx);
+              } else {
+                orig_buf_indexes[dim_idx] = flat_idx / stride;
+              }
+              // In the example above the stride is initially 1 for dim_idx = 2,
+              // then it's 3 for dim_idx = 1, and then it's 3*2 for dim_idx = 0.
+              stride = stride * A.dim(dim_idx);
+            }
+            return A.load(orig_buf_indexes);
           });
     }
     case aten::mm: // aten::mm is a subset of aten::matmul where both inputs are
@@ -2597,6 +2683,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::relu6:
     case aten::leaky_relu:
     case aten::hardswish:
+    case aten::hardsigmoid:
     case aten::gelu:
     case aten::batch_norm:
     case aten::log:
@@ -2641,10 +2728,13 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::t:
     case aten::transpose:
     case aten::expand:
+    case aten::expand_as:
     case aten::permute:
     case aten::mm:
     case aten::matmul:
     case aten::cat:
+    case aten::view:
+    case aten::reshape:
     case aten::sum:
     case aten::softmax:
     case aten::log_softmax:
@@ -3150,7 +3240,7 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
-  device_ = *pickDeviceType(graph_->inputs());
+  device_ = *pickDeviceType(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});
