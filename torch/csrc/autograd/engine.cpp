@@ -559,7 +559,7 @@ void GraphTask::exec_post_processing() {
       // a c10::nullopt. I don't expect GraphTask's backward pass ran leaf nodes on
       // any new devices, so the stashed streams should be enough.
       // If leaf_stream.device_index() happens to be for a new device,
-      // operator* on the c10::nullopt will throw an error.
+      // operator* on the c10::nullopt should throw an error.
       const auto caller_current_stream = *caller_current_streams_[leaf_stream.device_index()];
 
       if (caller_current_stream != leaf_stream) {
@@ -1242,7 +1242,14 @@ void GraphTask::stash_current_streams() {
   caller_default_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
+#ifdef __HIP_PLATFORM_HCC__
+      // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
+      // https://github.com/pytorch/pytorch/issues/59750.
+      // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.
+      if (true) {
+#else
       if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
+#endif
         caller_current_streams_[idx] = guard.getStream({c10::DeviceType::CUDA, idx});
         caller_default_streams_[idx] = guard.getDefaultStream({c10::DeviceType::CUDA, idx});
       } else {
