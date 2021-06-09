@@ -1024,6 +1024,32 @@ void ComputeConstant(Node* n, int opset_version) {
       ProcessTimeSeriesNode(n);
       break;
     }
+    case ::c10::onnx::Size: {
+      if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+        auto input0_shape_size =
+            ConstantValueMap::GetShape(n->input(0)->debugName())
+                .value()
+                .sizes();
+        if (input0_shape_size.has_value()) {
+          auto input0_shape_value = input0_shape_size.value();
+          int64_t total_size = 1;
+          auto is_full_static = true;
+          for (auto i = 0; i < input0_shape_value.size(); i++) {
+            if (input0_shape_value[i].is_static()) {
+              total_size *= input0_shape_value[i].static_size();
+            } else {
+              is_full_static = false;
+              break;
+            }
+          }
+          if (is_full_static) {
+            auto f_final = onnx_constant_fold::IntToTensor(total_size);
+            ConstantValueMap::SetValue(n->output(0)->debugName(), f_final);
+          }
+        }
+      }
+      break;
+    }
     case ::c10::onnx::Slice: {
       ProcessSliceNode(n, opset_version);
       break;
