@@ -9,7 +9,7 @@ import torch
 import traceback
 
 import test_onnx_common
-from torch.testing._internal.common_nn import module_tests
+from torch.testing._internal.common_nn import module_tests, is_criterion_test
 
 
 # Take a test case (a dict) as input, return the test name.
@@ -135,5 +135,7 @@ def convert_tests(testcases, sets=1):
     print_stats(FunctionalModule_nums, nn_module)
 
 if __name__ == "__main__":
-    testcases = module_tests
+    # Note: before the module test / criterion test merge, this test was not run on
+    # criterion tests. For now, this behavior is preserved.
+    testcases = [test for test in module_tests if not is_criterion_test(test)]
     convert_tests(testcases)

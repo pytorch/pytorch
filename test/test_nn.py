@@ -36,11 +36,11 @@ from torch.nn.parallel._functions import Broadcast
 from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
-    get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
+    load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, ModuleTest, \
-    module_tests, criterion_tests, loss_reference_fns, \
+    module_tests, loss_reference_fns, \
     ctcloss_reference
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
@@ -11399,15 +11399,15 @@ for test_params in module_tests:
 
         add_test(test, decorator)
 
-for test_params in criterion_tests:
-    name = test_params.pop('module_name')
-    test_params['constructor'] = getattr(nn, name)
-    test = ModuleTest(**test_params)
-    decorator = test_params.pop('decorator', None)
-    add_test(test, decorator)
-    if 'check_sum_reduction' in test_params:
-        desc = test_params.get('desc', None)
-        test_params['desc'] = 'sum_reduction' if desc is None else desc + '_sum_reduction'
+    # Note: Before the module test / criterion test merge, this logic was only
+    # run for criterion tests. For now, this behavior is preserved here.
+    if test.is_criterion_test and 'check_sum_reduction' in test_params:
+        fullname = test_params.get('fullname', None)
+        if fullname:
+            test_params['fullname'] = fullname + '_sum_reduction'
+        else:
+            desc = test_params.get('desc', None)
+            test_params['desc'] = 'sum_reduction' if desc is None else desc + '_sum_reduction'
 
         def gen_sum_reduction_constructor(constructor):
             def sum_reduction_constructor(*args, **kwargs):

@@ -6,7 +6,6 @@ import shutil
 
 import torch
 import torch.utils.cpp_extension
-import torch.testing._internal.common_nn as common_nn
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 # Note that this namedtuple is for C++ parity test mechanism's internal use.
@@ -183,9 +182,6 @@ def set_cpp_tensors_requires_grad(cpp_tensor_stmts, python_tensors):
 def move_cpp_tensors_to_device(cpp_tensor_stmts, device):
     return ['{}.to("{}")'.format(tensor_stmt, device) for tensor_stmt in cpp_tensor_stmts]
 
-def is_criterion_test(test_instance):
-    return test_instance.is_criterion_test
-
 # This function computes the following:
 # - What variable declaration statements should show up in the C++ parity test function
 # - What arguments should be passed into the C++ module/functional's forward function
@@ -283,7 +279,7 @@ def compute_arg_dict(test_params_dict, test_instance):
             arg_dict[arg_type].append(CppArg(name=arg_type_prefix + str(i), value=arg))
 
     put_args_into_arg_dict('input', 'i', convert_to_list(test_instance._get_input()))
-    if is_criterion_test(test_instance):
+    if test_instance.is_criterion_test:
         put_args_into_arg_dict('target', 't', convert_to_list(test_instance._get_target()))
     if test_instance.extra_args:
         put_args_into_arg_dict('extra_args', 'e', convert_to_list(test_instance.extra_args))

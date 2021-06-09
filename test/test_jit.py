@@ -89,7 +89,7 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
     EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
     get_nn_module_name_from_kwargs, script_method_template
 
-from torch.testing._internal.common_nn import module_tests, criterion_tests
+from torch.testing._internal.common_nn import module_tests, is_criterion_test
 from torch.testing._internal.common_methods_invocations import (
     create_input, unpack_variables)
 
@@ -15824,10 +15824,8 @@ for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
 for test in module_tests + additional_module_tests:
-    add_nn_module_test(**test)
-
-for test in criterion_tests:
-    test['no_grad'] = True
+    if is_criterion_test(test):
+        test['no_grad'] = True
     add_nn_module_test(**test)
 
 if __name__ == '__main__':

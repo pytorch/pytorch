@@ -4112,7 +4112,7 @@ loss_reference_fns: Dict['str', Callable] = {
 }
 
 
-criterion_tests = [
+module_tests.extend([
     dict(
         module_name='L1Loss',
         input_size=(2, 3, 4),
@@ -4741,7 +4741,7 @@ criterion_tests = [
         check_gradgrad=False,
         check_half=False,
     ),
-]
+])
 
 
 class NNTestCase(TestCase):
@@ -4867,14 +4867,27 @@ class NNTestCase(TestCase):
             self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
+def is_criterion_test(test_params):
+    """
+    Helper function to identify whether or not the test specified by the given test_params is a
+    criterion test.
+
+    Args:
+        test_params (dict): Parameters defining the test
+
+    Returns:
+        True if the given params indicate a criterion test; False otherwise
+    """
+    return any([name in test_params for name in ['target', 'target_fn', 'target_size']])
+
+
 class ModuleTest(object):
     def __init__(self, constructor, desc='', reference_fn=None, fullname=None, **kwargs):
         self.desc = desc
         self.fullname = fullname
         self.constructor = constructor
         self.reference_fn = reference_fn
-        self.is_criterion_test = any(
-            [name in kwargs for name in ['target', 'target_fn', 'target_size']])
+        self.is_criterion_test = is_criterion_test(kwargs)
         self._required_arg_names = {'constructor_args', 'input', 'extra_args'}
         if self.is_criterion_test:
             self._required_arg_names.add('target')
