@@ -2894,35 +2894,17 @@ class TestAutograd(TestCase):
         # This will segfault if things have been erroneously released
         out.backward(torch.randn(out.size()))
 
-    def test_maximum_subgradient(self):
-        def run_test(a, b, expected_a_grad, expected_b_grad):
+    def test_maximum_and_minimum_subgradient(self):
+        def run_test(f, a, b, expected_a_grad, expected_b_grad):
             a = torch.tensor(a, requires_grad=True)
             b = torch.tensor(b, requires_grad=True)
-            z = torch.maximum(a, b)
+            z = f(a, b)
             z.sum().backward()
             self.assertEqual(a.grad, expected_a_grad)
             self.assertEqual(b.grad, expected_b_grad)
 
-        run_test([0., 0., 0.], [0., 0., 0.], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-        run_test([0., 1., 0.], [0., 0., 0.], [0.5, 1., 0.5], [0.5, 0., 0.5])
-        run_test([0., 1., 2.], [0., 1., 2.], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-        run_test([0., 0., 0.], [0., 1., 2.], [0.5, 0., 0.], [0.5, 1., 1.])
-        run_test(2 * torch.ones(3, 3), 2 * torch.ones(3, 3), 0.5 * torch.ones(3, 3), 0.5 * torch.ones(3, 3))
-
-    def test_minimum_subgradient(self):
-        def run_test(a, b, expected_a_grad, expected_b_grad):
-            a = torch.tensor(a, requires_grad=True)
-            b = torch.tensor(b, requires_grad=True)
-            z = torch.minimum(a, b)
-            z.sum().backward()
-            self.assertEqual(a.grad, expected_a_grad)
-            self.assertEqual(b.grad, expected_b_grad)
-
-        run_test([0., 0., 0.], [0., 0., 0.], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-        run_test([0., 1., 0.], [0., 0., 0.], [0.5, 0., 0.5], [0.5, 1., 0.5])
-        run_test([0., 1., 2.], [0., 1., 2.], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-        run_test([0., 0., 0.], [0., 1., 2.], [0.5, 1., 1.], [0.5, 0., 0.])
-        run_test(2 * torch.ones(3, 3), 2 * torch.ones(3, 3), 0.5 * torch.ones(3, 3), 0.5 * torch.ones(3, 3))
+        run_test(torch.maximum, [0., 1., 2.], [1., 1., 1.], [0., 0.5, 1.], [1., 0.5, 0.])
+        run_test(torch.minimum, [0., 1., 2.], [1., 1., 1.], [1., 0.5, 0.], [0., 0.5, 1.])
 
     # TODO: norm is deprecated, update these tests and port them to OpInfos
     #   or test_linalg.py
