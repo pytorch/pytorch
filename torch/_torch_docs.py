@@ -3899,9 +3899,9 @@ histogram(input, bins, *, range=[], min=None, max=None, weight=None, density=Fal
 Computes the histogram of the values in a tensor.
 
 If :attr:`bins` is an int, it specifies the number of equal-width bins.
-Either :attr:`range` or :attr:`min` and :attr:`max` may be used to
-specify the lower and upper range of the bins. If no range is specified,
-the minimum and maximum elements of the input tensor are used.
+:attr:`range` may be used to specify the lower and upper range of the bins.
+If no range is specified, the minimum and maximum elements of the input
+tensor are used.
 
 If :attr:`bins` is a tensor, it specifies the sequence of bin edges.
 
@@ -3912,8 +3912,6 @@ Args:
 
 Keyword args:
     range (tuple of float): Defines the range of the bins.
-    min (float): Defines the lower range of the bins.
-    max (float): Defines the upper range of the bins.
     weight (Tensor): If provided, weight should have the same shape as input. Each value in
                      input contributes its associated weight towards its bin's result.
     density (bool): If False, the result will contain the count (or total weight) in each bin.
@@ -3927,9 +3925,9 @@ Returns:
 
 Example::
 
-    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, min=0, max=3, weight=torch.tensor([1., 2., 4.]))
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]))
     (tensor([ 0.,  5.,  2.,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
-    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, min=0, max=3, weight=torch.tensor([1., 2., 4.]), density=True)
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]), density=True)
     (tensor([ 0.,  0.9524,  0.3810,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
 """.format(**common_args))
 
