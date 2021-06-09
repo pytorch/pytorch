@@ -2912,7 +2912,8 @@ def new_subgroups(
         >>> # Create intra-machine subgroups.
         >>> cur_subgroup, subgroups = dist.new_subgroups()
         >>> # Allreduce within the machine.
-        >>> tensor = torch.ones(1)
+        >>> rank = dist.get_rank()
+        >>> tensor = torch.ones(1, device=rank) * rank
         >>> dist.all_reduce(tensor, group=cur_subgroup)
         >>> tensor
         tensor([8])     # Assume 8 is the number of CUDA devices per machine.
@@ -2965,7 +2966,7 @@ def new_subgroups_by_enumeration(
     pg_options=None,
 ):
     """
-    Creates GPU subgroups by divding the global world, where the division is specified by
+    Creates GPU subgroups by dividing the global world, where the division is specified by
     a nested list of ranks. The subgroups cannot have overlap, and some ranks may not have
     to be in any subgroup.
 
@@ -3026,7 +3027,8 @@ def new_subgroups_by_enumeration(
     Examples:
         >>> # Create two subgroups, where each has 2 processes.
         >>> cur_subgroup, subgroups = dist.new_subgroups(ranks=[[0, 2], [1, 3]])
-        >>> tensor = torch.ones(1) * dist.get_rank()
+        >>> rank = dist.get_rank()
+        >>> tensor = torch.ones(1, device=rank) * rank
         >>> dist.all_reduce(tensor, group=cur_subgroup)
         >>> tensor
         tensor([2])     # Subgroup 0: ranks 0 and 2
