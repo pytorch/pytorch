@@ -9,7 +9,7 @@ Tensor cov(
     int64_t correction,
     const c10::optional<Tensor>& fweights,
     const c10::optional<Tensor>& aweights) {
-  constexpr int OBSERVATIONS_DIM = 1;
+  constexpr int64_t OBSERVATIONS_DIM = 1;
 
   TORCH_CHECK(
       self.ndimension() <= 2,
