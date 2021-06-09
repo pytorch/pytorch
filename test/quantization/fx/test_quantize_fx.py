@@ -1094,6 +1094,35 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
+        # test that function order overrides global qconfig
+        class M4(torch.nn.Module):
+            def forward(self, x):
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                return x
+
+        m = M4().eval()
+        qconfig_dict = {
+            "": torch.quantization.default_qconfig,
+            "module_name_function_order": [
+                ("", torch.add, 1, None),
+            ],
+        }
+        m = prepare_fx(m, qconfig_dict)
+        data = torch.randn(1, 1, 1, 1)
+        m(data)
+        m = convert_fx(m)
+        m(data)
+
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
+            ns.call_method("dequantize"),
+            ns.call_function(torch.add),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+
     def test_qconfig_dict_validity(self):
         r"""
         Verifies that if a user passes an invalid key or makes a typo when
