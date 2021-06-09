@@ -165,7 +165,7 @@ TEST(TestQTensor, QuantizePerChannel4d) {
     }
   }
   // quantize and check values
-  Tensor q = at::native::quantize_per_channel_cpu(
+  Tensor q = at::native::quantize_per_channel(
       tensor, scales, zero_points, ch_axis, kQUInt8);
   auto* q_data = (uint8_t*)q.data_ptr<quint8>();
   for (int c = 0, i = 0; c < C; ++c) {
@@ -199,7 +199,7 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
   }
 
   // quantize and check values
-  Tensor q = at::native::quantize_per_channel_cpu(
+  Tensor q = at::native::quantize_per_channel(
       tensor, scales, zero_points, ch_axis, kQUInt8);
   auto* q_data = (uint8_t*)q.data_ptr<quint8>();
   for (int e = 0, i = 0; e < H * W; ++e) {
