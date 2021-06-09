@@ -98,6 +98,12 @@ TYPED_TEST(ExclusivelyOwnedTest, MoveAssignment) {
   assertIsSampleObject(*anotherSample);
 }
 
+TYPED_TEST(ExclusivelyOwnedTest, MoveAssignmentFromContainedType) {
+  c10::ExclusivelyOwned<TypeParam> anotherSample = c10::ExclusivelyOwned<TypeParam>(getSampleValue<TypeParam>());
+  anotherSample = getSampleValue<TypeParam>();
+  assertIsSampleObject(*anotherSample);
+}
+
 TYPED_TEST(ExclusivelyOwnedTest, Take) {
   auto x = std::move(this->sample).take();
   assertIsSampleObject(x);
