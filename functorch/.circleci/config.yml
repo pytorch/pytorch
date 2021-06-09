@@ -1,0 +1,141 @@
+version: 2.1
+
+commands:
+  checkout_merge:
+    description: "checkout merge branch"
+    steps:
+      - checkout
+  #     - run:
+  #         name: Checkout merge branch
+  #         command: |
+  #           set -ex
+  #           BRANCH=$(git rev-parse --abbrev-ref HEAD)
+  #           if [[ "$BRANCH" != "master" ]]; then
+  #             git fetch --force origin ${CIRCLE_BRANCH}/merge:merged/${CIRCLE_BRANCH}
+  #             git checkout "merged/$CIRCLE_BRANCH"
+  #           fi
+
+binary_common: &binary_common
+  parameters:
+    # Edit these defaults to do a release`
+    build_version:
+      description: "version number of release binary; by default, build a nightly"
+      type: string
+      default: ""
+    pytorch_version:
+      description: "PyTorch version to build against; by default, use a nightly"
+      type: string
+      default: ""
+    # Don't edit these
+    python_version:
+      description: "Python version to build against (e.g., 3.7)"
+      type: string
+    cu_version:
+      description: "CUDA version to build against, in CU format (e.g., cpu or cu100)"
+      type: string
+    unicode_abi:
+      description: "Python 2.7 wheel only: whether or not we are cp27mu (default: no)"
+      type: string
+      default: ""
+    wheel_docker_image:
+      description: "Wheel only: what docker image to use"
+      type: string
+      default: "pytorch/manylinux-cuda101"
+  environment:
+    PYTHON_VERSION: << parameters.python_version >>
+    PYTORCH_VERSION: << parameters.pytorch_version >>
+    UNICODE_ABI: << parameters.unicode_abi >>
+    CU_VERSION: << parameters.cu_version >>
+
+jobs:
+  unittest_linux_cpu:
+    <<: *binary_common
+    machine:
+      image: "ubuntu-1604:202007-01"
+    resource_class: xlarge
+    steps:
+      - checkout
+      - run:
+          name: Setup
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/setup_env.sh
+      - run:
+          name: Install functorch
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/install.sh
+      - persist_to_workspace:
+          root: wheels
+          paths:
+            - "*"
+      - store_artifacts:
+          path: wheels
+      - run:
+          name: Run tests
+          command: .circleci/unittest/linux/scripts/run_test.sh
+      - run:
+          name: Post process
+          command: .circleci/unittest/linux/scripts/post_process.sh
+      - store_test_results:
+          path: test-results
+
+  unittest_linux_gpu:
+    <<: *binary_common
+    machine:
+      image: ubuntu-1604-cuda-10.2:202012-01
+    resource_class: gpu.nvidia.medium
+    steps:
+      - checkout
+      - run:
+          name: Setup
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/setup_env.sh
+      - run:
+          name: Install functorch
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/install.sh
+      - persist_to_workspace:
+          root: wheels
+          paths:
+            - "*"
+      - store_artifacts:
+          path: wheels
+      - run:
+          name: Run tests
+          command: .circleci/unittest/linux/scripts/run_test.sh
+      - run:
+          name: Post process
+          command: .circleci/unittest/linux/scripts/post_process.sh
+      - store_test_results:
+          path: test-results
+
+workflows:
+  unittest:
+    jobs:
+      - unittest_linux_cpu:
+          name: unittest_linux_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.6", "3.7", "3.8"]
+              cu_version: ["cpu"]
+      - unittest_linux_gpu:
+          name: unittest_linux_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.6", "3.7", "3.8"]
+              cu_version: ["cu102"]

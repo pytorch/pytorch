@@ -110,7 +110,7 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -
     if len(wrapped_returns) == 1:
         wrapped_returns = f'return {wrapped_returns[0]};'
     else:
-        wrapped_returns = f'return {{ {", ".join(wrapped_returns)} }};'
+        wrapped_returns = f'return std::make_tuple({", ".join(wrapped_returns)});'
 
     result = f"""\
     {batch_rule_typedef}

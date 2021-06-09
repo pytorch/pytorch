@@ -33,7 +33,7 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
     auto new_x = reshape_dim_into(*lhs_bdim, lhs_spec[0], lhs);
     auto out = at::conv2d(new_x, rhs, unbatched_bias, stride, padding, dilation, groups);
     out = reshape_dim_outof(out_spec[0], lhs.sizes()[*lhs_bdim], out);
-    result = {out, out_spec[0]};
+    result = std::make_tuple(out, out_spec[0]);
   } else if (!lhs_bdim && rhs_bdim) {
     if (groups == 1) {
       auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
