@@ -23,6 +23,7 @@ class TORCH_API StorageContext {
   explicit StorageContext() = default;
 
   void addStorage(const std::string& name, c10::Storage storage) {
+    TORCH_INTERNAL_ASSERT(!hasStorage(name));
     storage_map_.insert({name, storage});
   }
 

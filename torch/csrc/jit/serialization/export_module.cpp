@@ -479,7 +479,6 @@ void ScriptModuleSerializer::writeArchive(
               std::to_string(reinterpret_cast<std::intptr_t>(
                   tensor.storage().unsafeGetStorageImpl()));
           tensor_names.push_back(string_id + ".storage");
-          storage_context_.addStorage(string_id, tensor.storage());
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }
@@ -493,18 +492,17 @@ void ScriptModuleSerializer::writeArchive(
   std::string prefix = archive_name + "/";
 
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
-  const std::vector<std::string>& pre_serialized_files =
-      writer_.getAllWrittenRecords();
 
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = tensor_dir + tensor_names[i++];
-    if (tensor_cdata_naming_scheme &&
-        std::find(
-            pre_serialized_files.begin(), pre_serialized_files.end(), fname) !=
-            pre_serialized_files.end()) {
-      // storage has been serialzed already, skip
-      continue;
+    if (tensor_cdata_naming_scheme) {
+      if(storage_context_.hasStorage(fname)){
+        // storage has been serialzed already, skip
+        continue;
+      } else {
+        storage_context_.addStorage(fname, td.storage());
+      }
     }
     writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
   }
