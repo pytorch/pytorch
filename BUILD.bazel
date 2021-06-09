@@ -1875,8 +1875,6 @@ cc_library(
             "torch/lib/c10d/*.hpp",
         ],
         exclude = [
-            "torch/lib/c10d/ProcessGroupMPI.hpp",
-            "torch/lib/c10d/ProcessGroupNCCL.hpp",
             "torch/csrc/autograd/generated/VariableType.h",
             "torch/csrc/autograd/generated/RegistrationDeclarations.h",
             "torch/csrc/autograd/generated/variable_factories.h",
