@@ -10,33 +10,61 @@ namespace at {
 namespace native {
 namespace {
 
+
+void check_zero_points_cuda(
+    const std::string& fn_name,
+    const Tensor& zero_points,
+    const int64_t& qmin,
+    const int64_t& qmax) {
+  auto iter = TensorIteratorConfig().add_output(zero_points).add_input(zero_points).build();
+  AT_DISPATCH_ALL_TYPES(zero_points.scalar_type(), "check_zero_points_cuda", [&](){
+    gpu_kernel(
+      iter,
+      [=] GPU_LAMBDA(scalar_t zero_point) -> scalar_t {
+        TORCH_CHECK(
+          zero_point <= qmin,
+          fn_name,
+          " zero_point ",
+          zero_point,
+          " is out of range. Below minimum");
+      TORCH_CHECK(
+          zero_point >= qmax,
+          fn_name,
+          " zero_point ",
+          zero_point,
+          " is out of range. Above maximum");
+      return zero_point;
+    });
+  });
+}
+
 void quantize_tensor_per_tensor_affine_cuda(
     const Tensor& rtensor,
     Tensor& qtensor,
     double scale,
     int64_t zero_point) {
-  AT_DISPATCH_QINT_TYPES(
-      qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cuda", [&]() {
-        constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
-        constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
+  fn_name = "quantize_tensor_per_tensor_affine_cuda"
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
+    constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
 
-        auto iter = TensorIteratorConfig()
-            .check_all_same_dtype(false)
-            .add_output(qtensor)
-            .add_input(rtensor)
-            .add_input(qtensor)
-            .build();
-        gpu_kernel(
-            iter,
-            [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val) -> scalar_t {
-              int64_t qvalue =
-                  static_cast<int64_t>(nearbyint(raw_val / scale) + zero_point);
-              qvalue = std::max<int64_t>(qvalue, qmin);
-              qvalue = std::min<int64_t>(qvalue, qmax);
-              quantized_val.val_ = qvalue;
-              return quantized_val;
-            });
+    auto iter = TensorIteratorConfig()
+        .check_all_same_dtype(false)
+        .add_output(qtensor)
+        .add_input(rtensor)
+        .add_input(qtensor)
+        .build();
+    gpu_kernel(
+      iter,
+      [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val) -> scalar_t {
+        int64_t qvalue =
+            static_cast<int64_t>(nearbyint(raw_val / scale) + zero_point);
+        qvalue = std::max<int64_t>(qvalue, qmin);
+        qvalue = std::min<int64_t>(qvalue, qmax);
+        quantized_val.val_ = qvalue;
+        return quantized_val;
       });
+  });
 }
 
 void dequantize_tensor_per_tensor_affine_cuda(
@@ -44,32 +72,31 @@ void dequantize_tensor_per_tensor_affine_cuda(
     Tensor& rtensor,
     double scale,
     int64_t zero_point) {
-  AT_DISPATCH_QINT_TYPES(
-      qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cuda", [&]() {
-        auto iter = TensorIteratorConfig()
-          .check_all_same_dtype(false)
-          .add_output(rtensor)
-          .add_input(qtensor)
-          .build();
-        gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value) -> float {
-          return (static_cast<float>(value.val_) - zero_point) * scale;
-        });
-      });
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cuda", [&]() {
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(rtensor)
+      .add_input(qtensor)
+      .build();
+    gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value) -> float {
+      return (static_cast<float>(value.val_) - zero_point) * scale;
+    });
+  });
 }
 
 void quantize_tensor_per_channel_affine_cuda(
-  const Tensor& rtensor,
-  Tensor& qtensor,
-  const Tensor& scales,
-  const Tensor& zero_points,
-  int64_t axis) {
-
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis) {
+  fn_name = "quantize_tensor_per_channel_affine_cuda"
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
   auto shaped_scales = native::_unsafe_view(scales, expected_shape);
   auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
-
+  
   auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .add_output(qtensor)
@@ -79,63 +106,67 @@ void quantize_tensor_per_channel_affine_cuda(
       .add_input(shaped_zero_points)
       .build();
 
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
+    constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
 
+    check_zero_points_cuda(fn_name, shaped_zero_points, qmin, qmax)
 
-  AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cuda_handler", [&]() {
-      constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
-      constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
-      // trying to match _quantize_per_channel_ref_nd in test_quantized_tensor.py
-      gpu_kernel(
-          iter,
-          [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, double scale, int64_t zero_point) -> scalar_t {
-            
-            int64_t qvalue =
-                static_cast<int64_t>(nearbyint(raw_val/scale) + zero_point);
-            qvalue = std::max<int64_t>(qvalue, qmin);
-            qvalue = std::min<int64_t>(qvalue, qmax);
-            quantized_val.val_ = qvalue;
-            return quantized_val;
-          });
-    });
+    gpu_kernel(
+      iter,
+      [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, double scale, int64_t zero_point) -> scalar_t { 
+        int64_t qvalue =
+            static_cast<int64_t>(nearbyint(raw_val/scale) + zero_point);
+        qvalue = std::max<int64_t>(qvalue, qmin);
+        qvalue = std::min<int64_t>(qvalue, qmax);
+        quantized_val.val_ = qvalue;
+        return quantized_val;
+      });
+  });
 }
 
 void dequantize_tensor_per_channel_affine_cuda(
-  const Tensor& qtensor,
-  Tensor& rtensor,
-  const Tensor& scales,
-  const Tensor& zero_points,
-  int64_t axis) {
-
+    const Tensor& qtensor,
+    Tensor& rtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis) {
+  fn_name = "dequantize_tensor_per_channel_affine_cuda_handler"
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
   auto shaped_scales = native::_unsafe_view(scales, expected_shape);
   auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
 
-  AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cuda_handler", [&]() {
-      auto iter = TensorIteratorConfig()
-        .check_all_same_dtype(false)
-        .add_output(rtensor)
-        .add_input(qtensor)
-        .add_input(shaped_scales)
-        .add_input(shaped_zero_points)
-        .build();
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    check_zero_points_cuda(
+      fn_name,
+      shaped_zero_points, 
+      std::numeric_limits<underlying_t>::min(), 
+      std::numeric_limits<underlying_t>::max()
+    )
+    
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(rtensor)
+      .add_input(qtensor)
+      .add_input(shaped_scales)
+      .add_input(shaped_zero_points)
+      .build();
 
-      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value, double scale, int64_t zero_point) -> float {
-        return static_cast<float>(value.val_ - zero_point) * scale;
-      });
+    gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value, double scale, int64_t zero_point) -> float {
+      return static_cast<float>(value.val_ - zero_point) * scale;
     });
+  });
 }
 
 void quantize_tensor_per_channel_float_qparams_cuda(
-  const Tensor& rtensor,
-  Tensor& qtensor,
-  const Tensor& scales,
-  const Tensor& zero_points,
-  int64_t axis) {
-
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis) {
+  fn_name = "quantize_tensor_per_channel_float_qparams_cuda"
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
   
@@ -151,51 +182,58 @@ void quantize_tensor_per_channel_float_qparams_cuda(
       .add_input(shaped_zero_points)
       .build();
 
-  AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cuda_handler", [&]() {
-      constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
-      constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
-      // trying to match _quantize_per_channel_ref_nd in test_quantized_tensor.py
-      gpu_kernel(
-          iter,
-          [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, float scale, float zero_point) -> scalar_t {
-            float inv_scale = 1.0f/scale;
-            int64_t qvalue = lrintf(raw_val*inv_scale + zero_point);
-            qvalue = std::max<int64_t>(qvalue, qmin);
-            qvalue = std::min<int64_t>(qvalue, qmax);
-            quantized_val.val_ = qvalue;
-            return quantized_val;
-          });
-    });
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
+    constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
+
+    check_zero_points_cuda(fn_name, shaped_zero_points, qmin, qmax)
+
+    gpu_kernel(
+      iter,
+      [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, float scale, float zero_point) -> scalar_t {
+        float inv_scale = 1.0f/scale;
+        int64_t qvalue = lrintf(raw_val*inv_scale + zero_point);
+        qvalue = std::max<int64_t>(qvalue, qmin);
+        qvalue = std::min<int64_t>(qvalue, qmax);
+        quantized_val.val_ = qvalue;
+        return quantized_val;
+      });
+  });
 }
 
 void dequantize_tensor_per_channel_float_qparams_cuda(
-  const Tensor& qtensor,
-  Tensor& rtensor,
-  const Tensor& scales,
-  const Tensor& zero_points,
-  int64_t axis) {
-
+    const Tensor& qtensor,
+    Tensor& rtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis) {
+  fn_name = "dequantize_tensor_per_channel_float_qparams_cuda"
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
   auto shaped_scales = native::_unsafe_view(scales, expected_shape);
   auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
 
-  AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cuda_handler", [&]() {
-      auto iter = TensorIteratorConfig()
-        .check_all_same_dtype(false)
-        .add_output(rtensor)
-        .add_input(qtensor)
-        .add_input(shaped_scales)
-        .add_input(shaped_zero_points)
-        .build();
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cuda_handler", [&]() {
+    check_zero_points_cuda(
+      fn_name,
+      shaped_zero_points, 
+      std::numeric_limits<underlying_t>::min(), 
+      std::numeric_limits<underlying_t>::max()
+    )
+    
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(rtensor)
+      .add_input(qtensor)
+      .add_input(shaped_scales)
+      .add_input(shaped_zero_points)
+      .build();
 
-      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value, float scale, float zero_point) -> float {
-        return (static_cast<float>(value.val_) - zero_point) * scale;
-      });
+    gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value, float scale, float zero_point) -> float {
+      return (static_cast<float>(value.val_) - zero_point) * scale;
     });
+  });
 }
 
 } // anonymous namespace
