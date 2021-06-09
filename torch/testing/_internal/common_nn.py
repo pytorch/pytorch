@@ -4905,11 +4905,11 @@ class TestBase(object):
 
     @property
     def constructor_args(self):
-        return self._get_arg('constructor_args', True)
+        return self._get_arg('constructor_args', False)
 
     @property
     def extra_args(self):
-        return self._get_arg('extra_args', True)
+        return self._get_arg('extra_args', False)
 
     def _get_arg(self, name, unpack):
         assert name in self._required_arg_names
@@ -5176,10 +5176,6 @@ class ModuleTest(TestBase):  # type: ignore[misc]
     def _get_target(self):
         return self._get_arg('target', False)
 
-    @property
-    def constructor_args(self):
-        return self._get_arg('constructor_args', False)
-
     def noncontiguize(self, obj):
         if isinstance(obj, list):
             return [self.noncontiguize(o) for o in obj]
@@ -5421,11 +5417,3 @@ class CriterionTest(TestBase):  # type: ignore[misc]
 
     def _get_target(self):
         return self._get_arg('target', False)
-
-    @property
-    def constructor_args(self):
-        return self._get_arg('constructor_args', False)
-
-    @property
-    def extra_args(self):
-        return self._get_arg('extra_args', False)
