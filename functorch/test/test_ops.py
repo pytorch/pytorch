@@ -16,7 +16,7 @@ import unittest
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU
-from torch.testing._internal.common_methods_invocations import op_db
+from functorch_lagging_op_db import functorch_lagging_op_db
 from common_utils import (
     parameterized,
     instantiate_parameterized_methods,
@@ -136,7 +136,7 @@ def is_inplace(op, variant):
 
 
 class TestOperators(TestCase):
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_grad(self, device, dtype, op):
         op_skip = {
             '__getitem__',
@@ -189,7 +189,7 @@ class TestOperators(TestCase):
 
             self.assertEqual(result, expected)
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_vjp(self, device, dtype, op):
         op_skip = {
             '__getitem__',
@@ -231,7 +231,7 @@ class TestOperators(TestCase):
 
             self.assertEqual(result_vjps, expected_vjps)
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_vjpvjp(self, device, dtype, op):
         op_skip = {
             '__getitem__',
@@ -280,7 +280,7 @@ class TestOperators(TestCase):
 
             self.assertEqual(result_vjps, expected_vjps)
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_vmapvjp(self, device, dtype, op):
         op_skip = {
             '__getitem__',
@@ -326,7 +326,7 @@ class TestOperators(TestCase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
                 self.assertEqual(loop_out, batched_out)
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_vjpvmap(self, device, dtype, op):
         op_skip = {
             '__getitem__',
