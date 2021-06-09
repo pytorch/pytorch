@@ -58,7 +58,7 @@ TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
     }
   }
 
-  check_reduction_shape(*this, name, self, dims, keepdim, out_dtype);
+  check_reduction_shape(*this, "all", self, dim, keepdim, out_dtype);
 }
 
 } // namespace meta
