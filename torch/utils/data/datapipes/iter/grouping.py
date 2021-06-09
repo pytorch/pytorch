@@ -58,7 +58,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
             else:
                 self.length = (len(self.datapipe) + self.batch_size - 1) // self.batch_size
             return self.length
-        raise NotImplementedError
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
 
 @functional_datapipe('bucket_batch')
@@ -126,7 +126,7 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
             else:
                 self.length = (len(self.datapipe) + self.batch_size - 1) // self.batch_size
             return self.length
-        raise NotImplementedError
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
 
 # defaut group key is the file pathname without the extension.
@@ -236,5 +236,5 @@ class GroupByKeyIterDataPipe(IterDataPipe[list]):
 
     def __len__(self) -> int:
         if self.length == -1:
-            raise NotImplementedError
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length

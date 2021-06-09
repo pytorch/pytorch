@@ -492,7 +492,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
-    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
+    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"
     "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
@@ -1477,6 +1477,10 @@ if(BUILD_SPLIT_CUDA)
   target_link_libraries(
       torch_cuda_cpp PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
   target_link_libraries(torch_cuda_cu PRIVATE torch_cuda_cpp)
+  if(USE_CUDNN)
+    target_link_libraries(
+        torch_cuda_cpp PRIVATE  caffe2::cudnn-private)
+  endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
@@ -1493,6 +1497,10 @@ elseif(USE_CUDA)
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+  if(USE_CUDNN)
+    target_link_libraries(
+        torch_cuda PRIVATE  caffe2::cudnn-private)
+  endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
