@@ -1256,15 +1256,14 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
             && self_or_result.is_contiguous()) {
     at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
-    bool enable_multithreaded_bmm{false};
 #ifdef C10_MOBILE
     /*
-     * Inference mode multithreading is done because various thread local
-     * state is not appropriately propagated through at::parallel_for.
-     * e.g. RecordFunction related state, dispatchKeySet
-     * Big concern with this is that if we at::parallel_for where state
-     * is not propagated then dispatch machinery may work differently, leading
-     * to undefined behavior.
+     * We only do multithreading when Inference mode is enabled because various
+     * thread local state is not appropriately propagated through
+     * at::parallel_for. e.g. RecordFunction related state, dispatchKeySet Big
+     * concern with this is that if we use at::parallel_for where state is not
+     * propagated then dispatch machinery may work differently on main thread
+     * vs. other threads, leading to undefined behavior.
      * Thus it is recommended to not use at::parallel_for where lambdas do
      * ops that go through dispatcher.
      * For now we circument this by InferenceMode guard in order to unlock
@@ -1274,13 +1273,14 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
      * Also note that this is enabled for mobile only because blas
      * implementation for non-mobile build is already multithreaded.
      */
-    enable_multithreaded_bmm = c10::InferenceMode::is_enabled();
     // Benchmarking was done as follows:
     // bmm_test: operator benchmark under
     // benchmarks/operator_benchmarks/pt/bmm_test.py Ran this benchmark for
     // various matrix sizes on Samsung S8U
-    enable_multithreaded_bmm =
+    const bool enable_multithreaded_bmm = c10::InferenceMode::is_enabled() &&
         bs >= 4 && res_rows >= 32 && res_cols >= 32 && contraction_size >= 32;
+#else
+    const bool enable_multithreaded_bmm{false};
 #endif
     if (is_bmm_out) {
       if (enable_multithreaded_bmm) {
