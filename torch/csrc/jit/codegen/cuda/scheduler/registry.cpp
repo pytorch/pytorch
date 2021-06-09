@@ -34,7 +34,7 @@ class SchedulerTopologyChecker {
     auto all_vals = fusion->usedMathVals();
     std::vector<TensorView*> reduction_tvs;
     for (auto tv : ir_utils::filterByType<TensorView>(all_vals)) {
-      if (tv->hasReduction()) {
+      if (tv->hasReduction() && !fusion->hasInput(tv)) {
         reduction_tvs.push_back(tv);
       }
     }
@@ -232,7 +232,7 @@ class SchedulerTopologyChecker {
     for (auto tv : ir_utils::filterByType<TensorView>(all_vals)) {
       // Welford can have 2 outputs, so do this on all found reduction tensor
       // views
-      if (tv->hasReduction()) {
+      if (tv->hasReduction() && !fusion->hasInput(tv)) {
         auto tv_chains = tvChains(DependencyCheck::getAllUseChains(tv));
         // Propagate forward from reduction through all uses of the reduction
         for (auto tv_dep_chain : tv_chains) {

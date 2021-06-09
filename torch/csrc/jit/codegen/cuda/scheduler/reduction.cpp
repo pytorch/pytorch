@@ -551,7 +551,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   auto tvs = scheduler_utils::allTvs(fusion);
   TensorView* red_tv = nullptr;
   for (auto tv : tvs) {
-    if (tv->hasReduction()) {
+    if (tv->hasReduction() && !fusion->hasInput(tv)) {
       if (red_tv == nullptr) {
         red_tv = tv;
       } else {
@@ -636,7 +636,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
   auto tvs = scheduler_utils::allTvs(fusion);
   TensorView* red_tv = nullptr;
   for (auto tv : tvs) {
-    if (tv->hasReduction()) {
+    if (tv->hasReduction() && !fusion->hasInput(tv)) {
       if (red_tv == nullptr) {
         red_tv = tv;
       } else {
