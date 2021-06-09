@@ -497,7 +497,7 @@ void ScriptModuleSerializer::writeArchive(
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = tensor_dir + tensor_names[i++];
     if (tensor_cdata_naming_scheme) {
-      if(storage_context_.hasStorage(fname)){
+      if (storage_context_.hasStorage(fname)) {
         // storage has been serialzed already, skip
         continue;
       } else {
