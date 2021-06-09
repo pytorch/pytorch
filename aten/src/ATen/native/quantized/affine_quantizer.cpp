@@ -156,7 +156,9 @@ Tensor& quantize_tensor_per_channel_affine(
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }
   });
 
   TORCH_CHECK(
@@ -258,7 +260,9 @@ Tensor& dequantize_tensor_per_channel_affine(
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }
   });
 
   TORCH_CHECK(

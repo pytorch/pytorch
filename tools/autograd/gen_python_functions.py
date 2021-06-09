@@ -95,7 +95,7 @@ SKIP_PYTHON_BINDINGS = [
     'nonzero(_(out|numpy))?',
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_',
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
 ]

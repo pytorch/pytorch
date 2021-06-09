@@ -8,6 +8,7 @@
 
 namespace at {
 namespace native {
+namespace {
 
 void quantize_tensor_per_tensor_affine_cuda(
     const Tensor& rtensor,
@@ -20,11 +21,11 @@ void quantize_tensor_per_tensor_affine_cuda(
         constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
 
         auto iter = TensorIteratorConfig()
-          .check_all_same_dtype(false)
-          .add_output(qtensor)
-          .add_input(rtensor)
-          .add_input(qtensor)
-          .build();
+            .check_all_same_dtype(false)
+            .add_output(qtensor)
+            .add_input(rtensor)
+            .add_input(qtensor)
+            .build();
         gpu_kernel(
             iter,
             [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val) -> scalar_t {
@@ -59,21 +60,24 @@ void dequantize_tensor_per_tensor_affine_cuda(
 void quantize_tensor_per_channel_affine_cuda(
   const Tensor& rtensor,
   Tensor& qtensor,
-  Tensor scales,
-  Tensor zero_points,
+  const Tensor& scales,
+  const Tensor& zero_points,
   int64_t axis) {
 
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
+  auto shaped_scales = native::_unsafe_view(scales, expected_shape);
+  auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
+
   auto iter = TensorIteratorConfig()
-  .check_all_same_dtype(false)
-  .add_output(qtensor)
-  .add_input(rtensor)
-  .add_input(qtensor)
-  .add_input(native::_unsafe_view(scales, expected_shape))
-  .add_input(native::_unsafe_view(zero_points, expected_shape))
-  .build();
+      .check_all_same_dtype(false)
+      .add_output(qtensor)
+      .add_input(rtensor)
+      .add_input(qtensor)
+      .add_input(shaped_scales)
+      .add_input(shaped_zero_points)
+      .build();
 
 
 
@@ -99,12 +103,15 @@ void quantize_tensor_per_channel_affine_cuda(
 void dequantize_tensor_per_channel_affine_cuda(
   const Tensor& qtensor,
   Tensor& rtensor,
-  Tensor scales,
-  Tensor zero_points,
+  const Tensor& scales,
+  const Tensor& zero_points,
   int64_t axis) {
 
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
+
+  auto shaped_scales = native::_unsafe_view(scales, expected_shape);
+  auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
 
   AT_DISPATCH_QINT_TYPES(
     qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cuda_handler", [&]() {
@@ -112,8 +119,8 @@ void dequantize_tensor_per_channel_affine_cuda(
         .check_all_same_dtype(false)
         .add_output(rtensor)
         .add_input(qtensor)
-        .add_input(native::_unsafe_view(scales, expected_shape))
-        .add_input(native::_unsafe_view(zero_points, expected_shape))
+        .add_input(shaped_scales)
+        .add_input(shaped_zero_points)
         .build();
 
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value, double scale, int64_t zero_point) -> float {
@@ -125,25 +132,26 @@ void dequantize_tensor_per_channel_affine_cuda(
 void quantize_tensor_per_channel_float_qparams_cuda(
   const Tensor& rtensor,
   Tensor& qtensor,
-  Tensor scales,
-  Tensor zero_points,
+  const Tensor& scales,
+  const Tensor& zero_points,
   int64_t axis) {
 
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
+  
+  auto shaped_scales = native::_unsafe_view(scales, expected_shape);
+  auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
 
   auto iter = TensorIteratorConfig()
-  .check_all_same_dtype(false)
-  .add_output(qtensor)
-  .add_input(rtensor)
-  .add_input(qtensor)
-  .add_input(native::_unsafe_view(scales, expected_shape))
-  .add_input(native::_unsafe_view(zero_points, expected_shape))
-  .build();
+      .check_all_same_dtype(false)
+      .add_output(qtensor)
+      .add_input(rtensor)
+      .add_input(qtensor)
+      .add_input(shaped_scales)
+      .add_input(shaped_zero_points)
+      .build();
 
-
-
-  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+  AT_DISPATCH_QINT_TYPES(
     qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cuda_handler", [&]() {
       constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
       constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
@@ -164,21 +172,24 @@ void quantize_tensor_per_channel_float_qparams_cuda(
 void dequantize_tensor_per_channel_float_qparams_cuda(
   const Tensor& qtensor,
   Tensor& rtensor,
-  Tensor scales,
-  Tensor zero_points,
+  const Tensor& scales,
+  const Tensor& zero_points,
   int64_t axis) {
 
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
 
-  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+  auto shaped_scales = native::_unsafe_view(scales, expected_shape);
+  auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
+
+  AT_DISPATCH_QINT_TYPES(
     qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cuda_handler", [&]() {
       auto iter = TensorIteratorConfig()
         .check_all_same_dtype(false)
         .add_output(rtensor)
         .add_input(qtensor)
-        .add_input(native::_unsafe_view(scales, expected_shape))
-        .add_input(native::_unsafe_view(zero_points, expected_shape))
+        .add_input(shaped_scales)
+        .add_input(shaped_zero_points)
         .build();
 
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value, float scale, float zero_point) -> float {
@@ -186,6 +197,8 @@ void dequantize_tensor_per_channel_float_qparams_cuda(
       });
     });
 }
+
+} // anonymous namespace
 
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
