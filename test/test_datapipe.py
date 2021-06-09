@@ -415,33 +415,6 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             input_dp.map(fn, nesting_level=-2)
 
-        def addition(item, amount=1.0):
-            return item + amount
-
-        map_dp = input_dp.map(addition, nesting_level=-1)
-        self.assertEqual(len(input_dp), len(map_dp))
-        for x, y in zip(map_dp, input_dp):
-            self.assertEqual(len(x), len(y))
-            for a, b in zip(x, y):
-                self.assertEqual(a, b + 1.0)
-
-        map_dp = input_dp.map(addition, fn_kwargs={'amount': 2.0}, nesting_level=-1)
-        self.assertEqual(len(input_dp), len(map_dp))
-        for x, y in zip(map_dp, input_dp):
-            self.assertEqual(len(x), len(y))
-            for a, b in zip(x, y):
-                self.assertEqual(a, b + 2.0)
-
-        def subtraction(item, amount):
-            return item - amount
-
-        map_dp = input_dp.map(subtraction, fn_args=(1.0, ), nesting_level=-1)
-        self.assertEqual(len(input_dp), len(map_dp))
-        for x, y in zip(map_dp, input_dp):
-            self.assertEqual(len(x), len(y))
-            for a, b in zip(x, y):
-                self.assertEqual(a, b - 1.0)
-
     def test_collate_datapipe(self):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         input_dp = IDP(arrs)
@@ -515,6 +488,11 @@ class TestFunctionalIterDataPipe(TestCase):
 
         unbatch_dp = input_dp.unbatch(unbatch_level=2)
         expected_dp2 = [0, 1, 2, 3, 4, 5, 6, 7]
+        self.assertEqual(len(list(unbatch_dp)), 8)
+        for i, res in zip(expected_dp2, unbatch_dp):
+            self.assertEqual(i, res)
+
+        unbatch_dp = input_dp.unbatch(unbatch_level=-1)
         self.assertEqual(len(list(unbatch_dp)), 8)
         for i, res in zip(expected_dp2, unbatch_dp):
             self.assertEqual(i, res)
