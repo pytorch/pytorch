@@ -859,7 +859,7 @@ def check_slow_test_from_stats(test):
     if slow_tests_dict is None:
         if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
             url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
-            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
+            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests.json", url)
         else:
             slow_tests_dict = {}
     test_suite = str(test.__class__).split('\'')[1]
@@ -1044,7 +1044,6 @@ class TestCase(expecttest.TestCase):
             result.stop()
 
     def setUp(self):
-
         check_slow_test_from_stats(self)
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
