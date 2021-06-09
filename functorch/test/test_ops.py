@@ -135,22 +135,26 @@ def is_inplace(op, variant):
     return variant is op.get_inplace()
 
 
+vjp_fail = {
+    '__getitem__',
+    '__rpow__',
+    'linalg.cholesky',
+    'linalg.inv',
+    'linalg.matrix_norm',
+    'linalg.matrix_power',
+    'linalg.norm',
+    'nanquantile',
+    'quantile',
+    'tensor_split',
+    'norm',
+    'to_sparse',
+}
+
+
 class TestOperators(TestCase):
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_grad(self, device, dtype, op):
-        op_skip = {
-            '__getitem__',
-            '__rpow__',
-            'linalg.cholesky',
-            'linalg.inv',
-            'linalg.matrix_norm',
-            'linalg.matrix_power',
-            'linalg.norm',
-            'nanquantile',
-            'quantile',
-            'tensor_split',
-        }
-        if op.name in op_skip:
+        if op.name in vjp_fail:
             self.skipTest("Skipped; Expected failures")
             return
 
@@ -191,19 +195,7 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_vjp(self, device, dtype, op):
-        op_skip = {
-            '__getitem__',
-            '__rpow__',
-            'linalg.cholesky',
-            'linalg.inv',
-            'linalg.matrix_norm',
-            'linalg.matrix_power',
-            'linalg.norm',
-            'nanquantile',
-            'quantile',
-            'tensor_split',
-        }
-        if op.name in op_skip:
+        if op.name in vjp_fail:
             self.skipTest("Skipped; Expected failures")
             return
 
@@ -233,18 +225,9 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_vjpvjp(self, device, dtype, op):
-        op_skip = {
-            '__getitem__',
-            '__rpow__',
-            'linalg.cholesky',
-            'linalg.inv',
-            'linalg.matrix_norm',
-            'linalg.matrix_power',
-            'linalg.norm',
-            'nanquantile',
-            'quantile',
-            'tensor_split',
-        }
+        op_skip = set({
+        })
+        op_skip = op_skip.union(vjp_fail)
         if op.name in op_skip:
             self.skipTest("Skipped; Expected failures")
             return
@@ -283,16 +266,6 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_vmapvjp(self, device, dtype, op):
         op_skip = {
-            '__getitem__',
-            '__rpow__',
-            'linalg.cholesky',
-            'linalg.inv',
-            'linalg.matrix_norm',
-            'linalg.matrix_power',
-            'linalg.norm',
-            'nanquantile',
-            'quantile',
-            'tensor_split',
             'broadcast_to',
             'dsplit',
             'dstack',
@@ -309,9 +282,14 @@ class TestOperators(TestCase):
             'unfold',
             'vsplit',
             'vstack',
+            'resolve_conj',
         }
+        op_skip = op_skip.union(vjp_fail)
         if op.name in op_skip:
             self.skipTest("Skipped; Expected failures")
+            return
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
             return
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -350,6 +328,10 @@ class TestOperators(TestCase):
             'tensor_split',
             'unfold',
             'vsplit',
+            'fill_',
+            'norm',
+            'resolve_conj',
+            'to_sparse',
         }
         if op.name in op_skip:
             self.skipTest("Skipped; Expected failures")
