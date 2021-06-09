@@ -89,6 +89,10 @@
   manual_cpp_binding: True
   variants: method
 
+- func: retains_grad(Tensor self) -> bool
+  manual_cpp_binding: True
+  variants: method
+
 - func: _fw_primal(Tensor(a) self, int level) -> Tensor(a)
   variants: method
   dispatch:
