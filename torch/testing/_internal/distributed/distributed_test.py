@@ -44,6 +44,7 @@ from torch.testing._internal.common_distributed import (
     captured_output,
     with_nccl_blocking_wait,
     with_dist_debug_levels,
+    verify_ddp_error_logged,
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -578,6 +579,7 @@ class DistributedTest:
                 "MASTER_PORT",
                 "WORLD_SIZE",
                 "NCCL_TOPO_DUMP_FILE",  # N/A
+                "NCCL_ASYNC_ERROR_HANDLING",
             ]
             for var in vars:
                 line = format_line(var)
@@ -789,35 +791,32 @@ class DistributedTest:
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
 
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        def test_new_default_subgroups_nccl(self):
+        @skip_if_lt_x_gpu(2)
+        def test_new_subgroups_nccl(self):
+            subgroup_size = 2
+            cur_subgroup, subgroups = dist.new_subgroups(subgroup_size)
+
             world_size = dist.get_world_size()
-            cur_subgroup, subgroups = dist.new_subgroups()
-            # By default, since this test runs on a single machine, only one subgroup will be generated,
-            # which should be equal to the main process group that contains all the ranks.
-            self.assertEqual(cur_subgroup.size(), world_size)
-            self.assertEqual(len(subgroups), 1)
-            self.assertEqual(cur_subgroup, subgroups[0])
+            self.assertEqual(cur_subgroup.size(), subgroup_size)
+            self.assertEqual(len(subgroups), world_size / subgroup_size)
             self.assertFalse(dist._rank_not_in_group(cur_subgroup))
 
-        @skip_if_lt_x_gpu(4)
-        def test_new_2subgroups_nccl(self):
-            group, _, rank = self._init_global_test()
-            rank_to_GPU = self._init_multigpu_helper()
-            device_id = rank_to_GPU[rank][0]
+            for subgroup in subgroups:
+                dist.destroy_process_group(subgroup)
 
-            # Divide into two subgroups, each of which has two processors.
-            # The device ids in the same subgroup are not neighboring numbers.
-            cur_subgroup, subgroups = dist.new_subgroups(ranks_per_subgroup_list=[[0, 2], [1, 3]], group=group)
-            if device_id >= 4:
-                self.assertIsNone(cur_subgroup)
-            else:
-                self.assertEqual(cur_subgroup.size(), 2)
-                self.assertEqual(len(subgroups), 2)
-                if device_id == 0 or device_id == 2:
-                    self.assertEqual(cur_subgroup, subgroups[0])
-                else:
-                    self.assertEqual(cur_subgroup, subgroups[1])
+        @skip_if_no_gpu
+        def test_new_subgroups_group_size_exceeds_world_size_nccl(self):
+            with self.assertRaisesRegex(
+                ValueError, "The arg 'group_size' must not exceed the world size"
+            ):
+                dist.new_subgroups(100)
+
+        @skip_if_lt_x_gpu(4)
+        def test_new_subgroups_world_size_not_divisible_by_group_size_nccl(self):
+            with self.assertRaisesRegex(
+                ValueError, "The world size must be divisible by 'group_size'"
+            ):
+                dist.new_subgroups(3)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
@@ -3335,7 +3334,7 @@ class DistributedTest:
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         def test_DistributedDataParallel_requires_grad(self):
             # a module without gradients shouldn't be accepted
-            self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
+            self.assertRaises(RuntimeError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
             self._barrier()
 
         @unittest.skipIf(
@@ -3343,6 +3342,7 @@ class DistributedTest:
             "Only NCCL and GLOO backend support DistributedDataParallel",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
         def test_DistributedDataParallel_non_default_stream(self):
             stream = torch.cuda.Stream(self.rank)
             rank = self.rank
@@ -4210,6 +4210,7 @@ class DistributedTest:
             def parse_env(var):
                 return os.environ[var] if var in os.environ else "N/A"
 
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=False)
 
@@ -4240,6 +4241,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("bucket_sizes"), str(param_size))
             self.assertEqual(ddp_logging_data.get("master_port"), parse_env("MASTER_PORT"))
             self.assertEqual(ddp_logging_data.get("master_addr"), parse_env("MASTER_ADDR"))
+            self.assertEqual(ddp_logging_data.get("torch_distributed_debug"), parse_env("TORCH_DISTRIBUTED_DEBUG"))
             self.assertEqual(ddp_logging_data.get("cuda_visible_devices"), parse_env("CUDA_VISIBLE_DEVICES"))
             if ddp_logging_data.get("backend_name") == "gloo":
                 self.assertEqual(ddp_logging_data.get("gloo_socket_ifname"), parse_env("GLOO_SOCKET_IFNAME"))
@@ -4312,7 +4314,8 @@ class DistributedTest:
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
             model_DDP._set_static_graph()
             self.assertEqual(model_DDP._get_ddp_logging_data().get("static_graph"), True)
-            with self.assertRaisesRegex(RuntimeError, 'should be called before training loop starts'):
+            expected_err = 'should be called before training loop starts'
+            with self.assertRaisesRegex(RuntimeError, expected_err):
                 local_bs = 2
                 batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
                 offset = dist.get_rank() * local_bs
@@ -4326,6 +4329,9 @@ class DistributedTest:
                     1,
                 )
                 model_DDP._set_static_graph()
+
+            # Verify error was logged in ddp_logging_data.
+            verify_ddp_error_logged(model_DDP, expected_err)
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
@@ -5406,6 +5412,7 @@ class DistributedTest:
                         ddp(inp).sum().backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        verify_ddp_error_logged(ddp, msg)
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
@@ -5660,6 +5667,7 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        verify_ddp_error_logged(model, msg)
                         # 2nd linear layer is unused
                         unused_param_index = 1
                         expected_strs = [
@@ -5703,10 +5711,8 @@ class DistributedTest:
             ones_input = torch.ones(20, 10, device=self.rank)
             # unused parameter in the first iteration got used
             # in second iteration.
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Your training graph has changed in this iteration",
-            ):
+            expected_err = "Your training graph has changed in this iteration"
+            with self.assertRaisesRegex(RuntimeError, expected_err):
                 for i in range(2):
                     if i % 2 == 0:
                         out = model(random_input)
@@ -5714,6 +5720,9 @@ class DistributedTest:
                         out = model(ones_input)
                     loss = out.sum()
                     loss.backward()
+
+            verify_ddp_error_logged(model, expected_err)
+
             # used parameter in the first iteration got unused
             # in second iteration.
             with self.assertRaisesRegex(
@@ -5729,6 +5738,8 @@ class DistributedTest:
                         out = model(ones_input)
                     loss = out.sum()
                     loss.backward()
+
+            verify_ddp_error_logged(model, "Expected to have finished reduction")
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
@@ -5806,6 +5817,7 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        verify_ddp_error_logged(model, msg)
                         unused_param_index = 1
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
@@ -6545,6 +6557,27 @@ class DistributedTest:
                 else:
                     all_gather_calls = get_profiling_event("all_gather", prof)
                 self.assertEqual([], all_gather_calls)
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_python_error_logged(self):
+            # Most python exceptions in DDP are raised during init before
+            # reducer is constructed, so we don't have a logger in those cases.
+            # However, the below is one example where a python error is thrown
+            # after reducer is constructed.
+            model = TwoLinLayerNet().cuda(self.rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            expected_err = "must be callable"
+            with self.assertRaisesRegex(TypeError, expected_err):
+                model.register_comm_hook({}, {})
+
+            verify_ddp_error_logged(model, expected_err)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
