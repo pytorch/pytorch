@@ -111,11 +111,21 @@ class C10_CUDA_API CUDAStream {
   }
 
   bool query() const {
-    return stream_.query();
+    DeviceGuard guard{stream_.device()};
+    cudaError_t err = cudaStreamQuery(stream());
+
+    if (err == cudaSuccess) {
+      return true;
+    } else if (err != cudaErrorNotReady) {
+      C10_CUDA_CHECK(err);
+    }
+
+    return false;
   }
 
   void synchronize() const {
-    return stream_.synchronize();
+    DeviceGuard guard{stream_.device()};
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream()));
   }
 
   int priority() const {
