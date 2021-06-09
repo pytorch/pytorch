@@ -23,6 +23,54 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+TEST(Reductions, ReduceSum0D_1) {
+  KernelScope kernel_scope;
+  const int M = 10;
+
+  Placeholder b(BufHandle("b", {M}, kFloat));
+  std::vector<float> in(M);
+  for (int j = 0; j < M; ++j) {
+    in[j] = j;
+  }
+
+  std::vector<float> out(M, -1.f);
+
+  Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {});
+  LoopNest loop({c});
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c});
+
+  cg.call({in, out});
+  for (int i = 0; i < M; ++i) {
+    ASSERT_EQ(out[i], in[i]);
+  }
+}
+
+TEST(Reductions, ReduceSum0D_2) {
+  KernelScope kernel_scope;
+  const int M = 10;
+
+  Placeholder b(BufHandle("b", {}, kFloat));
+  std::vector<float> in(1);
+  in[0] = 77.7;
+
+  std::vector<float> out(1, -1.f);
+
+  Tensor* c = Reduce("sum", {}, Sum(), b, {});
+  LoopNest loop({c});
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c});
+
+  cg.call({in, out});
+  ASSERT_EQ(out[0], in[0]);
+}
+
 // Sum an array to a single value.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum1D) {
