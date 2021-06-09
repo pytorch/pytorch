@@ -2315,4 +2315,3 @@ def disable_gc():
             gc.enable()
     else:
         yield
-
