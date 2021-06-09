@@ -42,7 +42,8 @@ namespace cub = at::cuda::detail::cub;
 
 namespace at {
 namespace cuda {
-namespace cub {
+
+namespace detail {
 
 template<typename T>
 struct cuda_type {
@@ -52,6 +53,40 @@ template<>
 struct cuda_type<c10::Half> {
   using type = __half;
 };
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 99999
+
+// waiting for https://github.com/NVIDIA/cub/pull/306 to land on CUDA
+template<>
+struct cuda_type<c10::BFloat16> {
+  using type = __nv_bfloat16;
+};
+
+#elif !defined(__HIP_PLATFORM_HCC__)
+
+// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+
+template <>
+struct cub::FpLimits<c10::BFloat16>
+{
+    static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
+        unsigned short max_word = 0x7F7F;
+        return reinterpret_cast<c10::BFloat16&>(max_word);
+    }
+
+    static __host__ __device__ __forceinline__ c10::BFloat16 Lowest() {
+        unsigned short lowest_word = 0xFF7F;
+        return reinterpret_cast<c10::BFloat16&>(lowest_word);
+    }
+};
+
+template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+
+#endif
+
+}  // namespace detail
+
+namespace cub {
 
 inline int get_num_bits(uint64_t max_key) {
   int num_bits = 1;
@@ -67,7 +102,7 @@ static inline void sort_keys(
     const key_t *keys_in, key_t *keys_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
-  using key_t_ = typename cuda_type<key_t>::type;
+  using key_t_ = typename detail::cuda_type<key_t>::type;
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
@@ -89,8 +124,7 @@ static inline void sort_pairs(
     const value_t *values_in, value_t *values_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
-  using key_t_ = typename cuda_type<key_t>::type;
-  using value_t_ = typename cuda_type<value_t>::type;
+  using key_t_ = typename detail::cuda_type<key_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
@@ -102,16 +136,14 @@ static inline void sort_pairs(
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
-  const value_t_ *values_in_ = reinterpret_cast<const value_t_*>(values_in);
-  value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
 
   if (descending) {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairsDescending,
-      keys_in_, keys_out_, values_in_, values_out_, n,
+      keys_in_, keys_out_, values_in, values_out, n,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairs,
-      keys_in_, keys_out_, values_in_, values_out_, n,
+      keys_in_, keys_out_, values_in, values_out, n,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
 }
@@ -124,8 +156,7 @@ static inline void segmented_sort_pairs(
     OffsetIteratorT begin_offsets, OffsetIteratorT end_offsets,
     bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
-  using key_t_ = typename cuda_type<key_t>::type;
-  using value_t_ = typename cuda_type<value_t>::type;
+  using key_t_ = typename detail::cuda_type<key_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
@@ -137,17 +168,15 @@ static inline void segmented_sort_pairs(
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
-  const value_t_ *values_in_ = reinterpret_cast<const value_t_*>(values_in);
-  value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
 
   if (descending) {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairsDescending,
-      keys_in_, keys_out_, values_in_, values_out_,
+      keys_in_, keys_out_, values_in, values_out,
       num_elements, num_segments, begin_offsets, end_offsets,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
     CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairs,
-      keys_in_, keys_out_, values_in_, values_out_,
+      keys_in_, keys_out_, values_in, values_out,
       num_elements, num_segments, begin_offsets, end_offsets,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }

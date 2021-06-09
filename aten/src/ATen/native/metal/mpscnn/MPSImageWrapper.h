@@ -32,7 +32,7 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
   std::vector<int64_t> _imageSizes;
   MPSImage* _image = nullptr;
   id<MTLBuffer> _buffer = nil;
-  __weak MetalCommandBuffer* _commandBuffer;
+  MetalCommandBuffer* _commandBuffer;
   id<PTMetalCommandBuffer> _delegate;
 };
 

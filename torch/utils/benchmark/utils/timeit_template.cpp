@@ -9,6 +9,7 @@ sections with user provided statements.
 */
 #include <chrono>
 
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/extension.h>
 
@@ -28,7 +29,7 @@ double timeit(int n) {
 
     // Main loop
     auto start_time = std::chrono::high_resolution_clock::now();
-    for (int loop_idx = 0; loop_idx < n; loop_idx++) {
+    for(const auto loop_idx : c10::irange(n)) {
         // STMT_TEMPLATE_LOCATION
     }
     auto end_time = std::chrono::high_resolution_clock::now();
