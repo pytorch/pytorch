@@ -506,13 +506,12 @@ class TestCommon(JitCommonTestCase):
 
                 if variant in method_or_inplace:
                     fn_template = '''
-                        def _fn(t0{c}{args}):
+                        def _fn(t0{c}):
                             return t0.{alias_name}({args_kw})
                     '''
                     # remove the first input tensor
                     script = fn_template.format(
                         c=", " if len(args_kw[1:]) > 1 or len(args_annot_kw[1:]) >= 1 else "",
-                        args=", ".join(args),
                         args_kw=", ".join(args_kw[1:]),
                         alias_name=variant_name,
                     )
