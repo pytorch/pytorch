@@ -340,8 +340,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
             # To be consistent with numerical evaluation, we actually compute one reduction per input
             for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
                 fw_grad.copy_(u.view_as(fw_grad))
-                raw_outputs = _as_tuple(fn(*dual_inputs))
-                dual_outputs = filter(_is_float_or_complex_tensor, raw_outputs)
+                dual_outputs = _as_tuple(fn(*dual_inputs))
                 for index_o, d_o in enumerate(dual_outputs):
                     val, res = fwAD.unpack_dual(d_o)
                     if check_grad_dtypes and val.is_complex() != res.is_complex():
@@ -359,13 +358,9 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
             for i, fw_grad in enumerate(fw_grads):
                 for lin_idx, grad_idx in enumerate(product(*[range(m) for m in fw_grad.size()])):
                     fw_grad[grad_idx] = 1.
-                    raw_outputs = _as_tuple(fn(*dual_inputs))
-                    dual_outputs = filter(_is_float_or_complex_tensor, raw_outputs)
+                    dual_outputs = _as_tuple(fn(*dual_inputs))
                     for index_o, d_o in enumerate(dual_outputs):
-                        val, res = fwAD.unpack_dual(d_o)
-                        if check_grad_dtypes and val.is_complex() != res.is_complex():
-                            raise GradcheckError('Forward AD gradient has dtype mismatch.')
-
+                        _, res = fwAD.unpack_dual(d_o)
                         if res is None:
                             jacobians[i][index_o][lin_idx].zero_()
                         else:
@@ -424,7 +419,7 @@ def _mul_tensor_or_tuple(u, k):
         return k * u
 
 
-def _get_numerical_jvp_wrt_specific_input(fn, input_idx, inputs, u, eps, is_forward_ad=False) -> List[torch.Tensor]:
+def _get_numerical_jvp_wrt_specific_input(fn, input_idx, inputs, outputs, u, eps, is_forward_ad=False) -> List[torch.Tensor]:
     input = inputs[input_idx]
     input_to_perturb = _get_input_to_perturb(input)
     wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, input_to_perturb, True)
@@ -435,28 +430,18 @@ def _get_numerical_jvp_wrt_specific_input(fn, input_idx, inputs, u, eps, is_forw
     return _compute_numerical_jvps_wrt_specific_input(jvp_fn, u, input.is_complex(), is_forward_ad)
 
 
-def _get_numerical_vJu(fn, inputs, inp_indices, func_out, all_u, all_v, eps, is_forward_ad):
+def _get_numerical_vJu(fn, inputs, inp_indices, outputs, all_u, all_v, eps, is_forward_ad):
     # Note that all_v can also be None, in that case, this function only computes Ju.
     reduced_jacobians: List[List[torch.Tensor]] = []
     for i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
-        all_Ju = _get_numerical_jvp_wrt_specific_input(fn, inp_idx, inputs, u, eps, is_forward_ad)
-        # Filter out the Ju for non floating point outputs
-        filtered_Ju = []
-        func_out = _as_tuple(func_out)
-        assert len(all_Ju) == len(func_out)
-        for Ju, output in zip(all_Ju, func_out):
-            if _is_float_or_complex_tensor(output):
-                filtered_Ju.append(Ju)
-            else:
-                # TODO: handle the other Ju
-                pass
+        all_Ju = _get_numerical_jvp_wrt_specific_input(fn, inp_idx, inputs, outputs, u, eps, is_forward_ad)
         if all_v is not None:
             jacobian_scalars: List[torch.Tensor] = []
-            for v, Ju in zip(all_v, filtered_Ju):
+            for v, Ju in zip(all_v, all_Ju):
                 jacobian_scalars.append(_dot_with_type_promotion(v, Ju))
             reduced_jacobians.append(jacobian_scalars)
         else:
-            reduced_jacobians.append(filtered_Ju)
+            reduced_jacobians.append(all_Ju)
     return reduced_jacobians
 
 
@@ -693,7 +678,7 @@ def _check_no_differentiable_outputs(func, inputs, func_out, eps) -> bool:
 def _check_no_differentiable_outputs_fast(func, func_out, all_inputs, inputs_indices,
                                           all_u, eps, nondet_tol):
     for inp_idx, u in zip(inputs_indices, all_u):
-        jvps = _get_numerical_jvp_wrt_specific_input(func, inp_idx, all_inputs, u, eps)
+        jvps = _get_numerical_jvp_wrt_specific_input(func, inp_idx, all_inputs, _as_tuple(func_out), u, eps)
         for jvp in jvps:
             if jvp.numel() == 0:
                 continue
@@ -974,14 +959,13 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
 
 def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, check_grad_dtypes,
                     nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
-    func_out = _as_tuple(func_out)
     if not outputs:
-        return _check_no_differentiable_outputs(func, tupled_inputs, func_out, eps)
+        return _check_no_differentiable_outputs(func, tupled_inputs, _as_tuple(func_out), eps)
 
     numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, is_forward_ad=use_forward_ad))
 
     if use_forward_ad:
-        analytical_forward = _get_analytical_jacobian_forward_ad(func, tupled_inputs, func_out, check_grad_dtypes=check_grad_dtypes)
+        analytical_forward = _get_analytical_jacobian_forward_ad(func, tupled_inputs, outputs, check_grad_dtypes=check_grad_dtypes)
 
         for i, n_per_out in enumerate(numerical):
             for j, n in enumerate(n_per_out):
@@ -1156,11 +1140,11 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
 
-    numerical_vJu = _get_numerical_vJu(func, inputs, inp_tensors_idx, func_out, all_u, all_v, eps, is_forward_ad=use_forward_ad)
+    numerical_vJu = _get_numerical_vJu(func, inputs, inp_tensors_idx, outputs, all_u, all_v, eps, is_forward_ad=use_forward_ad)
     if use_forward_ad:
         assert all_v is None
-        analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, _as_tuple(func_out),
-                                                             all_u=all_u, check_grad_dtypes=check_grad_dtypes)
+        analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, outputs, all_u=all_u,
+                                                             check_grad_dtypes=check_grad_dtypes)
     else:
         if not outputs:
             _check_no_differentiable_outputs_fast(func, func_out, inputs, inp_tensors_idx, all_u, eps, nondet_tol)

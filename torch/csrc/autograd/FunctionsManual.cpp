@@ -764,33 +764,33 @@ Tensor sparse_sparse_matmul_backward(
 
   c = a @ b
       then
-  a_grad = c_grad @ b^T
-  b_grad = a^T @ c_grad
+  a_grad = c_grad @ b^H
+  b_grad = a^H @ c_grad
 
   So for sparse matrices we can use the following definition:
 
   if grad_order == 0:
-      a_grad = sparse_matrix_mask(c_grad @ b^T, mask=a)
+      a_grad = sparse_matrix_mask(c_grad @ b^H, mask=a)
   else:
-      b_grad = sparse_matrix_mask(a^T @ c_grad, mask=b)
+      b_grad = sparse_matrix_mask(a^H @ c_grad, mask=b)
   */
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
   if (grad_order == 0) {
-    auto a_grad = _sparse_sparse_matmul(grad, b.t());
+    auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
     return _sparse_matrix_mask(a_grad.coalesce(), a.coalesce());
   }
-  auto b_grad = _sparse_sparse_matmul(a.t(), grad);
+  auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
   return _sparse_matrix_mask(b_grad.coalesce(), b.coalesce());
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p_s, int64_t dim, const Scalar& maxnorm) {
   auto self_sizes = self.sizes();
+  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
   at::DimVector reduce_dims(self_sizes.size());
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
-
   auto dtype = self.scalar_type();
   auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
   const auto p = p_s.toDouble();
@@ -915,13 +915,6 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
     auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
     return grad.new_zeros(input.sizes(), input.options()).masked_fill_(mask, grad / mask.sum());
   }
-}
-
-Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value) {
-  auto mask = (input == value);
-  auto count = mask.sum();
-  auto grad_output = fw_grad / count;
-  return at::sum(mask * grad_output);
 }
 
 static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t correction) {
@@ -3571,18 +3564,6 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
   }
 }
 
-Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim) {
-  auto full_indices = indices;
-  if (!keepdim) {
-    full_indices = indices.unsqueeze(dim);
-  }
-  auto out_fw_grad = at::gather(input, dim, full_indices);
-  if (!keepdim) {
-    out_fw_grad = out_fw_grad.squeeze(dim);
-  }
-
-  return out_fw_grad;
-}
 
 } // namespace details
 } // namespace generated
