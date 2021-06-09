@@ -15,16 +15,19 @@ on:
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   BUILD_WHEEL: 1
-  CUDA_VERSION: "cpu"
+  CUDA_VERSION: "!{{ cuda_version }}"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   JOB_BASE_NAME: test
   PYTHON_VERSION: "3.6"
   SCCACHE_BUCKET: "ossci-compiler-cache"
-  TORCH_CUDA_ARCH_LIST: "5.2;7.5"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
+{%- if cuda_version != "cpu" %}
+  TORCH_CUDA_ARCH_LIST: "7.0"
+  USE_CUDA: 1
+{%- endif %}
 
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
@@ -42,6 +45,16 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
+{%- if cuda_version != "cpu" %}
+      - name: Install Cuda
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cuda_install.sh
+      - name: Install Cudnn
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cudnn_install.sh
+{%- endif %}
       - name: Build
         shell: bash
         run: |
@@ -81,6 +94,16 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
+{%- if cuda_version != "cpu" %}
+      - name: Install Cuda
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cuda_install.sh
+      - name: Install Cudnn
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cudnn_install.sh
+{%- endif %}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:

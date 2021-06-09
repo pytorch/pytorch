@@ -54,13 +54,15 @@ if [[ "${BUILD_ENVIRONMENT}" == *cuda11* ]]; then
 fi
 
 run_tests() {
-    # Run nvidia-smi if available
-    for path in  /c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe /c/Windows/System32/nvidia-smi.exe; do
-        if [ -x $path ]; then
-            $path;
-            break
-        fi
-    done
+    # Run nvidia-smi if available and using CUDA
+    if [[ "${USE_CUDA}" -eq 1 ]]
+      for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
+          if [[ -x "$path" ]]; then
+              "$path";
+              break
+          fi
+      done
+    fi
 
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python.bat "$DETERMINE_FROM"
