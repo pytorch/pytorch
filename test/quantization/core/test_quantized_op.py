@@ -21,7 +21,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import qengine_is_qnnpack
@@ -1838,13 +1838,10 @@ class TestQuantizedOps(TestCase):
 
         self.assertEqual(Y, qY.dequantize())
 
-    @given(engine=st.one_of(st.just('fbgemm'), st.just('qnnpack')), keep=st.booleans())
-    @override_qengines
-    def test_quantized_mean(self, engine, keep):
-        if engine not in torch.backends.quantized.supported_engines:
-            skipTest("This Pytorch Build has not been built with or does not support {0}".format(engine.toupper()))
-        else:
-            torch.backends.quantized.engine = engine
+    @skipIfNoQNNPACK
+    @given(keep=st.booleans())
+    def test_quantized_mean_qnnpack(self, keep):
+        with override_quantized_engine("qnnpack"):
             in_dim = (3, 3, 3, 3)
             if keep:
                 out_dim = (3, 3, 1, 1)
