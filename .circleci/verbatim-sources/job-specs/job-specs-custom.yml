@@ -657,10 +657,6 @@
   pytorch_windows_test_multigpu:
     machine:
       image: ubuntu-2004:202104-01
-    # TODO: Remove this when statement when multi-gpu tests are working
-    #       see: https://github.com/pytorch/pytorch/issues/59724
-    when: false
-    # TODO: delete block
     steps:
       - checkout
       - run:
