@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/frontend/schema_emitter.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-
+#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 #include <torch/csrc/jit/ir/named_value.h>
 
 namespace torch {
@@ -57,11 +57,12 @@ Value* tryConvertToTypeAndPrepareGraph(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
-      auto tmp = std::shared_ptr<Graph>(new Graph());
-      Value* res = tryConvertToType(loc, graph, tmp, concrete_type, value, allow_conversions);
-      insertGraph(graph, *tmp, tmp->inputs());
-      return res;
-    }
+  auto tmp = std::make_shared<Graph>(new Graph());
+  Value* res = tryConvertToType(
+      loc, graph, tmp, concrete_type, value, allow_conversions);
+  insertGraph(graph, *tmp, tmp->inputs());
+  return res;
+}
 
 // Given a successful match between operator schema and symbol, emit a node
 // with the appropriate inputs and outputs.
@@ -127,8 +128,8 @@ Value* emitBuiltinCall(
     throw error;
   }
 
-  auto matched = matchSchemasAndPrepareGraph(
-      schemas, loc, graph, args, kwargs, self);
+  auto matched =
+      matchSchemasAndPrepareGraph(schemas, loc, graph, args, kwargs, self);
 
   if (matched.first < variants.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name);

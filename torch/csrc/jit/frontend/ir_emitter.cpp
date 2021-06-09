@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/resolver.h>
-#include <torch/csrc/jit/frontend/schema_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
@@ -43,6 +42,9 @@
 namespace torch {
 namespace jit {
 
+using FunctionTable = std::unordered_map<std::string, Function&>;
+using AttributeMap = std::unordered_map<std::string, Const>;
+using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 /* ============================================================ */
 /*                    Internal Utility Methods                  */
@@ -66,7 +68,6 @@ void to_ir::checkBreakContinue(
            "unrolled loops, we do not support break or continue inside the body of these loops";
   }
 }
-
 
 /* ============================================================ */
 /*                IR Generation Utility Methods                */
@@ -120,7 +121,6 @@ std::vector<NamedValue> to_ir::emitAttributes(
   });
 }
 
-
 /* ========================================= */
 /*              `Value` Getters              */
 /* ========================================= */
@@ -160,7 +160,6 @@ std::vector<Value*> to_ir::getValues(
   return getValues(trees.tree()->trees(), maybe_unpack);
 }
 
-
 /* =================================================== */
 /*            Environment Stack Manipulation           */
 /* =================================================== */
@@ -180,7 +179,6 @@ std::shared_ptr<Environment> to_ir::popFrame(bool ends_def) {
   }
   return old_frame;
 }
-
 
 /* ====================================== */
 /*               IR Emission              */
@@ -3285,7 +3283,6 @@ std::shared_ptr<SugaredValue> to_ir::emitSubscript(
     }
   }
 }
-
 
 } // namespace jit
 } // namespace torch

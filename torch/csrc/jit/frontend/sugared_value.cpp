@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
-#include <torch/csrc/jit/frontend/schema_emitter.h>
+#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -14,6 +14,84 @@ struct NoneValue : SugaredValue {
     return "None";
   }
 };
+
+std::shared_ptr<SugaredValue> FunctionValue::call(
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  std::vector<const FunctionSchema*> schemas;
+  for (Function* callee : callees_) {
+    try {
+      callee->ensure_defined();
+    } catch (const RecursiveMethodCallError&) {
+      throw ErrorReport(loc)
+          << " function '" << callee->name() << "' is called recursively. "
+          << "Recursive calls are not supported";
+    }
+    schemas.push_back(&callee->getSchema());
+  }
+  auto match =
+      matchSchemasAndPrepareGraph(schemas, loc, *f.graph(), args, kwargs);
+  Value* output =
+      f.graph()->insertFunctionCall(callees_[match.first], match.second);
+  output->node()->setSourceRange(loc);
+  return std::make_shared<SimpleValue>(output);
+}
+
+std::shared_ptr<SugaredValue> MethodValue::call(
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  std::vector<NamedValue> argsWithSelf = {self_};
+  argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
+  std::vector<const FunctionSchema*> schemas;
+  for (const std::string& method_name : method_names_) {
+    if (auto class_type = self_->type()->cast<ClassType>()) {
+      Function& method = class_type->getMethod(method_name);
+      try {
+        method.ensure_defined();
+      } catch (const RecursiveMethodCallError&) {
+        throw ErrorReport(loc)
+            << " method '" << method.name() << "' is called recursively. "
+            << "Recursive calls are not supported";
+      }
+      schemas.push_back(&method.getSchema());
+    } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+      schemas.push_back(interface_type->getMethod(method_name));
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "method constructed that is not a class or interface");
+    }
+  }
+  auto match = matchSchemasAndPrepareGraph(
+      schemas, loc, *f.graph(), argsWithSelf, kwargs);
+  Value* output =
+      f.graph()->insertMethodCall(method_names_[match.first], match.second);
+  output->node()->setSourceRange(loc);
+  return std::make_shared<SimpleValue>(output);
+}
+
+std::shared_ptr<SugaredValue> ExceptionValue::call(
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> /*attributes*/,
+    size_t /*n_binders*/) {
+  auto exception_message = insertConstant(*m.graph(), message_ + ": ", loc);
+  for (auto& input : args) {
+    auto input_str = input.value(*m.graph());
+    if (!input_str->type()->isSubtypeOf(StringType::get())) {
+      input_str = emitBuiltinCall(loc, *m.graph(), aten::str, {input_str}, {});
+    }
+    exception_message = emitBuiltinCall(
+        loc, *m.graph(), aten::add, {exception_message, input_str}, {});
+  }
+  return std::make_shared<ExceptionMessageValue>(exception_message);
+}
 
 std::shared_ptr<SugaredValue> PrintValue::call(
     const SourceRange& loc,
