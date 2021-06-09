@@ -617,20 +617,32 @@ void schedulePersistentNormalization(
     }
   }
 
+  // Make sure we don't make a cache of an input that would turn it into a
+  // persistent buffer. This gave invalid code.
   std::vector<TensorView*> cached_inputs;
-
+  // Inputs to post normalization section of the code. We don't want these
+  // tensors to computeWith their outputs as that could attempt to change them
+  std::unordered_set<TensorView*> post_norm_inputs;
+  // If we're going to unroll, make a cache of the inputs
   if (rparams.loop_unroll > 1) {
+    auto persistent_buffers =
+        scheduler_utils::persistentBuffers(fusion).buffers;
+    auto producers_for_persistence =
+        scheduler_utils::producerTvsOf(persistent_buffers);
+
+    // Don't cache inputs that are not producers of the reductions, they could
+    // have a different pattern than the reduction and we don't want to use them
+    // to computeWithOutputs
+    auto inputs_to_reduction_vec = scheduler_utils::inputTvsOf(reduction_tvs);
+    std::unordered_set<TensorView*> inputs_to_reductions_set(
+        inputs_to_reduction_vec.begin(), inputs_to_reduction_vec.end());
+
     auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
     for (auto tv : in_tvs) {
       auto cached_tv = tv->cache_after();
       cached_inputs.emplace_back(cached_tv);
-    }
-  } else {
-    auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
-    for (auto tv : in_tvs) {
-      if (tv->uses().size() > 1) {
-        auto cached_tv = tv->cache_after();
-        cached_inputs.emplace_back(cached_tv);
+      if (!inputs_to_reductions_set.count(tv)) {
+        post_norm_inputs.emplace(cached_tv);
       }
     }
   }
@@ -877,14 +889,25 @@ void schedulePersistentNormalization(
           std::inserter(reference_tvs, reference_tvs.end()),
           [](TensorView* tv) { return tv; });
     }
+
     for (auto cached_input : cached_inputs) {
-      auto consumers_of_input_cache =
-          scheduler_utils::consumerTvsOf(cached_input);
-      for (auto consumer : consumers_of_input_cache) {
-        scheduler_utils::computeWithOutputs(
-            consumer, -1, ComputeAtMode::MostInlined);
-        cached_input->computeAt(
-            consumer, unswitch_axis, ComputeAtMode::BestEffort);
+      if (!post_norm_inputs.count(cached_input)) {
+        auto consumers_of_input_cache =
+            scheduler_utils::consumerTvsOf(cached_input);
+        for (auto consumer : consumers_of_input_cache) {
+          scheduler_utils::computeWithOutputs(
+              consumer, -1, ComputeAtMode::MostInlined);
+          cached_input->computeAt(
+              consumer, unswitch_axis, ComputeAtMode::BestEffort);
+        }
+      } else {
+        auto tv_outputs = scheduler_utils::outputTvsOf(cached_input);
+        if (tv_outputs.empty()) {
+          // At the moment can have dummy inputs that aren't actually connected
+          // to the graph, just skip them.
+          continue;
+        }
+        cached_input->computeAt(tv_outputs[0], -1, ComputeAtMode::MostInlined);
       }
     }
 
@@ -992,26 +1015,32 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
     }
   }
 
+  // Make sure we don't make a cache of an input that would turn it into a
+  // persistent buffer. This gave invalid code.
   std::vector<TensorView*> cached_inputs;
+  // Inputs to post normalization section of the code. We don't want these
+  // tensors to computeWith their outputs as that could attempt to change them
+  std::unordered_set<TensorView*> post_norm_inputs;
   // If we're going to unroll, make a cache of the inputs
   if (rparams.loop_unroll > 1) {
     auto persistent_buffers =
         scheduler_utils::persistentBuffers(fusion).buffers;
-    TORCH_INTERNAL_ASSERT(
-        persistent_buffers.empty(),
-        "Cannot schedule fusions that can produce persistent buffers in multi reduction scheduler.");
+    auto producers_for_persistence =
+        scheduler_utils::producerTvsOf(persistent_buffers);
+
+    // Don't cache inputs that are not producers of the reductions, they could
+    // have a different pattern than the reduction and we don't want to use them
+    // to computeWithOutputs
+    auto inputs_to_reduction_vec = scheduler_utils::inputTvsOf(reduction_tvs);
+    std::unordered_set<TensorView*> inputs_to_reductions_set(
+        inputs_to_reduction_vec.begin(), inputs_to_reduction_vec.end());
 
     auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
     for (auto tv : in_tvs) {
       auto cached_tv = tv->cache_after();
       cached_inputs.emplace_back(cached_tv);
-    }
-  } else {
-    auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
-    for (auto tv : in_tvs) {
-      if (tv->uses().size() > 1) {
-        auto cached_tv = tv->cache_after();
-        cached_inputs.emplace_back(cached_tv);
+      if (!inputs_to_reductions_set.count(tv)) {
+        post_norm_inputs.emplace(cached_tv);
       }
     }
   }
@@ -1261,14 +1290,25 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
           std::inserter(reference_tvs, reference_tvs.end()),
           [](TensorView* tv) { return tv; });
     }
+
     for (auto cached_input : cached_inputs) {
-      auto consumers_of_input_cache =
-          scheduler_utils::consumerTvsOf(cached_input);
-      for (auto consumer : consumers_of_input_cache) {
-        scheduler_utils::computeWithOutputs(
-            consumer, -1, ComputeAtMode::MostInlined);
-        cached_input->computeAt(
-            consumer, unswitch_axis, ComputeAtMode::BestEffort);
+      if (!post_norm_inputs.count(cached_input)) {
+        auto consumers_of_input_cache =
+            scheduler_utils::consumerTvsOf(cached_input);
+        for (auto consumer : consumers_of_input_cache) {
+          scheduler_utils::computeWithOutputs(
+              consumer, -1, ComputeAtMode::MostInlined);
+          cached_input->computeAt(
+              consumer, unswitch_axis, ComputeAtMode::BestEffort);
+        }
+      } else {
+        auto tv_outputs = scheduler_utils::outputTvsOf(cached_input);
+        if (tv_outputs.empty()) {
+          // At the moment can have dummy inputs that aren't actually connected
+          // to the graph, just skip them.
+          continue;
+        }
+        cached_input->computeAt(tv_outputs[0], -1, ComputeAtMode::MostInlined);
       }
     }
 
