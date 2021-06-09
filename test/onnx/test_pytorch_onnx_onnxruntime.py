@@ -1960,7 +1960,9 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         y = torch.tensor(8.5, dtype=torch.float)
-        self.run_test(ArangeModelStep(), (x, y))
+        self.run_test(ArangeModelStep(), (x, y), input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModelStep(), (x, y), remained_onnx_input_idx=[1])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats(self):
@@ -1977,7 +1979,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         y = torch.tensor(8.5, dtype=torch.float)
-        self.run_test(ArangeModelStep(), (x, y))
+        self.run_test(ArangeModelStep(), (x, y), input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModelStep(), (x, y), remained_onnx_input_idx=[1])
+
+        class ArangeModelStepNeg(torch.nn.Module):
+            def forward(self, start, end):
+                return torch.arange(end, start.size(0), -1.5)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModelStepNeg(), (x, y), input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModelStepNeg(), (x, y), remained_onnx_input_idx=[1])
 
         class ArangeModelStart(torch.nn.Module):
             def forward(self, start, end):
@@ -1985,7 +1999,9 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         y = torch.tensor(8.5, dtype=torch.float)
-        self.run_test(ArangeModelStart(), (x, y))
+        self.run_test(ArangeModelStart(), (x, y), input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModelStart(), (x, y), remained_onnx_input_idx=[1])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats_override(self):
