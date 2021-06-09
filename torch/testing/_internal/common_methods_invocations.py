@@ -300,6 +300,7 @@ class OpInfo(object):
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+        self.test_conjugated_samples = test_conjugated_samples
         self.reset()
 
     def reset(self):
@@ -311,8 +312,6 @@ class OpInfo(object):
         # the sample which is currently being iterted on by sample_inputs. See
         # also decorate_errors()
         self._current_sample = None
-
-        self.test_conjugated_samples = test_conjugated_samples
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
