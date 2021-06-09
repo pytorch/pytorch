@@ -33,12 +33,9 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
   const auto zero_point = input_contig.q_zero_point();
   const auto outC = inC;
 
-  // something must be wrong with IntArrayRef copy construtor
-  // have to construct IntArrayRef() directly from data
-  IntArrayRef::value_type output_size_data[]{batch_size, outC, 1, 1};
   output = at::_empty_affine_quantized(
-      (keepdim ? IntArrayRef(output_size_data, 4)
-               : IntArrayRef(output_size_data, 2)),
+      keepdim ? IntArrayRef{batch_size, outC, 1, 1}
+              : IntArrayRef{batch_size, outC},
       at::device(kCPU).dtype(kQUInt8),
       scale,
       zero_point);
