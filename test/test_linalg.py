@@ -4477,14 +4477,14 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
             torch.linalg.qr(t2, mode='hello')
 
+    def _check_einsum(self, *args):
+        res = torch.einsum(*args)
+        args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
+        ref = np.einsum(*args)
+        self.assertEqual(torch.from_numpy(np.array(ref)), res)
+
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
-        def check(*args):
-            np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
-            ref = np.einsum(*np_args)
-            res = torch.einsum(*args)
-            self.assertEqual(torch.from_numpy(np.array(ref)), res)
-
         # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
         x = make_tensor((5,), device, dtype)
         y = make_tensor((7,), device, dtype)
@@ -4499,102 +4499,177 @@ class TestLinalg(TestCase):
         I = make_tensor((2, 3, 2), device, dtype)
 
         # Vector operations
-        check('i->', x)                     # sum
-        check('i,i->', x, x)                # dot
-        check('i,i->i', x, x)               # vector element-wisem mul
-        check('i,j->ij', x, y)              # outer
+        self._check_einsum('i->', x)                     # sum
+        self._check_einsum('i,i->', x, x)                # dot
+        self._check_einsum('i,i->i', x, x)               # vector element-wisem mul
+        self._check_einsum('i,j->ij', x, y)              # outer
 
         # Matrix operations
-        check("ij->ji", A)                  # transpose
-        check("ij->j", A)                   # row sum
-        check("ij->i", A)                   # col sum
-        check("ij,ij->ij", A, A)            # matrix element-wise mul
-        check("ij,j->i", A, x)              # matrix vector multiplication
-        check("ij,kj->ik", A, B)            # matmul
-        check("ij,ab->ijab", A, E)          # matrix outer product
+        self._check_einsum("ij->ji", A)                  # transpose
+        self._check_einsum("ij->j", A)                   # row sum
+        self._check_einsum("ij->i", A)                   # col sum
+        self._check_einsum("ij,ij->ij", A, A)            # matrix element-wise mul
+        self._check_einsum("ij,j->i", A, x)              # matrix vector multiplication
+        self._check_einsum("ij,kj->ik", A, B)            # matmul
+        self._check_einsum("ij,ab->ijab", A, E)          # matrix outer product
 
         # Tensor operations
-        check("Aij,Ajk->Aik", C, D)         # batch matmul
-        check("ijk,jk->i", C, A)            # tensor matrix contraction
-        check("aij,jk->aik", D, E)          # tensor matrix contraction
-        check("abCd,dFg->abCFg", F, G)      # tensor tensor contraction
-        check("ijk,jk->ik", C, A)           # tensor matrix contraction with double indices
-        check("ijk,jk->ij", C, A)           # tensor matrix contraction with double indices
-        check("ijk,ik->j", C, B)            # non contiguous
-        check("ijk,ik->jk", C, B)           # non contiguous with double indices
+        self._check_einsum("Aij,Ajk->Aik", C, D)         # batch matmul
+        self._check_einsum("ijk,jk->i", C, A)            # tensor matrix contraction
+        self._check_einsum("aij,jk->aik", D, E)          # tensor matrix contraction
+        self._check_einsum("abCd,dFg->abCFg", F, G)      # tensor tensor contraction
+        self._check_einsum("ijk,jk->ik", C, A)           # tensor matrix contraction with double indices
+        self._check_einsum("ijk,jk->ij", C, A)           # tensor matrix contraction with double indices
+        self._check_einsum("ijk,ik->j", C, B)            # non contiguous
+        self._check_einsum("ijk,ik->jk", C, B)           # non contiguous with double indices
 
         # Test diagonals
-        check("ii", H)                      # trace
-        check("ii->i", H)                   # diagonal
-        check('iji->j', I)                  # non-contiguous trace
-        check('ngrg...->nrg...', make_tensor((2, 1, 3, 1, 4), device, dtype))
+        self._check_einsum("ii", H)                      # trace
+        self._check_einsum("ii->i", H)                   # diagonal
+        self._check_einsum('iji->j', I)                  # non-contiguous trace
+        self._check_einsum('ngrg...->nrg...', make_tensor((2, 1, 3, 1, 4), device, dtype))
 
         # Test ellipsis
-        check("i...->...", H)
-        check("ki,...k->i...", A.t(), B)
-        check("k...,jk->...", A.t(), B)
-        check('...ik, ...j -> ...ij', C, x)
-        check('Bik,k...j->i...j', C, make_tensor((5, 3), device, dtype))
-        check('i...j, ij... -> ...ij', C, make_tensor((2, 5, 2, 3), device, dtype))
+        self._check_einsum("i...->...", H)
+        self._check_einsum("ki,...k->i...", A.t(), B)
+        self._check_einsum("k...,jk->...", A.t(), B)
+        self._check_einsum('...ik, ...j -> ...ij', C, x)
+        self._check_einsum('Bik,k...j->i...j', C, make_tensor((5, 3), device, dtype))
+        self._check_einsum('i...j, ij... -> ...ij', C, make_tensor((2, 5, 2, 3), device, dtype))
 
         # torch.bilinear with noncontiguous tensors
         l = make_tensor((5, 10), device, dtype, noncontiguous=True)
         r = make_tensor((5, 20), device, dtype, noncontiguous=True)
         w = make_tensor((15, 10, 20), device, dtype)
-        check("bn,anm,bm->ba", l, w, r)
+        self._check_einsum("bn,anm,bm->ba", l, w, r)
 
         # with strided tensors
-        check("bn,Anm,bm->bA", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+        self._check_einsum("bn,Anm,bm->bA", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+
+    @dtypes(torch.double, torch.cdouble)
+    def test_einsum_sublist_format(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        y = make_tensor((7,), device, dtype)
+        A = make_tensor((3, 5), device, dtype)
+        B = make_tensor((2, 5), device, dtype)
+        C = make_tensor((2, 1, 3, 1, 4), device, dtype)
+
+        self._check_einsum(x, [0])
+        self._check_einsum(x, [0], [])
+        self._check_einsum(x, [0], y, [1], [0, 1])
+        self._check_einsum(A, [0, 1], [1, 0])
+        self._check_einsum(A, [0, 1], x, [1], [0])
+        self._check_einsum(A, [0, 1], B, [2, 1])
+        self._check_einsum(A, [0, 1], B, [2, 1], [0, 2])
+        self._check_einsum(C, [0, 1, 2, 1, Ellipsis], [0, 2, 1, Ellipsis])
+        self._check_einsum(A.t(), [0, 1], B, [Ellipsis, 0])
+        self._check_einsum(A.t(), [0, 1], B, [Ellipsis, 0], [1, Ellipsis])
+        self._check_einsum(A.t(), [0, Ellipsis], B, [1, 0], [Ellipsis])
+
+        # torch.bilinear with noncontiguous tensors
+        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
+        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
+        w = make_tensor((15, 10, 20), device, dtype)
+        self._check_einsum(l, [40, 41], w, [2, 41, 50], r, [40, 50], [40, 2])
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_random(self, device, dtype):
-        def check(equation, *operands):
-            ref = np.einsum(equation, *[op.cpu().numpy() for op in operands])
-            res = torch.einsum(equation, operands)
-            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+        def convert_label(label):
+            if label == Ellipsis:
+                return '...'
+            elif label < 26:
+                return chr(ord('a') + label)
+            else:
+                return chr(ord('A') + label - 26)
 
-        for _ in range(20):
-            # Create a random number of input operands, each with a random
-            # number of dimensions randomly labeled.
-            op_labels = []
-            valid_labels = set()
-            for _ in range(random.randint(1, 3)):
-                labels = np.random.randint(0, 10, random.randint(1, 5))
-                op_labels.append(labels)
-                valid_labels.update(labels)
-            label_size = np.random.randint(1, 5, 10)
-            ell_sizes = np.random.randint(1, 5, 3)
+        def convert_sublist(sublist):
+            return ''.join(convert_label(label) for label in sublist)
 
-            # Build equation and tensors from input operand labels.
-            ops = []
-            equation = ''
-            for labels in op_labels:
-                sizes = [label_size[label] for label in labels]
-                labels = [chr(ord('a') + label) for label in labels]
+        def test(
+                seed=None,
+                n=10,                       # how many tests to generate
+                n_labels=5,                 # how many labels available
+                min_ops=1, max_ops=3,       # min and max number of operands per test
+                min_dims=0, max_dims=2,     # min and max number of dimensions per operand
+                min_size=0, max_size=8,    # min and max size of each dimension
+                max_out_dim=3,              # max number of dimensions for the output
+                enable_diagonals=True,      # controls if labels can be repeated for diagonals
+                ellipsis_prob=0.5,          # probability of including ellipsis in operand
+                broadcasting_prob=0.1):     # probability of turning some dim sizes 1 for broadcasting
 
-                # Add ellipsis dimensions at random
-                ell_num_dim = random.randint(0, 3)
-                if ell_num_dim > 0:
-                    ell_index = random.randint(0, len(labels))
-                    sizes[ell_index:ell_index] = ell_sizes[-ell_num_dim:]
-                    labels.insert(ell_index, "...")
+            MAX_LABELS = 52
 
-                equation += ''.join(labels) + ','
-                ops.append(make_tensor(sizes, device, dtype))
-            equation = equation[:-1]
+            assert 0 <= n
+            assert 0 <= n_labels < MAX_LABELS
+            assert 0 < min_ops <= max_ops
+            assert 0 <= min_dims <= max_dims
+            assert 0 <= min_size <= max_size
+            assert 0 <= max_out_dim
+            assert enable_diagonals or max_dims <= n_labels
 
-            # Test with implicit output
-            check(equation, *ops)
+            if seed:
+                random.seed(seed)
+                np.random.seed(seed)
 
-            # Randomly choose some labels to be part of the output
-            out_labels = np.unique(np.random.choice(list(valid_labels), random.randint(1, len(valid_labels))))
-            out_labels = [chr(ord('a') + label) for label in out_labels]
-            ell_index = random.randint(0, len(out_labels))
-            out_labels.insert(ell_index, '...')
-            equation += '->' + ''.join(out_labels)
+            for _ in range(n):
 
-            # Randomly test the output
-            check(equation, *ops)
+                # Select a subset of labels for this test and give them random sizes
+                POSSIBLE_LABELS = np.random.choice(range(MAX_LABELS), n_labels, replace=False)
+                LABELS_SIZE = np.random.randint(min_size, max_size + 1, MAX_LABELS)
+                ELLIPSIS_SHAPE = np.random.randint(min_size, max_size + 1, max_dims - min_dims)
+
+                operands = []
+                sublists = []
+
+                ell_size = 0
+                valid_labels = set()
+
+                # create random input operands
+                for _ in range(random.randint(min_ops, max_ops)):
+                    n_dim = random.randint(min_dims, max_dims)
+                    labels = np.random.choice(POSSIBLE_LABELS, n_dim, replace=enable_diagonals)
+                    valid_labels.update(labels)
+                    shape = LABELS_SIZE[labels]
+
+                    # turn some dimensions to size 1 for testing broadcasting
+                    mask = np.random.binomial(1, broadcasting_prob, n_dim)
+                    broadcast_labels = np.unique(labels[mask == 1])
+                    shape[np.isin(labels, broadcast_labels)] = 1
+
+                    labels = list(labels)
+                    shape = list(shape)
+
+                    # include ellipsis if not all dimensions were assigned a label already
+                    if n_dim < max_dims and np.random.random() < ellipsis_prob:
+                        ell_num_dim = random.randint(1, max_dims - n_dim)
+                        ell_size = max(ell_size, ell_num_dim)
+                        ell_shape = ELLIPSIS_SHAPE[-ell_num_dim:]
+                        # again, turn some dimensions to size 1 for broadcasting
+                        mask = np.random.binomial(1, broadcasting_prob, ell_num_dim)
+                        ell_shape[mask == 1] = 1
+                        ell_index = random.randint(0, n_dim)
+                        shape[ell_index:ell_index] = ell_shape
+                        labels.insert(ell_index, Ellipsis)
+
+                    operands.append(make_tensor(shape, device, dtype))
+                    sublists.append(labels)
+
+                # generate an explicit output
+                num_out_labels = max(0, random.randint(0, min(max_out_dim, len(valid_labels))) - ell_size)
+                out_sublist = list(np.random.choice(list(valid_labels), num_out_labels, replace=False))
+                out_sublist.insert(random.randint(0, num_out_labels), Ellipsis)
+
+                # test equation format with and without explicit output
+                equation = ','.join(convert_sublist(sublist) for sublist in sublists)
+                self._check_einsum(equation, *operands)
+                self._check_einsum(equation + '->' + convert_sublist(out_sublist), *operands)
+
+                # test sublist format with and without explicit output
+                args = [*itertools.chain(*zip(operands, sublists))]
+                self._check_einsum(*args)
+                self._check_einsum(*args, out_sublist)
+
+        test(2021, 100)
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
@@ -4667,38 +4742,6 @@ class TestLinalg(TestCase):
 
         check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
         check(x, [52], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
-
-    @dtypes(torch.double, torch.cdouble)
-    def test_einsum_sublist_format(self, device, dtype):
-        def check(*args):
-            np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
-            ref = np.einsum(*np_args)
-            res = torch.einsum(*args)
-            self.assertEqual(torch.from_numpy(np.array(ref)), res)
-
-        x = make_tensor((5,), device, dtype)
-        y = make_tensor((7,), device, dtype)
-        A = make_tensor((3, 5), device, dtype)
-        B = make_tensor((2, 5), device, dtype)
-        C = make_tensor((2, 1, 3, 1, 4), device, dtype)
-
-        check(x, [0])
-        check(x, [0], [])
-        check(x, [0], y, [1], [0, 1])
-        check(A, [0, 1], [1, 0])
-        check(A, [0, 1], x, [1], [0])
-        check(A, [0, 1], B, [2, 1])
-        check(A, [0, 1], B, [2, 1], [0, 2])
-        check(C, [0, 1, 2, 1, Ellipsis], [0, 2, 1, Ellipsis])
-        check(A.t(), [0, 1], B, [Ellipsis, 0])
-        check(A.t(), [0, 1], B, [Ellipsis, 0], [1, Ellipsis])
-        check(A.t(), [0, Ellipsis], B, [1, 0], [Ellipsis])
-
-        # torch.bilinear with noncontiguous tensors
-        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
-        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
-        w = make_tensor((15, 10, 20), device, dtype)
-        check(l, [40, 41], w, [2, 41, 50], r, [40, 50], [40, 2])
 
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):

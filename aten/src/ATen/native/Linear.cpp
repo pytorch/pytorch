@@ -154,7 +154,7 @@ bool einsum_check_label(unsigned char label) {
 
 uint8_t einsum_label_to_index(unsigned char label) {
   constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
-  return std::islower(label) ? label - 'a' : NUM_OF_LETTERS + (label - 'A');
+  return std::isupper(label) ? label - 'A' : NUM_OF_LETTERS + (label - 'a');
 }
 
 } // namespace
