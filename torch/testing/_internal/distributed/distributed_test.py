@@ -6484,53 +6484,6 @@ class DistributedTest:
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_lt_x_gpu(2)
-        def test_ddp_inference(self):
-            # tests that DDP module can be run on a single node with no_grad
-            # or eval setting and there is no hang.
-            rank = self.rank
-            torch.cuda.set_device(rank)
-            model = Net().cuda()
-            model = torch.nn.parallel.DistributedDataParallel(
-                model,
-                device_ids=[rank],
-            )
-            inp = torch.randn(10, 2).cuda()
-            if self.rank == 0:
-                with torch.no_grad():
-                    for _ in range(6):
-                        model(inp)
-                    torch.cuda.synchronize()
-
-                model.eval()
-                for _ in range(6):
-                    model(inp)
-                torch.cuda.synchronize()
-
-            self._barrier(timeout=30)
-
-            model = nn.SyncBatchNorm(
-                2, momentum=0.99, track_running_stats=False
-            ).cuda(rank)
-            model = torch.nn.parallel.DistributedDataParallel(
-                model,
-                device_ids=[rank]
-            )
-            inp = torch.randn(10, 2, 4, 4).cuda(rank)
-            if self.rank == 0:
-                # Note that with SyncBN modules we need to set eval() to make
-                # syncBN behave as a regular BN layer.
-                model.eval()
-                with torch.no_grad():
-                    for _ in range(6):
-                        model(inp)
-                    torch.cuda.synchronize()
-
-            self._barrier(timeout=30)
-
-
-        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                         "Only Nccl & Gloo backend support DistributedDataParallel")
-        @skip_if_lt_x_gpu(2)
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
             torch.cuda.set_device(rank)
