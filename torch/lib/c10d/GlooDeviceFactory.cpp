@@ -147,7 +147,7 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForInterface(const std::string& interfaceName) {
   auto device = makeGlooDevice(interfaceName, "");
   if (!device) {
-    throw std::runtime_error("makeDeviceForInterface(): unsupported gloo device");
+    TORCH_CHECK(false, "makeDeviceForInterface(): unsupported gloo device");
   }
   return device;
 }
@@ -156,7 +156,7 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForHostname(const std::string& hostname) {
   auto device = makeGlooDevice("", hostname);
   if (!device) {
-    throw std::runtime_error("makeDeviceForHostname(): unsupported gloo device");
+    TORCH_CHECK(false, "makeDeviceForHostname(): unsupported gloo device");
   }
   return device;
 }

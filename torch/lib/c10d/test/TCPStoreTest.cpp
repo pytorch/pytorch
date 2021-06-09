@@ -237,7 +237,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
       numCallbacksExecutedPromise.get_future();
   std::chrono::milliseconds span(kStoreCallbackTimeoutMillis);
   if (numCallbacksExecutedFuture.wait_for(span) == std::future_status::timeout)
-    throw std::runtime_error("Callback execution timed out.");
+    TORCH_CHECK(false, "Callback execution timed out.");
 
   // Check number of callbacks executed equal to number of key change operations
   // Wait for all callbacks to be triggered
@@ -301,7 +301,7 @@ void testKeyChangeHelper(
   std::future<bool> callbackFuture = callbackPromise.get_future();
   std::chrono::milliseconds span(kStoreCallbackTimeoutMillis);
   if (callbackFuture.wait_for(span) == std::future_status::timeout)
-    throw std::runtime_error("Callback execution timed out.");
+    TORCH_CHECK(false, "Callback execution timed out.");
 
   // Any exceptions raised from asserts should be rethrown
   if (eptr)
