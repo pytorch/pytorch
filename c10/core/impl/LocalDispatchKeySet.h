@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+
 #include <c10/core/impl/ThreadLocalState.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/macros/Macros.h>
@@ -29,8 +31,7 @@ namespace impl {
 // convention and the "normal" in memory layout.
 class C10_API LocalDispatchKeySetWrapper {
  public:
-  LocalDispatchKeySetWrapper(PODLocalState* tls) : tls_(tls) {}
-  LocalDispatchKeySetWrapper() : tls_(_get_thread_local_state()) {}
+  explicit LocalDispatchKeySetWrapper(PODLocalState* tls) : tls_(tls) {}
 
   // See Note [TLS Initialization]
   DispatchKeySet included() const {
@@ -42,10 +43,10 @@ class C10_API LocalDispatchKeySetWrapper {
         c10::default_excluded_set;
   }
 
-  void unsafe_set_included(DispatchKeySet x) {
+  void set_included(DispatchKeySet x) {
     tls_->included_ = (x ^ c10::default_included_set).raw_repr();
   }
-  void unsafe_set_excluded(DispatchKeySet x) {
+  void set_excluded(DispatchKeySet x) {
     tls_->excluded_ = (x ^ c10::default_excluded_set).raw_repr();
   }
 
@@ -62,7 +63,7 @@ struct C10_API LocalDispatchKeySet {
 };
 
 inline C10_API LocalDispatchKeySet snapshot_tls_keyset() {
-  return LocalDispatchKeySet(LocalDispatchKeySetWrapper());
+  return LocalDispatchKeySet(LocalDispatchKeySetWrapper(_get_thread_local_state()));
 }
 
 inline C10_API LocalDispatchKeySet snapshot_tls_keyset(PODLocalState* tls) {
@@ -92,51 +93,57 @@ class C10_API IncludeDispatchKeyGuard {
   DispatchKeySet include_;
 };
 
+template <uint64_t exclude, bool has_overlap>
 class C10_API ExcludeDispatchKeyGuard {
- public:
-  ExcludeDispatchKeyGuard(DispatchKeySet);
-  ExcludeDispatchKeyGuard(DispatchKey k)
-      : ExcludeDispatchKeyGuard(DispatchKeySet(k)) {}
-  ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;
-  ExcludeDispatchKeyGuard operator=(const ExcludeDispatchKeyGuard&) = delete;
-  ExcludeDispatchKeyGuard(ExcludeDispatchKeyGuard&&) = delete;
-  ExcludeDispatchKeyGuard operator=(ExcludeDispatchKeyGuard&&) = delete;
-  ~ExcludeDispatchKeyGuard();
-
- private:
-  // A little micro-optimization to save us from tls_get_addr call
-  // on destruction
-  LocalDispatchKeySetWrapper tls_wrapper_;
-  DispatchKeySet exclude_;
-};
-
-template <uint64_t exclude>
-class C10_API ExcludeDispatchKeyGuard_NoOverlap {
  public:
   // If our exclude set does not overlap with c10::default_excluded_set, we can
   // skip some bookkeeping. (And we know at compile time if this is the case.)
   // Key exclusion tends to be on the hot path, so it's worth it to bypass the
-  // unnecessary XORs if possible.
+  // unnecessary XORs if possible. We force `has_overlap` to be explicitly
+  // declared so that changes to the default excluded set do not silently knock
+  // us off the hot path.
   static_assert(
-    !(exclude & c10::default_excluded_set.raw_repr()),
-    "Fast path was requested, but `exclude` overlaps with `c10::default_excluded_set`."
+    has_overlap == (bool)(exclude & c10::default_excluded_set.raw_repr()),
+    "Declared `has_overlap` does not match computed value."
   );
 
-  ExcludeDispatchKeyGuard_NoOverlap(const ExcludeDispatchKeyGuard_NoOverlap&) = delete;
-  ExcludeDispatchKeyGuard_NoOverlap operator=(const ExcludeDispatchKeyGuard_NoOverlap&) = delete;
-  ExcludeDispatchKeyGuard_NoOverlap(ExcludeDispatchKeyGuard_NoOverlap&&) = delete;
-  ExcludeDispatchKeyGuard_NoOverlap operator=(ExcludeDispatchKeyGuard_NoOverlap&&) = delete;
+  ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;
+  ExcludeDispatchKeyGuard operator=(const ExcludeDispatchKeyGuard&) = delete;
+  ExcludeDispatchKeyGuard(ExcludeDispatchKeyGuard&&) = delete;
+  ExcludeDispatchKeyGuard operator=(ExcludeDispatchKeyGuard&&) = delete;
 
-  ExcludeDispatchKeyGuard_NoOverlap(PODLocalState* tls) : tls_(tls) {
-    delta_ = exclude & ~(tls_->excluded_);
-    tls_->excluded_ |= exclude;
+  explicit ExcludeDispatchKeyGuard(PODLocalState* tls) : tls_(tls){
+    if (has_overlap) {
+      LocalDispatchKeySetWrapper wrapper { tls_ };
+      auto current_excluded = wrapper.excluded();
+      auto exclude_set = DispatchKeySet(DispatchKeySet::RAW, exclude);
+      delta_ = (exclude_set - current_excluded).raw_repr();
+      wrapper.set_excluded(current_excluded | exclude_set);
+
+    } else {
+      // Fast path
+      delta_ = exclude & ~(tls_->excluded_);
+      tls_->excluded_ |= exclude;
+    }
   }
 
-  ExcludeDispatchKeyGuard_NoOverlap()
-  : ExcludeDispatchKeyGuard_NoOverlap(_get_thread_local_state()) {}
+  // Certain key guards (such as `AutoDispatchBelowADInplaceOrView`) are part
+  // of the public API, so we have to allow instantiation without exposing
+  // the implementation detail of `_get_thread_local_state()`.
+  ExcludeDispatchKeyGuard()
+    : ExcludeDispatchKeyGuard(_get_thread_local_state()) {}
 
-  ~ExcludeDispatchKeyGuard_NoOverlap() {
-    tls_->excluded_ &= ~delta_;
+  ~ExcludeDispatchKeyGuard() {
+    if (has_overlap) {
+      LocalDispatchKeySetWrapper wrapper { tls_ };
+      auto current = wrapper.excluded();
+      auto delta = DispatchKeySet(DispatchKeySet::RAW, delta_);
+      wrapper.set_excluded(current - delta);
+
+    } else {
+      // Fast path
+      tls_->excluded_ &= ~delta_;
+    }
   };
 
  private:
@@ -146,10 +153,10 @@ class C10_API ExcludeDispatchKeyGuard_NoOverlap {
   uint64_t delta_;
 };
 
-template<DispatchKey k>
-class C10_API ExcludeSingleDispatchKeyGuard_NoOverlap {
+template<DispatchKey k, bool has_overlap>
+class C10_API ExcludeSingleDispatchKeyGuard {
   static constexpr auto k_set = DispatchKeySet(k);
-  ExcludeDispatchKeyGuard_NoOverlap<k_set.raw_repr()> guard_;
+  ExcludeDispatchKeyGuard<k_set.raw_repr(), has_overlap> guard_;
 };
 
 

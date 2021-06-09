@@ -44,7 +44,7 @@ using c10::optional;
 
 // TODO: Once we have C++17, this can be a template function rather than a macro.
 #define UNPACK_TENSOR( t, pos ) \
-  TORCH_CHECK( t.defined(), "Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", #t, "'" ); \
+  TORCH_CHECK( t.defined(), "Expected a Tensor of type Variable but found an undefined Tensor for argument #" #pos " '" #t "'" ); \
   auto& t##_ = t;
 
 namespace VariableType {
