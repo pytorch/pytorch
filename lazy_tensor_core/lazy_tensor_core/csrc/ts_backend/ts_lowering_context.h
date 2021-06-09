@@ -9,6 +9,8 @@ namespace compiler {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
+class NodeLowering;
+
 namespace ts_backend {
 
 class GenericComputationTS : public lazy_tensors::GenericComputation {
@@ -22,7 +24,9 @@ class GenericComputationTS : public lazy_tensors::GenericComputation {
     for (torch::jit::Value* input : graph_->inputs()) {
       parameter_names.push_back(input->debugName());
     }
-    // TODO(asuhan): should we use valid shapes?
+    // NB: The return type is only used by certain backends to assing a physical
+    // layout. This backend doesn't use it for anything, so it's ok to leave it
+    // empty.
     std::vector<lazy_tensors::Shape> parameters(parameter_names.size());
     return lazy_tensors::ProgramShape(parameters, parameter_names,
                                       lazy_tensors::Shape());
@@ -75,18 +79,13 @@ class TSLoweringContext : public ir::LoweringContext {
 
   size_t AddResult(torch::jit::Value* op);
 
-  // Lowers a single IR node. All the inputs to the node must have a lowering
-  // before calling this API. Returns the generated TS operations.
-  TSOpVector LowerNode(const ir::Node* node);
-
   std::shared_ptr<torch::jit::Graph> graph_;
   std::unordered_map<lazy_tensors::client::Data::OpaqueHandle, Parameter>
       parameters_map_;
   std::vector<torch::jit::Value*> root_tuple_;
   ir::OutputMap<torch::jit::Value*> emitted_outputs_;
+  std::unique_ptr<NodeLowering> lowering_;
 };
-
-TSOpVector LowerNodeToTS(const ir::Node* node, TSLoweringContext* loctx);
 
 }  // namespace ts_backend
 }  // namespace compiler
