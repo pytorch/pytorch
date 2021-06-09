@@ -187,7 +187,90 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        return f'm.def({cpp_string(str(f.func))});\n'
+        schema_str = cpp_string(str(f.func))
+        schema_str = '"' + "aten::" + schema_str[1:]
+        return f'm.def({schema_str});\n'
+
+
+def _num_leading_spaces(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+# Unindents all lines in code. Each line gets unindented the same amount;
+# that amount is equal to the smallest number of leading spaces across all lines
+def deindent(code: str) -> str:
+    lines = code.split('\n')
+    min_leading_spaces = min(map(_num_leading_spaces, lines))
+    lines = [line[min_leading_spaces:] for line in lines]
+    return '\n'.join(lines)
+
+
+# Generates Operators.h and Operators.cpp.
+# These provide macros that, given an operator and overload name, allow users
+# to access an "un-overloaded" function version of the operator. This
+# is useful for extension writers who want to (1) want to decltype the operator
+# and (2) don't want to worry about method-only operators.
+@dataclass(frozen=True)
+class ComputeOperators:
+    target: Union[
+        Literal[Target.DECLARATION],
+        Literal[Target.DEFINITION]
+    ]
+
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> Optional[str]:
+        # NB: requires_grad is the only exception to the rule because
+        # its const correctness is questionable.
+        if str(f.func.name) in set(['requires_grad_']):
+            return None
+
+        if self.target is Target.DECLARATION:
+            return self.gen_declaration(f)
+        if self.target is Target.DEFINITION:
+            return self.gen_definition(f)
+        else:
+            assert_never(self.target)
+
+    # NB: This must be synchronized with the naming scheme in
+    # aten/src/ATen/templates/Operators.h
+    # Given a function schema "aten::op.overload(...)",
+    # If there is no overload name, this returns f"{op}"
+    # If there is an overload name, this returns f"{op}_{overload}"
+    def unambiguous_function_name(self, f: NativeFunction) -> str:
+        base_name = str(f.func.name.name)
+        overload_name = f.func.name.overload_name
+        if overload_name:
+            return f'{base_name}_{overload_name}'
+        return base_name
+
+    def gen_declaration(self, f: NativeFunction) -> str:
+        unambiguous_name = self.unambiguous_function_name(f)
+        sig = DispatcherSignature.from_schema(f.func)
+        return f"TORCH_API {sig.decl(unambiguous_name)};"
+
+    def most_faithful_name(self, f: NativeFunction) -> str:
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
+        sig = sig_group.most_faithful_signature()
+        return sig.name()
+
+    def invocation(self, f: NativeFunction) -> str:
+        faithful_op_name = self.most_faithful_name(f)
+        args = tuple(arg.name for arg in dispatcher.arguments(f.func))
+        # Method only
+        if Variant.function not in f.variants:
+            return f"{args[0]}.{faithful_op_name}({', '.join(args[1:])})"
+        return f"at::{faithful_op_name}({', '.join(args)})"
+
+    def gen_definition(self, f: NativeFunction) -> str:
+        unambiguous_name = self.unambiguous_function_name(f)
+        args = dispatcher.arguments(f.func)
+        sig = DispatcherSignature.from_schema(f.func)
+
+        return deindent(f"""\
+            {sig.defn(unambiguous_name)} {{
+              return {self.invocation(f)};
+            }}\
+        """)
 
 
 # Generates Function.cpp and Function.h.  These files provide the
@@ -373,6 +456,10 @@ class ComputeBackendSelect:
         Literal[Target.REGISTRATION]
     ]
 
+    # Selector object to determine which operators to generate
+    # registration code for.
+    selector: SelectiveBuilder
+
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if str(f.func.name.name).endswith('_like') or str(f.func.name.name).startswith('new_'):
@@ -382,6 +469,9 @@ class ComputeBackendSelect:
         native_sig = NativeSignature(f.func)
 
         if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_sig.arguments()):
+            return None
+
+        if not self.selector.is_native_function_selected(f):
             return None
 
         native_tensor_args = [
@@ -976,9 +1066,9 @@ def main() -> None:
     # BackendSelect is generated specially
     cpu_fm.write('RegisterBackendSelect.cpp', lambda: {
         'backend_select_method_definitions':
-            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION), native_functions)),
+            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), native_functions)),
         'backend_select_function_registrations':
-            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION), native_functions)),
+            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
     })
 
     cpu_fm.write('MetaFunctions.h', lambda: {
@@ -990,6 +1080,15 @@ def main() -> None:
         schema_selector = SelectiveBuilder.get_nop_selector()
     cpu_fm.write('RegisterSchema.cpp', lambda: {
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+    })
+
+    cpu_fm.write('Operators.cpp', lambda: {
+        'definitions': list(mapMaybe(ComputeOperators(
+            Target.DEFINITION), native_functions)),
+    })
+    cpu_fm.write('Operators.h', lambda: {
+        'declarations': list(mapMaybe(ComputeOperators(
+            Target.DECLARATION), native_functions)),
     })
 
     cpu_fm.write('Functions.h', lambda: {
