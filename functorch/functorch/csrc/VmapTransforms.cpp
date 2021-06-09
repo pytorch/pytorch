@@ -8,13 +8,14 @@
 #include <functorch/csrc/DynamicLayer.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace functorch {
 
 // Checks if the batch dims in `bdims` appear at the front of the tensor.
 static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
-  for (int64_t idx = 0; idx < bdims.size(); idx++) {
+  for (const auto idx: c10::irange(0, bdims.size())) {
     if (bdims[idx].dim() != idx) {
       return false;
     }
@@ -38,7 +39,7 @@ static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
   for (const auto& bdim : bdims) {
     permutation[idx++] = bdim.dim();
   }
-  for (int64_t ptr = 0; idx < sizes.size(); ptr++) {
+  for (const auto ptr : c10::irange(0, sizes.size())) {
     if (is_bdim[ptr]) {
       continue;
     }
@@ -145,7 +146,7 @@ static Tensor alignBatchDimsAtFront(
 
   auto physical_sizes = physical_tensor.sizes();
 
-  auto tensor_example_dim = physical_sizes.size() - /*num_batch_dims*/tensor_levels.count();
+  int64_t tensor_example_dim = physical_sizes.size() - /*num_batch_dims*/tensor_levels.count();
   TORCH_INTERNAL_ASSERT(tensor_example_dim <= requested_example_dim);
 
   if (tensor_levels == requested_levels && tensor_example_dim == requested_example_dim) {
@@ -166,7 +167,7 @@ static Tensor alignBatchDimsAtFront(
   // align the bdims
   int64_t level = 0;
   int64_t tensor_dim = 0;
-  for (int64_t bdim = 0; bdim < requested_levels.count(); bdim++) {
+  for (const auto bdim : c10::irange(0, requested_levels.count())) {
     // Determine the level of the bdim
     while (!requested_levels[level]) level++;
     if (tensor_levels[level]) {
@@ -320,7 +321,7 @@ Tensor VmapPhysicalToLogicalMap::apply(const Tensor& physical_tensor) const {
 }
 
 void VmapPhysicalToLogicalMap::applyInplace(std::vector<Tensor>& physical_tensors) const {
-  for (int64_t idx = 0; idx < physical_tensors.size(); ++idx) {
+  for (const auto idx : c10::irange(0, physical_tensors.size())) {
     physical_tensors[idx] = apply(physical_tensors[idx]);
   }
 }
