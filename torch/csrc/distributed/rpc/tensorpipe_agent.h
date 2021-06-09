@@ -43,8 +43,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct LazyStreamContext;
-
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -57,23 +55,13 @@ struct TransportRegistration {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
-struct CpuChannelRegistration {
+struct ChannelRegistration {
   std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
-
-struct CudaChannelRegistration {
-#ifdef USE_CUDA_NOT_ROCM
-  std::shared_ptr<tensorpipe::channel::Context> channel;
-  int64_t priority;
-#endif
-};
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
+C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
@@ -109,8 +97,7 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
     if (channels.has_value()) {
       for (const std::string& channelName : channels.value()) {
         TORCH_CHECK(
-            TensorPipeCudaChannelRegistry()->Has(channelName) ||
-                TensorPipeCpuChannelRegistry()->Has(channelName),
+            TensorPipeChannelRegistry()->Has(channelName),
             "Unknown channel: ",
             channelName);
       }
@@ -169,6 +156,8 @@ class TensorPipeAgent : public RpcAgent {
       int worldSize,
       c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts,
+      std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+      std::vector<c10::Device> devices,
       std::unique_ptr<RequestCallback> cb);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
@@ -192,8 +181,6 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
-  void setReverseDeviceMaps(
-      const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps);
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
@@ -235,7 +222,7 @@ class TensorPipeAgent : public RpcAgent {
       std::function<void(
           const tensorpipe::Error&,
           c10::intrusive_ptr<Message>,
-          std::shared_ptr<LazyStreamContext>)>) noexcept;
+          std::vector<c10::Stream>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
@@ -307,11 +294,11 @@ class TensorPipeAgent : public RpcAgent {
   };
 
   const TensorPipeRpcBackendOptions opts_;
-  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
+  const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
   // Local devices used by this agent. If application didn't specify this
   // field, it will be initialized using corresponding local devices in
   // opts_.deviceMaps and reverseDeviceMaps_;
-  std::vector<c10::Device> devices_;
+  const std::vector<c10::Device> devices_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
@@ -437,7 +424,7 @@ class TensorPipeAgent : public RpcAgent {
   void markFutureAsComplete(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
       c10::intrusive_ptr<Message> message,
-      std::shared_ptr<LazyStreamContext> ctx);
+      std::vector<c10::Stream> streams);
   void markFutureWithError(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
       std::string errorMsg);
