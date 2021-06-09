@@ -358,17 +358,16 @@ class Vectorized<ComplexFlt> {
     // angle = atan2(b/a)
     // auto b_a = _mm256_permute_ps(values, 0xB1); // b        a
     // return Sleef_atan2f8_u10(values, b_a); // 90-angle angle
-    auto ret = el_swapped();
-    for (int i = 0; i < 4; i++) {
-      ret._vec0[i] = std::atan2(_vec0[i], ret._vec0[i]);
-      ret._vec1[i] = std::atan2(_vec1[i], ret._vec0[i]);
+    Vectorized<ComplexFlt> ret;
+    for (int i = 0; i < 4; i += 2) {
+      ret._vec0[i] = std::atan2(_vec0[i + 1], _vec0[i]);
+      ret._vec1[i] = std::atan2(_vec1[i + 1], _vec1[i]);
     }
     return ret;
   }
 
   Vectorized<ComplexFlt> angle() const {
-    auto a = angle_().el_swapped();
-    return a & real_mask;
+    return angle_() & real_mask;
   }
 
   Vectorized<ComplexFlt> sin() const {
