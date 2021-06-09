@@ -58,6 +58,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::NestedTensor:
       return "NestedTensor";
 
+    case DispatchKey::Python:
+      return "Python";
+
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
     case DispatchKey::PrivateUse2:

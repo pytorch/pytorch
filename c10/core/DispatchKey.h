@@ -108,6 +108,7 @@ enum class DispatchKey : uint8_t {
   SparseCsrCUDA,
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
   // To see some example about how to use this, check out MSNPU
@@ -117,6 +118,8 @@ enum class DispatchKey : uint8_t {
 
   // Define an alias key to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
+  // (But you shouldn't: private use keys should have higher precedence than
+  // all built-in keys)
   EndOfBackendKeys = PrivateUse3,
 
   // In some situations, it is not immediately obvious what the correct
@@ -126,6 +129,7 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
+  Python,
   FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.
