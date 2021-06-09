@@ -250,6 +250,16 @@ at::Tensor runTorchArange_opset11(
   return updated_val;
 }
 
+at::Tensor IntToTensor(int64_t value) {
+  auto options = c10::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  std::vector<int64_t> size_data = {value};
+  auto f = at::from_blob(size_data.data(), {1}, at::kLong).to(at::kCPU);
+  // Need copy here
+  at::Tensor f_copy = at::empty({1}, options);
+  f_copy.copy_(f);
+  return at::squeeze(f_copy, 0);
+}
+
 c10::optional<at::Tensor> runTorchBackendForOnnx(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues,
@@ -491,13 +501,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     for (auto size : inputTensorValues[0].sizes()) {
       total_size *= size;
     }
-    auto options = c10::TensorOptions().dtype(at::kLong).device(at::kCPU);
-    std::vector<int64_t> size_data = {total_size};
-    auto f = at::from_blob(size_data.data(), {1}, at::kLong).to(at::kCPU);
-    // Need copy here
-    at::Tensor f_copy = at::empty({1}, options);
-    f_copy.copy_(f);
-    return c10::optional<at::Tensor>(at::squeeze(f_copy, 0));
+    return c10::optional<at::Tensor>(IntToTensor(total_size));
   } else {
     return c10::nullopt;
   }
