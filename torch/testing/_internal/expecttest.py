@@ -3,6 +3,7 @@ import unittest
 import traceback
 import os
 import string
+import sys
 from typing import Tuple
 
 
@@ -50,6 +51,8 @@ from typing import Tuple
 
 
 ACCEPT = os.getenv('EXPECTTEST_ACCEPT')
+
+LINENO_AT_START = sys.version_info >= (3, 8)
 
 
 def nth_line(src, lineno):
@@ -132,16 +135,29 @@ def ok_for_raw_triple_quoted_string(s, quote):
     return quote * 3 not in s and (not s or s[-1] not in [quote, '\\'])
 
 
+RE_EXPECT = re.compile(
+    (
+        r"^(?P<prefix>[^\n]*?)"
+        r"(?P<raw>r?)"
+        r"(?P<quote>'''|" r'""")'
+        r"(?P<body>.*?)"
+        r"(?P=quote)"
+    ),
+    re.DOTALL
+)
+
+
 # This operates on the REVERSED string (that's why suffix is first)
-RE_EXPECT = re.compile(r"^(?P<suffix>[^\n]*?)"
-                       r"(?P<quote>'''|" r'""")'
-                       r"(?P<body>.*?)"
-                       r"(?P=quote)"
-                       r"(?P<raw>r?)", re.DOTALL)
+RE_REVERSED_EXPECT = \
+    re.compile(r"^(?P<suffix>[^\n]*?)"
+               r"(?P<quote>'''|" r'""")'
+               r"(?P<body>.*?)"
+               r"(?P=quote)"
+               r"(?P<raw>r?)", re.DOTALL)
 
 
 def replace_string_literal(src : str, lineno : int,
-                           new_string : str) -> Tuple[str, int]:
+                           new_string : str, *, lineno_at_start: bool) -> Tuple[str, int]:
     r"""
     Replace a triple quoted string literal with new contents.
     Only handles printable ASCII correctly at the moment.  This
@@ -152,9 +168,9 @@ def replace_string_literal(src : str, lineno : int,
     Returns a tuple of the replaced string, as well as a delta of
     number of lines added/removed.
 
-    >>> replace_string_literal("'''arf'''", 1, "barf")
+    >>> replace_string_literal("'''arf'''", 1, "barf", lineno_at_start=False)
     ("'''barf'''", 0)
-    >>> r = replace_string_literal("  moo = '''arf'''", 1, "'a'\n\\b\n")
+    >>> r = replace_string_literal("  moo = '''arf'''", 1, "'a'\n\\b\n", lineno_at_start=False)
     >>> print(r[0])
       moo = '''\
     'a'
@@ -162,44 +178,75 @@ def replace_string_literal(src : str, lineno : int,
     '''
     >>> r[1]
     3
-    >>> replace_string_literal("  moo = '''\\\narf'''", 2, "'a'\n\\b\n")[1]
+    >>> replace_string_literal("  moo = '''\\\narf'''", 2, "'a'\n\\b\n", lineno_at_start=False)[1]
     2
-    >>> print(replace_string_literal("    f('''\"\"\"''')", 1, "a ''' b")[0])
+    >>> print(replace_string_literal("    f('''\"\"\"''')", 1, "a ''' b", lineno_at_start=False)[0])
         f('''a \'\'\' b''')
     """
     # Haven't implemented correct escaping for non-printable characters
     assert all(c in string.printable for c in new_string)
-    i = nth_eol(src, lineno)
+
     new_string = normalize_nl(new_string)
 
     delta = [new_string.count("\n")]
     if delta[0] > 0:
         delta[0] += 1  # handle the extra \\\n
 
-    def replace(m):
-        s = new_string
-        raw = m.group('raw') == 'r'
-        if not raw or not ok_for_raw_triple_quoted_string(s, quote=m.group('quote')[0]):
-            raw = False
-            s = s.replace('\\', '\\\\')
-            if m.group('quote') == "'''":
-                s = escape_trailing_quote(s, "'").replace("'''", r"\'\'\'")
-            else:
-                s = escape_trailing_quote(s, '"').replace('"""', r'\"\"\"')
+    if lineno_at_start:
+        i = nth_line(src, lineno)
 
-        new_body = "\\\n" + s if "\n" in s and not raw else s
-        delta[0] -= m.group('body').count("\n")
+        # i points to the tart of the string
+        def replace(m):
+            s = new_string
+            raw = m.group('raw') == 'r'
+            if not raw or not ok_for_raw_triple_quoted_string(s, quote=m.group('quote')[0]):
+                raw = False
+                s = s.replace('\\', '\\\\')
+                if m.group('quote') == "'''":
+                    s = escape_trailing_quote(s, "'").replace("'''", r"\'\'\'")
+                else:
+                    s = escape_trailing_quote(s, '"').replace('"""', r'\"\"\"')
 
-        return ''.join([m.group('suffix'),
-                        m.group('quote'),
-                        new_body[::-1],
-                        m.group('quote'),
-                        'r' if raw else '',
-                        ])
+            new_body = "\\\n" + s if "\n" in s and not raw else s
+            delta[0] -= m.group('body').count("\n")
 
-    # Having to do this in reverse is very irritating, but it's the
-    # only way to make the non-greedy matches work correctly.
-    return (RE_EXPECT.sub(replace, src[:i][::-1], count=1)[::-1] + src[i:], delta[0])
+            return ''.join([m.group('prefix'),
+                            'r' if raw else '',
+                            m.group('quote'),
+                            new_body,
+                            m.group('quote'),
+                            ])
+
+        return (src[:i] + RE_EXPECT.sub(replace, src[i:], count=1), delta[0])
+    else:
+        i = nth_eol(src, lineno)
+
+        # i points to the END of the string.  Do some funny
+        # business with reversing the string to do the replace
+        def replace(m):
+            s = new_string
+            raw = m.group('raw') == 'r'
+            if not raw or not ok_for_raw_triple_quoted_string(s, quote=m.group('quote')[0]):
+                raw = False
+                s = s.replace('\\', '\\\\')
+                if m.group('quote') == "'''":
+                    s = escape_trailing_quote(s, "'").replace("'''", r"\'\'\'")
+                else:
+                    s = escape_trailing_quote(s, '"').replace('"""', r'\"\"\"')
+
+            new_body = "\\\n" + s if "\n" in s and not raw else s
+            delta[0] -= m.group('body').count("\n")
+
+            return ''.join([m.group('suffix'),
+                            m.group('quote'),
+                            new_body[::-1],
+                            m.group('quote'),
+                            'r' if raw else '',
+                            ])
+
+        # Having to do this in reverse is very irritating, but it's the
+        # only way to make the non-greedy matches work correctly.
+        return (RE_REVERSED_EXPECT.sub(replace, src[:i][::-1], count=1)[::-1] + src[i:], delta[0])
 
 
 class TestCase(unittest.TestCase):
@@ -228,7 +275,10 @@ class TestCase(unittest.TestCase):
 
                     # compute the change in lineno
                     lineno = EDIT_HISTORY.adjust_lineno(fn, lineno)
-                    new, delta = replace_string_literal(old, lineno, actual)
+                    new, delta = replace_string_literal(
+                        old, lineno, actual,
+                        lineno_at_start=LINENO_AT_START
+                    )
 
                     assert old != new, f"Failed to substitute string at {fn}:{lineno}; did you use triple quotes?"
 
