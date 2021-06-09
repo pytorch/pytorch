@@ -1003,7 +1003,9 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "track_storage",
-          [](ScriptModuleSerializer& m, const std::string& name, const c10::Storage& storage) {
+          [](ScriptModuleSerializer& m,
+             const std::string& name,
+             const c10::Storage& storage) {
             m.storage_context().addStorage(name, storage);
           });
 

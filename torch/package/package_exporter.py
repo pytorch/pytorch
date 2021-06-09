@@ -716,7 +716,7 @@ node [shape=box];
             obj_key = str(obj._cdata)
             location = location_tag(obj)
             name = f".data/{obj_key}.storage"
-            
+
             # serialize storage if not already written
             if not self.script_module_serializer.has_storage(name):
                 if obj.device.type != "cpu":
