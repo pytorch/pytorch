@@ -38,6 +38,10 @@ jobs:
         uses: actions/checkout@v2
         with:
           submodules: recursive
+      - name: Clean workspace (including things in .gitignore)
+        shell: bash
+        run: |
+          git clean -xdf
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -77,6 +81,10 @@ jobs:
         uses: actions/checkout@v2
         with:
           submodules: recursive
+      - name: Clean workspace (including things in .gitignore)
+        shell: bash
+        run: |
+          git clean -xdf
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |

@@ -165,9 +165,24 @@ TEST(AutogradAPITests, RetainGrad) {
   auto h1 = input * 3;
   auto out = (h1 * h1).sum();
 
+  {
+    // Warning when grad is accessed for non-leaf tensor
+    WarningCapture warnings;
+    ASSERT_FALSE(h1.grad().defined());
+    ASSERT_TRUE(
+      warnings.str().find("is not a leaf") != std::string::npos);
+  }
   // It should be possible to call retain_grad() multiple times
   h1.retain_grad();
   h1.retain_grad();
+  {
+    // If retain_grad is true for a non-leaf tensor,
+    // there should not be any warning when grad is accessed
+    WarningCapture warnings;
+    ASSERT_FALSE(h1.grad().defined());
+    ASSERT_FALSE(
+      warnings.str().find("is not a leaf") != std::string::npos);
+  }
 
   // Gradient should be accumulated
   // NOLINTNEXTLINE(bugprone-argument-comment)
@@ -853,6 +868,26 @@ TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
   Variable z = x * x;
   Variable w = z + x * y + y * y;
   ASSERT_THROWS_WITH(w.backward(torch::ones({5, 5}), false, false, {z}), "is not a leaf Tensor");
+}
+
+TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
+  c10::Warning::WarnAlways guard(true);
+
+  torch::Tensor x = torch::randn({5,5}).set_requires_grad(true);
+  auto z = x * x;
+  {
+    WarningCapture warnings;
+    z.backward(torch::ones({5, 5}), c10::nullopt, true);
+    ASSERT_TRUE(
+        warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
+  }
+
+  {
+    WarningCapture warnings;
+    torch::autograd::backward({z}, {torch::ones({5, 5})}, c10::nullopt, true);
+    ASSERT_TRUE(
+        warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
+  }
 }
 
 // TODO add these tests if needed
