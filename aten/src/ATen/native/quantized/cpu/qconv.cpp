@@ -815,6 +815,8 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
       kSpatialDim == 2,
       func_name, kSpatialDim,
       "d (mkldnn): MKLDNN only supports Conv2d now.");
+  TORCH_CHECK(act.scalar_type() == c10::ScalarType::QUInt8,
+      func_name, " (MKLDNN): data type of input should be QUint8.");
 
   // src
   auto src_dims = act.sizes().vec();
@@ -853,7 +855,7 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
   const ideep::scale_t& src_scales = src.get_scale();
   const ideep::scale_t& weights_scales = weights.get_scale();
   const ideep::scale_t& dst_scales = ideep::scale_t(weights_scales.size(), 1.0/output_scale); // Scales of MKLDNN and PyTorch are reciprocal
-  ideep::attr_t op_attr = kReluFused ? ideep::attr_t() : ideep::attr_t::fuse_relu();
+  ideep::attr_t op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL}); // runtime src zero point
   if (with_bias) {
     auto b = bias_.value();
@@ -868,7 +870,7 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
                                         src_scales, weights_scales, dst_scales, op_attr,
                                         dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
                                         ideep::u8s8, ideep::engine::cpu_engine());
-}
+  }
 
   return output;
 }

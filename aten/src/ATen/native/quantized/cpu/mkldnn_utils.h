@@ -9,7 +9,56 @@
 #include <c10/core/QScheme.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
-#include <cfloat>
+
+struct PackedLinearWeightsMkldnn : public LinearPackedParamsBase {
+  PackedLinearWeightsMkldnn(
+      std::unique_ptr<ideep::tensor> weight,
+      c10::optional<ideep::tensor> bias,
+      at::Tensor orig_weight,
+      c10::optional<at::Tensor> orig_bias)
+      : weight_(std::move(weight)),
+        bias_(std::move(bias)),
+        orig_weight_(std::move(orig_weight)),
+        orig_bias_(std::move(orig_bias)) {}
+  std::unique_ptr<ideep::tensor> weight_;
+  c10::optional<ideep::tensor> bias_;
+  at::Tensor orig_weight_;
+  c10::optional<at::Tensor> orig_bias_;
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  c10::optional<at::Tensor> bias() override {
+    return orig_bias_;
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point);
+
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
+
+  void find_min_max(const float* a, float* min, float* max, int len);
+};
 
 template <int kSpatialDim = 2>
 struct PackedConvWeightsMkldnn : public ConvPackedParamsBase<kSpatialDim> {

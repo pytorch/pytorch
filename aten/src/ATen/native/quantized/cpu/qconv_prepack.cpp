@@ -389,6 +389,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
   } else {
     TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
   }
+  TORCH_CHECK(
+      wgt_zero_points.size()<=1,
+      "quantized::conv_prepack: MKLDNN only supports 1-dim zero point right now");
 
   // Set runtime src zero point
   auto src_zero_point = {DNNL_RUNTIME_S32_VAL};
@@ -399,7 +402,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
                                                                                  strides, padding_l, padding_r, dilates, groups,
                                                                                  dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
                                                                                  dnnl::memory::data_type::u8, ideep::dims(), op_attr);
-  ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight.data_ptr());
+  auto weight_copy = weight.clone();
+  ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
   ideep::tensor exp_wgt;
   exp_wgt.init(w_desc);
   exp_wgt.feed_from(wgt);
