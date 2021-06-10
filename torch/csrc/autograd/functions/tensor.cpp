@@ -56,7 +56,7 @@ CopySlices::CopySlices(
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
   add_next_edge(impl::gradient_edge(base_var));
-  for (size_t i = 1; i < num_outputs; i++) {
+  for (const auto i : c10::irange(1, num_outputs)) {
     add_next_edge(fn->next_edge(i));
   }
 }
