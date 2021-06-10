@@ -159,7 +159,7 @@ uint8_t einsum_label_to_index(unsigned char label) {
 
 unsigned char einsum_index_to_label(uint8_t index) {
   constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
-  return index < 26 ? index + 'A' : index - NUM_OF_LETTERS + 'a';
+  return index < NUM_OF_LETTERS ? index + 'A' : index - NUM_OF_LETTERS + 'a';
 }
 
 } // namespace
