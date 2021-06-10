@@ -1,7 +1,7 @@
 import torch
 from torch.fx import GraphModule, map_arg
 from torch.fx.graph import Graph, Node
-from torch.quantization.fx.quantize import is_activation_post_process
+from torch.quantization.quantize import is_activation_post_process
 from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 
 from .utils import (
