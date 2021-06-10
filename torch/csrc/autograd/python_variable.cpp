@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/DeadlockDetection.h>
+#include <c10/util/irange.h>
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
@@ -263,7 +264,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 // NB: this will overreport _Py_RefTotal but based on inspection of object.c
 // there is no way to avoid this
 #ifdef Py_TRACE_REFS
-  _Py_AddToAllObjects(op, 1);
+  _Py_AddToAllObjects(reinterpret_cast<PyObject *>(self), 1);
 #endif
   Py_INCREF(self);
 
@@ -569,7 +570,7 @@ PyObject *THPVariable_get_names(PyObject *self, void *unused)
   if (!tuple) throw python_error();
 
   const auto dimnames = tensor.names();
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* str;
     if (dimnames[i].type() == at::NameType::WILDCARD) {

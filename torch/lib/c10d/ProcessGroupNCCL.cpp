@@ -153,7 +153,7 @@ void syncStreams(
     const std::vector<at::Device>& devices,
     std::vector<at::cuda::CUDAEvent>& ncclEvents,
     std::vector<at::cuda::CUDAStream>& ncclStreams) {
-  for (size_t i = 0; i < devices.size(); ++i) {
+  for (const auto i : c10::irange(devices.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
     at::cuda::CUDAEvent& ncclEvent = ncclEvents[i];
     ncclEvent.record(at::cuda::getCurrentCUDAStream(devices[i].index()));
@@ -298,7 +298,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
-  for (size_t i = 0; i < devices_.size(); ++i) {
+  for (const auto i : c10::irange(devices_.size())) {
     // Checking the work's corresponding CUDA events' status
     if (!(*cudaEvents_)[i].query()) {
       return false;
@@ -339,7 +339,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
-  for (size_t i = 0; i < devices_.size(); ++i) {
+  for (const auto i : c10::irange(devices_.size())) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
     (*cudaEvents_)[i].block(currentStream);
@@ -875,14 +875,14 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // to "close" all active nccl groups to ensure nccl communicator is actually
   // created before encountering any communication calls. This is why we need
   // the following for loop.
-  for (size_t i = 0; i < ncclActiveGroupCounter_; ++i) {
+  for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
     C10D_NCCL_CHECK(ncclGroupEnd());
   }
 
   // [Note 1] Create the NCCL communicators for each GPU
   C10D_NCCL_CHECK(ncclGroupStart());
 
-  for (size_t i = 0; i < devices.size(); ++i) {
+  for (const auto i : c10::irange(devices.size())) {
     // GPU world size and GPU rank
     int numRanks, rank;
 
@@ -914,7 +914,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   C10D_NCCL_CHECK(ncclGroupEnd());
 
   // See [Group Start/End Note]
-  for (size_t i = 0; i < ncclActiveGroupCounter_; ++i) {
+  for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
     C10D_NCCL_CHECK(ncclGroupStart());
   }
 
@@ -1109,7 +1109,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   pre(ncclStreams_[key]);
 
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     gpuGuard.set_index(devices[i].index());
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
@@ -1127,7 +1127,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   {
     AutoNcclGroup nccl_group_guard;
-    for (size_t i = 0; i < inputs.size(); ++i) {
+    for (const auto i : c10::irange(inputs.size())) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       C10D_NCCL_CHECK(
@@ -1138,7 +1138,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   post(ncclStreams_[key]);
 
   // Event should only be recorded after the ncclGroupEnd()
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     (*work->cudaEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
@@ -1210,7 +1210,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   pre(ncclStreams_[key]);
 
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     gpuGuard.set_index(devices[i].index());
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
@@ -1225,7 +1225,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   {
     AutoNcclGroup nccl_group_guard;
-    for (size_t i = 0; i < tensors.size(); ++i) {
+    for (const auto i : c10::irange(tensors.size())) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       // For point-to-point communication, NCCL ranks can only
@@ -1239,7 +1239,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   post(ncclStreams_[key]);
 
   // Event should only be recorded after the ncclGroupEnd()
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     (*work->cudaEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
@@ -1462,7 +1462,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
       [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
       [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {
         // Copy the flattened output tensors to the outputs.
-        for (size_t i = 0; i < outputTensors.size(); ++i) {
+        for (const auto i : c10::irange(outputTensors.size())) {
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
           for (size_t j = 0; j < outputTensors[0].size(); ++j) {
             // See [Sync Streams].
@@ -1527,7 +1527,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
       },
       [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {
         // Copy the input tensors to the flattened inputs.
-        for (size_t i = 0; i < inputTensors.size(); ++i) {
+        for (const auto i : c10::irange(inputTensors.size())) {
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
           for (size_t j = 0; j < inputTensors[0].size(); ++j) {
             // See [Sync Streams].

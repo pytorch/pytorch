@@ -67,6 +67,10 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  0x3L: (Comment missing)
 //  0x4L: (Comment missing)
 //  0x4L: (update) Added schema to function tuple. Forward-compatible change.
+//  0x5L: (update) Update bytecode is sharing constant tensor files from torchscript, and only serialize
+//  0x6L: Implicit opereator versioning using number of specified argument.
+//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845
+//  for details.
 constexpr uint64_t kProducedBytecodeVersion = 0x4L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
@@ -78,7 +82,7 @@ static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
 // we should support this model_version. For example, we provide a wrapper to
 // handle an updated operator.
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
-constexpr uint64_t kMaxSupportedBytecodeVersion = 0x5L;
+constexpr uint64_t kMaxSupportedBytecodeVersion = 0x6L;
 
 } // namespace serialize
 } // namespace caffe2
