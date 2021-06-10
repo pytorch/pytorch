@@ -5735,6 +5735,13 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(trilModelwithDiagonal(), (x))
 
+        class trilModelwithNegDiagonal(torch.nn.Module):
+            def forward(self, x):
+                return torch.tril(x, diagonal=-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModelwithNegDiagonal(), (x))
+
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_triu(self):
         class triuModel(torch.nn.Module):
@@ -5746,10 +5753,17 @@ class TestONNXRuntime(unittest.TestCase):
 
         class triuModelwithDiagonal(torch.nn.Module):
             def forward(self, x):
-                return torch.triu(x, diagonal=-1)
+                return torch.triu(x, diagonal=1)
 
         x = torch.randn(2, 3, 4)
         self.run_test(triuModelwithDiagonal(), (x))
+
+        class trilModelwithNegDiagonal(torch.nn.Module):
+            def forward(self, x):
+                return torch.tril(x, diagonal=-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModelwithNegDiagonal(), (x))
 
     def test_mish(self):
         class MishModel(torch.nn.Module):

@@ -5,7 +5,8 @@ import torch.onnx
 from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
 import torch.utils.cpp_extension
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
+from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
+                                 skipIfUnsupportedMaxOpsetVersion)
 import caffe2.python.onnx.backend as backend
 from verify import verify
 
@@ -730,7 +731,7 @@ class TestUtilityFuns(TestCase):
         assert next(iter).kind() == "aten::dequantize"
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
-    @skipIfUnsupportedOpsetVersion([11, 12, 13, 14])
+    @skipIfUnsupportedMaxOpsetVersion(10)
     def test_prim_fallthrough(self):
         # Test prim op
         class PrimModule(torch.jit.ScriptModule):

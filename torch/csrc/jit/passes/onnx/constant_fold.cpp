@@ -270,9 +270,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     if (opset_version == ONNX_OPSET_9) {
       return runTorchSlice_opset9(node, inputTensorValues);
     } else if (
-        opset_version == ONNX_OPSET_10 || opset_version == ONNX_OPSET_11 ||
-        opset_version == ONNX_OPSET_12 || opset_version == ONNX_OPSET_13 ||
-        opset_version == ONNX_OPSET_14) {
+        opset_version >= ONNX_OPSET_10) {
       return runTorchSlice_opset10(node, inputTensorValues);
     } else {
       std::cerr << "Warning: Constant folding - unsupported opset version. "
