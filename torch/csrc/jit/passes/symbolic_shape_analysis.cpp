@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -17,7 +18,6 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/utils/memory.h>
 #include <memory>
 #include <unordered_map>
@@ -75,7 +75,7 @@ void replaceWithIValue(Value* v, IValue val) {
 // substitute in properties until we are unable to make any further
 // optimizations. Finally, we try to extract Tensor properties from the output.
 // For instance `return [1, 2, inp[2] + 1, inp[3]]` we know that the ouptut
-// will be length 4 with first two dimensions equal to 1 and 2. We can also 
+// will be length 4 with first two dimensions equal to 1 and 2. We can also
 // deduce that the 4th dimension has the same symbolic shape as inp[3], which
 // means that we do know its concrete value statically but we can asssign sets
 // of tensor dimensions which must be equal at runtime.
@@ -115,7 +115,7 @@ struct SymbolicShapeAnalyzer {
     }
   }
 
-   c10::SymbolicShape run() {
+  c10::SymbolicShape run() {
     bool made_change = true;
     size_t MAX_ATTEMPTS = 6;
     size_t curr_attempt = 0;
@@ -173,7 +173,6 @@ struct SymbolicShapeAnalyzer {
     // any further optimizations. representing them as constants in the graph
     // makes extracting output shapes with symbolic dimensions easier.
     // clang-format on
-
 
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
