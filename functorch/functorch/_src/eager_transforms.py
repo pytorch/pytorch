@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
 from collections import namedtuple
+import torch.autograd.forward_ad as fwAD
 import gc
 
 from .vmap import vmap
@@ -148,6 +149,42 @@ def _slice_argnums(args, argnums):
     if isinstance(argnums, tuple):
         return tuple(_safe_index(args, i) for i in argnums)
     raise RuntimeError(f'argnums must be int or Tuple[int, ...], got: {type(argnums)}')
+
+def jvp(f, primals, tangents):
+    level = _grad_increment_nesting()
+    try:
+        # Some interesting notes:
+        # 1. Can't nested jvp of jvp due to forwardAD restrictions
+        # 2. Seems like we can indeed vmap over this, given some more batch rules
+        # 3. PyTorch doesn't have a lot of jvp rules implemented right now.
+        with fwAD.dual_level():
+            # TODO: extend this to any number of primals
+            assert len(primals) == 1 and len(tangents) == 1
+            duals = tuple(fwAD.make_dual(p, t) for p, t in zip(primals, tangents))
+            result_duals = f(*duals)
+            result_duals, _ = tree_flatten(result_duals)
+            assert len(result_duals) == 1
+            primals_out, tangents_out = fwAD.unpack_dual(result_duals[0])
+            primals_out = _undo_create_differentiable(primals_out, level)
+            tangents_out = _undo_create_differentiable(tangents_out, level)
+            return primals_out, tangents_out
+    finally:
+        _grad_decrement_nesting()
+
+def jacfwd(f):
+    # TODO: This should take more than just a single primal...
+    def wrapper_fn(primal):
+        basis = torch.eye(primal.numel(), dtype=primal.dtype, device=primal.device) \
+                     .view(primal.numel(), *primal.shape)
+
+        def push_jvp(basis):
+            _, jvp_out = jvp(f, (primal,), (basis,))
+            return jvp_out
+
+        result = vmap(push_jvp)(basis)
+        result = result.view(*primal.shape, *primal.shape)
+        return result
+    return wrapper_fn
 
 def grad_and_value(f, argnums=0, has_aux=False):
     @wraps(f)
