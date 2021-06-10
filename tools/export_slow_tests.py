@@ -8,7 +8,7 @@ from collections import defaultdict
 from tools.stats_utils.s3_stat_parser import get_previous_reports_for_branch, Report, Version2Report
 from typing import cast, DefaultDict, Dict, List
 
-SLOW_TESTS_FILE = '.pytorch-slow-tests'
+SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 SLOW_TEST_CASE_THRESHOLD_SEC = 60.0
 
 
@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=SLOW_TESTS_FILE,
         const=SLOW_TESTS_FILE,
-        help='Specify a file path to dump slow test times from previous S3 stats. Default file path: .pytorch-slow-tests',
+        help='Specify a file path to dump slow test times from previous S3 stats. Default file path: .pytorch-slow-tests.json',
     )
     return parser.parse_args()
 
