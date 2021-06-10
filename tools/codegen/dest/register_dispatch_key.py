@@ -67,7 +67,8 @@ class RegisterDispatchKey:
         if type == DeviceCheckType.NoCheck:
             return '  // No device check\n'
 
-        device_check = 'c10::optional<Device> common_device = nullopt;'
+        device_check = 'c10::optional<Device> common_device = nullopt;\n'
+        device_check += '(void)common_device; // Suppress unused variable warning\n'
         for arg in args:
             # Only tensor like arguments are eligible
             if arg.type.is_tensor_like():
