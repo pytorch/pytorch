@@ -122,10 +122,8 @@ struct SymbolicShapeAnalyzer {
     while (made_change && curr_attempt < MAX_ATTEMPTS) {
       curr_attempt++;
       made_change = false;
-      // XXX: we cannot substitute symbolic dims before passes like constant
-      // propagation, or we might inadvertently use them in arithmetic or
-      // other operators
-      substituteInputTensorProperties(/*substitute_symbolic_dims*/ false);
+      // symbolic shape concrete values are only used in final shape extraction
+      substituteInputTensorProperties(/*symbolic_shape_values*/ nullptr);
       // TODO: lower simple tuples ?
       made_change |= RemoveListMutation(graph_);
       made_change |= UnrollConstantLoops(graph_);
@@ -138,17 +136,15 @@ struct SymbolicShapeAnalyzer {
       made_change |= EliminateCommonSubexpression(graph_);
       EliminateDeadCode(graph_);
     }
-    substituteInputTensorProperties(/*substitute_symbolic_dims*/ true);
-    GRAPH_DEBUG("Done with partial evaluation", graph_);
+    std::unordered_map<Value*, int64_t> symbolic_shape_values;
+    substituteInputTensorProperties(&symbolic_shape_values);
+    GRAPH_DUMP("Done with partial evaluation", graph_);
 
-    // XXX: do not run any passes after we have substituted in symbolic
-    // dimension value, we do it so they can be easily extracted into the output
-    // shape
-    return extractOutputShape();
+    return extractOutputShape(symbolic_shape_values);
   }
 
  private:
-  void substituteInputTensorProperties(bool substitute_symbolic_dims) {
+  void substituteInputTensorProperties(std::unordered_map<Value*, int64_t> * symbolic_shape_values) {
     // clang-format off
     // here we iteratively substitute properties of the node's input tensors
     // into the shape compute graph. we can substitute constants into the 
@@ -199,10 +195,11 @@ struct SymbolicShapeAnalyzer {
             if (!norm_index) {
               continue;
             }
-            if (tensor_shape[*norm_index].is_static() ||
-                substitute_symbolic_dims) {
+            if (tensor_shape[*norm_index].is_static()) {
               replaceWithIValue(
                   use.user->output(), tensor_shape[*norm_index].value());
+            } else if (symbolic_shape_values) {
+              symbolic_shape_values->emplace(use.user->output(), tensor_shape[*norm_index].value());
             } else {
               int64_t symbolic_index = tensor_shape[*norm_index].value();
               symbolic_shape_map[symbolic_index].push_back(use.user->output());
@@ -249,7 +246,7 @@ struct SymbolicShapeAnalyzer {
     }
   }
 
-  c10::SymbolicShape extractOutputShape() {
+  c10::SymbolicShape extractOutputShape(std::unordered_map<Value*, int64_t>& symbolic_shape_values) {
     TORCH_INTERNAL_ASSERT(graph_->outputs().size() == 1);
     auto output = graph_->outputs().at(0);
     TORCH_INTERNAL_ASSERT(
@@ -268,7 +265,11 @@ struct SymbolicShapeAnalyzer {
     Node* list_construct = output->node();
     std::vector<c10::optional<int64_t>> output_shape;
     for (Value* input : list_construct->inputs()) {
-      output_shape.push_back(constant_as<int64_t>(input));
+      if (symbolic_shape_values.count(input)) {
+        output_shape.push_back(symbolic_shape_values[input]);
+      } else {
+        output_shape.push_back(constant_as<int64_t>(input));
+      }
     }
     return c10::SymbolicShape(output_shape);
   }
