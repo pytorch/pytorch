@@ -139,7 +139,7 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
 
 
 class TestQuantizedTensor(TestCase):
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_cuda(self):
         self._test_qtensor(torch.device('cuda'))
 
@@ -336,7 +336,7 @@ class TestQuantizedTensor(TestCase):
             rqr = qr.dequantize()
             self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_to_device(self):
         dtype_and_zero_types = [
             (torch.quint8, torch.float),
