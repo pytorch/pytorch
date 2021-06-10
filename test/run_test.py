@@ -394,10 +394,10 @@ JIT_EXECUTOR_TESTS = [
 # options.run_specified_test_cases is enabled.
 # For example:
 # {
-#   "test_nn": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
+#   "`test_nn`": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
 #   ...
 # }
-# For test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
+# then for test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
 SPECIFIED_TEST_CASES_DICT: Dict[str, List[str]] = {}
 
 # The file from which the SPECIFIED_TEST_CASES_DICT will be filled, a CSV of test cases that would be run when
@@ -532,10 +532,9 @@ def get_slow_tests_based_on_S3() -> List[str]:
 
 
 def get_test_case_args(test_module, using_pytest) -> List[str]:
-    if test_module not in SPECIFIED_TEST_CASES_DICT:
-        sys.exit(f'Warning! Test module {test_module} is not found in the specified tests dict. This should never'
-                 'happen as we make a check for that before entering this function.')
     args = []
+    if test_module not in SPECIFIED_TEST_CASES_DICT:
+        return args
 
     if using_pytest:
         args.append('-k')
@@ -583,6 +582,7 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     executable = get_executable_command(options, allow_pytest=not extra_unittest_args,
                                         disable_coverage=disable_coverage)
 
+    # TODO: move this logic into common_utils.py instead of passing in "-k" individually
     # The following logic for running specified tests will only run for non-distributed tests, as those are dispatched
     # to test_distributed and not run_test (this function)
     if options.run_specified_test_cases:
@@ -838,8 +838,18 @@ def parse_args():
         nargs='?',
         type=str,
         const=SPECIFIED_TEST_CASES_FILE,
-        help='runs specified test cases from previous OSS CI stats from a file, format CSV',
-
+        help='load specified test cases file dumped from previous OSS CI stats, format CSV. '
+        'file content is used based on option "--use-specified-test-cases-for".'
+    )
+    parser.add_argument(
+        '--use-specified-test-cases-for',
+        type=str,
+        choices=['include', 'bring-to-front'],
+        default='include',
+        help='used together with option "--run-specified-test-cases". When specified test case '
+        'file is set. This option allow user to control whether to only run the specified test '
+        'modules or to also run the remaining modules. Note: regardless of this option, we '
+        'only run the specified test cases within a test module. ',
     )
     return parser.parse_args()
 
@@ -893,6 +903,11 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
+    if options.use_specified_test_cases_for == 'include':
+        options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
+    elif options.use_specified_test_cases_for == 'bring-to-front':
+        options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
+
     selected_tests = options.include
 
     if options.bring_to_front:
@@ -910,10 +925,6 @@ def get_selected_tests(options):
 
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
-
-    if options.run_specified_test_cases:
-        # Filter out any unspecified test modules.
-        selected_tests = [t for t in selected_tests if t in SPECIFIED_TEST_CASES_DICT]
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
