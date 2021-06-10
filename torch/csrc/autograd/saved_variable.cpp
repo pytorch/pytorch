@@ -54,20 +54,12 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     }
 
     output_nr_ = variable.output_nr();
-    requires_grad_ = variable.requires_grad();
-    has_grad_fn_ = !variable.is_leaf();
 
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
 
-    if (variable.is_leaf()) {
-      grad_accumulator_ = impl::grad_accumulator(variable);
-    } else if (!is_output) {
-      grad_fn_ = variable.grad_fn();
-    }
-
-    if(is_output && is_inplace_view) {
+    if(is_inplace_view) {
       weak_grad_fn_ = variable.grad_fn();
     }
 
@@ -93,8 +85,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // if versions don't match
   auto grad_fn = saved_original ? data_.grad_fn()
                                 : is_inplace_view_ ? weak_grad_fn_.lock()
-                                                   : grad_fn_;
-  if (has_grad_fn_ && !grad_fn) {
+                                                   : nullptr;
+  if (!saved_original && !grad_fn) {
     TORCH_CHECK(saved_for,"No grad_fn for non-leaf saved variable");
     grad_fn = std::move(saved_for);
   }
@@ -130,22 +122,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
-  Variable var;
-  if (grad_fn) {
-    var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
-  } else {
-    var = make_variable(data_, requires_grad_);
-  }
+  Variable var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
   impl::set_version_counter(var, saved_version_);
-
-  // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
-  // should have saved the grad accumulator. Even if the Variable no longer
-  // alive, the accumulator should be kept alive by the references in the
-  // graph).
-  if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired()) {
-    TORCH_CHECK(false, "No grad accumulator for a saved leaf!");
-  }
-  impl::set_grad_accumulator(var, grad_accumulator_);
 
   // NB: var here is never a view so there is no need to make anything special
   // for the case where the saved Tensor was a view. This whole argument relies
