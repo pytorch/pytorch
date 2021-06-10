@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/ProcessGroupWrapper.hpp>
@@ -69,7 +70,7 @@ struct CollectiveFingerPrint {
     // Allgather tensor shapes.
     pg->allgather(output_tensors, shape_tensors)->wait();
     // Verify equivalence
-    for (int i = 0; i < output_tensors.size(); ++i) {
+    for (const auto i : c10::irange(output_tensors.size())) {
       auto world_tensor_shapes = output_tensors[i];
       auto reference_shape_tensor = shape_tensors[i];
       for (const auto& rank_tensor_shape : world_tensor_shapes) {

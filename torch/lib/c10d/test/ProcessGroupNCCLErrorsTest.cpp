@@ -1,5 +1,6 @@
 #include <chrono>
 
+#include <c10/util/irange.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
 #include <c10d/test/CUDATest.hpp>
@@ -157,7 +158,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
 
     at::cuda::OptionalCUDAGuard deviceGuard;
     tensors_.resize(numDevices);
-    for (auto i = 0; i < numDevices; ++i) {
+    for (const auto i : c10::irange(numDevices)) {
       deviceGuard.set_index(i);
       tensors_[i] = at::ones({3, 3}, at::kCUDA);
     }

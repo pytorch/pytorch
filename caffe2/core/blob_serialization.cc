@@ -226,6 +226,11 @@ size_t EstimatePerElementSize(
                  << static_cast<int>(data_type);
       return 0;
   }
+
+  LOG(ERROR) << "unknown tensor data type during serialization size "
+                "estimation: "
+             << static_cast<int>(data_type);
+  return 0;
 }
 
 } // namespace
