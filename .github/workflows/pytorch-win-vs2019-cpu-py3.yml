@@ -20,7 +20,6 @@ env:
   JOB_BASE_NAME: test
   PYTHON_VERSION: "3.6"
   SCCACHE_BUCKET: "ossci-compiler-cache"
-  TORCH_CUDA_ARCH_LIST: "5.2;7.5"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
