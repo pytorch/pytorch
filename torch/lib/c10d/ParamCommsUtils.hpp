@@ -2,15 +2,14 @@
 
 #include <string>
 #include <vector>
-#include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <ATen/core/ivalue.h>
 
 namespace torch {
 
-extern TORCH_API const std::string kParamCommsCallName;
+extern const std::string kParamCommsCallName;
 
-class TORCH_API ParamCommsDebugInfo
+class ParamCommsDebugInfo
     : public c10::DebugInfoBase {
 
  public:
