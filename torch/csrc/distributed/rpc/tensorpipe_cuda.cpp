@@ -9,6 +9,7 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include <tensorpipe/tensorpipe.h>
+#include <tensorpipe/tensorpipe_cuda.h>
 
 namespace torch {
 namespace distributed {
