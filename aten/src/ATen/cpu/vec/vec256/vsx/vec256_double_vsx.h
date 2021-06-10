@@ -254,7 +254,9 @@ class Vectorized<double> {
   }
 
   Vectorized<double> angle() const {
-    return Vectorized<double>{0};
+    auto tmp = blendv(
+      Vectorized<double>(0), Vectorized<double>(c10::pi<double>), *this < Vectorized<double>(0));
+    return blendv(tmp, *this, isnan());
   }
   Vectorized<double> real() const {
     return *this;
@@ -386,8 +388,8 @@ class Vectorized<double> {
   DEFINE_MEMBER_OP(operator-, double, vec_sub)
   DEFINE_MEMBER_OP(operator*, double, vec_mul)
   DEFINE_MEMBER_OP(operator/, double, vec_div)
-  DEFINE_MEMBER_OP(maximum, double, vec_max)
-  DEFINE_MEMBER_OP(minimum, double, vec_min)
+  DEFINE_MEMBER_OP(maximum, double, vec_max_nan2)
+  DEFINE_MEMBER_OP(minimum, double, vec_min_nan2)
   DEFINE_MEMBER_OP(operator&, double, vec_and)
   DEFINE_MEMBER_OP(operator|, double, vec_or)
   DEFINE_MEMBER_OP(operator^, double, vec_xor)

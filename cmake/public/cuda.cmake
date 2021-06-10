@@ -299,24 +299,38 @@ set_property(
     TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# cudnn
+# cudnn public and private interfaces
 # static linking is handled by USE_STATIC_CUDNN environment variable
+# If library is linked dynamically, than private interface is no-op
+# If library is linked statically:
+#  - public interface would only reference headers
+#  - private interface will contain the actual link instructions
 if(CAFFE2_USE_CUDNN)
-  add_library(caffe2::cudnn INTERFACE IMPORTED)
+  add_library(caffe2::cudnn-public INTERFACE IMPORTED)
   set_property(
-    TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
-    ${CUDNN_LIBRARY_PATH})
+    TARGET caffe2::cudnn-public PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDNN_INCLUDE_PATH})
+  add_library(caffe2::cudnn-private INTERFACE IMPORTED)
   set_property(
-    TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
+    if(USE_WHOLE_CUDNN)
+      set_property(
+        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+        "-Wl,--whole-archive,\"${CUDNN_LIBRARY_PATH}\" -Wl,--no-whole-archive")
+    else()
+      set_property(
+        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDNN_LIBRARY_PATH})
+    endif()
     set_property(
-      TARGET caffe2::cudnn APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
       "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
     # Add explicit dependency on cublas to cudnn
     get_target_property(__tmp caffe2::cublas INTERFACE_LINK_LIBRARIES)
     set_property(
-      TARGET caffe2::cudnn APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
       "${__tmp}")
     # Lines below use target_link_libraries because we support cmake 3.5+.
     # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
@@ -327,8 +341,12 @@ if(CAFFE2_USE_CUDNN)
     #  link items that will not propagate to dependents."
     # Propagating to a dependent (torch_cuda) is exactly what we want here, so we are
     # flouting the warning, but I can't think of a better (3.5+ compatible) way.
-    target_link_libraries(caffe2::cudnn INTERFACE
+    target_link_libraries(caffe2::cudnn-private INTERFACE
         "-Wl,--exclude-libs,libcudnn_static.a")
+  else()
+  set_property(
+    TARGET caffe2::cudnn-public PROPERTY INTERFACE_LINK_LIBRARIES
+    ${CUDNN_LIBRARY_PATH})
   endif()
 endif()
 
