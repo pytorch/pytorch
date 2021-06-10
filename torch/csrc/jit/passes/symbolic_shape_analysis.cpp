@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -17,7 +18,6 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/utils/memory.h>
 #include <memory>
 #include <unordered_map>
@@ -120,7 +120,7 @@ struct SymbolicShapeAnalyzer {
     }
   }
 
-   c10::SymbolicShape run() {
+  c10::SymbolicShape run() {
     bool made_change = true;
     size_t MAX_ATTEMPTS = 6;
     size_t curr_attempt = 0;
