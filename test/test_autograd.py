@@ -5421,6 +5421,26 @@ for shape in [(1,), ()]:
         gc.collect()
         self.assertTrue(ref.expired())
 
+    def test_no_unnecessary_unwrapping(self):
+        a = torch.ones(5, requires_grad=True)
+        b = a * a
+        c = a * b
+
+        # a is leaf
+        self.assertIs(b.grad_fn._saved_self, a)
+        self.assertIs(b.grad_fn._saved_other, a)
+        self.assertIs(c.grad_fn._saved_self, a)
+
+        # b is not an output
+        self.assertIs(c.grad_fn._saved_other, b)
+
+        c.sum().backward()
+
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            c.grad_fn._saved_self
+
+        self.assertEqual(a, torch.ones(5))
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -7332,7 +7352,9 @@ class TestAutogradDeviceType(TestCase):
         class FixedGradientFunction(Function):
             @staticmethod
             def forward(ctx, x, grad_x):
-                ctx.save_for_backward(grad_x)
+                # this is needed because of https://github.com/pytorch/pytorch/issues/59828
+                # remove when fixed
+                ctx.save_for_backward(grad_x.clone())
                 return x
 
             @staticmethod
