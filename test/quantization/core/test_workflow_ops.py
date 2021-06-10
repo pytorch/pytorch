@@ -845,7 +845,9 @@ class TestFakeQuantizeOps(TestCase):
                 quant_min = torch.iinfo(torch_type).min
                 quant_max = torch.iinfo(torch_type).max
 
+                test_was_run = False
                 if test_type == "per_tensor":
+                    test_was_run = True
                     Y = torch.dequantize(torch.quantize_per_tensor(X.to('cpu').to(torch.float),
                                                                    scale, zero, torch_type)).to(device).to(float_type)
                     Y_prime = torch.fake_quantize_per_tensor_affine(X, scale, zero, quant_min, quant_max)
@@ -853,11 +855,13 @@ class TestFakeQuantizeOps(TestCase):
                         Y, Y_prime, "Difference found between dequant+quant_per_tensor and fake_quantize_per_tensor")
 
                 if test_type == "per_channel":
+                    test_was_run = True
                     Y = torch.dequantize(torch.quantize_per_channel(X.to('cpu').to(torch.float), scales.to(
                         'cpu'), zeros.to('cpu'), axis, torch_type)).to(device).to(float_type)
                     Y_prime = torch.fake_quantize_per_channel_affine(X, scales, zeros, axis, quant_min, quant_max)
                     self.assertEqual(
                         Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
+                self.assertTrue(test_was_run)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
