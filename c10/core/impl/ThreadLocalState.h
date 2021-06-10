@@ -32,7 +32,6 @@ static_assert(
     std::is_pod<PODLocalState>::value,
     "PODLocalState must be a POD type.");
 
-
 #if defined(_MSC_VER) || defined(C10_ANDROID)
 C10_API PODLocalState* _get_thread_local_state();
 #else // defined(_MSC_VER) || defined(C10_ANDROID)
