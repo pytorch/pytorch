@@ -47,7 +47,7 @@ CONFIG_TREE_DATA = [
                     ("shard_test", [XImportant(True)]),
                     ("libtorch", [
                         (True, [
-                            ('build_only', [XImportant(True)]),
+                            ('build_only', [X(True)]),
                         ]),
                     ]),
                 ]),
@@ -65,6 +65,13 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
                     ("vulkan", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
+        ("cuda", [
+            ("10.2", [
+                ("3.9", [
+                    ("shard_test", [XImportant(True)]),
                 ]),
             ]),
         ]),
@@ -138,6 +145,8 @@ class PyVerConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["pyver"] = node_name
         self.props["abbreviated_pyver"] = get_major_pyver(node_name)
+        if node_name == "3.9":
+            self.props["abbreviated_pyver"] = "py3.9"
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):

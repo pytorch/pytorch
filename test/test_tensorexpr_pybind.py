@@ -206,5 +206,104 @@ graph(%a : Tensor, %b : Tensor):
         correct = TestModule().forward(x, y)
         np.testing.assert_allclose(res.numpy(), correct.numpy(), atol=1e-5)
 
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_t(self):
+        def f(a):
+            return a.t()
+
+        device, size = 'cpu', (3, 4)
+        x = torch.rand(size, device=device)
+
+        graph_str = """
+graph(%a.1 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
+  %3 : Float(4, 3, strides=[4, 1], requires_grad=0, device=cpu) = aten::t(%a.1)
+  return (%3)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        kernel = torch._C._te.TensorExprKernel(graph)
+        res1 = kernel.run((x,))
+        res2 = kernel.fallback((x,))
+        correct = f(x)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_transpose(self):
+        def f(a):
+            return a.transpose(-1, -2)
+
+        device, size = 'cpu', (3, 4)
+        x = torch.rand(size, device=device)
+
+        graph_str = """
+graph(%a.1 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
+  %2 : int = prim::Constant[value=-1]()
+  %3 : int = prim::Constant[value=-2]()
+  %4 : Float(4, 3, strides=[4, 1], requires_grad=0, device=cpu) = aten::transpose(%a.1, %2, %3)
+  return (%4)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        kernel = torch._C._te.TensorExprKernel(graph)
+        res1 = kernel.run((x,))
+        res2 = kernel.fallback((x,))
+        correct = f(x)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_permute(self):
+        def f(a):
+            return a.permute([2, 1, 0])
+
+        device, size = 'cpu', (3, 4, 5)
+        x = torch.rand(size, device=device)
+
+        graph_str = """
+graph(%a.1 : Float(3, 4, 5, strides=[20, 5, 1], requires_grad=0, device=cpu)):
+  %1 : int = prim::Constant[value=2]()
+  %2 : int = prim::Constant[value=1]()
+  %3 : int = prim::Constant[value=0]()
+  %4 : int[] = prim::ListConstruct(%1, %2, %3)
+  %5 : Float(5, 4, 3, strides=[12, 3, 1], requires_grad=0, device=cpu) = aten::permute(%a.1, %4)
+  return (%5)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        kernel = torch._C._te.TensorExprKernel(graph)
+        res1 = kernel.run((x,))
+        res2 = kernel.fallback((x,))
+        correct = f(x)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_expand(self):
+        def f(a):
+            return a.expand((2, 3, 4))
+
+        device = 'cpu'
+        x = torch.rand((1, 3, 1), device=device)
+        graph_str = """
+graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
+  %1 : int = prim::Constant[value=2]()
+  %2 : int = prim::Constant[value=3]()
+  %3 : int = prim::Constant[value=4]()
+  %4 : int[] = prim::ListConstruct(%1, %2, %3)
+  %5 : bool = prim::Constant[value=0]()
+  %6 : Float(2, 3, 4, strides=[12, 4, 0], requires_grad=0, device=cpu) = aten::expand(%a, %4, %5)
+  return (%6)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        kernel = torch._C._te.TensorExprKernel(graph)
+        res1 = kernel.run((x,))
+        res2 = kernel.fallback((x,))
+        correct = f(x)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+
 if __name__ == '__main__':
     run_tests()

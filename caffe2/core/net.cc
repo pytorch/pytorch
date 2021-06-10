@@ -235,7 +235,6 @@ std::vector<float> NetBase::TEST_Benchmark(
   LOG(INFO) << "Main runs finished. Milliseconds per iter: "
             // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             << millis / main_runs
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             << ". Iters per second: " << 1000.0 * main_runs / millis;
 
   if (run_individual) {

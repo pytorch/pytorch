@@ -4,7 +4,6 @@
 
 using namespace at;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 bool allClose(const at::Tensor& t1, const at::Tensor& t2, double rtol=1e-5, double atol=1e-8) {
   if (!t1.is_same_size(t2)) {
     std::cerr << "Difference in tensor shapes: "
@@ -27,7 +26,6 @@ bool allClose(const at::Tensor& t1, const at::Tensor& t2, double rtol=1e-5, doub
 // and rely on backward tests of each at:: function used in math kernels.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, NativeGroupNorm) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int num_channels = 6;
   int N = 2;
   int H = 2, W = 2;
@@ -36,7 +34,6 @@ TEST(MathKernelTest, NativeGroupNorm) {
   const auto input = randn({N, num_channels, H, W});
   const auto weight = randn({num_channels});
   const auto bias = randn({num_channels});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double eps = 1e-05;
   for (bool undef_weight: {true, false}) {
     for (int num_groups: {3, 6, 1}) {
@@ -61,12 +58,10 @@ TEST(MathKernelTest, NativeLayerNorm) {
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   const auto input_ndim = input.dim();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double eps = 1e-05;
   for (bool undef_weight: {true, false}) {
     for (int normalized_size: {2, 3}) {
       Tensor undef;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::vector<int64_t> normalized_shape(normalized_size, 10);
       const auto weight = rand(normalized_shape);
       const auto bias = rand(normalized_shape);
@@ -116,8 +111,16 @@ TEST(MathKernelTest, SiluBackward) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(MathKernelTest, MishBackward) {
+  const auto input = rand({20, 10});
+  const auto grad_output = rand({20, 10});
+  auto out = at::native::mish_backward(grad_output, input);
+  auto math_out = at::native::math_mish_backward(grad_output, input);
+  ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, NarrowCopy)  {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = rand({5, 8, 7});
   for (int64_t dim = 0; dim < 3; ++dim) {
     const int64_t start = 1, length = 4;
@@ -136,8 +139,6 @@ TEST(MathKernelTest, Bmm)  {
     EXPECT_THROW(auto z = at::bmm(x, y), std::exception);
   };
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test_bmm(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   test_bmm(1000);
 }
