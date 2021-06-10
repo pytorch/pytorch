@@ -6,3 +6,6 @@ from ._variables import get_static_sparse_quantized_mapping
 # Sparsifier
 from .sparsifier.base_sparsifier import BaseSparsifier
 from .sparsifier.weight_norm_sparsifier import WeightNormSparsifier
+
+# Scheduler
+from .scheduler.base_scheduler import BaseScheduler
