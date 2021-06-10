@@ -128,12 +128,12 @@ std::chrono::milliseconds getRemainingTime(
   return remainingMillis;
 }
 
-// Emit a LOG(ERROR) and throws runtime_error with the given messages.
+// Emit a LOG(ERROR) and throws using TORCH_CHECK with the given messages.
 void logAndThrow(
     const std::string& logMessage,
     const std::string& errorMessage) {
   LOG(ERROR) << logMessage;
-  throw std::runtime_error(errorMessage);
+  TORCH_CHECK(false, errorMessage);
 }
 
 // For monitoredBarrier, checks remaining time left to finish processing ranks
@@ -1043,14 +1043,14 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     void populate_from_sparse_tensor(const at::Tensor& tensor) {
       const auto sparse_dim = tensor.sparse_dim();
       AT_ASSERT(sparse_dim <= 4);
-      for (auto i = 0; i < 4; i++) {
+      for (const auto i : c10::irange(4)) {
         if (i < sparse_dim) {
           data_[i] = tensor.size(i);
         }
       }
       const auto dense_dim = tensor.dense_dim();
       AT_ASSERT(dense_dim <= 4);
-      for (auto i = 0; i < 4; i++) {
+      for (const auto i : c10::irange(4)) {
         if (i < dense_dim) {
           data_[i + 4] = tensor.size(sparse_dim + i);
         }
@@ -1061,14 +1061,14 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<int64_t> sizes() const {
       std::vector<int64_t> sizes;
       // Sparse sizes
-      for (auto i = 0; i < 4; i++) {
+      for (const auto i : c10::irange(4)) {
         if (data_[i] <= 0) {
           break;
         }
         sizes.push_back(data_[i]);
       }
       // Dense sizes
-      for (auto i = 4; i < 8; i++) {
+      for (const auto i : c10::irange(4, 8)) {
         if (data_[i] <= 0) {
           break;
         }
@@ -1103,7 +1103,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto input = tensors[0];
 
     // Perform local reduction if we have multiple inputs.
-    for (size_t i = 1; i < tensors.size(); i++) {
+    for (const auto i : c10::irange(1, tensors.size())) {
       input += tensors[i];
     }
 
@@ -1148,7 +1148,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // This copy is needed when we run a multi-gpu version of reduce (multiple
     // inputs per rank).
-    for (int i = 0; i < inputs.size(); ++i) {
+    for (const auto i : c10::irange(inputs.size())) {
       inputs[i].copy_(output);
     }
   }
@@ -1936,7 +1936,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
           std::to_string(input_list.size()) + ", got " +
           std::to_string(output_list.size()) + ")");
     }
-    for (int i = 0; i < output_list.size(); ++i) {
+    for (const auto i : c10::irange(output_list.size())) {
       const auto expected = input_list[i].sizes();
       const auto actual = output_list[i].sizes();
       if (actual != expected) {
@@ -2597,7 +2597,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   // from any other process in the group.
   std::vector<int> srcRanks;
   srcRanks.resize(size_);
-  for (auto i = 0; i < size_; i++) {
+  for (const auto i : c10::irange(size_)) {
     srcRanks.push_back(i);
   }
 
@@ -2703,7 +2703,7 @@ void ProcessGroupGloo::monitoredBarrier(
   // Kick off recvWork and wait to unblock sendWork->wait() from non-zero ranks.
   // Failed/hanging ranks will not ack this call, letting rank 0 know about the
   // failure.
-  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
+  for (const auto dstRank : c10::irange(1, worldSize)) {
     recvWorkMap.insert({dstRank, recv(commTensor, dstRank, t1)});
   }
 
@@ -2752,7 +2752,7 @@ void ProcessGroupGloo::monitoredBarrier(
         auto rankFailure = (processedRanks.size() != size_ - 1);
         if (waitAllRanks && rankFailure) {
           std::vector<int> failedRanks;
-          for (int i = 1; i < size_; ++i) {
+          for (const auto i : c10::irange(1, size_)) {
             if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
                 processedRanks.end()) {
               failedRanks.push_back(i);
@@ -2776,7 +2776,7 @@ void ProcessGroupGloo::monitoredBarrier(
   // monitoredBarrier. Unblock all ranks now by responding to their recv(). This
   // ensures that this is a true barrier in that all ranks  exit it successfully
   // or none of them do.
-  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
+  for (const auto dstRank : c10::irange(1, worldSize)) {
     sendWorkMap.insert({dstRank, send(commTensor, dstRank, t2)});
   }
 
