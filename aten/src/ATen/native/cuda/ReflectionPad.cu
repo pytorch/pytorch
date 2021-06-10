@@ -165,8 +165,6 @@ __device__ inline void parallel_reflection_pad3d(
   int64_t output_y = (output_id / output.size(4)) % output.size(3);
   int64_t output_z = output_id / (output.size(3) * output.size(4));
 
-  auto output_tuple = thrust::make_tuple(output_z, output_y, output_x);
-
   int64_t i_start_x = ::max(int64_t(0), -pad_left);
   int64_t o_start_x = ::max(int64_t(0), pad_left);
   int64_t i_start_y = ::max(int64_t(0), -pad_top);
