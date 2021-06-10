@@ -76,7 +76,7 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(True, 1), fn_script(True, 1))
         self.assertEqual(fn(False, 5), fn_script(False, 5))
 
-    def test_if_hoist_shadowed_expr(self):
+    def test_if_hoist_reused_var(self):
         # Making sure that cases where the python variable is reused
         # is handled correctly
         def fn(x: bool, y: int):
