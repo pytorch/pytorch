@@ -30,9 +30,11 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(True, 1), fn_script(True, 1))
 
     def test_if_hoist_transposed_expr(self):
-        # Making sure that we can properly eliminate
-        # an expression even if it is not at the start
-        # of a block
+        """
+        Making sure that we can properly eliminate
+        an expression even if it is not at the start
+        of a block
+        """
         def fn(x: bool, y: int):
             if x:
                 a = y + 3
@@ -54,8 +56,10 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(False, 5), fn_script(False, 5))
 
     def test_if_hoist_swapped_expr(self):
-        # Making sure that the if statement
-        # doesn't get fully eliminated here
+        """
+        Making sure that the if statement
+        doesn't get fully eliminated here
+        """
         def fn(x: bool, y: int):
             if x:
                 a = y + 3
@@ -77,8 +81,10 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(False, 5), fn_script(False, 5))
 
     def test_if_hoist_reused_var(self):
-        # Making sure that cases where the python variable is reused
-        # is handled correctly
+        """
+        Making sure that cases where the python variable is reused
+        is handled correctly
+        """
         def fn(x: bool, y: int):
             b = 6
             if x:
@@ -102,7 +108,9 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(False, 5), fn_script(False, 5))
 
     def test_no_hoist(self):
-        # Nothing should happen here, expressions are different
+        """
+        Nothing should happen here, expressions are different
+        """
         def fn(x: bool, y: int, z: int):
             if x:
                 a = y + 3
@@ -122,9 +130,10 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(False, 5, 10), fn_script(False, 5, 10))
 
     def test_mutate_before(self):
-        # Make sure that if there is a mutation before the common
-        # op, the hoist doesn't happen
-
+        """
+        Make sure that if there is a mutation before the common
+        op, the hoist doesn't happen
+        """
         def fn(x: bool, y: torch.Tensor):
             if x:
                 y.add_(8)
@@ -148,9 +157,10 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(False, t2), fn_script(False, t2))
 
     def test_mutate_after(self):
-        # Check that the hoist can happen properly, and
-        # that the output is still correct.
-
+        """
+        Check that the hoist can happen properly, and
+        that the output is still correct.
+        """
         def fn(x: bool, y: torch.Tensor):
             if x:
                 b = 1
@@ -176,7 +186,9 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(False, t2.clone()), fn_script(False, t2.clone()))
 
     def test_multiple_hoists(self):
-        # test that hoists that depend on other hoists are done correctly
+        """
+        test that hoists that depend on other hoists are done correctly
+        """
         def fn(x: bool, y: torch.Tensor):
             if x:
                 a = y + 3
