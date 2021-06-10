@@ -15,6 +15,7 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <c10/core/StreamGuard.h>
+#include <c10/util/irange.h>
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 // Needed for ::getpid(), which is used to create a unique address.
@@ -318,7 +319,7 @@ constexpr static int kNumUvThreads = 16;
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
-  for (int laneIdx = 0; laneIdx < kNumUvThreads; ++laneIdx) {
+  for (const auto laneIdx : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
     std::string address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
