@@ -953,19 +953,29 @@ std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDa
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    auto reserve_size = tensors.size();
+    auto reserve_size = 0;
     for (const at::Tensor& tensor : tensors) {
-      if(tensor.is_sparse()){
-        reserve_size++;
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage. Therefore reserve_size needs to be
+        // incremented by 2.
+        reserve_size += 2
+      } else {
+        // A dense/strided tensor contains 1 storage.
+        reserve_size += 1
       }
     }
     data_ptrs.reserve(reserve_size);
     for (const at::Tensor& tensor : tensors) {
-      if(tensor.is_sparse()){
-        // sparse tensor is indices and values
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage. Therefore both data_ptr need to be emplaced
+        // in data_ptrs.
         data_ptrs.emplace_back(tensor.indices().storage().data_ptr());
         data_ptrs.emplace_back(tensor.values().storage().data_ptr());
-      }else{
+      } else {
+        // A dense/strided tensor contains 1 data_ptr that needs to emplaced
+        // in data_ptrs.
         data_ptrs.emplace_back(tensor.storage().data_ptr());
       }
     }
