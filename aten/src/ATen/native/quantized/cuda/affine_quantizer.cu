@@ -89,7 +89,7 @@ void quantize_tensor_per_channel_affine_cuda(
       gpu_kernel(
           iter,
           [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, double scale, int64_t zero_point) -> scalar_t {
-            
+
             int64_t qvalue =
                 static_cast<int64_t>(nearbyint(raw_val/scale) + zero_point);
             qvalue = std::max<int64_t>(qvalue, qmin);
@@ -138,7 +138,7 @@ void quantize_tensor_per_channel_float_qparams_cuda(
 
   std::vector<int64_t> expected_shape(rtensor.dim(), 1);
   expected_shape[axis] = rtensor.size(axis);
-  
+
   auto shaped_scales = native::_unsafe_view(scales, expected_shape);
   auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
 
