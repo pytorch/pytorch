@@ -44,7 +44,8 @@ T_co = TypeVar('T_co', covariant=True)
 PORT = 8000
 HOST = 'localhost'
 WEB_TEST_FILE_SIZE = 1024
-WEB_FILE_TEMP_DIR = tempfile.TemporaryDirectory(dir = os.getcwd())
+WEB_FILE_TEMP_DIR = tempfile.TemporaryDirectory(dir=os.getcwd())
+
 
 def set_up_local_server():
     # The method sets up a localhost server at current working directory. The local server starts on a separate thread.
@@ -54,7 +55,7 @@ def set_up_local_server():
     try:
         Handler = http.server.SimpleHTTPRequestHandler
         socketserver.TCPServer.allow_reuse_address = True
-        
+
         server = socketserver.TCPServer(("", PORT), Handler)
         server_thread = threading.Thread(target=server.serve_forever)
         server_thread.daemon = True
@@ -62,17 +63,18 @@ def set_up_local_server():
 
         # Wait a bit for the server to come up
         time.sleep(3)
-        print("Server started ... at {host}:{port}".format(host = HOST, port = PORT))
+        print("Server started ... at {host}:{port}".format(host=HOST, port=PORT))
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
             # localhost:port already in use, no need to initialize again
-            print("There is already an active server serving at {host}:{port}".format(host = HOST, port = PORT))
+            print("There is already an active server serving at {host}:{port}".format(host=HOST, port=PORT))
             pass
         else:
             print("Unexpected error:", sys.exc_info()[0])
             raise
-    except:
+    except Exception:
         raise
+
 
 def create_files_to_web_temp():
     clean_web_temp_dir()
@@ -82,14 +84,18 @@ def create_files_to_web_temp():
     web_tmp_subdir = os.path.basename(os.path.normpath(web_file_dir))
     with open(furl_local_file, 'w') as fsum:
         for i in range(0, 10):
-            f = os.path.join(web_file_dir, "webfile_test_{num}.data".format(num = i))
+            f = os.path.join(web_file_dir, "webfile_test_{num}.data"
+                             .format(num=i))
             with open(f, 'wb') as fout:
                 fout.write(os.urandom(WEB_TEST_FILE_SIZE))
-            fsum.write("http://{host}:{port}/{tmp}/webfile_test_{num}.data\n".format(host = HOST, port = PORT, tmp = web_tmp_subdir, num = i))
-    
+            fsum.write("http://{host}:{port}/{tmp}/webfile_test_{num}.data\n"
+                       .format(host=HOST, port=PORT, tmp=web_tmp_subdir, num=i))
+
+
 def clean_web_temp_dir():
     for f in os.listdir(WEB_FILE_TEMP_DIR.name):
         os.remove(os.path.join(WEB_FILE_TEMP_DIR.name, f))
+
 
 def create_temp_dir_and_files():
     # The temp dir and files within it will be released and deleted in tearDown().
@@ -309,15 +315,17 @@ class TestIterableDataPipeBasic(TestCase):
     def test_web_iterable_datapipe(self):
         timeout = 30
         max_limit = 1024*512
-        
+
         web_file_dir = WEB_FILE_TEMP_DIR.name
-        datapipe_rf = dp.iter.ReadLinesFromFile(os.path.join(web_file_dir, "urls_list"))
-        datapipe_web = dp.iter.Web(datapipe_rf, timeout = timeout)
-        datapipe_tob = dp.iter.ToBytes(datapipe_web, max_limit = max_limit)
+        datapipe_rf = dp.iter.ReadLinesFromFile(os.path.join(web_file_dir, 
+                                                             "urls_list"))
+        datapipe_web = dp.iter.Web(datapipe_rf, timeout=timeout)
+        datapipe_tob = dp.iter.ToBytes(datapipe_web, max_limit=max_limit)
 
         for (url, data) in datapipe_tob:
             self.assertLessEqual(len(data), max_limit)
             self.assertGreater(len(data), WEB_TEST_FILE_SIZE/2)
+
 
 class IDP_NoLen(IterDataPipe):
     def __init__(self, input_dp):

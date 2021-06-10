@@ -1,5 +1,6 @@
 from torch.utils.data import IterDataPipe
 
+
 class ReadLinesFromFileIterDataPipe(IterDataPipe[str]):
     r""" :class:`ReadLinesFromFileDataPipe`
 
@@ -10,7 +11,7 @@ class ReadLinesFromFileIterDataPipe(IterDataPipe[str]):
 
     def __init__(self, filepath):
         self.filepath = filepath
-    
+
     def __iter__(self):
         with open(self.filepath) as file:
             for line in file:
