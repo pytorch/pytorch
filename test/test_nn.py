@@ -3822,11 +3822,6 @@ class TestNN(NNTestCase):
                     # run forward again and assert that u and v are updated
                     self.assertNotEqual(u0, spectral_norm_m.u)
                     self.assertNotEqual(v0, spectral_norm_m.v)
-                else:
-                    # The weight has not been updated and u0 and v0 are already the correct
-                    # singular vectors
-                    self.assertEqual(u0, spectral_norm_m.u)
-                    self.assertEqual(v0, spectral_norm_m.v)
 
                 # assert that backprop reaches original weight
                 # can't use gradcheck because the function changes as we
