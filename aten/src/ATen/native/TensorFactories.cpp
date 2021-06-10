@@ -1463,8 +1463,6 @@ Tensor ones(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   return native::full(
       size, /*fill_value=*/1., names, dtype, layout, device, pin_memory);

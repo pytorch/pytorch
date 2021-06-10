@@ -167,7 +167,7 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeGConvFastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
   if (this->order_ != StorageOrder::NHWC || !is_same<T, uint8_t>::value ||
       !X.template IsType<T>() ||
-      (this->kernel_.size() != 2 && this->kernel_.size() != 3)) {
+      (this->kernel_.size() != 2 && this->kernel_.size() != 3) || Acc16()) {
     return false;
   }
 
