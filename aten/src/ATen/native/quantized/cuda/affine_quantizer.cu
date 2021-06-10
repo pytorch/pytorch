@@ -84,7 +84,7 @@ void quantize_tensor_per_channel_affine_cuda(
 
   auto shaped_scales = native::_unsafe_view(scales, expected_shape);
   auto shaped_zero_points = native::_unsafe_view(zero_points, expected_shape);
-  
+
   auto iter = TensorIteratorConfig()
                   .check_all_same_dtype(false)
                   .add_output(qtensor)
