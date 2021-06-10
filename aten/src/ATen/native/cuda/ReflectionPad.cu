@@ -201,15 +201,16 @@ __global__ void reflection_pad3d_out_kernel(
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
 ){
-
   parallel_reflection_pad3d(
       input,
       output,
       pad_left,
       pad_top,
       pad_front,
-      y_shift, z_shift,
-      [&](int64_t plane,
+      y_shift,
+      z_shift,
+      [&] __device__(
+          int64_t plane,
           int64_t batch,
           int64_t output_z,
           int64_t output_y,
@@ -235,8 +236,10 @@ __global__ void reflection_pad3d_backward_out_kernel(
       pad_left,
       pad_top,
       pad_front,
-      y_shift, z_shift,
-      [&](int64_t plane,
+      y_shift,
+      z_shift,
+      [&] __device__(
+          int64_t plane,
           int64_t batch,
           int64_t output_z,
           int64_t output_y,
