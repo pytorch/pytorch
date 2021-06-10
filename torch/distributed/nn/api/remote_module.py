@@ -639,7 +639,7 @@ class RemoteModule(_RemoteModule):
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
     ):
-        super().__init__(remote_device, module_cls, args, kwargs)
+        super().__init__(remote_device, module_cls, args, kwargs)  # type: ignore[arg-type]
 
 
 def _remote_module_receiver(

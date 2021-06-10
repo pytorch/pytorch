@@ -313,7 +313,13 @@ class SummaryWriter(object):
                 w_hp.add_scalar(k, v)
 
     def add_scalar(
-        self, tag, scalar_value, global_step=None, walltime=None, new_style=False
+        self,
+        tag,
+        scalar_value,
+        global_step=None,
+        walltime=None,
+        new_style=False,
+        double_precision=False,
     ):
         """Add scalar data to summary.
 
@@ -345,7 +351,9 @@ class SummaryWriter(object):
             from caffe2.python import workspace
             scalar_value = workspace.FetchBlob(scalar_value)
 
-        summary = scalar(tag, scalar_value, new_style=new_style)
+        summary = scalar(
+            tag, scalar_value, new_style=new_style, double_precision=double_precision
+        )
         self._get_file_writer().add_summary(summary, global_step, walltime)
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
