@@ -229,10 +229,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     double epsilon,
     const Tensor& reserveSpace) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& running_mean =
-      c10::value_or_else(running_mean_opt, [] { return Tensor(); });
-  const Tensor& running_var =
-      c10::value_or_else(running_var_opt, [] { return Tensor(); });
   const Tensor& save_mean_t =
       c10::value_or_else(save_mean_t_opt, [] { return Tensor(); });
   const Tensor& save_var_t =
