@@ -903,10 +903,11 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
-    if options.use_specified_test_cases_for == 'include':
-        options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
-    elif options.use_specified_test_cases_for == 'bring-to-front':
-        options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
+    if options.run_specified_test_cases:
+        if options.use_specified_test_cases_for == 'include':
+            options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
+        elif options.use_specified_test_cases_for == 'bring-to-front':
+            options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
 
     selected_tests = options.include
 
