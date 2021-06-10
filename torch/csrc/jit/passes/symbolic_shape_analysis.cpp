@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -17,7 +18,6 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/utils/memory.h>
 #include <memory>
 #include <unordered_map>
@@ -91,7 +91,7 @@ bool shapeGraphCleanupPasses(std::shared_ptr<Graph> graph) {
 // substitute in properties until we are unable to make any further
 // optimizations. Finally, we try to extract Tensor properties from the output.
 // For instance `return [1, 2, inp[2] + 1, inp[3]]` we know that the ouptut
-// will be length 4 with first two dimensions equal to 1 and 2. We can also 
+// will be length 4 with first two dimensions equal to 1 and 2. We can also
 // deduce that the 4th dimension has the same symbolic shape as inp[3], which
 // means that we do know its concrete value statically but we can asssign sets
 // of tensor dimensions which must be equal at runtime.
@@ -156,7 +156,8 @@ struct SymbolicShapeNodeAnalyzer {
   }
 
  private:
-  void substituteInputTensorProperties(std::unordered_map<Value*, int64_t> * symbolic_shape_values) {
+  void substituteInputTensorProperties(
+      std::unordered_map<Value*, int64_t>* symbolic_shape_values) {
     // clang-format off
     // here we iteratively substitute properties of the node's input tensors
     // into the shape compute graph. we can substitute constants into the 
@@ -181,7 +182,6 @@ struct SymbolicShapeNodeAnalyzer {
     // the graph for further use. Instead, we keep track of what there value would be
     // for extracting output shapes.
     // clang-format on
-
 
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
@@ -211,7 +211,8 @@ struct SymbolicShapeNodeAnalyzer {
               replaceWithIValue(
                   use.user->output(), tensor_shape[*norm_index].value());
             } else if (symbolic_shape_values) {
-              symbolic_shape_values->emplace(use.user->output(), tensor_shape[*norm_index].value());
+              symbolic_shape_values->emplace(
+                  use.user->output(), tensor_shape[*norm_index].value());
             } else {
               int64_t symbolic_index = tensor_shape[*norm_index].value();
               symbolic_shape_map[symbolic_index].push_back(use.user->output());
@@ -258,7 +259,8 @@ struct SymbolicShapeNodeAnalyzer {
     }
   }
 
-  c10::SymbolicShape extractOutputShape(std::unordered_map<Value*, int64_t>& symbolic_shape_values) {
+  c10::SymbolicShape extractOutputShape(
+      std::unordered_map<Value*, int64_t>& symbolic_shape_values) {
     TORCH_INTERNAL_ASSERT(graph_->outputs().size() == 1);
     auto output = graph_->outputs().at(0);
     TORCH_INTERNAL_ASSERT(
