@@ -187,7 +187,7 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        return f'm.def(at::_ops::{f.func.name.unambiguous_name()}::schema_str);\n'
+        return f'm.def({cpp_string(str(f.func))});\n'
 
 # Generates Operators.h and Operators.cpp.
 # These provide macros that, given an operator and overload name, allow users
@@ -435,6 +435,10 @@ class ComputeBackendSelect:
         Literal[Target.REGISTRATION]
     ]
 
+    # Selector object to determine which operators to generate
+    # registration code for.
+    selector: SelectiveBuilder
+
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if str(f.func.name.name).endswith('_like') or str(f.func.name.name).startswith('new_'):
@@ -444,6 +448,9 @@ class ComputeBackendSelect:
         native_sig = NativeSignature(f.func)
 
         if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_sig.arguments()):
+            return None
+
+        if not self.selector.is_native_function_selected(f):
             return None
 
         native_tensor_args = [
@@ -1044,9 +1051,9 @@ def main() -> None:
     # BackendSelect is generated specially
     cpu_fm.write('RegisterBackendSelect.cpp', lambda: {
         'backend_select_method_definitions':
-            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION), native_functions)),
+            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), native_functions)),
         'backend_select_function_registrations':
-            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION), native_functions)),
+            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
     })
 
     cpu_fm.write('NativeMetaFunctions.h', lambda: {
