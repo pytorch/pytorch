@@ -9,7 +9,6 @@
 #include <c10/core/Stream.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
-#include <c10/util/Backtrace.h>
 #include <c10/util/Exception.h>
 
 /*
@@ -68,12 +67,7 @@ class C10_CUDA_API CUDAStream {
   /// Construct a CUDAStream from a Stream.  This construction is checked,
   /// and will raise an error if the Stream is not, in fact, a CUDA stream.
   explicit CUDAStream(Stream stream) : stream_(stream) {
-    TORCH_CHECK(
-        stream_.device_type() == DeviceType::CUDA,
-        "Got device type ",
-        stream_.device_type(),
-        "\n",
-        c10::get_backtrace());
+    TORCH_CHECK(stream_.device_type() == DeviceType::CUDA);
   }
 
   /// Construct a CUDAStream from a Stream with no error checking.

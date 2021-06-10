@@ -449,7 +449,7 @@ def calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
 def pull_job_times_from_S3() -> Dict[str, float]:
     if HAVE_BOTO3:
         ci_job_prefix = get_stripped_CI_job()
-        s3_reports: List["Report"] = get_previous_reports_for_branch('origin/nightly', ci_job_prefix)
+        s3_reports: List["Report"] = get_previous_reports_for_branch('origin/viable/strict', ci_job_prefix)
     else:
         print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
         print('If not installed, please install boto3 for automatic sharding and test categorization.')
