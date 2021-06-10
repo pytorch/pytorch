@@ -209,6 +209,14 @@ def einsum(*args):
         run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
         can optimize the formula for you.
 
+    .. note::
+
+        As of PyTorch 1.10 :func:`torch.einsum` also supports the sublist format (see examples below). In this format,
+        subscripts for each operand are specified by sublists, list of integers in the range [0, 52). These sublists
+        follow their operands, and an extra sublist can appear at the end of the input to specify the output's
+        subscripts., e.g.`torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis` object
+        may be provided in a sublist to enable broadcasting as described in the Equation section above.
+
     Args:
         equation (string): The subscripts for the Einstein summation.
         operands (List[Tensor]): The tensors to compute the Einstein summation of.
@@ -237,6 +245,17 @@ def einsum(*args):
         >>> As = torch.randn(3,2,5)
         >>> Bs = torch.randn(3,5,4)
         >>> torch.einsum('bij,bjk->bik', As, Bs)
+        tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+                [-1.6706, -0.8097, -0.8025, -2.1183]],
+
+                [[ 4.2239,  0.3107, -0.5756, -0.2354],
+                [-1.4558, -0.3460,  1.5087, -0.8530]],
+
+                [[ 2.8153,  1.8787, -4.3839, -1.2112],
+                [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+
+        # with sublist format and ellipsis
+        >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
         tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
                 [-1.6706, -0.8097, -0.8025, -2.1183]],
 
