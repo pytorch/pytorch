@@ -1877,6 +1877,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 9:
         profileBoolList(pr, node, offset);
+        break;
       default:
         return false;
     }
@@ -1897,6 +1898,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 10:
         profileBoolList(pr, node, offset);
+        break;
       default:
         return false;
     }

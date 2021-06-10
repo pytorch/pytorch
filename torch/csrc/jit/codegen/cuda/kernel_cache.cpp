@@ -652,7 +652,7 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
       heuristics->emplaceBack(std::move(scheduler_entry));
     }
 
-    return std::move(heuristics);
+    return heuristics;
   }
 
   // Un-segmented case, just check the complete fusion
@@ -669,7 +669,7 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
     return c10::nullopt;
   }
 
-  return std::move(ret);
+  return ret;
 }
 
 bool GraphCache::requiresPermutation() {

@@ -2074,7 +2074,6 @@ class TestCudaFuser(JitTestCase):
         for i in range(3):
             jit_o = t_jit(x)
 
-        print(t_jit.graph_for(x))
         self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
         self.assertEqual(jit_o.dtype, torch.half)
 
@@ -2094,7 +2093,6 @@ class TestCudaFuser(JitTestCase):
         for i in range(3):
             jit_o = t_jit(x)
 
-        print(t_jit.graph_for(x))
         self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
         self.assertEqual(jit_o.dtype, torch.float)
 
@@ -2114,7 +2112,6 @@ class TestCudaFuser(JitTestCase):
         for i in range(3):
             jit_o = t_jit(x)
 
-        print(t_jit.graph_for(x))
         self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
         self.assertEqual(jit_o.dtype, torch.half)
 
