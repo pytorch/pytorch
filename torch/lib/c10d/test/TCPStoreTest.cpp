@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <c10d/test/StoreTestCommon.hpp>
 
 #include <cstdlib>
@@ -19,11 +20,12 @@ c10::intrusive_ptr<c10d::TCPStore> _createServer(
     int timeout = defaultTimeout) {
   return c10::make_intrusive<c10d::TCPStore>(
       "127.0.0.1",
-      0,
-      numWorkers,
-      true,
-      std::chrono::seconds(timeout),
-      /* wait */ false);
+      c10d::TCPStoreOptions{
+          /* port */ 0,
+          /* isServer */ true,
+          numWorkers,
+          /* waitWorkers */ false,
+          /* timeout */ std::chrono::seconds(timeout)});
 }
 
 // Different ports for different tests.
@@ -79,12 +81,16 @@ void testHelper(const std::string& prefix = "") {
   const auto numIterations = 1000;
   c10d::test::Semaphore sem1, sem2;
 
+  c10d::TCPStoreOptions opts{};
+  opts.port = serverTCPStore->getPort();
+  opts.numWorkers = numWorkers;
+
   // Each thread will have a client store to send/recv data
   std::vector<c10::intrusive_ptr<c10d::TCPStore>> clientTCPStores;
   std::vector<c10::intrusive_ptr<c10d::PrefixStore>> clientStores;
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     clientTCPStores.push_back(c10::make_intrusive<c10d::TCPStore>(
-        "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
+        "127.0.0.1", opts));
     clientStores.push_back(
         c10::make_intrusive<c10d::PrefixStore>(prefix, clientTCPStores[i]));
   }
@@ -92,7 +98,7 @@ void testHelper(const std::string& prefix = "") {
   std::string expectedCounterRes =
       std::to_string(numThreads * numIterations + 1);
 
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     threads.emplace_back(std::thread([&sem1,
                                       &sem2,
                                       &clientStores,
@@ -100,12 +106,12 @@ void testHelper(const std::string& prefix = "") {
                                       &expectedCounterRes,
                                       &numIterations,
                                       &numThreads] {
-      for (auto j = 0; j < numIterations; j++) {
+      for (const auto j : c10::irange(numIterations)) {
         clientStores[i]->add("counter", 1);
       }
       // Let each thread set and get key on its client store
       std::string key = "thread_" + std::to_string(i);
-      for (auto j = 0; j < numIterations; j++) {
+      for (const auto j : c10::irange(numIterations)) {
         std::string val = "thread_val_" + std::to_string(j);
         c10d::test::set(*clientStores[i], key, val);
         c10d::test::check(*clientStores[i], key, val);
@@ -116,7 +122,7 @@ void testHelper(const std::string& prefix = "") {
       // Check the counter results
       c10d::test::check(*clientStores[i], "counter", expectedCounterRes);
       // Now check other threads' written data
-      for (auto j = 0; j < numThreads; j++) {
+      for (const auto j : c10::irange(numThreads)) {
         if (j == i) {
           continue;
         }
@@ -144,7 +150,7 @@ void testHelper(const std::string& prefix = "") {
   c10d::test::check(*serverStore, "counter", expectedCounterRes);
 
   // Check that each threads' written data from the main thread
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     std::string key = "thread_" + std::to_string(i);
     std::string val = "thread_val_" + std::to_string(numIterations - 1);
     c10d::test::check(*serverStore, key, val);
@@ -176,12 +182,16 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
 
+  c10d::TCPStoreOptions opts{};
+  opts.port = serverTCPStore->getPort();
+  opts.numWorkers = numWorkers;
+
   // Each thread will have a client store to send/recv data
   std::vector<c10::intrusive_ptr<c10d::TCPStore>> clientTCPStores;
   std::vector<c10::intrusive_ptr<c10d::PrefixStore>> clientStores;
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     clientTCPStores.push_back(c10::make_intrusive<c10d::TCPStore>(
-        "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
+        "127.0.0.1", opts));
     clientStores.push_back(
         c10::make_intrusive<c10d::PrefixStore>(prefix, clientTCPStores[i]));
   }
@@ -189,7 +199,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   // Start watching key on server and client stores
   std::string internalKey = "internalKey";
   std::string internalKeyCount = "internalKeyCount";
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     serverStore->watchKey(internalKey + std::to_string(i), callback);
     serverStore->watchKey(internalKeyCount + std::to_string(i), callback);
     clientStores[i]->watchKey(internalKey + std::to_string(i), callback);
@@ -198,7 +208,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
 
   std::vector<std::thread> threads;
   std::atomic<int> keyChangeOperationCount{0};
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     threads.emplace_back(std::thread([&clientStores,
                                       &internalKey,
                                       &internalKeyCount,
@@ -354,11 +364,12 @@ TEST(TCPStoreTest, testCleanShutdown) {
 
   auto clientTCPStore = c10::make_intrusive<c10d::TCPStore>(
       "127.0.0.1",
-      serverTCPStore->getPort(),
-      numWorkers,
-      false,
-      std::chrono::seconds(defaultTimeout),
-      /* wait */ false);
+      c10d::TCPStoreOptions{
+          /* port */ serverTCPStore->getPort(),
+          /* isServer */ false,
+          numWorkers,
+          /* waitWorkers */ false,
+          /* timeout */ std::chrono::seconds(defaultTimeout)});
   clientTCPStore->get("key");
 
   auto clientThread = std::thread([&clientTCPStore] {
@@ -369,4 +380,24 @@ TEST(TCPStoreTest, testCleanShutdown) {
   serverTCPStore = nullptr;
 
   clientThread.join();
+}
+
+TEST(TCPStoreTest, testMultiTenantStores) {
+  c10d::TCPStoreOptions opts {};
+  opts.isServer = true;
+  opts.multiTenant = true;
+
+  // Construct two server stores on the same port.
+  auto store1 = c10::make_intrusive<c10d::TCPStore>("localhost", opts);
+  auto store2 = c10::make_intrusive<c10d::TCPStore>("localhost", opts);
+
+  // Assert that the two stores share the same server.
+  c10d::test::set(*store1, "key0", "value0");
+  c10d::test::check(*store2, "key0", "value0");
+
+  // Dispose the second instance and assert that the server is still alive.
+  store2.reset();
+
+  c10d::test::set(*store1, "key0", "value0");
+  c10d::test::check(*store1, "key0", "value0");
 }
