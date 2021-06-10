@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <c10/macros/Macros.h>
 
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
@@ -51,10 +50,10 @@ enum class OpType : std::uint8_t {
 };
 
 // Converts OpType to human readable string.
-TORCH_API std::string opTypeToString(OpType opType);
+std::string opTypeToString(OpType opType);
 
 // Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-TORCH_API bool isP2POp(OpType opType);
+bool isP2POp(OpType opType);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -76,13 +75,13 @@ TORCH_API bool isP2POp(OpType opType);
 // process group to find each other (referred to as rendezvous from
 // hereon)
 //
-class TORCH_API ProcessGroup : public torch::CustomClassHolder {
+class ProcessGroup : public torch::CustomClassHolder {
  public:
   // Please do not use ProcessGroup::Work API, it is going away, to be
   // replaced by ivalue::Future.
   // Python binding for this class might change, please do not assume
   // this will be bound using pybind.
-  class TORCH_API Work : public torch::CustomClassHolder {
+  class Work : public torch::CustomClassHolder {
    public:
     Work(
         int rank = -1,
@@ -177,7 +176,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // when constructing a ProcessGroup. Each ProcessGroup subclass should
   // extend this struct and define its options if it wants to provide more
   // config options (beyond basic ones defined here) to end user.
-  struct TORCH_API Options : torch::CustomClassHolder {
+  struct Options : torch::CustomClassHolder {
     explicit Options(
         std::string backend,
         std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)

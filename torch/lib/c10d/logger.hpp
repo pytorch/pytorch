@@ -3,7 +3,7 @@
 
 namespace c10d {
 
-class TORCH_API Logger {
+class Logger {
  public:
   explicit Logger(std::shared_ptr<c10d::Reducer> reducer);
   // Set logging data that can be got during DistributedDataParallel

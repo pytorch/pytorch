@@ -1,7 +1,6 @@
 #pragma once
 
 #include <vector>
-#include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
@@ -37,7 +36,7 @@ inline uint64_t fromVec(const std::vector<T>& values) {
   return num;
 }
 
-class TORCH_API SequenceNum {
+class SequenceNum {
  public:
   SequenceNum();
   explicit SequenceNum(const uint64_t num);
