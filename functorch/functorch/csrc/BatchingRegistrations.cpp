@@ -1482,6 +1482,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // cat/stack
   m.impl("cat", cat_batching_rule);
   m.impl("stack", stack_batching_rule);
+  m.impl("is_same_size", native::is_same_size);
 // //
 // //   // backward operators
 // //   m.impl("select_backward", select_backward_batching_rule);
