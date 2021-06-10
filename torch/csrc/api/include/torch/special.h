@@ -27,16 +27,15 @@ inline Tensor& gammaln_out(Tensor& result, const Tensor& self) {
 /// Example:
 /// ```
 /// auto t = torch::randn(128, dtype=kDouble);
-/// torch::special::polygamma(/*n= */2, t);
+/// torch::special::polygamma(2, t);
 /// ```
 inline Tensor polygamma(const Tensor& self, int64_t n) {
   return torch::special_polygamma(self, n);
 }
 inline Tensor& polygamma_out(const Tensor& self, int64_t n, Tensor& result) {
-  return torch::special_polygamma_out(n, result, self);
+  return torch::special_polygamma_out(result, self, n);
 }
 
-inline Tensor& polygamma_out(Tensor& result, const Tensor& self
 /// Computes entropy of input, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.entr.
 ///

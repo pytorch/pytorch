@@ -529,6 +529,7 @@ class TestCommon(JitCommonTestCase):
                         args_annot_kw=", ".join(args_annot_kw),
                         args_kw=", ".join(args_kw),
                     )
+                print(script, variant.__name__)
                 scripted = torch.jit.CompilationUnit(script)._fn
 
                 if (variant is inplace and not torch.can_cast(expected_dtype, dtype)):

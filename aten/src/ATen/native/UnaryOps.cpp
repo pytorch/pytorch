@@ -409,7 +409,7 @@ Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfi
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
 // special_polygamma, alias for polygamma
-Tensor& special_polygamma_out(const Tensor& self, int64_t n, Tensor& result) { return at::polygamma_out(n, result, self); }
+Tensor& special_polygamma_out(const Tensor& self, int64_t n, Tensor& result) { return at::polygamma_out(result, n, self); }
 Tensor special_polygamma(const Tensor& self, int64_t n) { return self.polygamma(n); }
 
 // FIXME: remove const_cast once unary_op_impl_out is updated
