@@ -2644,6 +2644,7 @@ class TestOperatorSignatures(JitTestCase):
                            'resize_',
                            'resize_as_',
                            'stack',
+                           'to_sparse',
                            'view',
                            'view_as',
                            'nn.functional.hardshrink',
@@ -2655,6 +2656,7 @@ class TestOperatorSignatures(JitTestCase):
                            '__rsub__',
                            '__rmul__',
                            '__rdiv__',
+                           '__rmod__',
                            '__rpow__',
                            '__rmatmul__'}
 
