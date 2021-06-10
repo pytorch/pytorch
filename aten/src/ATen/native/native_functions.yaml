@@ -5102,6 +5102,11 @@
   dispatch:
     CPU, CUDA: quantize_per_tensor
 
+- func: quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: quantize_per_tensor_tensor_qparams
+
 - func: quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, ScalarType dtype) -> Tensor[]
   variants: function
   dispatch:
