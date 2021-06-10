@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import torch
 import torch.utils.show_pickle
-from torch.utils.mobile_optimizer import optimize_for_mobile
+# from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.jit.mobile import (
     _load_for_lite_interpreter,
     _get_model_bytecode_version,
