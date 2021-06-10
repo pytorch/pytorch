@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <future>
 #include <iostream>
+#include <system_error>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -73,7 +74,7 @@ void testHelper(const std::string& prefix = "") {
     EXPECT_EQ(numKeys, 4);
     auto timeout = std::chrono::milliseconds(kShortStoreTimeoutMillis);
     serverStore->setTimeout(timeout);
-    EXPECT_THROW(serverStore->get("key0"), std::runtime_error);
+    EXPECT_THROW(serverStore->get("key0"), c10::Error);
   });
 
   // Hammer on TCPStore
@@ -373,7 +374,7 @@ TEST(TCPStoreTest, testCleanShutdown) {
   clientTCPStore->get("key");
 
   auto clientThread = std::thread([&clientTCPStore] {
-    EXPECT_THROW(clientTCPStore->get("invalid_key"), std::runtime_error);
+    EXPECT_THROW(clientTCPStore->get("invalid_key"), std::system_error);
   });
 
   // start server shutdown during a client request
