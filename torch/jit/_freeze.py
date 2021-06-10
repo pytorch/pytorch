@@ -168,5 +168,8 @@ def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
     # just make a copy 3
     buffer = io.BytesIO()
     torch.jit.save(mod, buffer)
+    buffer.seek(0)
     return torch.jit.load(buffer)
 
+        
+       
