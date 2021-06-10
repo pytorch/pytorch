@@ -118,6 +118,11 @@ def _check_sparse_coo_members_individually(
         if not actual.is_sparse:
             return check_tensors(actual, expected, **kwargs)
 
+        if actual._nnz() != expected._nnz():
+            return AssertionError(
+                f"The number of specified values does not match: {actual._nnz()} != {expected._nnz()}"
+            )
+
         kwargs_equal = dict(kwargs, rtol=0, atol=0)
         exc = check_tensors(actual._indices(), expected._indices(), **kwargs_equal)
         if exc:

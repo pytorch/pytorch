@@ -1203,6 +1203,25 @@ class TestAssertsSparseCOO(TestCase):
         for fn in assert_fns_with_inputs(actual, expected):
             fn(check_is_coalesced=False)
 
+    def test_mismatching_nnz(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, (2, 2))
+
+        expected_indices = (
+            (0, 1, 1,),
+            (1, 0, 0,),
+        )
+        expected_values = (1, 1, 1)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, (2, 2))
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of specified values")):
+                fn()
+
     def test_mismatching_indices_msg(self):
         actual_indices = (
             (0, 1),
