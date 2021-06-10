@@ -12,8 +12,6 @@
 #include <memory>
 #include <sstream>
 
-#include <iostream>
-
 namespace torch { namespace autograd {
 
 SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view) {
