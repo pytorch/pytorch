@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>

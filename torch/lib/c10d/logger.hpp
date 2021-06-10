@@ -1,3 +1,4 @@
+#include <c10/util/Logging.h>
 #include <c10d/reducer.hpp>
 
 namespace c10d {
@@ -60,6 +61,20 @@ class Logger {
   // TODO to support single process multiple devices and multi device modules,
   // events need to be created and recorded on multiple devices.
   void set_runtime_stats_and_log();
+
+  // Called when DDP/reducer is failing with an error. The
+  // logging data structure will have two fields filled: "has_error" indicating
+  // that this iteration encountered an error and other fields are not valid,
+  // and "error", a string which contains the error message that DDP failed
+  // with.
+  template <typename... Args>
+  void set_error_and_log(const std::string& ddp_error, const Args&... args) {
+    ddp_logging_data_->ints_map["has_error"] = 1;
+    auto err = c10::str(ddp_error, args...);
+    ddp_logging_data_->strs_map["error"] = err;
+    at::LogPyTorchDDPUsage(*ddp_logging_data_);
+  }
+
 
  private:
   // ddp_logging_data_ is used to hold all the ddp related logging

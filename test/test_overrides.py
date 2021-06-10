@@ -593,7 +593,7 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(None)
                 elif t == 'ScalarType':
                     func_args.append(torch.float32)
-                elif t == 'std::string':
+                elif t == 'c10::string_view':
                     func_args.append('')
                 else:
                     raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
@@ -806,7 +806,6 @@ class TestGradCheckOverride(TestCase):
             # Tensor-likes.
             expected_used_attrs = {
                 'data',
-                'device',
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
@@ -820,6 +819,7 @@ class TestGradCheckOverride(TestCase):
             }
             if fast_mode:
                 expected_used_attrs.add('is_complex')
+                expected_used_attrs.add('device')
             self.assertEqual(expected_used_attrs, total_used_attrs)
 
             expected_used_calls = {
@@ -833,8 +833,9 @@ class TestGradCheckOverride(TestCase):
                 torch.add,
             }
             if fast_mode:
-                expected_used_attrs.add(torch.Tensor.is_complex)
+                expected_used_calls.add(torch.Tensor.is_complex)
             self.assertEqual(expected_used_calls, total_used_calls)
+        run_test(fast_mode=True)
         run_test(fast_mode=False)
 
 class TestNamedTuple(TestCase):

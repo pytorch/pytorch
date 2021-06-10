@@ -201,6 +201,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
   int32_t num_outputs_;
 };
 
+#ifndef __APPLE__
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto register_NnapiCompilation = [](){
   try {
@@ -214,6 +215,7 @@ static auto register_NnapiCompilation = [](){
     throw;
   }
 }();
+#endif
 
 } // namespace
 } // namespace nnapi

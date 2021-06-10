@@ -1,4 +1,5 @@
 # Python dependencies required for development
+astunparse
 future
 numpy
 psutil

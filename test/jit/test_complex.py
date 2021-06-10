@@ -315,3 +315,14 @@ class TestComplex(JitTestCase):
             return sum(x)
 
         self.checkScript(fn, (torch.randn(4, dtype=torch.cdouble).tolist(), ))
+
+    def test_tensor_attributes(self):
+        def tensor_real(x):
+            return x.real
+
+        def tensor_imag(x):
+            return x.imag
+
+        t = torch.randn(2, 3, dtype=torch.cdouble)
+        self.checkScript(tensor_real, (t, ))
+        self.checkScript(tensor_imag, (t, ))

@@ -147,16 +147,15 @@ WORKFLOW_DATA = [
     WindowsJob(None, _VC2019, CudaVersion(10, 1), master_only=True),
     WindowsJob(1, _VC2019, CudaVersion(10, 1), master_only=True),
     WindowsJob(2, _VC2019, CudaVersion(10, 1), master_only=True),
+    # VS2019 CUDA-10.1 force on cpu
+    WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only=True),
     # VS2019 CUDA-11.1
     WindowsJob(None, _VC2019, CudaVersion(11, 1)),
     WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only=True),
     WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only=True),
-    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(11, 1), multi_gpu=True, master_and_nightly=True),
-    # VS2019 CPU-only
-    WindowsJob(None, _VC2019, None),
-    WindowsJob(1, _VC2019, None),
-    WindowsJob(2, _VC2019, None),
-    WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only=True),
+
+    # TODO: This test is disabled due to https://github.com/pytorch/pytorch/issues/59724
+    # WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(11, 1), multi_gpu=True, master_and_nightly=True),
 ]
 
 
