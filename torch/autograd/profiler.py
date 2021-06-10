@@ -436,7 +436,7 @@ class profile(object):
                 use_gpu_fallback = False
                 if self.use_cuda:
                     if (ProfilerActivity.CUDA not in
-                            torch.autograd.supported_kineto_activities()):
+                            torch.autograd._supported_kineto_activities()):
                         warn("CUPTI tracing is not available, falling back to legacy CUDA profiling")
                         use_gpu_fallback = True
                     else:
@@ -492,7 +492,7 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        if torch.cuda.is_available():
+        if self.use_cuda:
             torch.cuda.synchronize()
         if self.kineto_activities:
             self.kineto_results = torch.autograd._disable_profiler()
@@ -1481,10 +1481,11 @@ def build_table(
     name_column_width = max([len(evt.key) for evt in events]) + 4
     name_column_width = min(name_column_width, MAX_NAME_COLUMN_WIDTH)
 
-    DEFAULT_COLUMN_WIDTH = 12
+    MAX_SHAPES_COLUMN_WIDTH = 80
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
-    shapes_column_width = min(shapes_column_width, 45)
+    shapes_column_width = min(shapes_column_width, MAX_SHAPES_COLUMN_WIDTH)
 
+    DEFAULT_COLUMN_WIDTH = 12
     flops_column_width = DEFAULT_COLUMN_WIDTH
 
     src_column_width = None

@@ -126,7 +126,11 @@ def make_plan(
     return plan
 
 
-def run(*, args: List[str], files: List[str]) -> Tuple[int, List[str]]:
+def run(
+    *,
+    args: List[str],
+    files: List[str],
+) -> Tuple[int, List[str], List[str]]:
     """
     Return the exit code and list of output lines from running `mypy`.
 
@@ -163,11 +167,10 @@ def run(*, args: List[str], files: List[str]) -> Tuple[int, List[str]]:
         ),
         list(dict.fromkeys(  # remove duplicates, retain order
             item
-            # assume stderr is empty
-            # https://github.com/python/mypy/issues/1051
             for stdout, _, _ in mypy_results
             for item in stdout.splitlines()
         )),
+        [stderr for _, stderr, _ in mypy_results],
     )
 
 
@@ -202,12 +205,14 @@ def main(args: List[str]) -> None:
     and allows you to set the path to the mypy executable.
     """
     repo_root = str(Path.cwd())
-    exit_code, mypy_issues = run(
+    exit_code, mypy_issues, stderrs = run(
         args=[arg for arg in args if not arg.startswith(repo_root)],
         files=[arg for arg in args if arg.startswith(repo_root)],
     )
     for issue in mypy_issues:
         print(issue)
+    for stderr in stderrs:
+        print(stderr, end='', file=sys.stderr)
     sys.exit(exit_code)
 
 
