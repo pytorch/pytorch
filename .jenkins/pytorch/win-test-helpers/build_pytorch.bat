@@ -38,6 +38,10 @@ if not "%USE_CUDA%"=="1" goto cuda_build_end
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
 
+if x%CUDA_VERSION:.=%==x%CUDA_VERSION% (
+    echo CUDA version %CUDA_VERSION% format isn't correct, which doesn't contain '.'
+    exit /b 1
+)
 rem version transformer, for example 10.1 to 10_1.
 if x%CUDA_VERSION:.=%==x%CUDA_VERSION% (
     echo CUDA version %CUDA_VERSION% format isn't correct, which doesn't contain '.'
