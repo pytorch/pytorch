@@ -1,5 +1,5 @@
 import itertools
-import os
+import os, os.path, errno
 import pickle
 import random
 import tempfile
@@ -9,6 +9,10 @@ import zipfile
 import numpy as np
 import sys
 from unittest import skipIf
+import threading
+import http.server
+import socketserver
+import time
 
 import torch
 import torch.nn as nn
@@ -45,6 +49,55 @@ skipIfNoPIL = skipIf(not HAS_PIL, "no Pillow")
 
 T_co = TypeVar('T_co', covariant=True)
 
+PORT = 8000
+HOST = 'localhost'
+WEB_TEST_FILE_SIZE = 1024
+WEB_FILE_TEMP_DIR = tempfile.TemporaryDirectory(dir = os.getcwd())
+
+def set_up_local_server():
+    # The method sets up a localhost server at current working directory. The local server starts on a separate thread.
+    # The server is created only once. It uses a temp folder created above to save temporary files for test(s) of WebIterDataPipe.  
+    # By setting the property daemon = True, it would be discarded when the main program exits.
+    #
+    try:
+        Handler = http.server.SimpleHTTPRequestHandler
+        socketserver.TCPServer.allow_reuse_address = True
+        
+        server = socketserver.TCPServer(("", PORT), Handler)
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.daemon = True
+        server_thread.start()
+
+        # Wait a bit for the server to come up
+        time.sleep(3)
+        print("Server started ... at {host}:{port}".format(host = HOST, port = PORT))
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            # localhost:port already in use, no need to initialize again
+            print("There is already an active server serving at {host}:{port}".format(host = HOST, port = PORT))
+            pass
+        else:
+            print("Unexpected error:", sys.exc_info()[0])
+            raise
+    except:
+        raise
+
+def create_files_to_web_temp():
+    clean_web_temp_dir()
+
+    web_file_dir = WEB_FILE_TEMP_DIR.name
+    furl_local_file = os.path.join(web_file_dir, "urls_list")
+    web_tmp_subdir = os.path.basename(os.path.normpath(web_file_dir))
+    with open(furl_local_file, 'w') as fsum:
+        for i in range(0, 10):
+            f = os.path.join(web_file_dir, "webfile_test_{num}.data".format(num = i))
+            with open(f, 'wb') as fout:
+                fout.write(os.urandom(WEB_TEST_FILE_SIZE))
+            fsum.write("http://{host}:{port}/{tmp}/webfile_test_{num}.data\n".format(host = HOST, port = PORT, tmp = web_tmp_subdir, num = i))
+    
+def clean_web_temp_dir():
+    for f in os.listdir(WEB_FILE_TEMP_DIR.name):
+        os.remove(os.path.join(WEB_FILE_TEMP_DIR.name, f))
 
 def create_temp_dir_and_files():
     # The temp dir and files within it will be released and deleted in tearDown().
@@ -87,10 +140,14 @@ class TestIterableDataPipeBasic(TestCase):
         self.temp_sub_dir = ret[1][0]
         self.temp_sub_files = ret[1][1:]
 
+        set_up_local_server()
+        create_files_to_web_temp()
+
     def tearDown(self):
         try:
             self.temp_sub_dir.cleanup()
             self.temp_dir.cleanup()
+            clean_web_temp_dir()
         except Exception as e:
             warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
 
@@ -245,6 +302,18 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(rec[1][1].read(), b'12345abcde')
         self.assertEqual(count, 8)
 
+    def test_web_iterable_datapipe(self):
+        timeout = 30
+        max_limit = 1024*512
+        
+        web_file_dir = WEB_FILE_TEMP_DIR.name
+        datapipe_rf = dp.iter.ReadLinesFromFile(os.path.join(web_file_dir, "urls_list"))
+        datapipe_web = dp.iter.Web(datapipe_rf, timeout = timeout)
+        datapipe_tob = dp.iter.ToBytes(datapipe_web, max_limit = max_limit)
+
+        for (url, data) in datapipe_tob:
+            self.assertLessEqual(len(data), max_limit)
+            self.assertGreater(len(data), WEB_TEST_FILE_SIZE/2)
 
 class IDP_NoLen(IterDataPipe):
     def __init__(self, input_dp):
