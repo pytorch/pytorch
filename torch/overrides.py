@@ -966,6 +966,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_cuda.__get__: lambda self: -1,
         Tensor.is_xpu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
+        Tensor.retains_grad.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
         Tensor.is_mlc.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
