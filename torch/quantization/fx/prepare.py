@@ -421,7 +421,7 @@ def maybe_insert_input_observers_for_node(
         new_arg = maybe_insert_input_observer_for_arg_or_kwarg(
             node, arg, qconfig, model, modules, graph,
             node_name_to_target_dtype,
-            qhandler, prepare_custom_config_dict, 
+            qhandler, prepare_custom_config_dict,
             equalization_qconfig)
         new_args.append(new_arg)
 
@@ -441,7 +441,7 @@ def maybe_insert_input_observers_for_node(
 
 def maybe_insert_output_observer_for_node(
     node: Node,
-    model: GraphModule,
+    model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
     matches: Dict[str, MatchResult],
@@ -1051,7 +1051,7 @@ def _prepare(
 
     result_node = insert_observers_for_model(
         model, modules, matches, qconfig_map,
-        model.graph, prepare_custom_config_dict, 
+        model.graph, prepare_custom_config_dict,
         equalization_qconfig_map,
         input_quantized_idxs, output_quantized_idxs)
 
