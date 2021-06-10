@@ -868,9 +868,9 @@
   result: evenly_read_jvp(self_t, self_p, result)
 
 - name: maximum(Tensor self, Tensor other) -> Tensor
-  self: grad.clone().masked_fill_(self <= other, 0)
-  other: grad.clone().masked_fill_(self > other, 0)
-  result: other_t + (self_p > other_p) * (self_t - other_t)
+  self: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
+  other: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
+  result: other_t + at::where(self_p == other_p, 0.5, (self_p > other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
@@ -920,9 +920,9 @@
   result: evenly_read_jvp(self_t, self_p, result)
 
 - name: minimum(Tensor self, Tensor other) -> Tensor
-  self: grad.clone().masked_fill_(self >= other, 0)
-  other: grad.clone().masked_fill_(self < other, 0)
-  result: other_t + (self_p < other_p) * (self_t - other_t)
+  self: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
+  other: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
+  result: other_t + at::where(self_p == other_p, 0.5, (self_p < other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_((self <= other).logical_or_(other.isnan()).logical_not_(), 0)

@@ -8281,6 +8281,14 @@ class TestNN(NNTestCase):
                 _test_gelu(n, m, torch.float64, True)
                 _test_gelu(n, m, torch.float64, False)
 
+        # Test multi threaded
+        num_threads = torch.get_num_threads()
+        torch.set_num_threads(4)
+        try:
+            _test_gelu(32, 32, torch.float32, False)
+        finally:
+            torch.set_num_threads(num_threads)
+
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
@@ -11306,12 +11314,11 @@ def add_test(test, decorator=None):
             add(cuda_test_name + '_cdouble', test_cdouble)
 
     else:
+        def with_tf32_off(self, test=test, kwargs=kwargs):
+            with tf32_off():
+                test.test_cuda(self, **kwargs)
+
         if tf32_is_not_fp32() and test.with_tf32:
-
-            def with_tf32_off(self, test=test, kwargs=kwargs):
-                with tf32_off():
-                    test.test_cuda(self, **kwargs)
-
             add(cuda_test_name + '_fp32', with_tf32_off)
 
             def with_tf32_on(self, test=test, kwargs=kwargs):
@@ -11320,7 +11327,7 @@ def add_test(test, decorator=None):
 
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
-            add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
+            add(cuda_test_name, with_tf32_off)
 
 for test_params in module_tests + new_module_tests:
     # TODO: CUDA is not implemented yet
@@ -13199,7 +13206,8 @@ class TestNNDeviceType(NNTestCase):
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     output = module(input)
 
-    @onlyCUDA
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None,
