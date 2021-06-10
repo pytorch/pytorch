@@ -887,16 +887,9 @@ def chunk(g, self, chunks, dim):
     chunk_size_s = g.op("Sub", chunks, g.op("Constant", value_t=torch.tensor([1], dtype=torch.long)))
     chunk_size = g.op("Div", g.op("Add", dim_size, chunk_size_s), chunks)
 
-    # Cases where chunk_size is divisible by number of chunks
-    chunk_vec_divisible = expand(g, chunk_size, chunks, None)
-    # Cases where chunk_size is not divisible by number of chunks
-    chunk_vec_indivisible = [expand(g, chunk_size, chunk_size_s, None),
+    chunk_vec = [expand(g, chunk_size, chunk_size_s, None),
                              g.op("Sub", dim_size, g.op("Mul", chunk_size, chunk_size_s))]
-    chunk_vec_indivisible = g.op("Concat", *chunk_vec_indivisible, axis_i=0)
-
-    # Decide chunk_vec based on divisibilty
-    chunk_vec_cond = g.op("Equal", dim_size, g.op("Mul", chunk_size, chunks))
-    chunk_vec = where(g, chunk_vec_cond, chunk_vec_divisible, chunk_vec_indivisible)
+    chunk_vec = g.op("Concat", *chunk_vec, axis_i=0)
     return split(g, self, chunk_vec, dim)
 
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):

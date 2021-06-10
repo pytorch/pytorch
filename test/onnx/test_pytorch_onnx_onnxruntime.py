@@ -4635,7 +4635,6 @@ class TestONNXRuntime(unittest.TestCase):
                           dynamic_axes={"x": {0: "batch_size", 1: "dims"}})
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
     def test_dynamic_chunk(self):
         class ChunkModel(torch.nn.Module):
             def __init__(self, dim=1):
