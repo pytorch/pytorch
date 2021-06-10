@@ -5,7 +5,7 @@ from torch.utils.data import IterDataPipe
 class ToBytesIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
     r""" :class:`ToBytesIterDataPipe`
 
-    Iterable DataPipe to load IO stream with label name, 
+    Iterable DataPipe to load IO stream with label name,
     yield bytes with label name in a tuple
     args:
         max_limit : maximum bytes to read from stream

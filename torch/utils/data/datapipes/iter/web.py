@@ -8,7 +8,7 @@ from torch.utils.data import IterDataPipe
 class WebIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     r""" :class:`WebIterDataPipe`
 
-    Iterable DataPipe to load file url(s) (web url(s) pointing to file(s)), 
+    Iterable DataPipe to load file url(s) (web url(s) pointing to file(s)),
     yield file url and IO stream in a tuple
     args:
         timeout : timeout for web request

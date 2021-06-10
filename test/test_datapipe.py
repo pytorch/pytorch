@@ -48,8 +48,10 @@ WEB_FILE_TEMP_DIR = tempfile.TemporaryDirectory(dir=os.getcwd())
 
 
 def set_up_local_server():
-    # The method sets up a localhost server at current working directory. The local server starts on a separate thread.
-    # The server is created only once. It uses a temp folder created above to save temporary files for test(s) of WebIterDataPipe.  
+    # The method sets up a localhost server at current working directory.
+    # The local server starts on a separate thread.
+    # The server is created only once.
+    # It uses a temp folder created above to save temporary files for test(s) of WebIterDataPipe.
     # By setting the property daemon = True, it would be discarded when the main program exits.
     #
     try:
@@ -314,10 +316,10 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_web_iterable_datapipe(self):
         timeout = 30
-        max_limit = 1024*512
+        max_limit = 1024 * 512
 
         web_file_dir = WEB_FILE_TEMP_DIR.name
-        datapipe_rf = dp.iter.ReadLinesFromFile(os.path.join(web_file_dir, 
+        datapipe_rf = dp.iter.ReadLinesFromFile(os.path.join(web_file_dir,
                                                              "urls_list"))
         datapipe_web = dp.iter.Web(datapipe_rf, timeout=timeout)
         datapipe_tob = dp.iter.ToBytes(datapipe_web, max_limit=max_limit)
