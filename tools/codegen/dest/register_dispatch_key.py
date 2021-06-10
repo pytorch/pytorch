@@ -123,9 +123,14 @@ class RegisterDispatchKey:
             returns = ret_name
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
+        class_name_opt = self.backend_index.native_function_class_name()
+        if class_name_opt is None:
+            wrapper_name = sig.name()
+        else:
+            wrapper_name = f'{class_name_opt}::{sig.name()}'
 
         return f"""\
-{sig.defn()} {{
+{sig.defn(name=wrapper_name)} {{
   auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
@@ -197,8 +202,13 @@ class RegisterDispatchKey:
                 return result
             elif self.target is Target.NAMESPACED_DEFINITION:
                 def generate_defn(cpp_sig: CppSignature) -> str:
+                    class_name_opt = self.backend_index.native_function_class_name()
+                    if class_name_opt is None:
+                        target_name = sig.name()
+                    else:
+                        target_name = f'{class_name_opt}::{sig.name()}'
                     return f"""
-{cpp_sig.defn()} {{
+{cpp_sig.defn(name=target_name)} {{
 return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
 }}
 """
