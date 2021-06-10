@@ -119,7 +119,6 @@ struct SymbolicShapeAnalyzer {
       PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
       RefineIntegerValues(graph_);
       ConstantPropagation(graph_);
-      EliminateCommonSubexpression(graph_);
       HoistCommonExpression(graph_);
     }
     substituteInputTensorProperties(/*substitute_symbolic_dims*/ true);
