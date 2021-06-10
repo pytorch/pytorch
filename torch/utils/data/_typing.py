@@ -340,7 +340,7 @@ class _DataPipeMeta(GenericMeta):
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
-    sub_cls.reinforce_type = _reinforce_type
+    sub_cls.reinforce_type = reinforce_type
 
     # TODO:
     # - add global switch for type checking at compile-time
@@ -377,7 +377,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
                 raise TypeError("Expected return type of '__iter__' as a subtype of {}, but found {}"
                                 " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
 
-def _reinforce_type(self, expected_type):
+def reinforce_type(self, expected_type):
     r"""
     Reinforce the type for DataPipe instance. And the 'expected_type' is required
     to be a subtype of the original type hint to restrict the type requirement

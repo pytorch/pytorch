@@ -385,7 +385,10 @@ class TestFunctionalIterDataPipe(TestCase):
             data = torch.tensor(item, dtype=dtype)
             return data if not sum else data.sum()
 
-        map_dp = input_dp.map(lambda ls: ls * 2, nesting_level=0)
+        with warnings.catch_warnings(record=True) as wa:
+            map_dp = input_dp.map(lambda ls: ls * 2, nesting_level=0)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
         self.assertEqual(len(input_dp), len(map_dp))
         for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, y * 2)
@@ -406,11 +409,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         map_dp = input_dp.map(fn, nesting_level=4)
         with self.assertRaises(IndexError):
-            for x, y in zip(map_dp, input_dp):
-                self.assertEqual(len(x), len(y))
-                for a, b in zip(x, y):
-                    print(a, b)
-                    self.assertEqual(a, torch.tensor(b, dtype=torch.float))
+            list(map_dp)
 
         with self.assertRaises(ValueError):
             input_dp.map(fn, nesting_level=-2)
