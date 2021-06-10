@@ -192,24 +192,27 @@ def replace_string_literal(src : str, lineno : int,
     if delta[0] > 0:
         delta[0] += 1  # handle the extra \\\n
 
+    def compute_raw_new_body_and_adjust_delta(m):
+        s = new_string
+        raw = m.group('raw') == 'r'
+        if not raw or not ok_for_raw_triple_quoted_string(s, quote=m.group('quote')[0]):
+            raw = False
+            s = s.replace('\\', '\\\\')
+            if m.group('quote') == "'''":
+                s = escape_trailing_quote(s, "'").replace("'''", r"\'\'\'")
+            else:
+                s = escape_trailing_quote(s, '"').replace('"""', r'\"\"\"')
+
+        new_body = "\\\n" + s if "\n" in s and not raw else s
+        delta[0] -= m.group('body').count("\n")
+        return raw, new_body
+
     if lineno_at_start:
         i = nth_line(src, lineno)
 
-        # i points to the tart of the string
+        # i points to the start of the string
         def replace(m):
-            s = new_string
-            raw = m.group('raw') == 'r'
-            if not raw or not ok_for_raw_triple_quoted_string(s, quote=m.group('quote')[0]):
-                raw = False
-                s = s.replace('\\', '\\\\')
-                if m.group('quote') == "'''":
-                    s = escape_trailing_quote(s, "'").replace("'''", r"\'\'\'")
-                else:
-                    s = escape_trailing_quote(s, '"').replace('"""', r'\"\"\"')
-
-            new_body = "\\\n" + s if "\n" in s and not raw else s
-            delta[0] -= m.group('body').count("\n")
-
+            raw, new_body = compute_raw_new_body_and_adjust_delta(m)
             return ''.join([m.group('prefix'),
                             'r' if raw else '',
                             m.group('quote'),
@@ -224,19 +227,7 @@ def replace_string_literal(src : str, lineno : int,
         # i points to the END of the string.  Do some funny
         # business with reversing the string to do the replace
         def replace(m):
-            s = new_string
-            raw = m.group('raw') == 'r'
-            if not raw or not ok_for_raw_triple_quoted_string(s, quote=m.group('quote')[0]):
-                raw = False
-                s = s.replace('\\', '\\\\')
-                if m.group('quote') == "'''":
-                    s = escape_trailing_quote(s, "'").replace("'''", r"\'\'\'")
-                else:
-                    s = escape_trailing_quote(s, '"').replace('"""', r'\"\"\"')
-
-            new_body = "\\\n" + s if "\n" in s and not raw else s
-            delta[0] -= m.group('body').count("\n")
-
+            raw, new_body = compute_raw_new_body_and_adjust_delta(m)
             return ''.join([m.group('suffix'),
                             m.group('quote'),
                             new_body[::-1],
