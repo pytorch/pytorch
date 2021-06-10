@@ -293,14 +293,14 @@ __global__ void rrelu_with_noise_cuda_kernel(
     if (input[i] <= 0)
     {
       scalar_t r = curand_uniform_type<scalar_t>(&state);
-      r = scalar_t(r * (b - a) + a);
+      r = static_cast<scalar_t>(r * (b - a) + a);
       output[i] = input[i] * r;
       noise[i] = r;
     }
     else
     {
       output[i] = input[i];
-      noise[i] = scalar_t(1);
+      noise[i] = 1;
     }
   }
 }
