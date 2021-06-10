@@ -92,6 +92,7 @@ def get_cycles_per_ms():
 
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_memory_leak_check_per_method = True
     _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
 

@@ -969,7 +969,10 @@ class TestCase(expecttest.TestCase):
     def precision(self, prec: float) -> None:
         self._precision = prec
 
+    # (TODO implement this feature) do cuda memory leak check per class
     _do_cuda_memory_leak_check = False
+    # do cuda memory leak check per test method
+    _do_cuda_memory_leak_check_per_method = False
     _do_cuda_non_default_stream = False
 
     # When True, if a test case raises a NotImplementedError, instead of failing
@@ -982,10 +985,11 @@ class TestCase(expecttest.TestCase):
         test_method = getattr(self, method_name, None)
         if test_method is not None:
             # Wraps the tested method if we should do CUDA memory check.
-            self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+            do_cuda_memory_leak_check_on_method = getattr(test_method, '_do_cuda_memory_leak_check', False)
             # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-            if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-                self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+            if (self._do_cuda_memory_leak_check or do_cuda_memory_leak_check_on_method) and not IS_WINDOWS:
+                if self._do_cuda_memory_leak_check_per_method or do_cuda_memory_leak_check_on_method:
+                    self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
 
             # Wraps the tested method if we should enforce non default CUDA stream.
             self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
