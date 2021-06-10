@@ -2558,7 +2558,7 @@ class TestReductions(TestCase):
             values = make_tensor((), device, dtype=dtype)
             torch.histogram(values, 2, range=(1, 0))
 
-        with self.assertRaisesRegex(RuntimeError, 'range of \[nan, nan\] is not finite'):
+        with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
             torch.histogram(torch.tensor([float("nan")]), device, dtype=dtype)
 
     # Tests to ensure that reduction functions employing comparison operators are usable when there
