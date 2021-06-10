@@ -4478,9 +4478,9 @@ class TestLinalg(TestCase):
             torch.linalg.qr(t2, mode='hello')
 
     def _check_einsum(self, *args):
+        np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
         res = torch.einsum(*args)
-        args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
-        ref = np.einsum(*args)
+        ref = np.einsum(*np_args)
         self.assertEqual(torch.from_numpy(np.array(ref)), res)
 
     @dtypes(torch.double, torch.cdouble)
@@ -4575,7 +4575,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_random(self, device, dtype):
         def convert_label(label):
-            if label == Ellipsis:
+            if label == ...:
                 return '...'
             elif label < 26:
                 return chr(ord('A') + label)
@@ -4585,12 +4585,11 @@ class TestLinalg(TestCase):
         def convert_sublist(sublist):
             return ''.join(convert_label(label) for label in sublist)
 
-        def test(seed=None,
-                 n=10,                       # how many tests to generate
+        def test(n=10,                       # how many tests to generate
                  n_labels=5,                 # how many labels available
                  min_ops=1, max_ops=3,       # min and max number of operands per test
-                 min_dims=0, max_dims=2,     # min and max number of dimensions per operand
-                 min_size=0, max_size=8,    # min and max size of each dimension
+                 min_dims=1, max_dims=3,     # min and max number of dimensions per operand
+                 min_size=1, max_size=8,    # min and max size of each dimension
                  max_out_dim=3,              # max number of dimensions for the output
                  enable_diagonals=True,      # controls if labels can be repeated for diagonals
                  ellipsis_prob=0.5,          # probability of including ellipsis in operand
@@ -4605,10 +4604,6 @@ class TestLinalg(TestCase):
             assert 0 <= min_size <= max_size
             assert 0 <= max_out_dim
             assert enable_diagonals or max_dims <= n_labels
-
-            if seed:
-                random.seed(seed)
-                np.random.seed(seed)
 
             for _ in range(n):
 
@@ -4648,7 +4643,7 @@ class TestLinalg(TestCase):
                         ell_shape[mask == 1] = 1
                         ell_index = random.randint(0, n_dim)
                         shape[ell_index:ell_index] = ell_shape
-                        labels.insert(ell_index, Ellipsis)
+                        labels.insert(ell_index, ...)
 
                     operands.append(make_tensor(shape, device, dtype))
                     sublists.append(labels)
@@ -4656,10 +4651,10 @@ class TestLinalg(TestCase):
                 # generate an explicit output
                 num_out_labels = max(0, random.randint(0, min(max_out_dim, len(valid_labels))) - ell_size)
                 out_sublist = list(np.random.choice(list(valid_labels), num_out_labels, replace=False))
-                out_sublist.insert(random.randint(0, num_out_labels), Ellipsis)
+                out_sublist.insert(random.randint(0, num_out_labels), ...)
 
                 # test equation format with and without explicit output
-                equation = ','.join(convert_sublist(sublist) for sublist in sublists)
+                equation = ','.join(convert_sublist(l) for l in sublists)
                 self._check_einsum(equation, *operands)
                 self._check_einsum(equation + '->' + convert_sublist(out_sublist), *operands)
 
@@ -4668,7 +4663,7 @@ class TestLinalg(TestCase):
                 self._check_einsum(*args)
                 self._check_einsum(*args, out_sublist)
 
-        test(2021, 100)
+        test(100)
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
