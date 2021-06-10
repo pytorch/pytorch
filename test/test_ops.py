@@ -381,17 +381,20 @@ class TestCommon(JitCommonTestCase):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        
+        # Acquires variants to test
+        func = op.get_op()
+        method = op.get_method()
+        variants = {
+            # TODO: inplace tests currently fail, fix and add inplace variant
+            'function': func, 'method': method,
+        }   
+        if op.has_fake_function:
+            variants = {'method': getattr(torch.Tensor, op.name)}
+            samples = op.sample_inputs(device, dtype, requires_grad=False)
 
         tested = False
         for sample in samples:
-            # Acquires variants to test
-            func = op.get_op()
-            method = op.get_method()
-            variants = {
-                # TODO: inplace tests currently fail, fix and add inplace variant
-                'function': func, 'method': method,
-            }
-
             # Test traced and scripted consistency
             for func_type, variant in variants.items():
                 if variant is None:
@@ -422,30 +425,35 @@ class TestCommon(JitCommonTestCase):
                             return sample.output_process_fn_grad(output)
                         return output
 
+                    def get_sample():
+                        return clone_input_helper(sample.input) if op.name[-1] == '_' else sample.input
+
                     check_against_reference(self,
                                             script_fn,
                                             func,
                                             out_fn,
-                                            (sample.input,) + sample.args,
+                                            (get_sample(),) + sample.args,
                                             sample.kwargs,
                                             no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check traced forward, grad, and grad grad
-                    traced_fn = create_traced_fn(self, variant)
-                    check_against_reference(self,
-                                            traced_fn,
-                                            func,
-                                            out_fn,
-                                            (sample.input,) + sample.args,
-                                            sample.kwargs,
-                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
+                    # TODO: fix tracing here
+                    if not op.has_fake_function:
+                        traced_fn = create_traced_fn(self, variant)
+                        check_against_reference(self,
+                                                traced_fn,
+                                                func,
+                                                out_fn,
+                                                (get_sample(),) + sample.args,
+                                                sample.kwargs,
+                                                no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
                     # Note: only runs in float32 and int64 because schema isn't affected by dtype,
                     #   so running it on all dtypes is would be excessive
                     if dtype in [torch.float32, torch.int32]:
-                        check_alias_annotation(name, (sample.input,) + sample.args, sample.kwargs,
+                        check_alias_annotation(name, (get_sample(),) + sample.args, sample.kwargs,
                                                func_type=func_type, aten_name=op.aten_name)
 
                     # Check autodifferentiation of nodes for traced and scripted graphs, only need to check once per sample
@@ -459,7 +467,8 @@ class TestCommon(JitCommonTestCase):
                             nonfusible_nodes = op.autodiff_nonfusible_nodes
                             fusible_nodes = op.autodiff_fusible_nodes
 
-                        self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+                        if not op.has_fake_function:
+                            self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
                         self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
         assert tested, "JIT Test does not execute any logic"
 

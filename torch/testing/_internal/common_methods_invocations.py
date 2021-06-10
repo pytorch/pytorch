@@ -236,6 +236,8 @@ class OpInfo(object):
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
                  inplace_variant=_NOTHING,  # explicitly pass the inplace variant of the operator if required
                  method_variant=_NOTHING,  # explicitly pass the method variant of the operator if required
+                 has_fake_function = False  # does this opinfo use a function to simulate functional behavior
+                                            # of a mutating op
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -304,6 +306,7 @@ class OpInfo(object):
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+        self.has_fake_function = has_fake_function
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -4532,10 +4535,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_contiguous,
            supports_forward_ad=True,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-           ),
+           assert_autodiffed=True,
            supports_out=False),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
@@ -6470,10 +6470,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-           ),
+           has_fake_function=True,
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
            op=lambda x, other: torch.resize_as_(x.clone(), other),
@@ -6482,10 +6479,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-           ),
+           has_fake_function=True,
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -6731,10 +6725,7 @@ op_db: List[OpInfo] = [
            op=lambda self, condition, other: torch.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
            supports_out=False,
-           skips=(
-               # test does not work with passing lambda for op
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-           ),
+           assert_autodiffed=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
 ]
 
