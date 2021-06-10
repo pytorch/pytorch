@@ -120,9 +120,8 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
       "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
   input.sizes());
 
-  if (input.dim() == 5)
-  {
-    // batch mode
+  bool batch_mode = (input.dim() == 5);
+  if (batch_mode) {
     dim_w++;
     dim_h++;
     dim_d++;
@@ -158,8 +157,7 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
       ") is too small."
       " Calculated output D: ", output_d, " H: ", output_h, " W: ", output_w);
 
-  if (input.dim() == 5) {
-    // batch mode
+  if (batch_mode) {
     set_output({input.size(0), nplane, output_d, output_h, output_w}, input.options());
   } else {
     set_output({nplane, output_d, output_h, output_w}, input.options());
