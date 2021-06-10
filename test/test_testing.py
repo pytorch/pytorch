@@ -1140,7 +1140,7 @@ instantiate_device_type_tests(TestAssertsMultiDevice, globals(), only_for="cuda"
 
 
 class TestAssertsSparseCOO(TestCase):
-    def test_mismatching(self):
+    def test_mismatching_is_sparse(self):
         actual = torch.empty(())
         expected = actual.to_sparse()
 
@@ -1262,7 +1262,7 @@ class TestAssertsSparseCOO(TestCase):
 
 
 class TestAssertsSparseCSR(TestCase):
-    def test_mismatching(self):
+    def test_mismatching_is_sparse_csr(self):
         actual = torch.empty((2, 2))
         expected = actual.to_sparse_csr()
 
