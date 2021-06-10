@@ -20,12 +20,6 @@ from torch.onnx.symbolic_helper import _block_list_in_opset
 #   GRU, LSTM, RNN
 #   BatchNorm, Cumsum, Relu
 
-block_listed_operators = [
-]
-
-for block_listed_op in block_listed_operators:
-    vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
-
 @parse_args("v")
 def hardswish(g, self):
     return g.op("HardSwish", self)

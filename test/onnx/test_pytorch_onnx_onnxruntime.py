@@ -2493,10 +2493,10 @@ class TestONNXRuntime(unittest.TestCase):
     def test_reshape_allowzero(self):
         class ReshapeModel(torch.nn.Module):
             def forward(self, x):
-                x = x.reshape(-1, 2, 4, 4, 5, 5)
+                x = x.reshape(3, 4, 0)
                 return x
 
-        x = torch.randn(1, 32, 0, 5)
+        x = torch.randn(0, 3, 4)
         self.run_test(ReshapeModel(), x)
 
     def test_reshape_different_rank(self):
