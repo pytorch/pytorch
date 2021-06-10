@@ -10,8 +10,9 @@ from setuptools import distutils
 
 
 TEST_CUDA = torch.cuda.is_available()
+TEST_CUDA_DEVICE_NUM = 0  # change device num if you are in a shared GPU environment
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
-CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
+CUDA_DEVICE = torch.device(f"cuda:${TEST_CUDA_DEVICE_NUM}") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
@@ -22,7 +23,7 @@ SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >
 
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:
-    torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    torch.ones(1).cuda(TEST_CUDA_DEVICE_NUM)  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
 
 if TEST_NUMBA:
