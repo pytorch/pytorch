@@ -8,6 +8,7 @@
 #include <THC/THCAtomics.cuh>
 
 #include <thrust/pair.h>
+#include <thrust/tuple.h>
 
 namespace at {
 namespace native {
@@ -145,22 +146,27 @@ __global__ void reflection_pad2d_backward_out_kernel(
     gpuAtomicAdd(&grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
-
-template<typename scalar_t>
-__global__ void reflection_pad3d_out_kernel(
+template <typename scalar_t, typename F>
+static __forceinline__ __device__ void parallel_reflection_pad3d(
     PackedTensorAccessor64<scalar_t, 5> input,
     PackedTensorAccessor64<scalar_t, 5> output,
-    int64_t pad_left,  int64_t pad_top, int64_t pad_front,
-    int64_t y_shift, int64_t z_shift
-){
+    int64_t pad_left,
+    int64_t pad_top,
+    int64_t pad_front,
+    int64_t y_shift,
+    int64_t z_shift,
+    const F& f) {
   int64_t output_id = threadIdx.x + blockIdx.x * blockDim.x;
 
   if (output_id >= (output.size(2) * output.size(3) * output.size(4))) {
     return;
   }
+
   int64_t output_x = output_id % output.size(4);
   int64_t output_y = (output_id / output.size(4)) % output.size(3);
   int64_t output_z = output_id / (output.size(3) * output.size(4));
+
+  auto output_tuple = thrust::make_tuple(output_z, output_y, output_x);
 
   int64_t i_start_x = ::max(int64_t(0), -pad_left);
   int64_t o_start_x = ::max(int64_t(0), pad_left);
@@ -188,8 +194,35 @@ __global__ void reflection_pad3d_out_kernel(
 
   int64_t plane = blockIdx.y + y_shift;
   int64_t batch = blockIdx.z + z_shift;
-  output[batch][plane][output_z][output_y][output_x] =
-      input[batch][plane][input_z][input_y][input_x];
+  f(plane, batch, output_z, output_y, output_x, input_z, input_y, input_x);
+}
+
+template<typename scalar_t>
+__global__ void reflection_pad3d_out_kernel(
+    PackedTensorAccessor64<scalar_t, 5> input,
+    PackedTensorAccessor64<scalar_t, 5> output,
+    int64_t pad_left,  int64_t pad_top, int64_t pad_front,
+    int64_t y_shift, int64_t z_shift
+){
+
+  parallel_reflection_pad3d(
+      input,
+      output,
+      pad_left,
+      pad_top,
+      pad_front,
+      y_shift, z_shift,
+      [&](int64_t plane,
+          int64_t batch,
+          int64_t output_z,
+          int64_t output_y,
+          int64_t output_x,
+          int64_t input_z,
+          int64_t input_y,
+          int64_t input_x) {
+        auto value_to_copy = input[batch][plane][input_z][input_y][input_x];
+        output[batch][plane][output_z][output_y][output_x] = value_to_copy;
+      });
 }
 
 template <typename scalar_t>
@@ -199,45 +232,25 @@ __global__ void reflection_pad3d_backward_out_kernel(
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
 ) {
-  int64_t output_id = threadIdx.x + blockIdx.x * blockDim.x;
-
-  if (output_id >=
-      (grad_output.size(2) * grad_output.size(3) * grad_output.size(4))) {
-    return;
-  }
-  int64_t output_x = output_id % grad_output.size(4);
-  int64_t output_y = (output_id / grad_output.size(4)) % grad_output.size(3);
-  int64_t output_z = output_id / (grad_output.size(3) * grad_output.size(4));
-
-  int64_t i_start_x = ::max(int64_t(0), -pad_left);
-  int64_t o_start_x = ::max(int64_t(0), pad_left);
-  int64_t i_start_y = ::max(int64_t(0), -pad_top);
-  int64_t o_start_y = ::max(int64_t(0), pad_top);
-  int64_t i_start_z = ::max(int64_t(0), -pad_front);
-  int64_t o_start_z = ::max(int64_t(0), pad_front);
-
-  int64_t input_x = ::abs(output_x - pad_left)
-                 - ::abs(output_x - (grad_input.size(4) + pad_left - 1))
-                 - output_x
-                 + 2 * pad_left + grad_input.size(4) - 1
-                 - o_start_x + i_start_x;
-  int64_t input_y = ::abs(output_y - pad_top)
-                 - ::abs(output_y - (grad_input.size(3) + pad_top - 1))
-                 - output_y
-                 + 2 * pad_top + grad_input.size(3) - 1
-                 - o_start_y + i_start_y;
-
-  int64_t input_z = ::abs(output_z - pad_front)
-                 - ::abs(output_z - (grad_input.size(2) + pad_front - 1))
-                 - output_z
-                 + 2 * pad_front + grad_input.size(2) - 1
-                 - o_start_z + i_start_z;
-
-  int64_t plane = blockIdx.y + y_shift;
-  int64_t batch = blockIdx.z + z_shift;
-  gpuAtomicAdd(
-    &grad_input[batch][plane][input_z][input_y][input_x],
-     grad_output[batch][plane][output_z][output_y][output_x]);
+  parallel_reflection_pad3d(
+      grad_input,
+      grad_output,
+      pad_left,
+      pad_top,
+      pad_front,
+      y_shift, z_shift,
+      [&](int64_t plane,
+          int64_t batch,
+          int64_t output_z,
+          int64_t output_y,
+          int64_t output_x,
+          int64_t input_z,
+          int64_t input_y,
+          int64_t input_x) {
+        auto value_to_add = grad_output[batch][plane][output_z][output_y][output_x];
+        auto target = &grad_input[batch][plane][input_z][input_y][input_x];
+        gpuAtomicAdd(target, value_to_add);
+      });
 }
 
 void reflection_pad2d_out_template(

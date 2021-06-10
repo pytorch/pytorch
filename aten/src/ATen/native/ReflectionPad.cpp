@@ -670,15 +670,14 @@ void reflection_pad2d_backward_out_template(
     );
   }
 }
-
-template <typename scalar_t>
-static void reflection_pad3d_out_frame(
-    scalar_t *input_p, scalar_t *output_p,
+template <typename F>
+inline void parallel_reflection_pad3d(
     int64_t nplane,
     int64_t input_w, int64_t input_h, int64_t input_d,
     int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_top, int64_t pad_front)
-{
+    int64_t pad_left, int64_t pad_top, int64_t pad_front,
+    const F& f) {
+
   auto i_start_x = std::max(int64_t(0), -pad_left);
   auto i_start_y = std::max(int64_t(0), -pad_top);
   auto i_start_z = std::max(int64_t(0), -pad_front);
@@ -689,47 +688,77 @@ static void reflection_pad3d_out_frame(
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
-    for (int64_t k = start; k < end; k++) {
-      for (int64_t z = 0; z < output_d; z++) {
-        for (int64_t i = 0; i < output_h; i++) {
-          for (int64_t j = 0; j < output_w; j++) {
-            if (j < pad_left) {
-              ip_x = pad_left * 2 - j;
-            } else if (j >= pad_left && j < input_w + pad_left) {
-              ip_x = j;
+    for (int64_t plane = start; plane < end; plane++) {
+      for (int64_t op_z = 0; op_z < output_d; op_z++) {
+        for (int64_t op_y = 0; op_y < output_h; op_y++) {
+          for (int64_t op_x = 0; op_x < output_w; op_x++) {
+            if (op_x < pad_left) {
+              ip_x = pad_left * 2 - op_x;
+            } else if (op_x >= pad_left && op_x < input_w + pad_left) {
+              ip_x = op_x;
             } else {
-              ip_x = (input_w + pad_left - 1) * 2 - j;
+              ip_x = (input_w + pad_left - 1) * 2 - op_x;
             }
             ip_x = ip_x - o_start_x + i_start_x;
 
-            if (i < pad_top) {
-              ip_y = pad_top * 2 - i;
-            } else if (i >= pad_top && i < input_h + pad_top) {
-              ip_y = i;
+            if (op_y < pad_top) {
+              ip_y = pad_top * 2 - op_y;
+            } else if (op_y >= pad_top && op_y < input_h + pad_top) {
+              ip_y = op_y;
             } else {
-              ip_y = (input_h + pad_top - 1) * 2 - i;
+              ip_y = (input_h + pad_top - 1) * 2 - op_y;
             }
             ip_y = ip_y - o_start_y + i_start_y;
 
-            if (z < pad_front) {
-              ip_z = pad_front * 2 - z;
-            } else if (z >= pad_front && z < input_d + pad_front) {
-              ip_z = z;
+            if (op_z < pad_front) {
+              ip_z = pad_front * 2 - op_z;
+            } else if (op_z >= pad_front && op_z < input_d + pad_front) {
+              ip_z = op_z;
             } else {
-              ip_z = (input_d + pad_front - 1) * 2 - z;
+              ip_z = (input_d + pad_front - 1) * 2 - op_z;
             }
             ip_z = ip_z - o_start_z + i_start_z;
 
-            scalar_t *dest_p = output_p + k * output_w * output_h * output_d +
-              z * output_w * output_h + i * output_w + j;
-            scalar_t *src_p = input_p + k * input_w * input_h * input_d +
-              ip_z * input_w * input_h + ip_y * input_w + ip_x;
-            *dest_p = *src_p;
+            f(plane, op_z, op_y, op_x, ip_z, ip_y, ip_x);
           }
         }
       }
     }
   });
+}
+
+template <typename scalar_t>
+static void reflection_pad3d_out_frame(
+    scalar_t *input_p, scalar_t *output_p,
+    int64_t nplane,
+    int64_t input_w, int64_t input_h, int64_t input_d,
+    int64_t output_w, int64_t output_h, int64_t output_d,
+    int64_t pad_left, int64_t pad_top, int64_t pad_front)
+{
+  parallel_reflection_pad3d(
+      nplane,
+      input_w,
+      input_h,
+      input_d,
+      output_w,
+      output_h,
+      output_d,
+      pad_left,
+      pad_top,
+      pad_front,
+      [&](int64_t plane,
+          int64_t op_z,
+          int64_t op_y,
+          int64_t op_x,
+          int64_t ip_z,
+          int64_t ip_y,
+          int64_t ip_x) {
+        scalar_t* dest_p = output_p + plane * output_w * output_h * output_d +
+            op_z * output_w * output_h + op_y * output_w + op_x;
+        scalar_t* src_p = input_p + plane * input_w * input_h * input_d +
+            ip_z * input_w * input_h + ip_y * input_w + ip_x;
+        *dest_p = *src_p;
+      });
 }
 
 template <typename scalar_t>
@@ -741,12 +770,23 @@ static void reflection_pad3d_out_loop(
     int64_t pad_left, int64_t pad_top, int64_t pad_front)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (int64_t p = start; p < end; p++)
-    {
-      scalar_t *input_p_inner = input_p + p * nplane * input_w * input_h * input_d;
-      scalar_t *output_p_inner = output_p + p * nplane * output_w * output_h * output_d;
-      reflection_pad3d_out_frame(input_p_inner, output_p_inner, nplane, input_w, input_h, input_d, output_w, output_h, output_d, pad_left, pad_top, pad_front);
-     }
+    for (int64_t p = start; p < end; p++) {
+      scalar_t* input_p_inner = input_p + p * nplane * input_w * input_h * input_d;
+      scalar_t* output_p_inner = output_p + p * nplane * output_w * output_h * output_d;
+      reflection_pad3d_out_frame(
+          input_p_inner,
+          output_p_inner,
+          nplane,
+          input_w,
+          input_h,
+          input_d,
+          output_w,
+          output_h,
+          output_d,
+          pad_left,
+          pad_top,
+          pad_front);
+    }
   });
 }
 
@@ -758,57 +798,30 @@ static void reflection_pad3d_backward_out_frame(
     int64_t output_w, int64_t output_h, int64_t output_d,
     int64_t pad_left, int64_t pad_top, int64_t pad_front
 ) {
-  auto i_start_x = std::max(int64_t(0), -pad_left);
-  auto i_start_y = std::max(int64_t(0), -pad_top);
-  auto i_start_z = std::max(int64_t(0), -pad_front);
-  auto o_start_x = std::max(int64_t(0), pad_left);
-  auto o_start_y = std::max(int64_t(0), pad_top);
-  auto o_start_z = std::max(int64_t(0), pad_front);
-
-  at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t ip_x, ip_y, ip_z;
-    for (int64_t k = start; k < end; k++) {
-      for (int64_t z = 0; z < output_d; z++) {
-        for (int64_t i = 0; i < output_h; i++) {
-          for (int64_t j = 0; j < output_w; j++) {
-            if (j < pad_left) {
-              ip_x = pad_left * 2 - j;
-            } else if (j >= pad_left && j < input_w + pad_left) {
-              ip_x = j;
-            } else {
-              ip_x = (input_w + pad_left - 1) * 2 - j;
-            }
-            ip_x = ip_x - o_start_x + i_start_x;
-
-            if (i < pad_top) {
-              ip_y = pad_top * 2 - i;
-            } else if (i >= pad_top && i < input_h + pad_top) {
-              ip_y = i;
-            } else {
-              ip_y = (input_h + pad_top - 1) * 2 - i;
-            }
-            ip_y = ip_y - o_start_y + i_start_y;
-
-            if (z < pad_front) {
-              ip_z = pad_front * 2 - z;
-            } else if (z >= pad_front && z < input_d + pad_front) {
-              ip_z = z;
-            } else {
-              ip_z = (input_d + pad_front - 1) * 2 - z;
-            }
-            ip_z = ip_z - o_start_z + i_start_z;
-
-            scalar_t *src_p = grad_output + k * output_w * output_h * output_d +
-              z * output_w * output_h + i * output_w + j;
-            scalar_t *dest_p = grad_input + k * input_w * input_h * input_d +
-              ip_z * input_w * input_h + ip_y * input_w + ip_x;
-            *dest_p += *src_p;
-          }
-        }
-      }
-    }
-  });
+  parallel_reflection_pad3d(
+      nplane,
+      input_w,
+      input_h,
+      input_d,
+      output_w,
+      output_h,
+      output_d,
+      pad_left,
+      pad_top,
+      pad_front,
+      [&](int64_t plane,
+          int64_t op_z,
+          int64_t op_y,
+          int64_t op_x,
+          int64_t ip_z,
+          int64_t ip_y,
+          int64_t ip_x) {
+        scalar_t* src_p = grad_output + plane * output_w * output_h * output_d +
+            op_z * output_w * output_h + op_y * output_w + op_x;
+        scalar_t* dest_p = grad_input + plane * input_w * input_h * input_d +
+            ip_z * input_w * input_h + ip_y * input_w + ip_x;
+        *dest_p += *src_p;
+      });
 }
 
 template <typename scalar_t>
@@ -820,15 +833,23 @@ static void reflection_pad3d_backward_out_loop(
     int64_t pad_left, int64_t pad_top, int64_t pad_front
 ) {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (int64_t p = start; p < end; p++)
-    {
+    for (int64_t p = start; p < end; p++) {
       scalar_t* grad_input_inner = grad_input + p * nplane * input_w * input_h * input_d;
       scalar_t* grad_output_inner = grad_output + p * nplane * output_w * output_h * output_d;
-      reflection_pad3d_backward_out_frame(grad_input_inner, grad_output_inner,
-          nplane, input_w, input_h, input_d,
-          output_w, output_h, output_d,
-          pad_left, pad_top, pad_front);
-     }
+      reflection_pad3d_backward_out_frame(
+          grad_input_inner,
+          grad_output_inner,
+          nplane,
+          input_w,
+          input_h,
+          input_d,
+          output_w,
+          output_h,
+          output_d,
+          pad_left,
+          pad_top,
+          pad_front);
+    }
   });
 }
 
