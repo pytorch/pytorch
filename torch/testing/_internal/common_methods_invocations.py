@@ -250,7 +250,9 @@ class OpInfo(object):
             # This is because, below we set dtypesIfCUDA to dtypes if they are None.
             assert isinstance(dtypesIfCUDA, opinfo_helper._dynamic_dispatch_dtypes), \
                 (f"To use dynamic dypes for operator {name}, "
-                 "use the helper function for arguments `dtypesIfCUDA`")
+                 "acquire the dtypes dynamically for argument `dtypesIfCUDA`."
+                 "This is to ensure that CUDA dtypes are acquired correctly as they"
+                 "differ from CPU dtypes occasionally")
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
