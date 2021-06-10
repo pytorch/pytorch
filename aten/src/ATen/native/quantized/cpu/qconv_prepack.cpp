@@ -330,10 +330,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
         int64_t groups,
         bool transpose) {
   TORCH_CHECK(
-      transpose == false,
-      "Quantized::conv_prepack: "
-      "MKLDNN does not support qconv_transpose right now.");
-  TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ", kSpatialDim + 2, " dimensions");
   TORCH_CHECK(
@@ -352,6 +348,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
       dilation.size() == kSpatialDim,
       "dilation should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
+  TORCH_CHECK(
+      !transpose || std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; }),
+      "quantized::conv_prepack: MKLDNN only supports zero output_padding.");
 
   // Weight
   auto dims = weight.sizes().vec();
@@ -398,10 +397,20 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
   op_attr.set_zero_points(DNNL_ARG_SRC,
                           ideep::utils::tensor_zp_mask(src_zero_point.size()),
                           src_zero_point);
-  ideep::tensor::desc w_desc = ideep::convolution_forward::expected_weights_desc(dims, dnnl::memory::data_type::s8,
-                                                                                 strides, padding_l, padding_r, dilates, groups,
-                                                                                 dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-                                                                                 dnnl::memory::data_type::u8, ideep::dims(), op_attr);
+  ideep::tensor::desc w_desc;
+  if (transpose) {
+    w_desc = ideep::convolution_transpose_forward::expected_weights_desc(
+        dims, dnnl::memory::data_type::s8,
+        strides, padding_l, padding_r, dilates, groups,
+        dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
+        ideep::dims(), op_attr);
+  } else {
+    w_desc = ideep::convolution_forward::expected_weights_desc(
+        dims, dnnl::memory::data_type::s8,
+        strides, padding_l, padding_r, dilates, groups,
+        dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+        dnnl::memory::data_type::u8, ideep::dims(), op_attr);
+  }
   auto weight_copy = weight.clone();
   ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
   ideep::tensor exp_wgt;

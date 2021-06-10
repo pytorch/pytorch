@@ -811,10 +811,6 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());
-  TORCH_CHECK(
-      kSpatialDim == 2,
-      func_name, kSpatialDim,
-      "d (mkldnn): MKLDNN only supports Conv2d now.");
   TORCH_CHECK(act.scalar_type() == c10::ScalarType::QUInt8,
       func_name, " (MKLDNN): data type of input should be QUint8.");
 
@@ -832,8 +828,29 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
   auto kernel_size = weights.get_dims();
   // dst
   std::vector<int64_t> input_size = src.get_dims();
-  std::vector<int64_t> output_sizes =
-      at::native::conv_output_size(input_size, kernel_size, padding_.vec(), stride_.vec(), dilation_.vec());
+  std::vector<int64_t> output_sizes;
+  if (transpose()) {
+    const int N = act.size(0); // batch size
+    const int M = weights.get_dim(0); // output channels
+    const int D = kSpatialDim == 2 ? 1 : act.size(2); // input depth
+    const int H = act.size(kSpatialDim); // input height
+    const int W = act.size(kSpatialDim + 1); // input width
+    const int KH = weights.get_dim(kSpatialDim); // kernel height
+    const int KW = weights.get_dim(kSpatialDim + 1); // kernel width
+    const int KD = kSpatialDim == 2 ? 1 : weights.get_dim(2); // kernel depth
+    auto output_shape = MakeDeConvOutputShape<kSpatialDim>(
+        N,
+        M,
+        kSpatialDim == 2 ? std::vector<int64_t>{H, W} : std::vector<int64_t>{D, H, W},
+        kSpatialDim == 2 ? std::vector<int64_t>{KH, KW} : std::vector<int64_t>{KD, KH, KW},
+        stride(),
+        padding(),
+        output_padding(),
+        dilation());
+    output_sizes = c10::IntArrayRef(output_shape).vec();
+  } else {
+    output_sizes = at::native::conv_output_size(input_size, kernel_size, padding().vec(), stride().vec(), dilation().vec());
+  }
   ideep::dims dst_dims = ideep::dims({output_sizes.cbegin(), output_sizes.cend()});
   at::Tensor output = at::native::empty_affine_quantized( // Allocate output Tensor
       dst_dims,
@@ -843,15 +860,17 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
       c10::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
-      c10::MemoryFormat::ChannelsLast);
+      kSpatialDim == 2
+          ? c10::MemoryFormat::ChannelsLast
+          : c10::MemoryFormat::ChannelsLast3d);
   ideep::tensor dst({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
                     output.data_ptr());
   dst.set_zero_point(std::vector<int32_t>(1, output_zero_point));
   // Parameters
-  ideep::dims strides = stride_.vec();
-  ideep::dims dilates = dilation_.vec();
-  ideep::dims padding_l = padding_.vec();
-  ideep::dims padding_r = padding_.vec();
+  ideep::dims strides = stride().vec();
+  ideep::dims dilates = dilation().vec();
+  ideep::dims padding_l = padding().vec();
+  ideep::dims padding_r = padding().vec();
   const ideep::scale_t& src_scales = src.get_scale();
   const ideep::scale_t& weights_scales = weights.get_scale();
   const ideep::scale_t& dst_scales = ideep::scale_t(weights_scales.size(), 1.0/output_scale); // Scales of MKLDNN and PyTorch are reciprocal
@@ -859,17 +878,37 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
   op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL}); // runtime src zero point
   if (with_bias) {
     auto b = bias_.value();
-    ideep::convolution_forward::compute(src, weights, b, dst_dims, dst,
-                                        strides, dilates, padding_l, padding_r, groups_,
-                                        src_scales, weights_scales, dst_scales, op_attr,
-                                        dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-                                        ideep::u8s8, ideep::engine::cpu_engine());
+    if (transpose()) {
+      ideep::convolution_transpose_forward::compute(
+          src, weights, b, dst_dims, dst,
+          strides, padding_l, padding_r, dilates,
+          groups(), src_scales, weights_scales, dst_scales, op_attr,
+          dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
+          ideep::u8s8, ideep::engine::cpu_engine());
+    } else {
+      ideep::convolution_forward::compute(
+          src, weights, b, dst_dims, dst,
+          strides, dilates, padding_l, padding_r, groups(),
+          src_scales, weights_scales, dst_scales, op_attr,
+          dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+          ideep::u8s8, ideep::engine::cpu_engine());
+    }
   } else {
-    ideep::convolution_forward::compute(src, weights, dst_dims, dst,
-                                        strides, dilates, padding_l, padding_r, groups_,
-                                        src_scales, weights_scales, dst_scales, op_attr,
-                                        dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-                                        ideep::u8s8, ideep::engine::cpu_engine());
+    if (transpose()) {
+      ideep::convolution_transpose_forward::compute(
+          src, weights, dst_dims, dst,
+          strides, padding_l, padding_r, dilates,
+          groups(), src_scales, weights_scales, dst_scales, op_attr,
+          dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
+          ideep::u8s8, ideep::engine::cpu_engine());
+    } else {
+      ideep::convolution_forward::compute(
+          src, weights, dst_dims, dst,
+          strides, dilates, padding_l, padding_r, groups(),
+          src_scales, weights_scales, dst_scales, op_attr,
+          dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+          ideep::u8s8, ideep::engine::cpu_engine());
+    }
   }
 
   return output;
