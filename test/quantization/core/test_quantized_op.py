@@ -1842,11 +1842,12 @@ class TestQuantizedOps(TestCase):
     @given(keep=st.booleans())
     def test_quantized_mean_qnnpack(self, keep):
         with override_quantized_engine("qnnpack"):
-            in_dim = (3, 3, 3, 3)
+            # using even sizes to avoid pytorch_q8gavgpool_ukernel_up8xm__sse2() alignment problem under ASAN
+            in_dim = (6, 6, 6, 6)
             if keep:
-                out_dim = (3, 3, 1, 1)
+                out_dim = (6, 6, 1, 1)
             else:
-                out_dim = (3, 3)
+                out_dim = (6, 6)
             X = torch.ones(in_dim)
             Y = torch.ones(out_dim)
             XQ = torch.quantize_per_tensor(X, scale=0.2, zero_point=0, dtype=torch.quint8)
