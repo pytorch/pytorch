@@ -820,7 +820,13 @@ class TestFakeQuantizeOps(TestCase):
         self._test_learnable_backward_per_channel(
             X_base, 'cuda', scale_base, zero_point_base, axis)
 
-    def test_numerical_consistency(self):
+    def test_numerical_consistency_per_tensor(self):
+        self._test_numerical_consistency('per_tensor')
+
+    def test_numerical_consistency_per_channel(self):
+        self._test_numerical_consistency('per_channel')
+
+    def _test_numerical_consistency(self, test_type):
         r"""Comparing numerical consistency between quantize/dequantize op and the fake quantize op across devices and dtypes
         """
         torch.random.manual_seed(NP_RANDOM_SEED)
@@ -839,13 +845,19 @@ class TestFakeQuantizeOps(TestCase):
                 quant_min = torch.iinfo(torch_type).min
                 quant_max = torch.iinfo(torch_type).max
 
-                Y = torch.dequantize(torch.quantize_per_tensor(X.to('cpu').to(torch.float), scale, zero, torch_type)).to(device).to(float_type)
-                Y_prime = torch.fake_quantize_per_tensor_affine(X, scale, zero, quant_min, quant_max)
-                self.assertEqual(Y, Y_prime, "Difference found between dequant+quant_per_tensor and fake_quantize_per_tensor")
+                if test_type == "per_tensor":
+                    Y = torch.dequantize(torch.quantize_per_tensor(X.to('cpu').to(torch.float),
+                                                                   scale, zero, torch_type)).to(device).to(float_type)
+                    Y_prime = torch.fake_quantize_per_tensor_affine(X, scale, zero, quant_min, quant_max)
+                    self.assertEqual(
+                        Y, Y_prime, "Difference found between dequant+quant_per_tensor and fake_quantize_per_tensor")
 
-                Y = torch.dequantize(torch.quantize_per_channel(X.to('cpu').to(torch.float), scales.to('cpu'), zeros.to('cpu'), axis, torch_type)).to(device).to(float_type)
-                Y_prime = torch.fake_quantize_per_channel_affine(X, scales, zeros, axis, quant_min, quant_max)
-                self.assertEqual(Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
+                if test_type == "per_channel":
+                    Y = torch.dequantize(torch.quantize_per_channel(X.to('cpu').to(torch.float), scales.to(
+                        'cpu'), zeros.to('cpu'), axis, torch_type)).to(device).to(float_type)
+                    Y_prime = torch.fake_quantize_per_channel_affine(X, scales, zeros, axis, quant_min, quant_max)
+                    self.assertEqual(
+                        Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

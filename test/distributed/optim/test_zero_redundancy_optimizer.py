@@ -61,8 +61,11 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
             pass
 
     def dist_init(self, rank, world_size=-1):
-        store = dist.FileStore(self.file_name, self.world_size if world_size < 1 else world_size)
-        return dist.init_process_group(backend=BACKEND, store=store, rank=rank, world_size=self.world_size)
+        if (world_size < 1):
+            world_size = self.world_size
+        store = dist.FileStore(self.file_name, world_size)
+        return dist.init_process_group(backend=BACKEND, store=store, rank=rank, world_size=world_size)
+
 
 
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
@@ -210,10 +213,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @common_distributed.skip_if_rocm
     def test_step(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step()` interface"""
-        if self.rank > 1 or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
+
+        if self.rank >= self.world_size or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
             return
 
-        self.dist_init(self.rank, world_size=2)
+        self.dist_init(self.rank, world_size=self.world_size)
 
         context = suppress() if not torch.cuda.is_available() else torch.cuda.device(self.rank)
 
@@ -222,26 +226,39 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             m = torch.nn.Linear(1, 1)
             m.weight.data = torch.tensor([[1.0]])
             m.bias.data = torch.tensor([2.0])
+            m_zero = copy.deepcopy(m)
             m.to(self.device)
+            m_zero.to(self.device)
 
-            o = ZeroRedundancyOptimizer(m.parameters(), optimizer_class=SGD, lr=0.1)
+            lr = 0.1
+            o = SGD(m.parameters(), lr=lr)
+            o_zero = ZeroRedundancyOptimizer(m_zero.parameters(), optimizer_class=SGD, lr=lr)
+
             y = m(x)
             y.backward(x)
+            y_zero = m_zero(x)
+            y_zero.backward(x)
+
             for p in m.parameters():
                 dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
                 p.grad.data /= self.world_size
             o.step()
-            self.assertEqual(m.weight, torch.tensor([[0.75]], device=self.device))
-            self.assertEqual(m.bias, torch.tensor([1.85], device=self.device))
+            for p in m_zero.parameters():
+                dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
+                p.grad.data /= self.world_size
+            o_zero.step()
+
+            self.assertEqual(m.weight, m_zero.weight)
+            self.assertEqual(m.bias, m_zero.bias)
 
     @common_distributed.skip_if_rocm
     def test_step_with_closure(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step(closure)` interface"""
 
-        if self.rank > 1 or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
+        if self.rank >= self.world_size or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
             return
 
-        self.dist_init(self.rank, world_size=2)
+        self.dist_init(self.rank, world_size=self.world_size)
 
         context = suppress() if not torch.cuda.is_available() else torch.cuda.device(self.rank)
 

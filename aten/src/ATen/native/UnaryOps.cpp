@@ -28,7 +28,8 @@ namespace at {
 namespace meta {
 
 // Unary float operations always produce floating point
-// outputs, even if their inputs are integer
+// outputs for floating point and integral types
+// For complex inputs, the output type should be the same as input type.
 #define CREATE_UNARY_FLOAT_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
     build_unary_float_op(maybe_get_output(), self);   \
@@ -363,7 +364,8 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
+    // real is never affected by conjugate bit, safe to use physical version
+    auto real_tensor = at::_view_as_real_physical(self);
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
@@ -379,17 +381,44 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor& conj_out(const Tensor& self, Tensor& result) {
-  return unary_op_impl_out(result, self, conj_stub);
+Tensor& conj_physical_out(const Tensor& self, Tensor& result) {
+  return unary_op_impl_out(result, self, conj_physical_stub);
 }
 
-Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+Tensor _conj_physical(const Tensor& self) {
+  if (self.is_conj()) {
+    return self.conj().clone();
+  }
+  return unary_op_impl(self, at::conj_physical_out);
+}
+
+Tensor conj_physical(const Tensor& self) {
+  if (!self.is_complex()) return self;
+  return at::_conj_physical(self);
+}
+
+Tensor& conj_physical_(Tensor& self) {
+  if (!self.is_complex()) return self;
+  return unary_op_impl_out(self, self, conj_physical_stub);
+}
+
+Tensor resolve_conj(const Tensor& self) {
+  if (!self.is_conj()) { return self; }
+  // conjugation is handled in `copy_()` that clone ultimately calls into
+  return self.clone(self.suggest_memory_format());
+}
+
+Tensor _conj(const Tensor& self) {
+  Tensor self_ = self.alias();
+  self_._set_conj(!self.is_conj());
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
 
 Tensor conj(const Tensor& self) {
-  if (!self.is_complex()) {
-    return self;
-  }
-  return at::_conj(self);
+  // This might look like an infinite recursion but it's not.
+  // This actually calls into `conj()` defined in the Tensor class.
+  return self.conj();
 }
 
 // special_exp2, alias for exp2
@@ -411,6 +440,10 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
+
+// special_i0, alias for i0
+Tensor& special_i0_out(const Tensor& self, Tensor& result) { return at::i0_out(result, self); }
+Tensor special_i0(const Tensor& self) { return self.i0(); }
 
 namespace {
 
@@ -685,7 +718,7 @@ DEFINE_DISPATCH(abs_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 DEFINE_DISPATCH(angle_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(real_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(imag_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(conj_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(conj_physical_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(asinh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
