@@ -85,6 +85,69 @@ vec_sldw_aux(const vfloat32& vec_in0, const vfloat32& vec_in1) {
 
 #define vec_not(a) vec_nor(a, a)
 
+// Vectorized min/max which return a if any operand is nan
+template <class T>
+C10_ALWAYS_INLINE T vec_min_nan(const T& a, const T& b) {
+  return vec_min(a, b);
+}
+template <class T>
+C10_ALWAYS_INLINE T vec_max_nan(const T& a, const T& b) {
+  return vec_max(a, b);
+}
+
+// Specializations for float/double taken from Eigen
+template<>
+C10_ALWAYS_INLINE vfloat32 vec_min_nan<vfloat32>(const vfloat32& a, const vfloat32& b)
+{
+  // NOTE: about 10% slower than vec_min, but consistent with std::min and SSE regarding NaN
+  vfloat32 ret;
+  __asm__ ("xvcmpgesp %x0,%x1,%x2\n\txxsel %x0,%x1,%x2,%x0" : "=&wa" (ret) : "wa" (a), "wa" (b));
+  return ret;
+}
+// Specializations for float/double taken from Eigen
+template<>
+C10_ALWAYS_INLINE vfloat32 vec_max_nan<vfloat32>(const vfloat32& a, const vfloat32& b)
+{
+  // NOTE: about 10% slower than vec_max, but consistent with std::min and SSE regarding NaN
+  vfloat32 ret;
+   __asm__ ("xvcmpgtsp %x0,%x2,%x1\n\txxsel %x0,%x1,%x2,%x0" : "=&wa" (ret) : "wa" (a), "wa" (b));
+  return ret;
+}
+
+template<>
+C10_ALWAYS_INLINE vfloat64 vec_min_nan<vfloat64>(const vfloat64& a, const vfloat64& b)
+{
+  // NOTE: about 10% slower than vec_min, but consistent with std::min and SSE regarding NaN
+  vfloat64 ret;
+  __asm__ ("xvcmpgedp %x0,%x1,%x2\n\txxsel %x0,%x1,%x2,%x0" : "=&wa" (ret) : "wa" (a), "wa" (b));
+  return ret;
+}
+template<>
+C10_ALWAYS_INLINE vfloat64 vec_max_nan<vfloat64>(const vfloat64& a, const vfloat64& b)
+{
+  // NOTE: about 10% slower than vec_max, but consistent with std::max and SSE regarding NaN
+  vfloat64 ret;
+  __asm__ ("xvcmpgtdp %x0,%x2,%x1\n\txxsel %x0,%x1,%x2,%x0" : "=&wa" (ret) : "wa" (a), "wa" (b));
+  return ret;
+}
+
+// Vectorizes min/max function which returns nan if any side is nan
+#define C10_VSX_VEC_NAN_PROPAG(name, type, btype, func)       \
+  C10_ALWAYS_INLINE type name(const type& a, const type& b) { \
+    type tmp = func(a, b);                                    \
+    btype nan_a = vec_cmpne(a, a);                            \
+    btype nan_b = vec_cmpne(b, b);                            \
+    tmp = vec_sel(tmp, a, nan_a);                             \
+    return vec_sel(tmp, b, nan_b);                            \
+  }
+
+C10_VSX_VEC_NAN_PROPAG(vec_min_nan2, vfloat32, vbool32, vec_min)
+C10_VSX_VEC_NAN_PROPAG(vec_max_nan2, vfloat32, vbool32, vec_max)
+C10_VSX_VEC_NAN_PROPAG(vec_min_nan2, vfloat64, vbool64, vec_min)
+C10_VSX_VEC_NAN_PROPAG(vec_max_nan2, vfloat64, vbool64, vec_max)
+
+#undef C10_VSX_VEC_NAN_PROPAG
+
 #define DEFINE_MEMBER_UNARY_OP(op, op_type, func)     \
   Vectorized<op_type> C10_ALWAYS_INLINE op() const {      \
     return Vectorized<op_type>{func(_vec0), func(_vec1)}; \
@@ -130,27 +193,29 @@ vec_sldw_aux(const vfloat32& vec_in0, const vfloat32& vec_in1) {
     return Vectorized<op_type>{vec_and(ret0, v_one), vec_and(ret1, v_one)};      \
   }
 
-#define DEFINE_CLAMP_FUNCS(operand_type)                                \
-  template <>                                                           \
-  Vectorized<operand_type> C10_ALWAYS_INLINE clamp(                         \
-      const Vectorized<operand_type>& a,                                    \
-      const Vectorized<operand_type>& min,                                  \
-      const Vectorized<operand_type>& max) {                                \
-    return Vectorized<operand_type>{                                        \
-        vec_min(max.vec0(), vec_max(a.vec0(), min.vec0())),             \
-        vec_min(max.vec1(), vec_max(a.vec1(), min.vec1()))};            \
-  }                                                                     \
-  template <>                                                           \
-  Vectorized<operand_type> C10_ALWAYS_INLINE clamp_min(                     \
+#define DEFINE_CLAMP_FUNCS(operand_type)                                        \
+  template <>                                                                   \
+  Vectorized<operand_type> C10_ALWAYS_INLINE clamp(                             \
+      const Vectorized<operand_type>& a,                                        \
+      const Vectorized<operand_type>& min,                                      \
+      const Vectorized<operand_type>& max) {                                    \
+    return Vectorized<operand_type>{                                            \
+        vec_min_nan(vec_max_nan(a.vec0(), min.vec0()), max.vec0()),             \
+        vec_min_nan(vec_max_nan(a.vec1(), min.vec1()), max.vec1())};            \
+  }                                                                             \
+  template <>                                                                   \
+  Vectorized<operand_type> C10_ALWAYS_INLINE clamp_min(                         \
       const Vectorized<operand_type>& a, const Vectorized<operand_type>& min) { \
-    return Vectorized<operand_type>{                                        \
-        vec_max(a.vec0(), min.vec0()), vec_max(a.vec1(), min.vec1())};  \
-  }                                                                     \
-  template <>                                                           \
-  Vectorized<operand_type> C10_ALWAYS_INLINE clamp_max(                     \
+    return Vectorized<operand_type>{                                            \
+        vec_max_nan(a.vec0(), min.vec0()),                                      \
+        vec_max_nan(a.vec1(), min.vec1())};                                     \
+  }                                                                             \
+  template <>                                                                   \
+  Vectorized<operand_type> C10_ALWAYS_INLINE clamp_max(                         \
       const Vectorized<operand_type>& a, const Vectorized<operand_type>& max) { \
-    return Vectorized<operand_type>{                                        \
-        vec_min(a.vec0(), max.vec0()), vec_min(a.vec1(), max.vec1())};  \
+    return Vectorized<operand_type>{                                            \
+        vec_min_nan(a.vec0(), max.vec0()),                                      \
+        vec_min_nan(a.vec1(), max.vec1())};                                     \
   }
 
 #define DEFINE_REINTERPRET_CAST_FUNCS(                             \
