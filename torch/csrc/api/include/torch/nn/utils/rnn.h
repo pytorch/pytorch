@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -303,7 +304,7 @@ inline Tensor pad_sequence(
 ///     a `PackedSequence` object
 inline PackedSequence pack_sequence(ArrayRef<Tensor> sequences, bool enforce_sorted = true) {
   Tensor lengths = torch::empty({(int64_t)sequences.size()}, kInt64);
-  for (size_t i = 0; i < sequences.size(); i++) {
+  for (const auto i : c10::irange(sequences.size())) {
     lengths[i] = sequences[i].size(0);
   }
   return pack_padded_sequence(

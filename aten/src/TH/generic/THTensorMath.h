@@ -25,8 +25,6 @@ TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTen
 
 TH_API void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue);
 
-TH_API accreal THTensor_(std_var_all)(THTensor* self, int64_t correction, bool take_sqrt);
-
 #endif
 #endif
 #endif
