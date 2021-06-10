@@ -29,10 +29,12 @@
 #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
 #define __ubsan_ignore_signed_int_overflow__ \
   __attribute__((no_sanitize("signed-integer-overflow")))
+#define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
 #else
 #define __ubsan_ignore_float_divide_by_zero__
 #define __ubsan_ignore_undefined__
 #define __ubsan_ignore_signed_int_overflow__
+#define __ubsan_ignore_function__
 #endif
 
 // Detect address sanitizer as some stuff doesn't work with it
@@ -312,7 +314,8 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__ANDROID__) || defined(__APPLE__) || \
+    (defined(__HIP_PLATFORM_HCC__) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
