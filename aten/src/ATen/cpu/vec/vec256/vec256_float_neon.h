@@ -308,7 +308,7 @@ public:
     return Vectorized<float>(vabsq_f32(values.val[0]), vabsq_f32(values.val[1]));
   }
   Vectorized<float> angle() const {
-    return Vectorized<float>(0.f);
+    return map(at::native::angle_impl<float>);
   }
   Vectorized<float> real() const {
     return *this;
