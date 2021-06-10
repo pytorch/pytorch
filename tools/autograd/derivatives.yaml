@@ -821,8 +821,8 @@
   self: evenly_distribute_backward(grad, self, result)
 
 - name: maximum(Tensor self, Tensor other) -> Tensor
-  self: grad.clone().masked_fill_(self <= other, 0)
-  other: grad.clone().masked_fill_(self > other, 0)
+  self: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
+  other: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
@@ -867,8 +867,8 @@
   self: evenly_distribute_backward(grad, self, result)
 
 - name: minimum(Tensor self, Tensor other) -> Tensor
-  self: grad.clone().masked_fill_(self >= other, 0)
-  other: grad.clone().masked_fill_(self < other, 0)
+  self: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
+  other: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_((self <= other).logical_or_(other.isnan()).logical_not_(), 0)

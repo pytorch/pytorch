@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/DeadlockDetection.h>
+#include <c10/util/irange.h>
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -599,7 +600,7 @@ PyObject *THPVariable_get_names(PyObject *self, void *unused)
   if (!tuple) throw python_error();
 
   const auto dimnames = tensor.names();
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* str;
     if (dimnames[i].type() == at::NameType::WILDCARD) {

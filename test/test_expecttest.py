@@ -48,7 +48,7 @@ class TestExpectTest(TestCase):
         self.assertEqual(ns['r2'], expecttest.normalize_nl(t), msg=msg)  # noqa: F821
         self.assertEqual(ns['r3'], 'placeholder3', msg=msg)  # noqa: F821
 
-    def test_sample(self):
+    def test_sample_lineno_at_end(self):
         prog = r"""
 single_single('''0''')
 single_multi('''1''')
