@@ -4744,15 +4744,13 @@ TEST(LoopNest, VectorizeUse) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* int64Loop = R"IR(
-{
-  for (int64_t n = 0; n < 12; n++) {
-    b[n] = (a[n]) + 1;
-  }
-}
+# CHECK: for (int64_t n = 0; n < 12; n++) {
+# CHECK:   b[n] = (a[n]) + 1;
+# CHECK: }
 )IR";
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LoopNest, DISABLED_Int64Direct) {
+TEST(LoopNest, Int64Direct) {
   KernelScope kernel_scope;
 
   constexpr int64_t N = 12;
@@ -4763,11 +4761,11 @@ TEST(LoopNest, DISABLED_Int64Direct) {
   s = IRSimplifier::simplify(s);
   std::ostringstream oss;
   oss << *s;
-  ASSERT_EQ(oss.str(), int64Loop);
+  torch::jit::testing::FileCheck().run(int64Loop, oss.str());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LoopNest, DISABLED_Int64Compute) {
+TEST(LoopNest, Int64Compute) {
   KernelScope kernel_scope;
 
   constexpr int64_t N = 12;
@@ -4780,7 +4778,7 @@ TEST(LoopNest, DISABLED_Int64Compute) {
   nest.simplify();
   std::ostringstream oss;
   oss << *nest.root_stmt();
-  ASSERT_EQ(oss.str(), int64Loop);
+  torch::jit::testing::FileCheck().run(int64Loop, oss.str());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
