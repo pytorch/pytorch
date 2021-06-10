@@ -60,6 +60,8 @@ Creating TorchScript Code
     ScriptModule
     ScriptFunction
     freeze
+    optimize_for_inference
+    run_frozen_optimizations
     save
     load
     ignore
