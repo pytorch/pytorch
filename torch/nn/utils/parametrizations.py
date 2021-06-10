@@ -30,10 +30,10 @@ class _SpectralNorm(Module):
             weight_mat = self._reshape_weight_to_matrix(weight)
             h, w = weight_mat.size()
 
-            self.register_buffer('u',
-                F.normalize(weight_mat.new_empty(h).normal_(0, 1), dim=0, eps=self.eps))
-            self.register_buffer('v',
-                F.normalize(weight_mat.new_empty(w).normal_(0, 1), dim=0, eps=self.eps))
+            u = weight_mat.new_empty(h).normal_(0, 1)
+            v = weight_mat.new_empty(w).normal_(0, 1)
+            self.register_buffer('u', F.normalize(u, dim=0, eps=self.eps))
+            self.register_buffer('v', F.normalize(v, dim=0, eps=self.eps))
 
             # Start with u, v initialized to some reasonable values by performing a number
             # of iterations of the power method
