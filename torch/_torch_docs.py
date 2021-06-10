@@ -3894,7 +3894,7 @@ Example::
 
 add_docstr(torch.histogram,
            r"""
-histogram(input, bins, *, range=[], min=None, max=None, weight=None, density=False, out=None) -> (Tensor, Tensor)
+histogram(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor)
 
 Computes the histogram of the values in a tensor.
 

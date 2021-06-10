@@ -20,20 +20,39 @@ constexpr int64_t HISTOGRAM_GRAIN_SIZE = 200;
  * Accepts a template argument of type BIN_SELECTION_ALGORITHM specifying how the
  * elements of input should be mapped into the bins:
  *
- *     - LINEAR_INTERPOLATION: bin_edges must contain a linear progression. Elements of input
- *       are mapped to bins by computing (elt - leftmost_edge)/(rightmost_edge - leftmost_edge)
- *       and truncating the result to an integer. Results may not be perfectly consistent with the
- *       boundaries specified in bin_edges due to precision issues (or if bin_edges doesn't
- *       actually contain a linear progression).
+ *     - LINEAR_INTERPOLATION: bin_edges must contain a linear progression.
+ *       Elements of input are mapped to bins by computing
+ *           (element - leftmost_edge)/(rightmost_edge - leftmost_edge) * bin_ct
+ *       and truncating the result to an integer.
+ *
+ *       Results may not be perfectly consistent with the boundaries specified in bin_edges
+ *       due to precision issues.
+ *
+ *       Used by torch.histc, which doesn't need consistency with bin_edges as it does not
+ *       return bin_edges. Additionally, this implementation is identical to the legacy histc
+ *       implementation, which was replaced when histogram was implemented.
  *
  *     - LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH: Also expects that bin_edges contains a
  *       linear progression. For each element, if 'pos' is the bin selected by the
  *       LINEAR_INTERPOLATION approach, this approach inspects the boundaries in bin_edges to
  *       place the element into pos - 1, pos, or pos + 1. The "local search" over neighboring
- *       bins allows for correction of misclassifications due to precision issues.
+ *       bins allows for correction of misclassifications due to precision issues (an element
+ *       very close to a bin_edge may be misclassified by LINEAR_INTERPOLATION).
  *
- *     - BINARY_SEARCH: Handles the general case by searching over the elements of bin_edges.
- *       Implemented using std::upper_bound.
+ *       Should produce the same output as the general case BINARY_SEARCH, but run about
+ *       3x faster asymptotically.
+ *
+ *       Used by torch.histogram for cases in which bin_edges is constructed using
+ *       torch.linspace. The behavior of LINEAR_INTERPOLATION may not perfectly align
+ *       with linspace bin_edges due to precision issues. torch.histogram returns both
+ *       the hist and bin_edges tensors as output, so the "local search" is needed to
+ *       keep its output internally consistent.
+ *
+ *     - BINARY_SEARCH: Handles torch.histogram's general case by by searching over the
+ *       elements of bin_edges. Implemented using std::upper_bound.
+ *
+ * See discussion at https://github.com/pytorch/pytorch/pull/58780#discussion_r648604866
+ * for further details on relative performance of the bin selection algorithms.
  *
  * Accumulates the total weight in each bin into the hist tensor.
  */
@@ -161,17 +180,30 @@ void histogram_out_cpu_template(const Tensor& self, const c10::optional<Tensor>&
     }
 }
 
+/* The general implementation of the histogram kernel. Maps each element of the input tensor
+ * to its corresponding bin by performing a binary search over the elements of bin_edges.
+ *
+ * Refer to histogram_out_cpu_template for more details.
+ */
 static void histogram_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, const Tensor& bin_edges) {
     histogram_out_cpu_template<BINARY_SEARCH>(self, weight, density, hist, bin_edges);
 }
 
+/* A faster version of the histogram kernel for cases in which bin_edges are known
+ * to form a linear progression.
+ *
+ * Refer to histogram_out_cpu_template for more details.
+ */
 static void histogram_linear_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight,
         bool density, Tensor& hist, const Tensor& bin_edges, bool local_search) {
     if (local_search) {
+        // histogram codepath: both hist and bin_edges are eventually returned as output,
+        // so we'll keep them consistent
         histogram_out_cpu_template<LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH>(
               self, weight, density, hist, bin_edges);
     } else {
+        // histc codepath: bin_edges are not returned to the caller
         histogram_out_cpu_template<LINEAR_INTERPOLATION>(
               self, weight, density, hist, bin_edges);
     }
