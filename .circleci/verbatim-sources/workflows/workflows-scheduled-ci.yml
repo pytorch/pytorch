@@ -116,7 +116,7 @@
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11.3"
-          name: pytorch_windows_vs2019_py36_cuda11.3_build
+          name: pytorch_windows_vs2019_py38_cuda11.3_build
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
@@ -131,10 +131,10 @@
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11.3"
           executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py36_cuda11.3_test1
+          name: pytorch_windows_vs2019_py38_cuda11.3_test1
           python_version: "3.8"
           requires:
-            - pytorch_windows_vs2019_py36_cuda11.3_build
+            - pytorch_windows_vs2019_py38_cuda11.3_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: BuildTools
@@ -149,10 +149,10 @@
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11.3"
           executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py36_cuda11.3_test2
+          name: pytorch_windows_vs2019_py38_cuda11.3_test2
           python_version: "3.8"
           requires:
-            - pytorch_windows_vs2019_py36_cuda11.3_build
+            - pytorch_windows_vs2019_py38_cuda11.3_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: BuildTools
