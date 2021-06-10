@@ -914,7 +914,7 @@ def _real_and_imag_input(fn, complex_inp_indices):
 
 
 def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,
-                         atol, check_grad_dtypes, check_forward_ad, nondet_tol):
+                         atol, check_grad_dtypes, check_forward_ad, nondet_tol, scale_atol):
     complex_out_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
     has_any_complex_output = any(o.is_complex() for o in _as_tuple(func_out))
     if has_any_complex_output:
@@ -923,16 +923,17 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
         imag_func_out = imag_fn(*tupled_inputs)
         imag_outputs = _differentiable_outputs(imag_func_out)
         gradcheck_fn(imag_fn, imag_func_out, tupled_inputs, imag_outputs, eps,
-                     rtol, atol, check_grad_dtypes, nondet_tol,
+                     rtol, atol, check_grad_dtypes, nondet_tol, scale_atol,
                      complex_indices=complex_out_indices, test_imag=True)
 
         real_func_out = real_fn(*tupled_inputs)
         real_outputs = _differentiable_outputs(real_func_out)
         gradcheck_fn(real_fn, real_func_out, tupled_inputs, real_outputs, eps,
-                     rtol, atol, check_grad_dtypes, nondet_tol, complex_indices=complex_out_indices)
+                     rtol, atol, check_grad_dtypes, nondet_tol, scale_atol,
+                     complex_indices=complex_out_indices)
     else:
         gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
-                     rtol, atol, check_grad_dtypes, nondet_tol)
+                     rtol, atol, check_grad_dtypes, nondet_tol, scale_atol)
 
     if check_forward_ad:
         complex_inp_indices = [i for i, inp in enumerate(tupled_inputs) if is_tensor_like(inp) and inp.is_complex()]
@@ -943,22 +944,22 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
             imag_func_out = imag_fn(*imag_inputs)
             diff_imag_func_out = _differentiable_outputs(imag_func_out)
             gradcheck_fn(imag_fn, imag_func_out, imag_inputs, diff_imag_func_out, eps,
-                         rtol, atol, check_grad_dtypes, nondet_tol,
+                         rtol, atol, check_grad_dtypes, nondet_tol, scale_atol,
                          complex_indices=complex_inp_indices, test_imag=True, use_forward_ad=True)
 
             real_inputs = [inp.real if is_tensor_like(inp) and inp.is_complex() else inp for inp in tupled_inputs]
             real_func_out = real_fn(*real_inputs)
             diff_real_func_out = _differentiable_outputs(real_func_out)
             gradcheck_fn(real_fn, real_func_out, real_inputs, diff_real_func_out, eps,
-                         rtol, atol, check_grad_dtypes, nondet_tol, complex_indices=complex_inp_indices,
-                         use_forward_ad=True)
+                         rtol, atol, check_grad_dtypes, nondet_tol, scale_atol,
+                         complex_indices=complex_inp_indices, use_forward_ad=True)
         else:
             gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
-                         rtol, atol, check_grad_dtypes, nondet_tol, use_forward_ad=True)
+                         rtol, atol, check_grad_dtypes, nondet_tol,  scale_atol, use_forward_ad=True)
 
 
 def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, check_grad_dtypes,
-                    nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
+                    nondet_tol, scale_atol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
     if not outputs:
         return _check_no_differentiable_outputs(func, tupled_inputs, _as_tuple(func_out), eps)
 
@@ -1042,7 +1043,8 @@ def _adjusted_atol(atol, u, v):
     u = u[0] if isinstance(u, tuple) else u
     sum_u = torch.sparse.sum(u) if u.layout == torch.sparse_coo else u.sum()
     sum_v = 1. if v is None else torch.sparse.sum(v) if v.layout == torch.sparse_coo else v.sum()
-    return atol # * float(sum_u) * float(sum_v)
+    # Empirically due to numerical inprecision, we need a small eps here
+    return atol * float(sum_u) * float(sum_v) + 1e-8
 
 
 FAST_FAIL_SLOW_OK_MSG = """
@@ -1062,9 +1064,10 @@ If the test
 """.strip()
 
 
-def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, is_forward_ad):
+def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output_idx, eps, rtol, atol, is_forward_ad):
     # Compute jacobians in slow mode for better error message
-    slow_numerical = _get_numerical_jacobian(func, tupled_inputs, outputs, is_forward_ad=is_forward_ad)[input_idx][output_idx]
+    outputs = _differentiable_outputs(func(*tupled_inputs))
+    slow_numerical = _get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, is_forward_ad=is_forward_ad)[input_idx][output_idx]
     if is_forward_ad:
         def new_fn(inp):
             new_inputs = list(tupled_inputs)
@@ -1119,7 +1122,7 @@ def _make_vectors(inp_tensors, outputs, *, use_forward_ad):
 
 
 def _check_analytical_numerical_equal(all_analytical, all_numerical, complex_indices, tupled_inputs, outputs,
-                                      func, all_v, all_u, rtol, atol, test_imag, *, is_forward_ad=False):
+                                      func, all_v, all_u, eps, rtol, atol, test_imag, scale_atol, *, is_forward_ad=False):
     for i, all_numerical_for_input_i in enumerate(all_numerical):
         for j, n in enumerate(all_numerical_for_input_i):
             # Forward AD generates the transpose of what this function expects
@@ -1128,14 +1131,15 @@ def _check_analytical_numerical_equal(all_analytical, all_numerical, complex_ind
             else:
                 a = all_analytical[j][i]
             n = n.to(device=a.device)
-            updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
+            updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None) if scale_atol else atol
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
-                jacobians_str = _run_slow_mode_and_get_error(func, tupled_inputs, outputs, i, j, rtol, atol, is_forward_ad)
+                jacobians_str = _run_slow_mode_and_get_error(func, tupled_inputs, outputs, i, j, eps, rtol, atol, is_forward_ad)
                 raise GradcheckError(_get_notallclose_msg(a, n, j, i, complex_indices, test_imag, is_forward_ad) + jacobians_str)
 
 
 def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
-                    atol, check_grad_dtypes, nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
+                    atol, check_grad_dtypes, nondet_tol, scale_atol, *, use_forward_ad=False,
+                    complex_indices=None, test_imag=False):
     # See https://github.com/pytorch/pytorch/issues/53876 for details
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
@@ -1152,7 +1156,8 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
         analytical_vJu = _get_analytical_vJu_backward_mode(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, all_u_dense)
 
     _check_analytical_numerical_equal(analytical_vJu, numerical_vJu, complex_indices,
-                                      inputs, outputs, func, all_v, all_u, rtol, atol, test_imag, is_forward_ad=use_forward_ad)
+                                      inputs, outputs, func, all_v, all_u, eps, rtol, atol, test_imag, scale_atol,
+                                      is_forward_ad=use_forward_ad)
 
     return True
 
@@ -1179,6 +1184,7 @@ def gradcheck(
     check_batched_grad: bool = False,
     check_forward_ad: bool = False,
     fast_mode: bool = False,
+    fast_mode_scale_atol: bool = False,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -1229,10 +1235,15 @@ def gradcheck(
             batched gradients using prototype vmap support. Defaults to False.
         check_forward_ad (bool, optional): if True, check that the gradients computed with forward
             mode AD match the numerical ones. Defaults to False.
-        fast_mode (bool, optional): Fast mode for gradcheck and gradgradcheck is currently only
-            implemented for R to R functions. If none of the inputs and outputs are complex
-            a faster implementation of gradcheck that no longer computes the entire jacobian
-            is run; otherwise, we fall back to the slow implementation.
+        fast_mode (bool, optional): If True, run a faster implementation of gradcheck that no
+            longer computes the entire Jacobian. For more information on the implementation
+            of fast_mode, see :ref:`gradcheck-mechanics`.
+        fast_mode_scale_atol (bool, optional): Scale :attr:`atol` by
+            :math:`\sum_{i} \sum_{j} u_i * v_j` where :math:`u` and :math:`v` are the random unit
+            vectors used to compute the scalar :math:`v^T J u`.
+            This scale accounts for the fact that slow gradcheck computes element-wise differences
+            but fast gradcheck computes a single scalar. We do not scale by default
+            because most Jacobian matrices are sparse.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -1250,7 +1261,8 @@ def gradcheck(
 
 
 def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_tol, check_undefined_grad,
-                      check_grad_dtypes, check_batched_grad, check_forward_ad, fast_mode):
+                      check_grad_dtypes, check_batched_grad, check_forward_ad, fast_mode,
+                      fast_mode_scale_atol):
     tupled_inputs = _as_tuple(inputs)
     _check_inputs(tupled_inputs, check_sparse_nnz)
 
@@ -1260,7 +1272,8 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
 
     gradcheck_fn = _fast_gradcheck if fast_mode else _slow_gradcheck
     _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps,
-                         rtol, atol, check_grad_dtypes, check_forward_ad=check_forward_ad, nondet_tol=nondet_tol)
+                         rtol, atol, check_grad_dtypes, check_forward_ad=check_forward_ad, nondet_tol=nondet_tol,
+                         scale_atol=fast_mode_scale_atol)
 
     for i, o in enumerate(outputs):
         if check_batched_grad:
@@ -1287,6 +1300,7 @@ def gradgradcheck(
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
     fast_mode: bool = False,
+    fast_mode_scale_atol: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -1336,7 +1350,14 @@ def gradgradcheck(
         check_batched_grad (bool, optional): if True, check if we can compute
             batched gradients using prototype vmap support. Defaults to False.
         fast_mode (bool, optional): if True, run a faster implementation of gradgradcheck that
-            no longer computes the entire jacobian.
+            no longer computes the entire jacobian. For more information on the implementation
+            of fast_mode, see :ref:`gradcheck-mechanics`.
+        fast_mode_scale_atol (bool, optional): Scale :attr:`atol` by
+            :math:`\sum_{i} \sum_{j} u_i * v_j` where :math:`u` and :math:`v` are random unit
+            vectors used to compute the final scalar for comparison in fast gradcheck.
+            This scale accounts for the fact that slow gradcheck computes element-wise differences
+            but fast gradcheck computes a single scalar. We do not scale by default
+            because most Jacobian matrices are sparse.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -1372,4 +1393,5 @@ def gradgradcheck(
     return gradcheck(
         new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
         nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
-        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad, fast_mode=fast_mode)
+        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad,
+        fast_mode=fast_mode, fast_mode_scale_atol=fast_mode_scale_atol)

@@ -4096,6 +4096,24 @@ class TestAutograd(TestCase):
         check(fast_mode=True)
         check(fast_mode=False)
 
+    def test_gradcheck_fast_mode_scales_atol(self):
+        def fn(x):  # R -> R, C -> C
+            # We can use any op with dense Jacobian
+            y = x.sum()
+            y.register_hook(lambda x: x * 1.001)
+            return y
+        x = torch.ones(4, 4, requires_grad=True, dtype=torch.double)
+
+        # Passes with slow mode
+        gradcheck(fn, (x,), fast_mode=False, atol=1e-3, rtol=0, check_undefined_grad=False)
+
+        # Fails with fast mode
+        with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
+            gradcheck(fn, (x,), fast_mode=True, atol=1e-3, rtol=0, check_undefined_grad=False)
+
+        # Passes with fast mode if scale atol
+        gradcheck(fn, (x,), fast_mode=True, atol=1e-3, rtol=0, check_undefined_grad=False, fast_mode_scale_atol=True)
+
     def test_gradcheck_dense_and_sparse_inputs(self):
         def check(fast_mode):
             def fn(x, y):
