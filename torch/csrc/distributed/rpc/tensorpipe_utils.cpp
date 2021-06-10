@@ -3,6 +3,8 @@
 
 #ifdef USE_TENSORPIPE
 
+#include <c10/util/irange.h>
+
 #include <tensorpipe/tensorpipe.h>
 
 namespace torch {
@@ -177,7 +179,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       buffers.pickle.data(), buffers.pickle.size()});
   const std::vector<torch::Tensor>& tensorDataVec = pickler.tensorData();
   tpMessage.tensors.reserve(tensorDataVec.size());
-  for (size_t i = 0; i < tensorDataVec.size(); ++i) {
+  for (const auto i : c10::irange(tensorDataVec.size())) {
     const torch::Tensor& tensor = tensorDataVec[i];
 
     const TensorpipeDeviceTypeConverter* converter =
@@ -248,7 +250,7 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 
   size_t numTensors = tpDescriptor.tensors.size();
   tpAllocation.tensors.reserve(numTensors);
-  for (size_t tensorIdx = 0; tensorIdx < numTensors; ++tensorIdx) {
+  for (const auto tensorIdx : c10::irange(numTensors)) {
     const tensorpipe::Descriptor::Tensor& tensor =
         tpDescriptor.tensors[tensorIdx];
     TORCH_INTERNAL_ASSERT(tensor.targetDevice.has_value());
@@ -310,7 +312,7 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
-  for (size_t i = 0; i < tpDescriptor.tensors.size(); ++i) {
+  for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
     auto& tensor = tpDescriptor.tensors[i];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
