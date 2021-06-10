@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 
+#include <ATen/core/ivalue.h>
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
@@ -18,7 +19,7 @@ namespace jit {
  * support heteogeneous lookup, and also shared_ptr is an implementation detail
  * which should be encapsulated.
  */
-class TORCH_API SourceRef {
+class TORCH_API SourceRef : public CustomClassHolder {
  public:
   explicit SourceRef(std::shared_ptr<Source> source)
       : source_(std::move(source)) {}
@@ -33,6 +34,9 @@ class TORCH_API SourceRef {
   }
   bool operator<(const SourceRef& other) const {
     return *this < *other.source_.get();
+  }
+  const Source* operator->() const {
+    return source_.get();
   }
 
  private:

@@ -1,10 +1,13 @@
-from unittest import skipIf
 from io import BytesIO
-from tempfile import TemporaryDirectory
+from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    run_tests,
+    IS_FBCODE,
+    IS_SANDCASTLE,
+)
 
 try:
     from torchvision.models import resnet18
@@ -67,42 +70,6 @@ class PackageScriptModuleTest(PackageTestCase):
         loaded_mod = importer.load_pickle("res", "mod.pkl")
         input = torch.rand(1, 2, 3)
         self.assertEqual(loaded_mod(input), scripted_mod(input))
-
-    @skipIf(
-        IS_FBCODE or IS_SANDCASTLE or IS_WINDOWS,
-        "Tests that use temporary files are disabled in fbcode",
-    )
-    def test_save_scriptmodule_directory(self):
-        """
-        Test basic saving and loading of a ScriptModule in a directory.
-        Currently not supported.
-        """
-        from package_a.test_module import ModWithTensor
-
-        scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
-
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as e:
-            e.save_pickle("res", "mod.pkl", scripted_mod)
-
-        # test we can load from a directory
-        import zipfile
-
-        zip_file = zipfile.ZipFile(filename, "r")
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Loading ScriptObjects from a PackageImporter created from a "
-            "directory is not supported. Use a package archive file instead.",
-        ):
-            with TemporaryDirectory() as temp_dir:
-                zip_file.extractall(path=temp_dir)
-                dir_importer = PackageImporter(
-                    str(Path(temp_dir) / Path(filename).name)
-                )
-                dir_mod = dir_importer.load_pickle("res", "mod.pkl")
-                input = torch.rand(1, 2, 3)
-                self.assertEqual(dir_mod(input), scripted_mod(input))
 
     def test_save_scriptmodule_with_submods(self):
         """

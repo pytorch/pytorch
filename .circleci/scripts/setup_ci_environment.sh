@@ -50,43 +50,50 @@ else
 fi
 
 add_to_env_file() {
-  local content
-  content=$1
-  # BASH_ENV should be set by CircleCI
-  echo "${content}" >> "${BASH_ENV:-/tmp/env}"
+  local name=$1
+  local value=$2
+  case "$value" in
+    *\ *)
+      # BASH_ENV should be set by CircleCI
+      echo "${name}='${value}'" >> "${BASH_ENV:-/tmp/env}"
+      ;;
+    *)
+      echo "${name}=${value}" >> "${BASH_ENV:-/tmp/env}"
+      ;;
+  esac
 }
 
-add_to_env_file "IN_CI=1"
-add_to_env_file "COMMIT_SOURCE='${CIRCLE_BRANCH:-}'"
-add_to_env_file "BUILD_ENVIRONMENT='${BUILD_ENVIRONMENT}'"
-add_to_env_file "CIRCLE_PULL_REQUEST='${CIRCLE_PULL_REQUEST}'"
+add_to_env_file IN_CI 1
+add_to_env_file COMMIT_SOURCE "${CIRCLE_BRANCH:-}"
+add_to_env_file BUILD_ENVIRONMENT "${BUILD_ENVIRONMENT}"
+add_to_env_file CIRCLE_PULL_REQUEST "${CIRCLE_PULL_REQUEST}"
 
 
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
-  add_to_env_file "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2"
+  add_to_env_file SCCACHE_BUCKET ossci-compiler-cache-circleci-v2
 
   SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
   MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
   MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-  add_to_env_file "MAX_JOBS=${MAX_JOBS}"
+  add_to_env_file MAX_JOBS "${MAX_JOBS}"
 
   if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-    add_to_env_file "TORCH_CUDA_ARCH_LIST=5.2"
+    add_to_env_file TORCH_CUDA_ARCH_LIST 5.2
   fi
 
   if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     # This IAM user allows write access to S3 bucket for sccache & bazels3cache
     set +x
-    add_to_env_file "XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
-    add_to_env_file "AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
-    add_to_env_file "AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
+    add_to_env_file XLA_CLANG_CACHE_S3_BUCKET_NAME "${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
+    add_to_env_file AWS_ACCESS_KEY_ID "${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
+    add_to_env_file AWS_SECRET_ACCESS_KEY "${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}"
     set -x
   else
     # This IAM user allows write access to S3 bucket for sccache
     set +x
-    add_to_env_file "XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
-    add_to_env_file "AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
-    add_to_env_file "AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
+    add_to_env_file XLA_CLANG_CACHE_S3_BUCKET_NAME "${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}"
+    add_to_env_file AWS_ACCESS_KEY_ID "${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
+    add_to_env_file AWS_SECRET_ACCESS_KEY "${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}"
     set -x
   fi
 fi
