@@ -70,7 +70,7 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 //   work->wait()
 //
 //   // Now continue on other work in the current stream.
-class TORCH_API ProcessGroupNCCL : public ProcessGroup {
+class ProcessGroupNCCL : public ProcessGroup {
  public:
   class WorkNCCL : public ProcessGroup::Work,
     public std::enable_shared_from_this<WorkNCCL> {
