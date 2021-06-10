@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import \
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
+from torch.distributions.binomial import Binomial
 
 # Protects against includes accidentally setting the default dtype
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
@@ -4477,8 +4478,9 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
             torch.linalg.qr(t2, mode='hello')
 
-    def _check_einsum(self, *args):
-        np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
+    def _check_einsum(self, *args, np_args=None):
+        if np_args is None:
+            np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
         res = torch.einsum(*args)
         ref = np.einsum(*np_args)
         self.assertEqual(torch.from_numpy(np.array(ref)), res)
@@ -4595,10 +4597,10 @@ class TestLinalg(TestCase):
                  ellipsis_prob=0.5,          # probability of including ellipsis in operand
                  broadcasting_prob=0.1):     # probability of turning some dim sizes 1 for broadcasting
 
-            MAX_LABELS = 52
+            all_labels = torch.arange(52)
 
             assert 0 <= n
-            assert 0 <= n_labels < MAX_LABELS
+            assert 0 <= n_labels < len(all_labels)
             assert 0 < min_ops <= max_ops
             assert 0 <= min_dims <= max_dims
             assert 0 <= min_size <= max_size
@@ -4608,9 +4610,9 @@ class TestLinalg(TestCase):
             for _ in range(n):
 
                 # Select a subset of labels for this test and give them random sizes
-                POSSIBLE_LABELS = np.random.choice(range(MAX_LABELS), n_labels, replace=False)
-                LABELS_SIZE = np.random.randint(min_size, max_size + 1, MAX_LABELS)
-                ELLIPSIS_SHAPE = np.random.randint(min_size, max_size + 1, max_dims - min_dims)
+                possible_labels = all_labels[torch.randperm(len(all_labels))[:n_labels]]
+                labels_size = torch.randint_like(all_labels, min_size, max_size + 1)
+                ellipsis_shape = torch.randint(min_size, max_size + 1, (max_dims - min_dims,))
 
                 operands = []
                 sublists = []
@@ -4621,25 +4623,26 @@ class TestLinalg(TestCase):
                 # create random input operands
                 for _ in range(random.randint(min_ops, max_ops)):
                     n_dim = random.randint(min_dims, max_dims)
-                    labels = np.random.choice(POSSIBLE_LABELS, n_dim, replace=enable_diagonals)
-                    valid_labels.update(labels)
-                    shape = LABELS_SIZE[labels]
+                    labels_idx = torch.ones(len(possible_labels)).multinomial(n_dim, enable_diagonals)
+                    labels = possible_labels[labels_idx]
+                    valid_labels.update(labels.tolist())
+                    shape = labels_size[labels]
 
                     # turn some dimensions to size 1 for testing broadcasting
-                    mask = np.random.binomial(1, broadcasting_prob, n_dim)
-                    broadcast_labels = np.unique(labels[mask == 1])
-                    shape[np.isin(labels, broadcast_labels)] = 1
+                    mask = Binomial(probs=broadcasting_prob).sample((n_dim,))
+                    broadcast_labels = torch.unique(labels[mask == 1])
+                    shape[(labels[..., None] == broadcast_labels).any(-1)] = 1
 
-                    labels = list(labels)
-                    shape = list(shape)
+                    labels = labels.tolist()
+                    shape = shape.tolist()
 
                     # include ellipsis if not all dimensions were assigned a label already
-                    if n_dim < max_dims and np.random.random() < ellipsis_prob:
+                    if n_dim < max_dims and torch.rand(1) < ellipsis_prob:
                         ell_num_dim = random.randint(1, max_dims - n_dim)
                         ell_size = max(ell_size, ell_num_dim)
-                        ell_shape = ELLIPSIS_SHAPE[-ell_num_dim:]
+                        ell_shape = ellipsis_shape[-ell_num_dim:]
                         # again, turn some dimensions to size 1 for broadcasting
-                        mask = np.random.binomial(1, broadcasting_prob, ell_num_dim)
+                        mask = Binomial(probs=broadcasting_prob).sample((ell_num_dim,))
                         ell_shape[mask == 1] = 1
                         ell_index = random.randint(0, n_dim)
                         shape[ell_index:ell_index] = ell_shape
@@ -4648,20 +4651,34 @@ class TestLinalg(TestCase):
                     operands.append(make_tensor(shape, device, dtype))
                     sublists.append(labels)
 
+                # NumPy has a bug with the sublist format so for now we compare PyTorch sublist
+                # implementation against the equation format implementation of NumPy
+                # see https://github.com/numpy/numpy/issues/10926
+                np_operands = [op.cpu().numpy() for op in operands]
+
+                # test equation format
+                equation = ','.join(convert_sublist(l) for l in sublists)
+                self._check_einsum(equation, *operands, np_args=(equation, *np_operands))
+
+                # test sublist format
+                args = [*itertools.chain(*zip(operands, sublists))]
+                self._check_einsum(*args, np_args=(equation, *np_operands))
+
                 # generate an explicit output
+                out_sublist = []
                 num_out_labels = max(0, random.randint(0, min(max_out_dim, len(valid_labels))) - ell_size)
-                out_sublist = list(np.random.choice(list(valid_labels), num_out_labels, replace=False))
+                if num_out_labels > 0:
+                    out_labels_idx = torch.ones(len(valid_labels)).multinomial(num_out_labels)
+                    out_sublist = torch.tensor(list(valid_labels))[out_labels_idx].tolist()
                 out_sublist.insert(random.randint(0, num_out_labels), ...)
 
-                # test equation format with and without explicit output
-                equation = ','.join(convert_sublist(l) for l in sublists)
-                self._check_einsum(equation, *operands)
-                self._check_einsum(equation + '->' + convert_sublist(out_sublist), *operands)
+                # test equation format with explicit output
+                equation += '->' + convert_sublist(out_sublist)
+                self._check_einsum(equation, *operands, np_args=(equation, *np_operands))
 
-                # test sublist format with and without explicit output
-                args = [*itertools.chain(*zip(operands, sublists))]
-                self._check_einsum(*args)
-                self._check_einsum(*args, out_sublist)
+                # test sublist format with explicit output
+                args.append(out_sublist)
+                self._check_einsum(*args, np_args=(equation, *np_operands))
 
         test(100)
 
