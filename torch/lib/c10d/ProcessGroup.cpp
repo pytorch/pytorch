@@ -107,7 +107,7 @@ std::exception_ptr ProcessGroup::Work::exception() const {
 }
 
 int ProcessGroup::Work::sourceRank() const {
-  TORCH_CHECK(false, 
+  TORCH_CHECK(false,
       "sourceRank() may only be called on work objects "
       "that correspond to a recv or recv-from-any call.");
 }
@@ -186,7 +186,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* usused */,
     std::vector<at::Tensor>& /* usused */,
     const AllgatherOptions& /* usused */) {
-  TORCH_CHECK(false, 
+  TORCH_CHECK(false,
       "no support for allgather_coalesced in this process group");
 }
 

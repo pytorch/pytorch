@@ -346,7 +346,7 @@ std::tuple<int, std::string> accept(
   while (true) {
     int res = tcputil::poll(events.get(), 1, timeout.count());
     if (res == 0) {
-      TORCH_CHECK(false, 
+      TORCH_CHECK(false,
           "waiting for processes to "
           "connect has timed out");
     } else if (res == -1) {

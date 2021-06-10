@@ -124,7 +124,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
-  TORCH_CHECK(false, 
+  TORCH_CHECK(false,
       "no support for _allgather_base in RoundRobin process group");
 }
 

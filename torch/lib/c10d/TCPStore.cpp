@@ -133,7 +133,7 @@ void BackgroundThread::join() {
 void BackgroundThread::initStopSignal() {
   ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
   if (ghStopEvent_ == NULL) {
-    TORCH_CHECK(false, 
+    TORCH_CHECK(false,
         "Failed to create the control pipe to start the "
         "BackgroundThread run");
   }
@@ -149,7 +149,7 @@ void BackgroundThread::stop() {
 #else
 void BackgroundThread::initStopSignal() {
   if (pipe(controlPipeFd_.data()) == -1) {
-    TORCH_CHECK(false, 
+    TORCH_CHECK(false,
         "Failed to create the control pipe to start the "
         "BackgroundThread run");
   }

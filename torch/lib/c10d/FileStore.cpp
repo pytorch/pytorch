@@ -273,7 +273,7 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       cleanupKey_("cleanup/"),
       regularPrefix_("/") {
   if (numWorkers_ < 1) {
-    TORCH_CHECK(false, 
+    TORCH_CHECK(false,
         "Number of workers for FileStore should be greater than zero");
   }
 }
