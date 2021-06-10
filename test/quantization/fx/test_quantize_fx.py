@@ -1033,9 +1033,16 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
         self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
 
-    def test_qconfig_module_name_function_order(self):
+    def test_qconfig_module_name_object_type_order(self):
         class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(1, 1)
+                self.fc2 = nn.Linear(1, 1)
+
             def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
                 x = torch.add(x, x)
                 x = torch.add(x, x)
                 return x
@@ -1043,9 +1050,13 @@ class TestQuantizeFx(QuantizationTestCase):
         class M2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
+                self.fc1 = nn.Linear(1, 1)
+                self.fc2 = nn.Linear(1, 1)
                 self.m1 = M1()
 
             def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
                 x = torch.add(x, x)
                 x = torch.add(x, x)
                 x = self.m1(x)
@@ -1054,9 +1065,13 @@ class TestQuantizeFx(QuantizationTestCase):
         class M3(torch.nn.Module):
             def __init__(self):
                 super().__init__()
+                self.fc1 = nn.Linear(1, 1)
+                self.fc2 = nn.Linear(1, 1)
                 self.m2 = M2()
 
             def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
                 x = torch.add(x, x)
                 x = torch.add(x, x)
                 x = self.m2(x)
@@ -1064,10 +1079,13 @@ class TestQuantizeFx(QuantizationTestCase):
 
         m = M3().eval()
         qconfig_dict = {
-            "module_name_function_order": [
+            "module_name_object_type_order": [
                 # test various FQNs: global, single child, multiple children
+                ("", nn.Linear, 0, torch.quantization.default_qconfig),
                 ("", torch.add, 0, torch.quantization.default_qconfig),
+                ("m2", nn.Linear, 1, torch.quantization.default_qconfig),
                 ("m2", torch.add, 1, torch.quantization.default_qconfig),
+                ("m2.m1", nn.Linear, 0, torch.quantization.default_qconfig),
                 ("m2.m1", torch.add, 0, torch.quantization.default_qconfig),
             ],
         }
@@ -1080,14 +1098,26 @@ class TestQuantizeFx(QuantizationTestCase):
         node_list = [
             # m3
             ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
+            ns.call_function(torch.quantize_per_tensor),
             ns.call_function(torch.ops.quantized.add),
             ns.call_method("dequantize"),
             ns.call_function(torch.add),
             # m2
+            ns.call_module(nn.Linear),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
             ns.call_function(torch.add),
             ns.call_function(torch.quantize_per_tensor),
             ns.call_function(torch.ops.quantized.add),
             # m1
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
+            ns.call_function(torch.quantize_per_tensor),
             ns.call_function(torch.ops.quantized.add),
             ns.call_method("dequantize"),
             ns.call_function(torch.add),
@@ -1096,7 +1126,14 @@ class TestQuantizeFx(QuantizationTestCase):
 
         # test that function order overrides global qconfig
         class M4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(1, 1)
+                self.fc2 = nn.Linear(1, 1)
+
             def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
                 x = torch.add(x, x)
                 x = torch.add(x, x)
                 return x
@@ -1104,7 +1141,8 @@ class TestQuantizeFx(QuantizationTestCase):
         m = M4().eval()
         qconfig_dict = {
             "": torch.quantization.default_qconfig,
-            "module_name_function_order": [
+            "module_name_object_type_order": [
+                ("", nn.Linear, 1, None),
                 ("", torch.add, 1, None),
             ],
         }
@@ -1115,6 +1153,10 @@ class TestQuantizeFx(QuantizationTestCase):
         m(data)
 
         node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
             ns.call_function(torch.quantize_per_tensor),
             ns.call_function(torch.ops.quantized.add),
             ns.call_method("dequantize"),

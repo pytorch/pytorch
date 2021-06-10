@@ -86,21 +86,21 @@ def get_module_name_regex_qconfig(qconfig_dict, module_name, fallback_qconfig):
     return fallback_qconfig
 
 
-def maybe_adjust_qconfig_for_module_name_function_order(
+def maybe_adjust_qconfig_for_module_name_object_type_order(
     qconfig_dict: Any,
     cur_module_path: str,
-    cur_function_target: Callable,
-    cur_function_idx: int,
+    cur_object_type: Callable,
+    cur_object_type_idx: int,
     fallback_qconfig: QConfigAny,
 ) -> QConfigAny:
-    qconfig_module_name_function_order = \
-        qconfig_dict.get('module_name_function_order', {})
-    for module_path, function_target, function_idx, qconfig in \
-            qconfig_module_name_function_order:
+    qconfig_module_name_object_type_order = \
+        qconfig_dict.get('module_name_object_type_order', {})
+    for module_path, object_type, object_type_idx, qconfig in \
+            qconfig_module_name_object_type_order:
         if (
             (module_path == cur_module_path) and
-            (function_target == cur_function_target) and
-            (function_idx == cur_function_idx)
+            (object_type == cur_object_type) and
+            (object_type_idx == cur_object_type_idx)
         ):
             return qconfig
 
@@ -122,7 +122,7 @@ def get_module_name_qconfig(qconfig_dict, module_name, fallback_qconfig):
 # global_qconfig if necessary
 
 
-def get_qconfig(qconfig_dict, module_type, module_name, global_qconfig):
+def maybe_adjust_qconfig_for_module_type_or_name(qconfig_dict, module_type, module_name, global_qconfig):
     module_type_qconfig = get_object_type_qconfig(
         qconfig_dict, module_type, global_qconfig)
     module_name_regex_qconfig = get_module_name_regex_qconfig(
@@ -147,14 +147,14 @@ def generate_qconfig_map(
     #
     # meaning in submodule 'foo.bar', we have seen 0 F.linear and
     # 1 F.conv2d invocations so far.
-    submodule_to_function_type_to_cur_idx: Dict[str, Dict[Callable, int]] = \
+    submodule_to_object_type_to_cur_idx: Dict[str, Dict[Callable, int]] = \
         defaultdict(lambda: defaultdict(int))
 
     for node in input_graph.nodes:
         qconfig = None
         if node.op == "get_attr":
             module_name, _ = _parent_name(node.target)
-            qconfig = get_qconfig(
+            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[module_name]), module_name, global_qconfig)
         elif node.op == "call_function":
             # precedence: module_name_qconfig
@@ -163,28 +163,45 @@ def generate_qconfig_map(
             function_qconfig = get_object_type_qconfig(
                 qconfig_dict, node.target, global_qconfig)
             module_path, module_type = node_name_to_scope[node.name]
-            qconfig = get_qconfig(
+            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, module_type, module_path, function_qconfig)
 
-            cur_function_idx = \
-                submodule_to_function_type_to_cur_idx[module_path][node.target]
-            submodule_to_function_type_to_cur_idx[module_path][node.target] += 1
-            qconfig = maybe_adjust_qconfig_for_module_name_function_order(
-                qconfig_dict, module_path, node.target, cur_function_idx,
+            cur_object_type_idx = \
+                submodule_to_object_type_to_cur_idx[module_path][node.target]
+            submodule_to_object_type_to_cur_idx[module_path][node.target] += 1
+            qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
+                qconfig_dict, module_path, node.target, cur_object_type_idx,
                 qconfig)
 
         elif node.op == "call_method":
             module_path, module_type = node_name_to_scope[node.name]
             # use the qconfig of the module that the node belongs to
-            qconfig = get_qconfig(
+            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, module_type, module_path, global_qconfig)
+            # Currently call_method does not support modifying qconfig
+            # by order, we can add this later if it is needed.
+
         elif node.op == 'call_module':
-            qconfig = get_qconfig(
+            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[node.target]), node.target, global_qconfig)
+
+            module_path, module_type = node_name_to_scope[node.name]
+            # Note: for call_module, the module_path is the current module's name.
+            # to meaningfully count invocations, we need to count them in the parent
+            # module.
+            parent_name, _ = _parent_name(module_path)
+            cur_object_type_idx = \
+                submodule_to_object_type_to_cur_idx[parent_name][module_type]
+            submodule_to_object_type_to_cur_idx[parent_name][module_type] += 1
+            qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
+                qconfig_dict, parent_name, module_type, cur_object_type_idx,
+                qconfig)
+
             # regex is not supported eager mode propagate_qconfig_, we'll
             # need to set the qconfig explicitly here in case regex
             # is used
             modules[node.target].qconfig = qconfig
+
         qconfig_map[node.name] = qconfig
     return qconfig_map
 
@@ -213,7 +230,7 @@ def check_is_valid_qconfig_dict(qconfig_dict: Any) -> None:
 
     qconfig_dict_allowed_keys = {
         "", "object_type", "module_name_regex", "module_name",
-        "module_name_function_order"}
+        "module_name_object_type_order"}
     check_is_valid_config_dict(qconfig_dict, qconfig_dict_allowed_keys, "qconfig_dict")
 
 
