@@ -189,6 +189,8 @@ class testVariousModelVersions(TestCase):
                 current_from_version -= 1
             shutil.rmtree(tmpdirname)
 
+    # Please run this test manually when working on backport.
+    # This test passes in OSS, but fails internally, likely due to missing step in build
     # def test_all_backport_functions(self):
     #     # Backport from the latest bytecode version to the minimum support version
     #     # Load, run the backport model, and check version
