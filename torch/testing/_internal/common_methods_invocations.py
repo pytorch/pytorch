@@ -236,8 +236,9 @@ class OpInfo(object):
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
                  inplace_variant=_NOTHING,  # explicitly pass the inplace variant of the operator if required
                  method_variant=_NOTHING,  # explicitly pass the method variant of the operator if required
-                 has_fake_function = False  # does this opinfo use a function to simulate functional behavior
+                 has_fake_function = False,  # does this opinfo use a function to simulate functional behavior
                                             # of a mutating op
+                 assert_jit_shape_analysis = False,  # assert that jit shape analysis fully propagates shape
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -307,6 +308,7 @@ class OpInfo(object):
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
         self.has_fake_function = has_fake_function
+        self.assert_jit_shape_analysis = assert_jit_shape_analysis
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -5349,6 +5351,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
            assert_autodiffed=True,
+           assert_jit_shape_analysis=True,     
            sample_inputs_func=sample_inputs_matmul,
            skips=(
                # matmul does not correctly warn when resizing out= inputs
