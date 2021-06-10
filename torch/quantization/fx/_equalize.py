@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 
 from ..observer import (
-    PerChannelMinMaxObserver, _with_args, default_observer
+    PerChannelMinMaxObserver, _with_args
 )
-from ..qconfig import QConfig
 
+from collections import namedtuple
 import warnings
 
 
@@ -227,11 +227,11 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
     return equalization_scale
 
 
-class EqualizationQConfig(QConfig):
+class EqualizationQConfig(namedtuple('EqualizationQConfig', ['input_activation', 'weight'])):
     """
     Describes how to quantize a layer or a part of the network specifically for
-    equalization by providing settings (observer classes) for inputs, outputs,
-    and weights.
+    input-weight equalization by providing settings (observer classes) for
+    inputs, outputs, and weights.
 
     Note that EqualizationQConfig needs to contain observer **classes** (like
     MinMaxObserver) or a callable that returns instances on invocation, not the
@@ -243,23 +243,19 @@ class EqualizationQConfig(QConfig):
     overwritten with `with_args` method (that behaves like functools.partial):
 
     my_qconfig = EqualizationQConfig(input_activation=_InputEqualizationObserver.with_args(dtype=torch.qint8),
-                                    output_activation=MinMaxObserver.with_args(dtype=torch.qint8),
                                     weight=_WeightEqualizationObserver.with_args(dtype=torch.qint8))
     """
-    def __new__(cls, input_activation=torch.nn.Identity, output_activation=torch.nn.Identity, weight=torch.nn.Identity):
-        # catch common mistakes
-        if isinstance(input_activation, nn.Module) or isinstance(output_activation, nn.Module) or isinstance(weight, nn.Module):
+    def __new__(cls, input_activation=torch.nn.Identity, weight=torch.nn.Identity):
+        if isinstance(input_activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("EqualizationQConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        self = super(EqualizationQConfig, cls).__new__(cls, output_activation, weight)
-        self.input_activation = input_activation
+        self = super(EqualizationQConfig, cls).__new__(cls, input_activation, weight)
         return self
 
 
 input_equalization_observer = _InputEqualizationObserver.with_args(
     dtype=torch.quint8, qscheme=torch.per_tensor_symmetric)
 weight_equalization_observer = _WeightEqualizationObserver.with_args(
-    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
+    dtype=torch.qint8, qscheme=torch.per_channel_symmetric)
 default_equalization_qconfig = EqualizationQConfig(input_activation=input_equalization_observer,
-                                                   output_activation=default_observer,
                                                    weight=weight_equalization_observer)
