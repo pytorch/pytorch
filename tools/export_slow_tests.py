@@ -50,9 +50,6 @@ def too_similar(calculated_times: Dict[str, float], other_times: Dict[str, float
         return False
 
     for test_case, test_time in calculated_times.items():
-        if test_case not in other_times:
-            print(test_case)
-            return False
         other_test_time = other_times[test_case]
         relative_difference = abs((other_test_time - test_time) / max(other_test_time, test_time))
         if relative_difference > threshold:
