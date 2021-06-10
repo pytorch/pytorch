@@ -1002,11 +1002,17 @@ void initJitScriptBindings(PyObject* module) {
             return m.storage_context().hasStorage(name);
           })
       .def(
+          "get_storage_id",
+          [](ScriptModuleSerializer& m,
+             const std::string& name) {
+            return m.storage_context().getStorageID(name);
+          })
+      .def(
           "track_storage",
           [](ScriptModuleSerializer& m,
              const std::string& name,
              const c10::Storage& storage) {
-            m.storage_context().addStorage(name, storage);
+            return m.storage_context().addStorage(name, storage);
           });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.

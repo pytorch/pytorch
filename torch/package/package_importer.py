@@ -176,7 +176,7 @@ class PackageImporter(Importer):
         storage_context = torch._C.StorageContext()
 
         def load_tensor(data_type, size, key, location, restore_location):
-            name = f"{key}.storage"
+            name = f"{int(key)}.storage"
             dtype = data_type(0).dtype
 
             if storage_context.has_storage(name):

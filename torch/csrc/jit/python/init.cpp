@@ -1141,7 +1141,7 @@ void initJITBindings(PyObject* module) {
           [](StorageContext& self,
              const std::string& name,
              const at::Tensor& tensor) {
-            self.addStorage(name, tensor.storage());
+            return self.addStorage(name, tensor.storage());
           })
       .def("has_storage", &StorageContext::hasStorage);
 

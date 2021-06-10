@@ -714,16 +714,17 @@ node [shape=box];
             storage_type = normalize_storage_type(type(obj))
             obj_key = str(obj._cdata)
             location = location_tag(obj)
-            name = f".data/{obj_key}.storage"
 
             # serialize storage if not already written
-            if not self.script_module_serializer.has_storage(name):
+            if not self.script_module_serializer.has_storage(obj_key):
                 if obj.device.type != "cpu":
                     obj = obj.cpu()
                 num_bytes = obj.size() * obj.element_size()
-                self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
-                self.script_module_serializer.track_storage(name, obj)
-            return ("storage", storage_type, obj_key, location, obj.size())
+                storage_id  = str(self.script_module_serializer.track_storage(obj_key, obj))
+                self.zip_file.write_record(f".data/{storage_id}.storage", obj.data_ptr(), num_bytes)
+            else:
+                storage_id = self.script_module_serializer.get_storage_id(obj_key) 
+            return ("storage", storage_type, storage_id, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(

@@ -20,25 +20,35 @@ namespace jit {
 // used in torch.package deserialization
 class TORCH_API StorageContext {
  public:
-  explicit StorageContext() = default;
+  explicit StorageContext() : unique_id(0) {};
 
-  void addStorage(const std::string& name, c10::Storage storage) {
+  uint64_t addStorage(const std::string& name, c10::Storage storage) {
     TORCH_INTERNAL_ASSERT(!hasStorage(name));
-    storage_map_.insert({name, storage});
+    uint64_t id = unique_id++; 
+    cdata_id_map_.insert({name, id});
+    id_storage_map_.insert({id, storage});
+    return id;
   }
 
   bool hasStorage(const std::string& name) {
-    return storage_map_.find(name) != storage_map_.end();
+    return cdata_id_map_.find(name) != cdata_id_map_.end();
+  }
+
+  bool getStorageID(const std::string& name) {
+      TORCH_INTERNAL_ASSERT(hasStorage(name));
+      return cdata_id_map_.find(name)->second;
   }
 
   c10::Storage getStorage(const std::string& name) {
     TORCH_INTERNAL_ASSERT(hasStorage(name));
-    return storage_map_.find(name)->second;
+    return id_storage_map_.find(cdata_id_map_.find(name)->second)->second;
   }
   ~StorageContext() = default;
 
  private:
-  std::map<std::string, c10::Storage> storage_map_;
+  uint64_t unique_id;
+  std::map<std::string, uint64_t> cdata_id_map_;
+  std::map<uint64_t, c10::Storage> id_storage_map_; 
 };
 
 TORCH_API Module import_ir_module(

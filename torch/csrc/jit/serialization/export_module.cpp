@@ -463,6 +463,7 @@ void ScriptModuleSerializer::writeArchive(
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
   std::vector<std::string> tensor_names;
+  std::unordered_set<std::string> tensors_to_serialize;
   Pickler data_pickle(
       [&](const char* buf, size_t size) {
         data.insert(data.end(), buf, buf + size);
@@ -475,10 +476,18 @@ void ScriptModuleSerializer::writeArchive(
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
         if (tensor_cdata_naming_scheme) {
-          std::string string_id =
+            std::string cdata_str =
               std::to_string(reinterpret_cast<std::intptr_t>(
                   tensor.storage().unsafeGetStorageImpl()));
-          tensor_names.push_back(string_id + ".storage");
+             uint64_t id = 0;
+          if (storage_context_.hasStorage(cdata_str)) {
+            // storage has been serialzed already, skip
+            id = storage_context_.getStorageID(cdata_str);
+          } else {
+            id = storage_context_.addStorage(cdata_str, tensor.storage());
+            tensors_to_serialize.insert(std::to_string(id) + ".storage");
+          }
+          tensor_names.push_back(std::to_string(id) + ".storage");
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }
@@ -495,16 +504,12 @@ void ScriptModuleSerializer::writeArchive(
 
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
-    std::string fname = tensor_dir + tensor_names[i++];
-    if (tensor_cdata_naming_scheme) {
-      if (storage_context_.hasStorage(fname)) {
+    std::string tensor_name = tensor_names[i++]; 
+    if (tensor_cdata_naming_scheme && !tensors_to_serialize.count(tensor_name)) {
         // storage has been serialzed already, skip
         continue;
-      } else {
-        storage_context_.addStorage(fname, td.storage());
-      }
-    }
-    writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+    } 
+    writer_.writeRecord(tensor_dir + tensor_name, writable_td.data(), writable_td.sizeInBytes());
   }
 
   std::string fname = archive_dir + archive_name + ".pkl";
