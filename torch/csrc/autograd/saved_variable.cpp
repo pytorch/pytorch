@@ -12,6 +12,8 @@
 #include <memory>
 #include <sstream>
 
+#include <iostream>
+
 namespace torch { namespace autograd {
 
 SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view) {
@@ -41,13 +43,16 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     version_counter_ = impl::version_counter(variable);
     saved_version_ = version_counter_.current_version();
 
+    // This check actually does not hold
+    // TORCH_CHECK(is_output && variable.is_leaf(), "Variable is both an output and a leaf");
+
     // If the variable is not an output, we can safely save the
     // original variable without running the risk of reference cycles.
     // If the variable is not an output, its grad_fn has already been fully
     // created and in particular will be a different Node than the one
     // we are currently constructing (the one that owns this SavedVariable).
-    // In particular, a leaf is never an output.
-    if (!is_output) {
+    // Similarly, if the variable is a leaf.
+    if (!is_output || variable.is_leaf()) {
       saved_original = true;
       data_ = variable;
       return;
