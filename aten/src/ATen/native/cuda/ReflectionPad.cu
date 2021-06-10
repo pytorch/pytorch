@@ -8,7 +8,6 @@
 #include <THC/THCAtomics.cuh>
 
 #include <thrust/pair.h>
-#include <thrust/tuple.h>
 
 namespace at {
 namespace native {
