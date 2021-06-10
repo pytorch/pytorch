@@ -959,10 +959,10 @@ std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDa
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage. Therefore reserve_size needs to be
         // incremented by 2.
-        reserve_size += 2
+        reserve_size += 2;
       } else {
         // A dense/strided tensor contains 1 storage.
-        reserve_size += 1
+        reserve_size += 1;
       }
     }
     data_ptrs.reserve(reserve_size);
