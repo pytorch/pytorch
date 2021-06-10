@@ -87,12 +87,16 @@ TORCH_META_FUNC2(remainder, Tensor)(const Tensor& self, const Tensor& other) {
 TORCH_META_FUNC2(bitwise_left_shift, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
+  TORCH_CHECK(self.is_integral(false) && other.is_integral(false),
+              "bitwise_left_shift is supported only for integral tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC2(bitwise_right_shift, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
+  TORCH_CHECK(self.is_integral(false) && other.is_integral(false),
+              "bitwise_right_shift is supported only for integral tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 

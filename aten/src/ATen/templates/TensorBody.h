@@ -171,6 +171,10 @@ class TORCH_API Tensor {
     return at::isSignedType(this->scalar_type());
   }
 
+  bool is_integral(bool includeBool) const {
+    return at::isIntegralType(this->scalar_type(), includeBool);
+  }
+
   int64_t size(int64_t dim) const {
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
     dim = c10::maybe_wrap_dim(dim, this->dim(), false);
