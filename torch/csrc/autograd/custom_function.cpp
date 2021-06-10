@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/autograd.h>
@@ -110,7 +111,7 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
   int num_diff_outputs = 0;
 
 
-  for (auto i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     // For outputs that are not tensors, put a placeholder undefined input.
     if (!raw_outputs[i].has_value()) {
       if (cdata) {
