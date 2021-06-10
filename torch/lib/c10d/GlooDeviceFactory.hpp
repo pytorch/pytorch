@@ -10,7 +10,7 @@
 
 namespace c10d {
 
-class TORCH_API GlooDeviceFactory {
+class GlooDeviceFactory {
  public:
   // Create new device instance for specific interface.
   static std::shared_ptr<::gloo::transport::Device> makeDeviceForInterface(

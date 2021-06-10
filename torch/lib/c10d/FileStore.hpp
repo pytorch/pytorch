@@ -9,7 +9,7 @@
 
 namespace c10d {
 
-class TORCH_API FileStore : public Store {
+class FileStore : public Store {
  public:
   explicit FileStore(const std::string& path, int numWorkers);
 

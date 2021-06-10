@@ -85,8 +85,6 @@ endif()
 add_library(c10d STATIC ${C10D_SRCS})
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET c10d PROPERTY CXX_STANDARD 14)
-# Workaround to get TORCH_API to work correctly until c10d is merged into libtorch
-target_compile_options(c10d PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 
 if(NOT MSVC)
   target_compile_options(c10d PUBLIC
