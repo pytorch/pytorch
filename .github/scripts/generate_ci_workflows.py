@@ -43,6 +43,7 @@ def PyTorchLinuxWorkflow(
     test_runner_type: str,
     on_pull_request: bool = False,
     enable_doc_jobs: bool = False,
+    enable_update_apis_job: bool = False,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
@@ -50,6 +51,7 @@ def PyTorchLinuxWorkflow(
         "test_runner_type": test_runner_type,
         "on_pull_request": on_pull_request,
         "enable_doc_jobs": enable_doc_jobs,
+        "enable_update_apis_job": enable_update_apis_job,
     }
 
 
@@ -71,6 +73,7 @@ WINDOWS_WORKFLOWS = [
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cpu-py3",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
+        on_pull_request=True
     )
 ]
 
@@ -81,6 +84,7 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         enable_doc_jobs=True,
+        enable_update_apis_job=True,
     ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4",
@@ -200,8 +204,8 @@ if __name__ == "__main__":
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
     )
     template_and_workflows = [
-        (jinja_env.get_template("linux_ci_workflow.yml.in"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.in"), WINDOWS_WORKFLOWS)
+        (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
+        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS)
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:

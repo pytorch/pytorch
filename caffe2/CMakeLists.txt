@@ -145,7 +145,6 @@ if(BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
     add_subdirectory(operators)
     add_subdirectory(operators/rnn)
     if(USE_FBGEMM)
-      add_subdirectory(quantization)
       add_subdirectory(quantization/server)
     endif()
     if(USE_QNNPACK)
@@ -492,7 +491,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
-    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
+    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"
     "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
@@ -738,6 +737,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+      ${TORCH_SRC_DIR}/csrc/utils/crash_handler.cpp
     )
   endif()
 
@@ -1020,9 +1020,10 @@ endif()
 if(LINUX)
   find_library(BREAKPAD_LIB breakpad_client)
   find_path(BREAKPAD_INCLUDE_DIR breakpad)
-  if(BREAKPAD_LIB_FOUND AND BREAKPAD_INCLUDE_DIR_FOUND)
-    target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
-    add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
+  if(BREAKPAD_LIB AND BREAKPAD_INCLUDE_DIR)
+    message(STATUS "found breakpad library")
+    target_link_libraries(torch_cpu PUBLIC ${BREAKPAD_LIB})
+    target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
     target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
   else()
     message(STATUS "breakpad library not found")
@@ -1475,6 +1476,10 @@ if(BUILD_SPLIT_CUDA)
   target_link_libraries(
       torch_cuda_cpp PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
   target_link_libraries(torch_cuda_cu PRIVATE torch_cuda_cpp)
+  if(USE_CUDNN)
+    target_link_libraries(
+        torch_cuda_cpp PRIVATE  caffe2::cudnn-private)
+  endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
@@ -1491,6 +1496,10 @@ elseif(USE_CUDA)
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+  if(USE_CUDNN)
+    target_link_libraries(
+        torch_cuda PRIVATE  caffe2::cudnn-private)
+  endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
@@ -1621,13 +1630,13 @@ endif()
 # ---[ Test binaries.
 if(BUILD_TEST)
 
-  foreach(test_src ${ATen_VEC256_TEST_SRCS})
+  foreach(test_src ${ATen_VEC_TEST_SRCS})
     foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
         get_filename_component(test_name ${test_src} NAME_WE)
         list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
         list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
-        # Build vec256 with minimal dependencies on all platforms but Windows
+        # Build vec with minimal dependencies on all platforms but Windows
         if(NOT MSVC)
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/affine_quantizer_base.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)

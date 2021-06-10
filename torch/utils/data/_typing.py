@@ -4,7 +4,7 @@
 import collections
 import numbers
 import sys
-from typing import (Any, Dict, Iterator, List, Set, Tuple, TypeVar, Union,
+from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
                     get_type_hints)
 from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
 
@@ -17,11 +17,12 @@ except ImportError:  # Python 3.6
 # Please check [Note: TypeMeta and TypeAlias]
 try:
     from typing import GenericMeta  # Python 3.6
+    _GenericAlias = GenericMeta
 except ImportError:  # Python > 3.6
     # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
     # For Python 3.9, only Protocol in typing uses metaclass
     from abc import ABCMeta
-    from typing import _ProtocolMeta  # type: ignore[attr-defined]
+    from typing import _ProtocolMeta, _GenericAlias  # type: ignore[attr-defined, no-redef]
 
     class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
         pass
@@ -64,6 +65,10 @@ def issubtype(left, right, recursive=True):
 
     if right is Any or left == right:
         return True
+
+    if isinstance(right, _GenericAlias):
+        if getattr(right, '__origin__', None) is Generic:
+            return True
 
     if right == type(None):
         return False
@@ -220,13 +225,16 @@ class _DataPipeType:
 
     def __eq__(self, other):
         if isinstance(other, _DataPipeType):
-            return self.issubtype(other) and other.issubtype(self)
+            return self.param == other.param
         return NotImplemented
 
     def __hash__(self):
         return hash(self.param)
 
     def issubtype(self, other):
+        if isinstance(other.param, _GenericAlias):
+            if getattr(other.param, '__origin__', None) is Generic:
+                return True
         if isinstance(other, _DataPipeType):
             return issubtype(self.param, other.param)
         if isinstance(other, type):
@@ -238,7 +246,8 @@ class _DataPipeType:
 
 
 # Default type for DataPipe without annotation
-_DEFAULT_TYPE = _DataPipeType(Any)
+T_co = TypeVar('T_co', covariant=True)
+_DEFAULT_TYPE = _DataPipeType(Generic[T_co])
 
 
 class _DataPipeMeta(GenericMeta):
@@ -248,44 +257,66 @@ class _DataPipeMeta(GenericMeta):
     """
     type: _DataPipeType
 
-    def __new__(cls, name, bases, namespace, **kargs):
+    def __new__(cls, name, bases, namespace, **kwargs):
         # For Python > 3.6
         cls.__origin__ = None
         # Need to add _is_protocol for Python 3.7 _ProtocolMeta
         if '_is_protocol' not in namespace:
             namespace['_is_protocol'] = True
         if 'type' in namespace:
-            return super().__new__(cls, name, bases, namespace)
+            return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace['__type_class__'] = False
         # For plain derived class without annotation
         for base in bases:
             if isinstance(base, _DataPipeMeta):
-                return super().__new__(cls, name, bases, namespace)
+                return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace.update({'type': _DEFAULT_TYPE,
                           '__init_subclass__': _dp_init_subclass})
-        return super().__new__(cls, name, bases, namespace)
+        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+
+    def __init__(self, name, bases, namespace, **kwargs):
+        super().__init__(name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
     @_tp_cache
-    def __getitem__(self, param):
-        if param is None:
+    def __getitem__(self, params):
+        if params is None:
             raise TypeError('{}[t]: t can not be None'.format(self.__name__))
-        if isinstance(param, str):
-            param = ForwardRef(param)
-        if isinstance(param, tuple):
-            param = Tuple[param]
-        _type_check(param, msg="{}[t]: t must be a type".format(self.__name__))
-        t = _DataPipeType(param)
+        if isinstance(params, str):
+            params = ForwardRef(params)
+        if not isinstance(params, tuple):
+            params = (params, )
+
+        msg = "{}[t]: t must be a type".format(self.__name__)
+        params = tuple(_type_check(p, msg) for p in params)
+
+        if isinstance(self.type.param, _GenericAlias):
+            orig = getattr(self.type.param, '__origin__', None)
+            if isinstance(orig, type) and orig is not Generic:
+                p = self.type.param[params]  # type: ignore[index]
+                t = _DataPipeType(p)
+                l = len(str(self.type)) + 2
+                name = self.__name__[:-l]
+                name = name + '[' + str(t) + ']'
+                bases = (self,) + self.__bases__
+                return self.__class__(name, bases,
+                                      {'__init_subclass__': _dp_init_subclass,
+                                       'type': t,
+                                       '__type_class__': True})
+
+        if len(params) > 1:
+            raise TypeError('Too many parameters for {} actual {}, expected 1'.format(self, len(params)))
+
+        t = _DataPipeType(params[0])
 
         if not t.issubtype(self.type):
             raise TypeError('Can not subclass a DataPipe[{}] from DataPipe[{}]'
                             .format(t, self.type))
 
         # Types are equal, fast path for inheritance
-        if self.type.issubtype(t):
-            if _mro_subclass_init(self):
-                return self
+        if self.type == t:
+            return self
 
         name = self.__name__ + '[' + str(t) + ']'
         bases = (self,) + self.__bases__
@@ -305,24 +336,6 @@ class _DataPipeMeta(GenericMeta):
 
     def __hash__(self):
         return hash((self.__name__, self.type))
-
-
-def _mro_subclass_init(obj):
-    r"""
-    Run through MRO to check if any super class has already built in
-    the corresponding `__init_subclass__`. If so, no need to add
-    `__init_subclass__`.
-    """
-
-    mro = obj.__mro__
-    for b in mro:
-        if isinstance(b, _DataPipeMeta):
-            if b.__init_subclass__ == _dp_init_subclass:
-                return True
-            if hasattr(b.__init_subclass__, '__func__') and \
-                    b.__init_subclass__.__func__ == _dp_init_subclass:  # type: ignore[attr-defined]
-                return True
-    return False
 
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):

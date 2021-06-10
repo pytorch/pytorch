@@ -269,6 +269,9 @@ option(USE_ZSTD "Use ZSTD" OFF)
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." "${CPU_INTEL}"
   "CPU_INTEL OR CPU_AARCH64" OFF)
+cmake_dependent_option(
+  USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
+  "USE_MKLDNN AND CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
@@ -348,6 +351,7 @@ option(USE_SYSTEM_CPUINFO "Use system-provided cpuinfo." OFF)
 option(USE_SYSTEM_SLEEF "Use system-provided sleef." OFF)
 option(USE_SYSTEM_GLOO "Use system-provided gloo." OFF)
 option(USE_SYSTEM_FP16 "Use system-provided fp16." OFF)
+option(USE_SYSTEM_PYBIND11 "Use system-provided PyBind11." OFF)
 option(USE_SYSTEM_PTHREADPOOL "Use system-provided pthreadpool." OFF)
 option(USE_SYSTEM_PSIMD "Use system-provided psimd." OFF)
 option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
@@ -368,6 +372,7 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_BENCHMARK ON)
   set(USE_SYSTEM_ONNX ON)
   set(USE_SYSTEM_XNNPACK ON)
+  set(USE_SYSTEM_PYBIND11 ON)
 endif()
 
 # Used when building Caffe2 through setup.py

@@ -71,6 +71,21 @@ namespace c10d {
   return it->second;
 }
 
+std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors) {
+  std::vector<at::Tensor> shapeTensors;
+  shapeTensors.reserve(tensors.size());
+  for (const auto& tensor : tensors) {
+    auto shapesVec = tensor.sizes().vec();
+    int64_t shapes_size = shapesVec.size();
+    // Need to clone here otherwise the shapesVec.data() memory is not copied
+    // and can be released under the hood.
+    at::Tensor shapesTensor = at::from_blob(
+        shapesVec.data(), {shapes_size}, at::TensorOptions().dtype(at::kLong)).clone();
+    shapeTensors.emplace_back(std::move(shapesTensor));
+  }
+  return shapeTensors;
+}
+
 
 namespace tcputil {
 

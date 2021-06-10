@@ -349,6 +349,8 @@ Tensor empty_like(
     namedinference::propagate_names(result, self.names());
   }
 
+  // never propagate Conjugate key
+  result._set_conj(false);
   return result;
 }
 
@@ -1383,7 +1385,7 @@ Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) 
   return at::detail::tensor_complex_backend(values, options);
 }
 
-Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size,
+Tensor from_file(c10::string_view filename, c10::optional<bool> shared, c10::optional<int64_t> size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1400,7 +1402,7 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
         c10::StorageImpl::use_byte_size_t(),
         size_bytes,
         THMapAllocator::makeDataPtr(
-            filename.c_str(), flags, size_bytes, nullptr),
+            std::string(filename), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
     auto tensor = detail::make_tensor<at::TensorImpl>(

@@ -30,6 +30,7 @@ from torch._six import string_classes
 
 from .constants import default_pg_timeout
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
+from torch._C._distributed_c10d import _get_debug_mode, _DistributedDebugLevel
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -50,11 +51,14 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupGloo
+    from torch._C._distributed_c10d import _ProcessGroupWrapper
 except ImportError:
     _GLOO_AVAILABLE = False
 
 
 logger = logging.getLogger(__name__)
+
+PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 
 
 # Some reduce ops are not supported by complex numbers and will result in an error.
@@ -295,9 +299,7 @@ def _get_group_size(group):
     if group is GroupMember.WORLD or group is None:
         default_pg = _get_default_group()
         return default_pg.size()
-    if group not in _pg_group_ranks:
-        raise RuntimeError("The given group does not exist")
-    return len(_pg_group_ranks[group])
+    return group.size()
 
 
 def _check_single_tensor(param, param_name):
@@ -556,6 +558,10 @@ def init_process_group(
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
+            # Use a PrefixStore to avoid accidental overrides of keys used by
+            # different systems (e.g. RPC) in case the store is multi-tenant.
+            store = PrefixStore("default_pg", store)
+
         default_pg = _new_process_group_helper(
             world_size,
             rank,
@@ -657,7 +663,28 @@ def _new_process_group_helper(
         if backend == Backend.GLOO:
             if pg_options is not None:
                 raise RuntimeError("GLOO options not supported")
-            pg = ProcessGroupGloo(prefix_store, rank, world_size, timeout=timeout)
+            pg = ProcessGroupGloo(
+                prefix_store,
+                rank,
+                world_size,
+                timeout=timeout)
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debugability.
+            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info("""TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging.""")
+                else:
+                    pg = _create_process_group_wrapper(
+                        wrapped_pg=pg,
+                        store_prefix=group_name,
+                        store=store,
+                        rank=rank,
+                        world_size=world_size,
+                        timeout=timeout
+                    )
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
@@ -673,7 +700,28 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
                 pg_options._timeout = timeout
 
-            pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
+            pg = ProcessGroupNCCL(
+                prefix_store,
+                rank,
+                world_size,
+                pg_options)
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debugability.
+            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info("""TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging.""")
+                else:
+                    pg = _create_process_group_wrapper(
+                        wrapped_pg=pg,
+                        store_prefix=group_name,
+                        store=store,
+                        rank=rank,
+                        world_size=world_size,
+                        timeout=timeout
+                    )
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -1512,10 +1560,8 @@ def all_gather_object(object_list, obj, group=None):
         return
 
     input_tensor, local_size = _object_to_tensor(obj)
-    group_backend = get_backend(group)
-    is_nccl_backend = group_backend == Backend.NCCL
     current_device = torch.device("cpu")
-    if is_nccl_backend:
+    if is_nccl_available() and isinstance(group or _get_default_group(), ProcessGroupNCCL):
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
         # true.
@@ -2294,6 +2340,46 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
     else:
         work.wait()
 
+def _reduce_scatter_base(output,
+                         input,
+                         op=ReduceOp.SUM,
+                         group=None,
+                         async_op=False):
+    """
+    Reduces, then scatters a flattened tensor to all processes in a group.
+
+    Args:
+        output (Tensor): Output tensor.
+        input (Tensor): Input tensor that is of size output tensor size times world size
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    """
+    _check_single_tensor(output, "output")
+    _check_single_tensor(input, "input")
+
+    if _rank_not_in_group(group):
+        return
+
+    opts = ReduceScatterOptions()
+    opts.reduceOp = op
+
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg._reduce_scatter_base(output, input, opts)
+    else:
+        work = group._reduce_scatter_base(output, input, opts)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
 
 def all_to_all_single(
     output,
@@ -2538,7 +2624,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
 
 def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
     """
-    Synchronizes all processes similar to torch.distributed.barrier, but takes
+    Synchronizes all processes similar to ``torch.distributed.barrier``, but takes
     a configurable timeout and is able to report ranks that did not pass this
     barrier within that timeout. Specifically, for non-zero ranks, will block
     until a send/recv is processed from rank 0. Rank 0 will block until all send
@@ -2550,7 +2636,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     This collective will block all processes/ranks in the group, until the
     whole group exits the function successfully, making it useful for debugging
     and synchronizing. However, it can have a performance impact and should only
-    be used for debugging or scenarios that require full synhcronization points
+    be used for debugging or scenarios that require full synchronization points
     on the host-side. For debugging purposees, this barrier can be inserted
     before the application's collective calls to check if any ranks are
     desynchronized.
@@ -2599,6 +2685,26 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
 
+def _create_process_group_wrapper(
+    wrapped_pg: ProcessGroup,
+    store_prefix: str,
+    store: Store,
+    rank: int,
+    world_size: int,
+    timeout: timedelta = default_pg_timeout
+):
+    # Create a separate prefix store for the helper process group.
+    prefix = f"{PG_WRAPPER_STORE_PREFIX}:{store_prefix}"
+    store = PrefixStore(prefix, store)
+    helper_pg = ProcessGroupGloo(
+        store,
+        rank,
+        world_size,
+        timeout=timeout
+    )
+    # Wrap the underlying pg with ProcessGroupWrapper.
+    wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
+    return wrapped_pg
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
     """

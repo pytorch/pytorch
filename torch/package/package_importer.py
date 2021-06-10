@@ -1,11 +1,11 @@
 import builtins
-from contextlib import contextmanager
 import importlib
 import inspect
 import io
 import linecache
 import os.path
 import types
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, List, Optional, Union
 from weakref import WeakValueDictionary
@@ -13,8 +13,7 @@ from weakref import WeakValueDictionary
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
-from .file_structure_representation import Directory, _create_directory_from_file_list
-from .glob_group import GlobPattern
+from ._directory_reader import DirectoryReader
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -23,8 +22,9 @@ from ._importlib import (
     _sanity_check,
 )
 from ._mangling import PackageMangler, demangle
-from ._mock_zipreader import MockZipReader
 from ._package_unpickler import PackageUnpickler
+from .file_structure_representation import Directory, _create_directory_from_file_list
+from .glob_group import GlobPattern
 from .importer import Importer
 
 
@@ -74,7 +74,7 @@ class PackageImporter(Importer):
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
-                self.zip_reader = MockZipReader(self.filename)
+                self.zip_reader = DirectoryReader(self.filename)
         else:
             self.filename = "<binary>"
             self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
@@ -286,7 +286,12 @@ class PackageImporter(Importer):
         self, name: str, filename: Optional[str], is_package: bool, parent: str
     ):
         mangled_filename = self._mangler.mangle(filename) if filename else None
-        spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore[arg-type]
+        spec = importlib.machinery.ModuleSpec(
+            name,
+            self,  # type: ignore[arg-type]
+            origin="<package_importer>",
+            is_package=is_package,
+        )
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
         module.__name__ = self._mangler.mangle(name)
@@ -619,6 +624,14 @@ class _PackageResourceReader:
     def resource_path(self, resource):
         # The contract for resource_path is that it either returns a concrete
         # file system path or raises FileNotFoundError.
+        if isinstance(
+            self.importer.zip_reader, DirectoryReader
+        ) and self.importer.zip_reader.has_record(
+            os.path.join(self.fullname, resource)
+        ):
+            return os.path.join(
+                self.importer.zip_reader.directory, self.fullname, resource
+            )
         raise FileNotFoundError
 
     def is_resource(self, name):

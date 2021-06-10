@@ -349,3 +349,21 @@ const auto clamp_script_2 = R"JIT(
       a = torch.clamp(inp, min, max)
       return (a)
 )JIT";
+
+const auto full_like_script = R"JIT(
+  def forward(self,
+              a: Tensor,
+              fill_value: int,
+              dtype: Optional[int],
+              layout: Optional[int],
+              device: Optional[Device],
+              pin_memory: Optional[bool],
+              memory_format: Optional[int]):
+      return torch.full_like(a,
+                             fill_value,
+                             dtype=dtype,
+                             layout=layout,
+                             device=device,
+                             pin_memory=pin_memory,
+                             memory_format=memory_format)
+)JIT";

@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import hashlib
 import torch
 import torch.fx
 import pydot
@@ -9,12 +10,29 @@ from torch.fx.node import _get_qualified_name
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
     "call_module": "LemonChiffon1",
-    "call_function": "PeachPuff1",
     "get_param": "Yellow2",
     "get_attr": "LightGrey",
-    "call_method": "LavenderBlush1",
     "output": "PowderBlue",
 }
+
+_HASH_COLOR_MAP = [
+    "CadetBlue1",
+    "Coral",
+    "DarkOliveGreen1",
+    "DarkSeaGreen1",
+    "GhostWhite",
+    "Khaki1",
+    "LavenderBlush1",
+    "LightSkyBlue",
+    "MistyRose1",
+    "MistyRose2",
+    "PaleTurquoise2",
+    "PeachPuff1",
+    "Salmon",
+    "Thistle1",
+    "Thistle3",
+    "Wheat1",
+]
 
 _WEIGHT_TEMPLATE = {
     "shape": "record",
@@ -64,7 +82,13 @@ class FxGraphDrawer:
             "style": '"filled,rounded"',
             "fontcolor": "#000000",
         }
-        template["fillcolor"] = _COLOR_MAP[node.op]
+        if node.op in _COLOR_MAP:
+            template["fillcolor"] = _COLOR_MAP[node.op]
+        else:
+            # Use a random color for each node; based on its name so it's stable.
+            target_name = node._pretty_print_target(node.target)
+            target_hash = int(hashlib.md5(target_name.encode()).hexdigest()[:8], 16)
+            template["fillcolor"] = _HASH_COLOR_MAP[target_hash % len(_HASH_COLOR_MAP)]
         return template
 
     def _get_leaf_node(
@@ -106,16 +130,18 @@ class FxGraphDrawer:
             label += "|" + self._typename(node.target) + r"\l"
 
         tensor_meta = node.meta.get('tensor_meta')
-        if tensor_meta:
-            dtype_ = tensor_meta.dtype if hasattr(tensor_meta, "dtype") else "none"
-            shape_ = tensor_meta.shape if hasattr(tensor_meta, "shape") else "none"
-            stride_ = tensor_meta.stride if hasattr(tensor_meta, "stride") else "none"
-            if dtype_:
-                label += "|" + "dtype" + "=" + str(dtype_) + r"\l"
-            if shape_:
-                label += "|" + "shape" + "=" + str(shape_) + r"\l"
-            if stride_:
-                label += "|" + "stride" + "=" + str(stride_) + r"\l"
+        if tensor_meta is not None:
+            label += "|" + "dtype" + "=" + str(tensor_meta.dtype) + r"\l"
+            label += "|" + "shape" + "=" + str(tuple(tensor_meta.shape)) + r"\l"
+            label += "|" + "stride" + "=" + str(tensor_meta.stride) + r"\l"
+            if tensor_meta.is_quantized:
+                if tensor_meta.qscheme in {
+                        torch.per_tensor_affine,
+                        torch.per_tensor_symmetric,
+                }:
+                    label += "|" + "q_scale" + "=" + str(tensor_meta.q_scale) + r"\l"
+                    label += "|" + "q_zero_point" + "=" + str(tensor_meta.q_zero_point) + r"\l"
+                label += "|" + "qscheme" + "=" + str(tensor_meta.qscheme) + r"\l"
 
         return label + "}"
 
