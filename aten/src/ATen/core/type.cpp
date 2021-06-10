@@ -1119,6 +1119,10 @@ void ClassType::addOverloadedMethod(torch::jit::Function* method) {
       method->name() + "__" + c10::guts::to_string(method_offset);
   overloaded_methods_.push_back(method);
   it.first->second.push_back(mangled_name);
+  // if there is any method with this mangled name, we won't add this method
+  if (findMethod(mangled_name)) {
+    return;
+  }
   // registers where this overloaded function is stored in the
   // overloaded_methods vector.
   mangled_to_function_[mangled_name] = overloaded_methods_.size() - 1;
@@ -1434,6 +1438,13 @@ torch::jit::Function* ClassType::findMethod(const std::string& name) const {
     if (overloaded_methods.value().size() == 1) {
       return getMangledOverloadedMethod(overloaded_methods.value()[0]);
     }
+
+    if (overloaded_methods.value().size() > 1) {
+      std::cout << "S:" << overloaded_methods.value().size() << std::endl;
+      TORCH_WARN(
+          "There are multiple overloads registered for method name: ", name);
+    }
+
     return nullptr;
   }
 

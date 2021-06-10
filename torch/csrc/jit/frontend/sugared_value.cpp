@@ -639,8 +639,8 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
-  if (!type_->findMethod("__init__") &&
-      !type_->findOverloadedMethod("__init__")) {
+  if (!type_->findOverloadedMethod("__init__") &&
+      !type_->findMethod("__init__")) {
     throw ErrorReport(loc) << "Class " << type_->name()->name()
                            << " does not have an __init__ function defined";
   }
