@@ -673,6 +673,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::Metal;
         case DeviceType::Meta:
           return DispatchKey::Meta;
+        case DeviceType::HPU:
+          return DispatchKey::HPU;
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -772,6 +774,9 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::MLC:
     case DispatchKey::AutogradMLC:
       return DeviceType::MLC;
+    case DispatchKey::HPU:
+    case DispatchKey::AutogradHPU:
+      return DeviceType::HPU;
 
     // stuff that isn't real
     case DispatchKey::MSNPU:

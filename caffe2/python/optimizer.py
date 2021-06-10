@@ -1628,6 +1628,7 @@ class DecayAdagradOptimizer(Optimizer):
         beta2=0.999,
         epsilon=0.1,
         weight_decay=0.0,
+        ema_options=None,
         bias_correction_first=True,
         policy="fixed",
         engine="",
@@ -1643,6 +1644,15 @@ class DecayAdagradOptimizer(Optimizer):
         self.policy = policy
         self.engine = engine
         self.init_kwargs = kwargs
+        self._process_ema_options(ema_options)
+
+    def _process_ema_options(self, ema_options):
+        self.ema_enabled = True if ema_options else False
+        if self.ema_enabled:
+            self.ema_start = ema_options.get("ema_start", None)
+            self.ema_end = ema_options.get("ema_end", None)
+            self.ema_step = ema_options.get("ema_step", None)
+            self.ema_alpha = ema_options.get("ema_alpha", None)
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
@@ -1685,6 +1695,21 @@ class DecayAdagradOptimizer(Optimizer):
                 weight_decay=self.weight_decay,
                 bias_correction_first=self.bias_correction_first,
             )
+
+            if self.ema_enabled:
+                param_ema = str(param) + "_ema"
+                if not param_init_net.BlobIsDefined(param_ema):
+                    param_init_net.ConstantFill([param], param_ema, value=0.0)
+                    self._aux_params.local.append(param_ema)
+
+                net.EMA(
+                    [param, param_ema, iteration],
+                    [param, param_ema],
+                    ema_start=self.ema_start,
+                    ema_end=self.ema_end,
+                    ema_step=self.ema_step,
+                    ema_alpha=self.ema_alpha,
+                )
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale

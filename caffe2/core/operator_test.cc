@@ -49,7 +49,6 @@ class JustTestWithSomeOutput : public JustTest {
  public:
   using JustTest::JustTest;
   bool Run(int /* unused */ /*stream_id*/) override {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     *OperatorBase::Output<int>(0) = 5;
     return true;
   }
@@ -182,7 +181,6 @@ TEST(OperatorTest, TestParameterAccess) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddArgument<float>("arg0", 0.1, &op_def);
   AddArgument<vector<int>>("arg1", vector<int>{1, 2}, &op_def);
   AddArgument<string>("arg2", "argstring", &op_def);
@@ -210,7 +208,6 @@ TEST(OperatorTest, CannotAccessParameterWithWrongType) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddArgument<float>("arg0", 0.1f, &op_def);
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
@@ -228,7 +225,6 @@ TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddArgument<vector<float>>("arg0", vector<float>{0.1f}, &op_def);
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);

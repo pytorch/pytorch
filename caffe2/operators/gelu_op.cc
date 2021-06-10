@@ -31,7 +31,6 @@ operator()(const int N, const T* X, T* Y, CPUContext* context) const {
     Y_arr = X_arr *
         (((X_arr + X_arr.cube() * gelu_utils::kFastCoeff) * kAlpha).tanh() +
          T(1)) *
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<T>(0.5);
   } else {
     // y = x * P(X <= x) where X ~ N(0, 1)
@@ -63,13 +62,11 @@ bool GeluGradientFunctor<CPUContext>::Forward(
     dX_arr =
         (T(1) + dX_arr +
          X_arr * (T(1) - dX_arr.square()) * (kBeta * X_arr.square() + kAlpha)) *
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         dY_arr * static_cast<T>(0.5);
   } else {
     constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);
     math::CdfNorm<T, CPUContext>(N, X, dX, context);
     dX_arr = (dX_arr +
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               X_arr * (-X_arr.square() * static_cast<T>(0.5)).exp() * kAlpha) *
         dY_arr;
   }
