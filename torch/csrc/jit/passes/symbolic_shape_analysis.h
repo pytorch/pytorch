@@ -10,6 +10,8 @@ namespace jit {
 
 TORCH_API void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph);
 
+TORCH_API c10::optional<std::shared_ptr<Graph>>  PropagateShapesAndBuildLargeShapeComputeGraph(Node *beg, Node* end);
+
 // don't insert complete tensor shapes in shape compute graphs and instead
 // rely on our partial evaluation pipeline to propagate information.
 // this is a good proxy for our ability to propagate non-complete shape
