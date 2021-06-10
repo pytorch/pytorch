@@ -680,6 +680,35 @@ using CrossEntropyFuncOptions = CrossEntropyLossOptions;
 
 // ============================================================================
 
+/// Options for the `CrossEntropyLossWithSoftLabels` module.
+///
+/// Example:
+/// ```
+/// CrossEntropyLossWithSoftLabels model(CrossEntropyLossWithSoftLabelsOptions().reduction(torch::kMean));
+/// ```
+struct TORCH_API CrossEntropyLossWithSoftLabelsOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+namespace functional {
+/// Options for `torch::nn::functional::cross_entropy_with_soft_labels`.
+///
+/// See the documentation for `torch::nn::CrossEntropyLossWithSoftLabelsOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cross_entropy(input, target, F::CrossEntropyWithSoftLabelsFuncOptions().reduction(torch::kMean));
+/// ```
+using CrossEntropyWithSoftLabelsFuncOptions = CrossEntropyLossWithSoftLabelsOptions;
+} // namespace functional
+
+// ============================================================================
+
 /// Options for the `BCEWithLogitsLoss` module.
 ///
 /// Example:

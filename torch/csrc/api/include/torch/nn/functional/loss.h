@@ -862,6 +862,43 @@ inline Tensor cross_entropy(
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
+inline Tensor cross_entropy_with_soft_labels(
+    const Tensor& input,
+    const Tensor& target,
+    CrossEntropyWithSoftLabelsFuncOptions::reduction_t reduction) {
+  return torch::cross_entropy_loss_with_soft_labels(
+      input,
+      target,
+      enumtype::reduction_get_enum(reduction));
+}
+} // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.cross_entropy_with_soft_labels
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::CrossEntropyWithSoftLabelsFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cross_entropy_with_soft_labels(input, target, F::CrossEntropyWithSoftLabelsFuncOptions().reduction(torch::kMean));
+/// ```
+inline Tensor cross_entropy_with_soft_labels(
+    const Tensor& input,
+    const Tensor& target,
+    const CrossEntropyWithSoftLabelsFuncOptions& options = {}) {
+  return detail::cross_entropy_with_soft_labels(
+      input,
+      target,
+      options.reduction());
+}
+
+// ============================================================================
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail {
 inline Tensor binary_cross_entropy_with_logits(
   const Tensor& input, const Tensor& target, const Tensor& weight,
   BinaryCrossEntropyWithLogitsFuncOptions::reduction_t reduction, const Tensor& pos_weight) {

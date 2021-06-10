@@ -383,6 +383,27 @@ Tensor CrossEntropyLossImpl::forward(
 
 // ============================================================================
 
+CrossEntropyLossWithSoftLabelsImpl::CrossEntropyLossWithSoftLabelsImpl(
+    const CrossEntropyLossWithSoftLabelsOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {}
+
+void CrossEntropyLossWithSoftLabelsImpl::reset() {}
+
+void CrossEntropyLossWithSoftLabelsImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CrossEntropyLossWithSoftLabels()";
+}
+
+Tensor CrossEntropyLossWithSoftLabelsImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::detail::cross_entropy_with_soft_labels(
+    input,
+    target,
+    options.reduction());
+}
+
+// ============================================================================
+
 BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
   // NOLINTNEXTLINE(modernize-pass-by-value)
   const BCEWithLogitsLossOptions& options_) : options(options_) {

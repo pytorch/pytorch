@@ -111,6 +111,7 @@ torch::nn::PairwiseDistance|Yes|No
 torch::nn::L1Loss|Yes|No
 torch::nn::MSELoss|Yes|No
 torch::nn::CrossEntropyLoss|Yes|No
+torch::nn::CrossEntropyLossWithSoftLabels|Yes|No
 torch::nn::CTCLoss|Yes|No
 torch::nn::NLLLoss|Yes|No
 torch::nn::PoissonNLLLoss|Yes|No

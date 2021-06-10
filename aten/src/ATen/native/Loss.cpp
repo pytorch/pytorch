@@ -123,6 +123,21 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   return grad_input;
 }
 
+Tensor cross_entropy_loss_with_soft_labels(
+    const Tensor& self,
+    const Tensor& target,
+    int64_t reduction) {
+  TORCH_CHECK(self.dim() == 2, "Expected 2D input; got shape: ", self.sizes());
+  TORCH_CHECK(self.sizes() == target.sizes(), "Expected input and target to be the same shape; got: ",
+      self.sizes(), " and ", target.sizes());
+  return at::kl_div(
+      at::log_softmax(
+          self, 1, optTypeMetaToScalarType(self.options().dtype_opt())),
+      target,
+      reduction,
+      /*log_target=*/ false);
+}
+
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);

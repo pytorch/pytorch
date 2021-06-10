@@ -3824,6 +3824,13 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
         reduction=reduction)
 
 
+def cross_entropy_loss_with_soft_labels_reference(input, target, reduction='mean'):
+    return kldivloss_reference(
+        torch.log_softmax(input, 1),
+        target,
+        reduction=reduction)
+
+
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
                       reduction='mean'):
 
@@ -4136,7 +4143,8 @@ loss_reference_fns: Dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
-    'CrossEntropyLoss': cross_entropy_loss_reference
+    'CrossEntropyLoss': cross_entropy_loss_reference,
+    'CrossEntropyLossWithSoftLabels': cross_entropy_loss_with_soft_labels_reference
 }
 
 
@@ -4257,6 +4265,11 @@ criterion_tests = [
         input_size=(15, 10),
         target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         desc='weights',
+    ),
+    dict(
+        module_name='CrossEntropyLossWithSoftLabels',
+        input_size=(15, 10),
+        target_fn=lambda: torch.empty(15, 10).uniform_(),
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -4549,6 +4562,16 @@ criterion_tests = [
             loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='dim_is_3',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLossWithSoftLabels',
+        input_size=(5, 3),
+        target_fn=lambda: torch.rand(5, 3),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLossWithSoftLabels'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='2d',
         check_bfloat16=False,
     ),
     dict(

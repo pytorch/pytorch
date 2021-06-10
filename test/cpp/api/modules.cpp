@@ -2429,6 +2429,25 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(ModulesTest, CrossEntropyLossWithSoftLabels) {
+  CrossEntropyLossWithSoftLabels loss;
+  auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({{1., 0.}, {0., 1.}}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  // Using one-hot labels should be equivalent to cross entropy loss except
+  // smaller by a factor of num classes (2 in this case) for the mean reduction.
+  auto expected = torch::tensor(0.6931 / 2., torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(
+    CrossEntropyLossWithSoftLabels(CrossEntropyLossWithSoftLabelsOptions().reduction(torch::kMean))
+      ->forward(input, target).allclose(expected, 1e-04));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -4916,6 +4935,12 @@ TEST_F(ModulesTest, PrettyPrintNLLLoss) {
 TEST_F(ModulesTest, PrettyPrinCrossEntropyLoss) {
   ASSERT_EQ(
       c10::str(CrossEntropyLoss()), "torch::nn::CrossEntropyLoss()");
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(ModulesTest, PrettyPrinCrossEntropyLossWithSoftLabels) {
+  ASSERT_EQ(
+      c10::str(CrossEntropyLossWithSoftLabels()), "torch::nn::CrossEntropyLossWithSoftLabels()");
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

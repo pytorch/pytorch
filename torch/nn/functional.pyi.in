@@ -242,6 +242,9 @@ def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ...,
                   ignore_index: int = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
 
 
+def cross_entropy_with_soft_labels(input: Tensor, target: Tensor, reduction: str = ...) -> Tensor: ...
+
+
 def binary_cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ...,
                          size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
                          reduction: str = ...) -> Tensor: ...

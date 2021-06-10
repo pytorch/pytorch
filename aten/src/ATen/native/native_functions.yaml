@@ -6505,6 +6505,9 @@
 - func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
   python_module: nn
 
+- func: cross_entropy_loss_with_soft_labels(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+  python_module: nn
+
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   dispatch:
     CPU: legacy_lstsq_out

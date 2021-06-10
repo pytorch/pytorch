@@ -2826,6 +2826,41 @@ def cross_entropy(
     return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
 
 
+def cross_entropy_with_soft_labels(
+    input: Tensor,
+    target: Tensor,
+    reduction: str = "mean",
+) -> Tensor:
+    r"""This criterion combines `log_softmax` and `kl_div` in a single function.
+
+    See :class:`~torch.nn.CrossEntropyLossWithSoftLabels` for details.
+
+    Args:
+        input (Tensor) : :math:`(N, C)` where `N = minibatch size` and `C = number of classes`
+        target (Tensor) : :math:`(N, C)`, same shape as the input
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
+
+    Examples::
+
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> loss = F.cross_entropy_with_soft_labels(input, target)
+        >>> loss.backward()
+    """
+    if has_torch_function_variadic(input, target):
+        return handle_torch_function(
+            cross_entropy_with_soft_labels,
+            (input, target),
+            input,
+            target,
+            reduction=reduction,
+        )
+    return torch._C._nn.cross_entropy_loss_with_soft_labels(input, target, _Reduction.get_enum(reduction))
+
+
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,

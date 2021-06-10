@@ -1041,6 +1041,10 @@ class CrossEntropyLoss(_WeightedLoss):
     is specified, this criterion also accepts this class index (this index may not
     necessarily be in the class range).
 
+    If you need to specify an arbitrary target distribution (e.g. if using smoothed
+    labels), check out :class:`~torch.nn.CrossEntropyLossWithSoftLabels`, which is more
+    flexible but less performant than this criterion.
+
     The loss can be described as:
 
     .. math::
@@ -1119,6 +1123,91 @@ class CrossEntropyLoss(_WeightedLoss):
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.cross_entropy(input, target, weight=self.weight,
                                ignore_index=self.ignore_index, reduction=self.reduction)
+
+
+class CrossEntropyLossWithSoftLabels(_Loss):
+    r"""This criterion combines :class:`~torch.nn.LogSoftmax` and :class:`~torch.nn.KLDivLoss` in
+    one single class. It is useful when training a classification problem with `C` classes when
+    "soft labels" are required, such as when utilizing label smoothing or blended labels.
+
+    The `input` is expected to contain raw, unnormalized scores for each class and the `target`
+    should match the `input` shape and contain the target distribution over the classes.
+
+    The loss can be described as:
+
+    .. math::
+        L = l_{n,c} = y_{n,c} \cdot \left( \log y_{n,c} - \\
+        \log\left(\frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} \right)
+
+    where :math:`x_{n,c}` represents each element of ``input``, :math:`y_{n,c}` represents each element of
+    ``target``, and :math:`L` has the same shape as ``input`` and ``target``.  If :attr:`reduction` is not
+    ``'none'`` (default ``'mean'``), then:
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';} \\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
+        \end{cases}
+
+    .. note::
+        This criterion differs from :class:`~torch.nn.CrossEntropyLoss` in that it allows for
+        "soft labels", whereas :class:`~torch.nn.CrossEntropyLoss` requires a single class index label
+        per minibatch item. If you only need a single class label, you should use
+        :class:`~torch.nn.CrossEntropyLoss` instead, as it performs better at the cost of flexibility.
+
+    .. note::
+        Using one-hot encoded labels with this criterion is equivalent to using
+        :class:`~torch.nn.CrossEntropyLoss` with the corresponding class index labels, with one
+        caveat: when ``reduction='mean'``, the loss values returned by this criterion are a constant factor
+        of `C` (i.e. num classes) smaller than those returned by :class:`~torch.nn.CrossEntropyLoss`. See the
+        example section below for details on this.
+
+    Args:
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
+            be applied, ``'mean'``: the mean of the output is taken,
+            ``'sum'``: the output will be summed. Default: ``'mean'``
+
+    Shape:
+        - Input: :math:`(N, C)` where `N = minibatch size` and `C = number of classes`
+        - Target: :math:`(N, C)`, same shape as the input
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, C)`
+
+    Examples::
+
+        >>> N, C = 5, 3
+        >>> criterion = nn.CrossEntropyLossWithSoftLabels()
+        >>> input = torch.randn(N, C, requires_grad=True)
+        >>> target = torch.randn(N, C)
+        >>> loss = criterion(input, target)
+        >>> loss.backward()
+
+        >>> # Example demonstrating difference between nn.CrossEntropyLoss and
+        >>> # nn.CrossEntropyLossWithSoftLabels with one-hot labels.
+        >>> N, C = 5, 3
+        >>> ce_hard = nn.CrossEntropyLoss(reduction='none')
+        >>> ce_soft = nn.CrossEntropyLossWithSoftLabels(reduction='none')
+        >>> input = torch.randn(N, C, requires_grad=True)
+        >>> target = torch.tensor([1, 2, 1], dtype=torch.long)
+        >>> target_one_hot = torch.nn.functional.one_hot(target, num_classes=C).to(torch.float32)
+        >>> # Note the shape difference for the soft label case; this is why reduction='mean'
+        >>> # results in loss of a constant factor of C smaller for the soft label case.
+        >>> ce_hard(input, target)
+        tensor([2.4831, 0.6119, 0.4749, 0.5124, 1.2246], grad_fn=<NllLossBackward>)
+        >>> ce_soft(input, target_one_hot)
+        tensor([[0.0000, 2.4831, 0.0000],
+                [0.0000, 0.0000, 0.6119],
+                [0.0000, 0.4749, 0.0000],
+                [0.5124, 0.0000, 0.0000],
+                [0.0000, 0.0000, 1.2246]], grad_fn=<KlDivBackward>)
+    """
+    __constants__ = ['reduction']
+
+    def __init__(self, reduction: str = 'mean') -> None:
+        super().__init__(reduction=reduction)
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.cross_entropy_with_soft_labels(input, target, reduction=self.reduction)
 
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):

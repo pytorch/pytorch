@@ -747,6 +747,45 @@ struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
 /// module storage semantics.
 TORCH_MODULE(CrossEntropyLoss);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossEntropyLossWithSoftLabels ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Creates a criterion that combines :func:`nn.LogSoftmax` and
+/// :func:`nn.KLDivLoss` in one single class.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.CrossEntropyLossWithSoftLabels to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::CrossEntropyLossWithSoftLabelsOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// CrossEntropyLossWithSoftLabels model(CrossEntropyLossWithSoftLabelsOptions().reduction(torch::kMean));
+/// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
+struct TORCH_API CrossEntropyLossWithSoftLabelsImpl : public Cloneable<CrossEntropyLossWithSoftLabelsImpl> {
+  explicit CrossEntropyLossWithSoftLabelsImpl(
+      const CrossEntropyLossWithSoftLabelsOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `CrossEntropyLossWithSoftLabels` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(
+      const Tensor& input,
+      const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  CrossEntropyLossWithSoftLabelsOptions options;
+};
+
+/// A `ModuleHolder` subclass for `CrossEntropyLossWithSoftLabelsImpl`.
+/// See the documentation for `CrossEntropyLossWithSoftLabelsImpl` class to learn what methods it
+/// provides, and examples of how to use `CrossEntropyLossWithSoftLabels` with `torch::nn::CrossEntropyLossWithSoftLabelsOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(CrossEntropyLossWithSoftLabels);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BCEWithLogitsLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// This loss combines a `Sigmoid` layer and the `BCELoss` in one single

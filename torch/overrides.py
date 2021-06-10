@@ -665,6 +665,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                                     reduce=None, reduction='mean': -1),
         torch.nn.functional.cross_entropy: (lambda input, target, weight=None, size_average=None, ignore_index=-100,
                                             reduce=None, reduction="mean": -1),
+        torch.nn.functional.cross_entropy_with_soft_labels: (lambda input, target, reduction="mean": -1),
         torch.nn.functional.ctc_loss: (lambda log_probs, targets, input_lengths, target_lengths, blank=0,
                                        reduction='mean', zero_infinity=False: -1),
         torch.nn.functional.dropout: lambda input, p=0.5, training=True, inplace=False: -1,

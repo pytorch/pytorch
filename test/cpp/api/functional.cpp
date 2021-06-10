@@ -844,6 +844,20 @@ TEST_F(FunctionalTest, CrossEntropy) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(FunctionalTest, CrossEntropyWithSoftLabels) {
+  auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::kFloat);
+  auto target = torch::tensor({{1., 0.}, {0., 1.}}, torch::kFloat);
+  auto output = F::cross_entropy_with_soft_labels(
+      input, target, F::CrossEntropyWithSoftLabelsFuncOptions().reduction(torch::kMean));
+  // Using one-hot labels should be equivalent to cross entropy loss except
+  // smaller by a factor of num classes (2 in this case) for the mean reduction.
+  auto expected = torch::tensor(0.6931 / 2., torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_TRUE(F::cross_entropy_with_soft_labels(input, target).allclose(expected, 1e-04));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
