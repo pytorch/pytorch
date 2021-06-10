@@ -366,8 +366,6 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, I
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   Tensor values = expand_values_if_needed(values_);
 
@@ -759,8 +757,6 @@ Tensor sparse_mask_helper_cpu(
 
   // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this
   // flatten value `index` to the original position `i`
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  auto t_indices_accessor = t_i.accessor<int64_t, 2>();
   for (int64_t i = 0; i < t_nnz; i++) {
     int64_t index = ti_flattened_indices.data_ptr<int64_t>()[i];
     t_flatten_indices[index] = i;
