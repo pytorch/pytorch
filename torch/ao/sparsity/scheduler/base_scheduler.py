@@ -1,5 +1,5 @@
 
-from torch.ao.sparsifier.base_sparsifier import BaseSparsifier
+from torch.ao.sparsity import BaseSparsifier
 
 from functools import wraps
 import weakref
