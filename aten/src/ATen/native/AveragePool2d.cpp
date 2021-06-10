@@ -64,6 +64,57 @@ TORCH_META_FUNC(avg_pool2d) (
   }
 }
 
+TORCH_META_FUNC(avg_pool2d_backward) (
+  const Tensor& gradOutput_,
+  const Tensor& input,
+  IntArrayRef kernel_size,
+  IntArrayRef stride,
+  IntArrayRef padding,
+  bool ceil_mode,
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override
+) {
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
+    "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
+  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
+    "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
+  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+    "avg_pool2d: padding must either be a single int, or a tuple of two ints");
+  const int padH = safe_downcast<int, int64_t>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
+
+  /* sizes */
+  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
+  const int64_t nInputPlane = input.size(-3); // number of channels (or colors)
+  const int64_t inputHeight = input.size(-2);
+  const int64_t inputWidth = input.size(-1);
+  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
+
+  avg_pool2d_backward_shape_check(
+    input,
+    gradOutput_,
+    nbatch,
+    kH, kW, dH, dW, padH, padW,
+    nInputPlane,
+    inputHeight, inputWidth,
+    outputHeight, outputWidth,
+    input.suggest_memory_format());
+
+  /* resize output */
+  set_output(0, input.sizes(), input.options());
+}
+
 } // namespace meta
 
 namespace native {
@@ -300,8 +351,9 @@ static void avg_pool2d_backward_out_frame(
   });
 }
 
-Tensor& avg_pool2d_backward_out_cpu_template(
-  Tensor& gradInput,
+} // anonymous namespace
+
+TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (
   const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
@@ -309,26 +361,18 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
-{
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
+  c10::optional<int64_t> divisor_override,
+  const Tensor& gradInput
+) {
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
-  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
-    "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW :
                  stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
-  const int64_t ndim = input.ndimension();
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
@@ -340,22 +384,9 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
 
-  avg_pool2d_backward_shape_check(
-    input,
-    gradOutput_,
-    nbatch,
-    kH, kW, dH, dW, padH, padW,
-    nInputPlane,
-    inputHeight, inputWidth,
-    outputHeight, outputWidth,
-    input.suggest_memory_format());
-
   /* get contiguous gradOutput */
   const Tensor gradOutput = gradOutput_.contiguous();
 
-  /* resize */
-  gradInput.resize_as_(input);
-  gradInput.zero_();
   TORCH_CHECK(gradInput.is_contiguous(), "gradInput must be contiguous");
 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
@@ -378,57 +409,6 @@ Tensor& avg_pool2d_backward_out_cpu_template(
          divisor_override);
     }
   );
-
-  return gradInput;
-}
-
-} // namespace
-
-Tensor& avg_pool2d_backward_out_cpu(const Tensor& gradOutput_,
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
-  Tensor& gradInput)
-{
-  avg_pool2d_backward_out_cpu_template(
-    gradInput,
-    gradOutput_,
-    input,
-    kernel_size,
-    stride,
-    padding,
-    ceil_mode,
-    count_include_pad,
-    divisor_override);
-  return gradInput;
-}
-
-Tensor avg_pool2d_backward_cpu(
-  const Tensor& gradOutput_,
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
-{
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  avg_pool2d_backward_out_cpu_template(
-    gradInput,
-    gradOutput_,
-    input,
-    kernel_size,
-    stride,
-    padding,
-    ceil_mode,
-    count_include_pad,
-    divisor_override);
-  return gradInput;
 }
 
 } // at::native

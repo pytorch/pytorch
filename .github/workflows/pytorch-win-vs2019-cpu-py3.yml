@@ -16,6 +16,7 @@ env:
   BUILD_WHEEL: 1
   CUDA_VERSION: "cpu"
   IN_CI: 1
+  INSTALL_WINDOWS_SDK: 1
   JOB_BASE_NAME: test
   PYTHON_VERSION: "3.6"
   SCCACHE_BUCKET: "ossci-compiler-cache"
@@ -34,19 +35,12 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-      - name: Install 7zip if not already installed
-        shell: powershell
-        run: |
-          choco install 7zip.install -y
+        with:
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
-          choco install vswhere -y
           .\.circleci\scripts\vs_install.ps1
-      - name: Install Windows 10 SDK
-        shell: powershell
-        run: |
-          .\.github\scripts\install_windows_sdk.ps1
       - name: Build
         shell: bash
         run: |
@@ -80,19 +74,12 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-      - name: Install 7zip if not already installed
-        shell: powershell
-        run: |
-          choco install 7zip.install -y
+        with:
+          submodules: recursive
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
-          choco install vswhere -y
           .\.circleci\scripts\vs_install.ps1
-      - name: Install Windows 10 SDK
-        shell: powershell
-        run: |
-          .\.github\scripts\install_windows_sdk.ps1
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
