@@ -591,26 +591,26 @@ and the first action will be taken.
 
 ``intern``
 """"""""""
-If a module is ``intern``ed, it will be placed into the package.
+If a module is ``intern``-ed, it will be placed into the package.
 
 This action is your model code, or any related code you want to package. For example, if you are trying to package a ResNet from ``torchvision``,
 you will need to ``intern`` the module torchvision.models.resnet.
 
-On package import, when your packaged code tries to import an ``intern``ed module, PackageImporter will look inside your package for that module.
+On package import, when your packaged code tries to import an ``intern``-ed module, PackageImporter will look inside your package for that module.
 If it can’t find that module, an error will be raised. This ensures that each :class:`PackageImporter` is isolated from the loading environment—even
 if you have ``my_interned_module`` available in both your package and the loading environment, :class:`PackageImporter` will only use the version in your
 package.
 
-**Note**: Only Python source modules can be ``intern``ed. Other kinds of modules, like C extension modules and bytecode modules, will raise an error if
-you attempt to ``intern`` them. These kinds of modules need to be ``mock``ed or ``extern``ed.
+**Note**: Only Python source modules can be ``intern``-ed. Other kinds of modules, like C extension modules and bytecode modules, will raise an error if
+you attempt to ``intern`` them. These kinds of modules need to be ``mock``-ed or ``extern``-ed.
 
 
 ``extern``
 """"""""""
-If a module is ``extern``ed, it will not be packaged. Instead, it will be added to a list of external dependencies for this package. You can find this
+If a module is ``extern``-ed, it will not be packaged. Instead, it will be added to a list of external dependencies for this package. You can find this
 list on ``package_exporter.extern_modules``.
 
-On package import, when time packaged code tries to import an ``extern``ed module, :class:`PackageImporter` will use the default Python importer to find
+On package import, when time packaged code tries to import an ``extern``-ed module, :class:`PackageImporter` will use the default Python importer to find
 that module, as if you did ``importlib.import_module("my_externed_module")``. If it can’t find that module, an error will be raised.
 
 In this way, you can depend on third-party libraries like ``numpy`` and ``scipy`` from within your package without having to package them too.
@@ -621,7 +621,7 @@ for your package, try to limit your use of ``extern``.
 
 ``mock``
 """"""""
-If a module is ``mock``ed, it will not be packaged. Instead a stub module will be packaged in its place. The stub module will allow you to retrieve
+If a module is ``mock``-ed, it will not be packaged. Instead a stub module will be packaged in its place. The stub module will allow you to retrieve
 objects from it (so that ``from my_mocked_module import foo`` will not error), but any use of that object will raise a ``NotImplementedError``.
 
 ``mock`` should be used for code that you “know” will not be needed in the loaded package, but you still want to available for use in non-packaged contents.
