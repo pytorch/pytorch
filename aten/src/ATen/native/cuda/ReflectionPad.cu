@@ -146,7 +146,7 @@ __global__ void reflection_pad2d_backward_out_kernel(
   }
 }
 template <typename scalar_t, typename F>
-static __forceinline__ __device__ void parallel_reflection_pad3d(
+__device__ inline void parallel_reflection_pad3d(
     PackedTensorAccessor64<scalar_t, 5> input,
     PackedTensorAccessor64<scalar_t, 5> output,
     int64_t pad_left,
