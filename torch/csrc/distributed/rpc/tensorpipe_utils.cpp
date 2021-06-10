@@ -261,7 +261,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     tpMessage.tensors.back().targetDevice = std::move(targetDevice);
 
     if (maybeCopiedTensor.has_value()) {
-      buffers.copiedTensors.push_back(std::move(*maybeCopiedTensor));
+      buffers.copiedTensors.push_back(std::move(maybeCopiedTensor).value());
     }
   }
 
