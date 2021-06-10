@@ -4713,8 +4713,8 @@ for shape in [(1,), ()]:
         self.assertEqual(out.grad_fn._saved_weight, torch.ones((5,)))     # c10:optional<Tensor> -> Tensor?
 
         out.sum().backward()
-        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
-            out.grad_fn._saved_weight
+        # weight is a leaf
+        self.assertIs(out.grad_fn._saved_weight, loss.weight)
 
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -5408,6 +5408,19 @@ for shape in [(1,), ()]:
             self.assertFalse(ref.expired())
         gc.collect()
         self.assertTrue(ref.expired())
+
+    def test_no_unnecessary_unwrapping(self):
+        a = torch.rand(1, requires_grad=True)
+        b = a * a
+        c = a * b
+
+        # a is leaf
+        self.assertIs(b.grad_fn._saved_self, a)
+        self.assertIs(b.grad_fn._saved_other, a)
+        self.assertIs(c.grad_fn._saved_self, a)
+
+        # b is not an output
+        self.assertIs(c.grad_fn._saved_other, b)
 
 
 def index_perm_variable(shape, max_indices):

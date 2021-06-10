@@ -38,30 +38,29 @@ class TORCH_API SavedVariable {
   Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
   void reset_data() {
-    return data_.reset();
+    if (!saved_original) {
+      var_.reset();
+    }
   }
 
   void reset_grad_function() {
-    grad_fn_.reset();
+    // No op
   }
 
  private:
-  at::Tensor data_;
+  // The variable to save (i.e. a wrapper around a c10::intrusive_ptr<at::TensorImpl>).
+  // If storing the variable would lead to reference cycles, store its
+  // tensor_data instead
+  Variable var_;
 
   // This field is used to store the forward AD gradients associated with
   // the saved Tensor. Note that this shared_ptr must never be shared with
   // either the saved Tensor or the unpacked Tensor. See note [ Using ForwardGrad ]
   std::shared_ptr<ForwardGrad> fw_grad_;
 
-  // The gradient function associated with this node. If has_grad_fn
-  // is false, then this is a leaf node. Note that the grad_fn is not saved if
-  // it would create a circular reference. In that case, the grad_fn must be
-  // passed in to the unpack function when reconstructing the Variable.
-  std::shared_ptr<Node> grad_fn_;
   // Weak version of grad_fn_ that prevents leaks in rebase_history() for
   // inplace views.
   std::weak_ptr<Node> weak_grad_fn_;
-  std::weak_ptr<Node> grad_accumulator_;
   c10::VariableVersion version_counter_;
 
   uint32_t saved_version_ = 0;
@@ -70,5 +69,6 @@ class TORCH_API SavedVariable {
   bool requires_grad_ = false;
   bool has_grad_fn_ = false;
   bool is_inplace_view_ = false;
+  bool saved_original = false;
 };
 }} // namespace torch::autograd
