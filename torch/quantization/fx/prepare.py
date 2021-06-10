@@ -30,7 +30,7 @@ from .quantization_patterns import (
 
 from .quantization_types import Pattern
 
-from ._equalize import EqualizationQConfig
+from ._equalize import _InputEqualizationObserver, _WeightEqualizationObserver
 
 from .graph_module import (
     ObservedGraphModule,
@@ -157,7 +157,10 @@ def insert_observer(
     if model_device:
         observer.to(model_device)
     # add observer module as attribute
-    prefix = node.name + '_activation_post_process_'
+    if isinstance(observer, _InputEqualizationObserver) or isinstance(observer, _WeightEqualizationObserver):
+        prefix = node.name + '_equalization_process_'
+    else:
+        prefix = node.name + '_activation_post_process_'
     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
     observer_name = get_new_observer_name(model)
     setattr(model, observer_name, observer)
@@ -244,6 +247,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     node_name_to_target_dtype: Dict[str, Any],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
+    equalization_qconfig: Any,
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -257,7 +261,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             new_inner_arg = maybe_insert_input_observer_for_arg_or_kwarg(
                 node, inner_arg, qconfig, model, modules,
                 graph, node_name_to_target_dtype,
-                qhandler, prepare_custom_config_dict)
+                qhandler, prepare_custom_config_dict,
+                equalization_qconfig)
             new_arg_to_return.append(new_inner_arg)
         return new_arg_to_return
 
@@ -267,6 +272,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
     # default (no observer)
     new_arg = arg
+    act_eq_process_ctr = None
 
     is_standalone_module = qhandler is not None and \
         isinstance(qhandler, StandaloneModuleQuantizeHandler)
@@ -276,10 +282,13 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         is_weight = node_arg_is_weight(node, arg)
         assert qconfig is not None
 
+        # If this node needs to be equalized, we will set the get the observer
+        if equalization_qconfig is not None:
+            act_eq_process_ctr = equalization_qconfig.weight if is_weight else \
+                equalization_qconfig.input_activation
+
         act_post_process_ctr = qconfig.weight if is_weight else \
             qconfig.activation
-        if isinstance(qconfig, EqualizationQConfig) and not is_weight:
-            act_post_process_ctr = qconfig.input_activation
 
         is_bias = node_arg_is_bias(node, arg)
         is_activation = not (is_weight or is_bias)
@@ -336,6 +345,14 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 (node_dtype != torch.float)
             )
 
+    # If we need to insert an equalization observer, insert it before the
+    # quantization observer
+    if act_eq_process_ctr is not None:
+        new_eq_obs_mod = act_eq_process_ctr()
+        new_eq_obs_node = insert_observer(
+            arg, new_eq_obs_mod, model, modules, graph)
+        arg = new_eq_obs_node
+
     if needs_obs:
 
         new_obs_mod = act_post_process_ctr()
@@ -377,6 +394,7 @@ def maybe_insert_input_observers_for_node(
     node_name_to_target_dtype: Dict[str, Any],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
+    equalization_qconfig: Any,
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -403,7 +421,8 @@ def maybe_insert_input_observers_for_node(
         new_arg = maybe_insert_input_observer_for_arg_or_kwarg(
             node, arg, qconfig, model, modules, graph,
             node_name_to_target_dtype,
-            qhandler, prepare_custom_config_dict)
+            qhandler, prepare_custom_config_dict, 
+            equalization_qconfig)
         new_args.append(new_arg)
 
     new_kwargs = {}
@@ -411,7 +430,8 @@ def maybe_insert_input_observers_for_node(
         new_kwarg = maybe_insert_input_observer_for_arg_or_kwarg(
             node, kwarg, qconfig, model, modules, graph,
             node_name_to_target_dtype,
-            qhandler, prepare_custom_config_dict)
+            qhandler, prepare_custom_config_dict,
+            equalization_qconfig)
         new_kwargs[k] = new_kwarg
 
     # assign the new args and kwargs to the node, inplace
@@ -464,23 +484,7 @@ def maybe_insert_output_observer_for_node(
                     get_default_output_activation_post_process_map().get(
                         matched_pattern,
                         act_post_process_ctr)
-
-            # Find the next node in the graph
-            next_node = node.next
-            while next_node.op not in ('call_module', 'call_method', 'call_function', 'output'):
-                next_node = next_node.next
-
-            if next_node:
-                _, _, _, _, next_qconfig = matches.get(
-                    next_node.name, (None, None, None, None, None))
-
-                # If the current and next layer need to be equalized, then we
-                # will set the output observer to be the input observer
-                if isinstance(qconfig, EqualizationQConfig) and isinstance(next_qconfig, EqualizationQConfig):
-                    act_post_process_ctr = next_qconfig.input_activation
-
             observer = act_post_process_ctr()
-
             new_obs = insert_observer(node, observer, model, modules, graph)
             # set the type, so the next node can read it
             node_name_to_target_dtype[new_obs.name] = \
@@ -733,6 +737,7 @@ def insert_observers_for_model(
     qconfig_map: Dict[str, QConfigAny],
     graph: Graph,
     prepare_custom_config_dict: Dict[str, Any],
+    equalization_config_map: Dict[str, Any],
     input_quantized_idxs: List[int],
     output_quantized_idxs: List[int],
 ) -> Optional[Node]:
@@ -807,6 +812,7 @@ def insert_observers_for_model(
         # check for matches
         root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
+        equalization_qconfig = equalization_config_map.get(node.name, None)
 
         if node.op == 'placeholder':
             # if a graph input is in fp32, it does not need observation
@@ -834,7 +840,8 @@ def insert_observers_for_model(
                     maybe_insert_input_observers_for_node(
                         node, qconfig, model, modules, graph,
                         node_name_to_target_dtype,
-                        qhandler, prepare_custom_config_dict)
+                        qhandler, prepare_custom_config_dict,
+                        equalization_qconfig)
 
                     is_last_node_of_pattern = root_node is node
                     is_like_copy_node = \
@@ -955,6 +962,7 @@ def _prepare(
         qconfig_dict: Any,
         node_name_to_scope: Dict[str, Tuple[str, type]],
         prepare_custom_config_dict: Optional[Dict[str, Any]],
+        equalization_qconfig_dict: Optional[Dict[str, Any]],
         is_standalone_module: bool) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
@@ -978,6 +986,8 @@ def _prepare(
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
+    if equalization_qconfig_dict is None:
+        equalization_qconfig_dict = {}
 
     additional_quant_patterns = \
         prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -995,6 +1005,7 @@ def _prepare(
         get_default_quant_patterns(), additional_quant_patterns)
 
     convert_dict_to_ordered_dict(qconfig_dict)
+    convert_dict_to_ordered_dict(equalization_qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)
@@ -1013,6 +1024,7 @@ def _prepare(
     modules = dict(model.named_modules())
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
+    equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_dict, node_name_to_scope)
     qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_dict, node_name_to_scope)
 
     # match the patterns that will get quantized
@@ -1039,7 +1051,8 @@ def _prepare(
 
     result_node = insert_observers_for_model(
         model, modules, matches, qconfig_map,
-        model.graph, prepare_custom_config_dict,
+        model.graph, prepare_custom_config_dict, 
+        equalization_qconfig_map,
         input_quantized_idxs, output_quantized_idxs)
 
     save_state(model, qconfig_map, node_name_to_scope, patterns, prepare_custom_config_dict)

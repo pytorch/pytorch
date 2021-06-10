@@ -7,9 +7,6 @@ from torch.quantization.fx._equalize import (
     _InputEqualizationObserver,
     _WeightEqualizationObserver,
     calculate_equalization_scale,
-    EqualizationQConfig,
-    input_equalization_observer,
-    weight_equalization_observer,
     default_equalization_qconfig,
 )
 
@@ -129,7 +126,9 @@ class TestEqualizeFx(QuantizationTestCase):
     def test_input_weight_equalization_prepare(self):
         """ Tests that graphs created after prepare_fx is as expected
         """
-        default_qconfig_dict = {
+        qconfig_dict = {"": default_qconfig}
+
+        default_equalization_qconfig_dict = {
             "": default_qconfig,
             "object_type": [(nn.Linear, default_equalization_qconfig),
                             (nn.functional.linear, default_equalization_qconfig)]
@@ -146,7 +145,24 @@ class TestEqualizeFx(QuantizationTestCase):
 
         linear_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 1,
-            ns.call_module(MinMaxObserver): 1,
+            ns.call_module(MinMaxObserver): 2,
+        }
+
+        # Test with two linear layers
+        class Linear2Module(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(1, 1)
+                self.linear2 = nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                return x
+
+        linear2_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 2,
+            ns.call_module(MinMaxObserver): 3,
         }
 
         class Linear(torch.nn.Module):
@@ -163,17 +179,15 @@ class TestEqualizeFx(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear1 = Linear()
-                self.linear2 = Linear()
 
             def forward(self, x):
                 x = self.linear1(x)
-                x = self.linear2(x)
                 return x
 
         functionalLinear_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
-            ns.call_module(_WeightEqualizationObserver): 2,
-            ns.call_module(MinMaxObserver): 1,
+            ns.call_module(_WeightEqualizationObserver): 1,
+            ns.call_module(MinMaxObserver): 3,
         }
 
         # Test where we have a Linear layer followed by a fp32 operation
@@ -191,36 +205,25 @@ class TestEqualizeFx(QuantizationTestCase):
                 x = self.linear2(x)
                 return x
 
-        fp32_qconfig_dict = {
+        fp32_equalization_qconfig_dict = {
             "": None,
             "object_type": [(nn.Linear, default_equalization_qconfig),
                             (nn.functional.linear, default_equalization_qconfig)]
         }
 
         functionalLinearFP32_node_occurrence = {
-            ns.call_module(_InputEqualizationObserver): 2,
+            ns.call_module(_InputEqualizationObserver): 4,
             ns.call_module(_WeightEqualizationObserver): 2,
-            ns.call_module(MinMaxObserver): 2,
+            ns.call_module(MinMaxObserver): 6,
         }
 
-        # Test where the output observer to be an InputEqualizationObserver
-        equalization_qconfig = EqualizationQConfig(input_activation=input_equalization_observer,
-                                                   output_activation=input_equalization_observer,
-                                                   weight=weight_equalization_observer)
-        specified_qconfig_dict = {"": default_qconfig,
-                                  "object_type": [(nn.Linear, equalization_qconfig)]}
+        tests = [(LinearModule, default_equalization_qconfig_dict, linear_node_occurrence),
+                 (Linear2Module, fp32_equalization_qconfig_dict, linear2_node_occurrence),
+                 (FunctionalLinearModule, default_equalization_qconfig_dict, functionalLinear_node_occurrence),
+                 (FunctionalLinearFP32Module, fp32_equalization_qconfig_dict, functionalLinearFP32_node_occurrence)]
 
-        specified_node_occurrence = {
-            ns.call_module(_InputEqualizationObserver): 2,
-            ns.call_module(MinMaxObserver): 0,
-        }
 
-        tests = [(LinearModule, default_qconfig_dict, linear_node_occurrence),
-                 (FunctionalLinearModule, default_qconfig_dict, functionalLinear_node_occurrence),
-                 (FunctionalLinearFP32Module, fp32_qconfig_dict, functionalLinearFP32_node_occurrence),
-                 (LinearModule, specified_qconfig_dict, specified_node_occurrence)]
-
-        for (M, qconfig_dict, node_occurrence) in tests:
+        for (M, equalization_qconfig_dict, node_occurrence) in tests:
             m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict)
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
