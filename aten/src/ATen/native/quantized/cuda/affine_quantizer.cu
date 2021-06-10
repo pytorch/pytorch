@@ -95,28 +95,22 @@ void quantize_tensor_per_channel_affine_cuda(
                   .build();
 
   AT_DISPATCH_QINT_TYPES(
-      qtensor.scalar_type(),
-      "quantize_tensor_per_channel_affine_cuda_handler",
-      [&]() {
-        constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
-        constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
-        // trying to match _quantize_per_channel_ref_nd in
-        // test_quantized_tensor.py
-        gpu_kernel(
-            iter,
-            [=] GPU_LAMBDA(
-                float raw_val,
-                scalar_t quantized_val,
-                double scale,
-                int64_t zero_point) -> scalar_t {
-              int64_t qvalue =
-                  static_cast<int64_t>(nearbyint(raw_val / scale) + zero_point);
-              qvalue = std::max<int64_t>(qvalue, qmin);
-              qvalue = std::min<int64_t>(qvalue, qmax);
-              quantized_val.val_ = qvalue;
-              return quantized_val;
-            });
-      });
+    qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cuda_handler", [&]() {
+      constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
+      constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
+      // trying to match _quantize_per_channel_ref_nd in test_quantized_tensor.py
+      gpu_kernel(
+          iter,
+          [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, double scale, int64_t zero_point) -> scalar_t {
+
+            int64_t qvalue =
+                static_cast<int64_t>(nearbyint(raw_val/scale) + zero_point);
+            qvalue = std::max<int64_t>(qvalue, qmin);
+            qvalue = std::min<int64_t>(qvalue, qmax);
+            quantized_val.val_ = qvalue;
+            return quantized_val;
+          });
+    });
 }
 
 void dequantize_tensor_per_channel_affine_cuda(
