@@ -17,7 +17,7 @@ from torch.testing._internal.common_jit import JitCommonTestCase, check_against_
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
-
+from types import LambdaType
 
 # Get names of all the operators which have entry in `method_tests` (legacy testing infra)
 method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
@@ -380,9 +380,9 @@ class TestCommon(JitCommonTestCase):
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or
                                                    op.supports_complex_autograd(torch.device(device).type))
-
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
+        tested = False
         for sample in samples:
             # Acquires variants to test
             func = op.get_op()
@@ -396,6 +396,15 @@ class TestCommon(JitCommonTestCase):
             for func_type, variant in variants.items():
                 if variant is None:
                     continue
+
+                # scripting and check_alias_analysis do not work with lambdas
+                # lambdas are typically used as a way to simulate methods without
+                # functional variants, so rely on the other variant for testing
+                # for now
+                if isinstance(variant, LambdaType):
+                    continue
+
+                tested = True
 
                 # Create accessor for script function variant
                 name = op.name + '_' if func_type == 'inplace' else op.name
@@ -452,6 +461,7 @@ class TestCommon(JitCommonTestCase):
 
                         self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
                         self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+        assert tested, "JIT Test does not execute any logic"
 
     @_alias_ops((op for op in op_db if op.aliases))
     def test_jit_alias_remapping(self, device, dtype, op):

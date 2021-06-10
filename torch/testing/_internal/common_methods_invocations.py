@@ -4746,17 +4746,11 @@ op_db: List[OpInfo] = [
            op=lambda self, shape: self.expand(shape),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_expand,
-           skips=(
-               # Because expand does not have a function variant.
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
            supports_out=False),
     OpInfo('expand_as',
            op=lambda self, other: self.expand_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_expand_as,
-           skips=(
-               # Because expand_as does not have a function variant.
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
            supports_out=False),
     OpInfo('diag',
            dtypes=all_types_and_complex_and(torch.bool),
@@ -6277,27 +6271,18 @@ op_db: List[OpInfo] = [
            op=lambda x, other: x.reshape_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_view_as_reshape_as,
-           skips=(
-               # Because reshape_as does not have a function variant.
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
            supports_out=False,
            ),
     OpInfo('view',
            op=lambda x, shape: x.view(shape),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
-           skips=(
-               # Because view does not have a function variant.
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
            sample_inputs_func=sample_inputs_view_reshape,
            ),
     OpInfo('view_as',
            op=lambda x, other: x.view_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
-           skips=(
-               # Because view_as does not have a function variant.
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
            sample_inputs_func=sample_inputs_view_as_reshape_as,
            ),
     OpInfo('pinverse',
