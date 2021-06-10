@@ -170,14 +170,10 @@ Customize how a class is packaged?
 ``__reduce_package__`` on a class and by defining a corresponding de-packaging function. This is similar to defining ``__reduce__`` for
 Python’s normal pickling process.
 
-In the below example, class Foo defines  ``__reduce_package__`` to customize how Foo instances are saved into a ``torch.package``.
-``__reduce_package__`` is called by a :class:`PackageExporter` during the pickling process and is passed the :class:`PackageExporter` itself
-which the save_pickle() call was invoked from. Foo’s ``__reduce_package__`` implementation does the work needed to save the Foo instance
-into the package. ``__reduce_package__`` returns a tuple containing the function ``unpackage_foo`` along with the arguments call to ``unpackage_foo``
-with. ``unpackage_foo`` is a de-packaging function that does the necessary work to reconstruct and return Foo objects from what was saved into the
-``torch.package``. The de-packaging function, in this case ``unpackage_foo``, is called by the loading :class:`PackageImporter` during ``load_pickle()``
-invocations. The arguments passed to the de-packaging function include the calling :class:`PackageImporter` followed by the arguments in the
-``__reduce_package__``’s return tuple. Note: the arguments to the de-packaging function must themselves not need ``persistent_id`` to be pickled.
+Steps:
+
+1. Define the method ``__reduce_package__(self, exporter: PackageExporter)`` on the target class. This method should do the work to save the class instance inside of the package, and should return a tuple of the corresponding de-packaging function with the arguments needed to invoke the de-packaging function. This method is called by the ``PackageExporter`` when it encounters an instance of the target class.
+2. Define a de-packaging function for the class. This de-packaging function should do the work to reconstruct and return an instance of the class. The function signature’s first parameter should be a ``PackageImporter`` instance, and the rest of the parameters are user defined.
 
 
 ::
@@ -421,10 +417,6 @@ this check will return ``False``.
     assert not is_from_package(txt) # str is from stdlib, so this will return False
 
 
-Fix mocked object being used in ``Pickle`` error?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Diagnose and resolve unpicklable objects?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Re-export an imported object?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 To re-export an object that was previously imported by a :class:`PackageImporter`, you must make the new :class:`PackageExporter`
@@ -443,10 +435,20 @@ aware of the original :class:`PackageImporter` so that it can find source code f
 
 Package a TorchScript module?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Customize how dependencies are packaged?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Understand what dependencies my code has?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+To package a TorchScript model, use the same ``save_pickle`` and ``load_pickle`` APIs as you would with any other object.
+Saving TorchScript objects that are attributes or submodules is supported as well with no extra work.
+
+
+::
+
+    # save TorchScript just like any other object
+    with PackageExporter(file_name, verbose=True) as e:
+        e.save_pickle("res", "script_model.pkl", scripted_model)
+        e.save_pickle("res", "mixed_model.pkl", python_model_with_scripted_submodule)
+    # load as normal
+    importer = PackageImporter(file_name)
+    loaded_script = importer.load_pickle("res", "script_model.pkl")
+    loaded_mixed = importer.load_pickle("res", "mixed_model.pkl"
 
 
 API Reference
