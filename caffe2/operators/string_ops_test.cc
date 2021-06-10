@@ -85,7 +85,6 @@ TEST_F(StringJoinOpTest, testString2DJoin) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testFloat1DJoin) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input = {3.90f, 5.234f, 8.12f};
 
   auto blob = std::make_unique<Blob>();
@@ -107,9 +106,7 @@ TEST_F(StringJoinOpTest, testFloat1DJoin) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testFloat2DJoin) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<std::vector<float>> input = {{1.23f, 2.45f, 3.56f},
-                                           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                            {4.67f, 5.90f, 6.32f}};
 
   auto blob = std::make_unique<Blob>();
@@ -132,7 +129,6 @@ TEST_F(StringJoinOpTest, testFloat2DJoin) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testLong2DJoin) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<std::vector<int64_t>> input = {{100, 200}, {1000, 2000}};
 
   auto blob = std::make_unique<Blob>();

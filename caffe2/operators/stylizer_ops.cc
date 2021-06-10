@@ -78,7 +78,6 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
 
     auto* noiseBlob = ws_->CreateBlob("__CAFFE2_STYLIZER_NOISE__");
     auto defaultNoiseSize = OperatorBase::GetSingleArgument<int>(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         "noise_size", 491 /* prime to avoid artifacts */);
 
     if (!BlobIsTensorType(*noiseBlob, CPU)) {
@@ -126,7 +125,6 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     math::RandGaussian<float, CPUContext>(
         size,
         0.0,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         OperatorBase::GetSingleArgument<float>("noise_std", 10.0),
         noise->template mutable_data<float>(),
         &context_);

@@ -142,7 +142,6 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.rand(M, N, device=device)
             x = traced(a, b, c)
             x = warmup_and_run_forward(traced, a, b, c)
-            print(torch.jit.last_executed_optimized_graph())
             self.assertLastGraphAllFused()
             npr = a.cpu().numpy() + b.cpu().numpy() + c.cpu().numpy()
             np.testing.assert_allclose(npr, x.cpu().numpy())
@@ -175,7 +174,7 @@ class TestTensorExprFuser(BaseTestClass):
                 npr = a.cpu().numpy() + b.cpu().numpy() + c.cpu().numpy()
                 np.testing.assert_allclose(npr, x.cpu().numpy())
 
-            test_configs = [[36, 17, 63, 33], [32, 32, 32, 32]]
+            test_configs = [[5, 2, 7, 3], [8, 8, 8, 8]]
             for test_config in test_configs:
                 test_body(*test_config)
 
@@ -530,7 +529,6 @@ class TestTensorExprFuser(BaseTestClass):
         )
         self.assertLastGraphAllFused()
 
-    @unittest.skip("temporarily disable")
     def test_min_max_reduction(self):
         def test(x):
             return torch.min(x) + torch.max(x)
@@ -540,7 +538,6 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(warmup_and_run_forward(traced, a), np.amin(a.numpy()) + np.amax(a.numpy()))
         self.assertLastGraphAllFused()
 
-    @unittest.skip("temporarily disable")
     def test_min_max_reduction2(self):
         def test(x):
             return x.min() + x.max()
@@ -560,14 +557,13 @@ class TestTensorExprFuser(BaseTestClass):
             a.numpy(), axis=1) + np.amax(a.numpy(), axis=1))
         self.assertLastGraphAllFused()
 
-    @unittest.skip("temporarily disable")
     def test_min_max_reduction_dim1_2(self):
         def test(x):
-            return torch.min(x, 1)
+            return torch.min(x * x, 1)
 
         traced = torch.jit.trace(test, (torch.zeros(16, 16)))
         a = 8.0 * torch.rand(16, 16)
-        np.testing.assert_allclose(warmup_and_run_forward(traced, a)[0], np.amin(a.numpy(), axis=1))
+        np.testing.assert_allclose(warmup_and_run_forward(traced, a)[0], np.amin((a * a).numpy(), axis=1))
         self.assertLastGraphAllFused()
 
     def test_clamp(self):
@@ -1021,7 +1017,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         traced = torch.jit.trace(easy, (torch.zeros(1024, 1024)))
 
-        a = torch.zeros(1024, 1024)
+        a = torch.zeros(32, 32)
         x = warmup_and_run_forward(traced, a)
         self.assertLastGraphAllFused()
         npr = a.numpy()
@@ -1163,7 +1159,6 @@ class TestTensorExprFuser(BaseTestClass):
         r = test(x, y, z)
         assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
-    @unittest.skip("no shape inference for aten::slice yet")
     def test_slice(self):
         def easy(x, y):
             a = x[0:512:2]

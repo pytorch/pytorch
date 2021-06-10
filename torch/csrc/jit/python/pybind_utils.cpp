@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
-
+#include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
+
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -136,6 +138,17 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
+
+      // If the object is a ScriptDict, retrieve the c10::Dict
+      // instance inside it.
+      try {
+        auto script_dict = py::cast<ScriptDict>(obj);
+        return script_dict.dict_;
+      } catch (py::cast_error& e) {
+      }
+
+      // If not (i.e. it is a regular Python dictionary), make a new
+      // c10::Dict.
       return createGenericDict(
           py::cast<py::dict>(obj),
           dict_type->getKeyType(),
@@ -165,7 +178,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           c10::StrongTypePtr(cu, classType), numAttrs);
 
       // 2. copy all the contained types
-      for (size_t slot = 0; slot < numAttrs; slot++) {
+      for (const auto slot : c10::irange(numAttrs)) {
         const auto& attrType = classType->getAttribute(slot);
         const auto& attrName = classType->getAttributeName(slot);
 

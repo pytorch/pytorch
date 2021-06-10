@@ -211,15 +211,4 @@ TORCH_CUDA_CU_API void THNN_(RReLU_updateOutput)(
     bool train,
     bool inplace,
     c10::optional<at::Generator> generator);
-
-TORCH_CUDA_CU_API void THNN_(RReLU_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    THCTensor* noise,
-    double lower,
-    double upper,
-    bool train,
-    bool inplace);
 #endif

@@ -62,7 +62,17 @@ class TORCH_API CodeGen {
     return ("");
   }
 
+  // There are two ways to invoke the codegen:
+  //  1) with a vector of CallArgs
+  //  2) with a vector of raw 'void*' pointers
+  //
+  // The codegen knows types of all inputs from the buffer args, that's why
+  // 'void*' pointers suffice.
+  //
+  // TODO: Eventually we might consider killing the CallArgs version, but
+  // currently only LLVM codegen implements call_raw.
   virtual void call(const std::vector<CallArg>& args) = 0;
+  virtual void call_raw(const std::vector<void*>& args) = 0;
 
   virtual at::Tensor empty_strided(
       c10::IntArrayRef size,
@@ -78,6 +88,9 @@ class TORCH_API CodeGen {
   const std::string& kernel_func_name() const {
     return kernel_func_name_;
   }
+
+ protected:
+  static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
 
  private:
   Stmt* stmt_;
@@ -122,44 +135,34 @@ class CodeGen::CallArg {
 
   template <typename T>
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-pro-type-const-cast)
-  CallArg(const std::vector<T>& buffer) : ptr_(const_cast<T*>(buffer.data())) {}
+  CallArg(const std::vector<T>& buffer)
+      : data_(const_cast<T*>(buffer.data())) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  CallArg(void* ptr) : ptr_(ptr) {}
+  CallArg(void* ptr) : data_(ptr) {}
 
-#define ARG_TYPE_CTOR(Type, Name) \
-  CallArg(Type v) : Name##val_(v) {}
+#define ARG_TYPE_CTOR(Type, Name)     \
+  CallArg(Type v) {                   \
+    memcpy(&data_, &v, sizeof(Type)); \
+  }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
   void* data() const {
-    return ptr_;
+    return data_;
   }
 
-#define ARG_DATA_DEFINE(Type, Name) \
-  Type Name##Data() const {         \
-    return Name##val_;              \
-  }
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_DATA_DEFINE);
-#undef ARG_DATA_DEFINE
-
-#define ARG_PTR_DEFINE(Type, Name)         \
-  Type* Name##Ptr() const {                \
-    return const_cast<Type*>(&Name##val_); \
+#define ARG_PTR_DEFINE(Type, Name) \
+  Type* Name##Ptr() const {        \
+    return (Type*)&data_;          \
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
  private:
-  union {
-    void* ptr_;
-
-#define ARG_BACKING(Type, Name) Type Name##val_;
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_BACKING);
-#undef ARG_BACKING
-  };
+  void* data_;
 };
 
 class RegisterCodeGenList {

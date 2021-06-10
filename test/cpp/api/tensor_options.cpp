@@ -70,23 +70,19 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto options = empty(5, kDouble).options();
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   options = empty(5, getDeprecatedTypeProperties(Backend::SparseCPU, kByte)).options();
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, ConstructsWellFromVariables) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto options = torch::empty(5).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
   ASSERT_FALSE(options.requires_grad());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   options = torch::empty(5, at::requires_grad()).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
   ASSERT_FALSE(options.requires_grad());
@@ -156,18 +152,15 @@ TEST(DefaultDtypeTest, NewTensorsHaveCorrectDefaultDtype) {
   AutoDefaultDtypeMode dtype_mode(kFloat);
   set_default_dtype(caffe2::TypeMeta::Make<int>());
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto tensor = torch::ones(5);
     ASSERT_EQ(tensor.dtype(), kInt);
   }
   set_default_dtype(caffe2::TypeMeta::Make<double>());
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto tensor = torch::ones(5);
     ASSERT_EQ(tensor.dtype(), kDouble);
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto tensor = torch::ones(5, kFloat);
     ASSERT_EQ(tensor.dtype(), kFloat);
   }

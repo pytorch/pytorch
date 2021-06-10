@@ -49,7 +49,6 @@ void expectCallsIncrement(c10::DispatchKeySet ks) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(ks), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
@@ -65,7 +64,6 @@ void expectCallsIncrementUnboxed(DispatchKey dispatch_key) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t result = callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(6, result);
 }
@@ -76,7 +74,6 @@ void expectCallsDecrement(DispatchKey dispatch_key) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(4, result[0].toInt());
