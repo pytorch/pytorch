@@ -394,7 +394,7 @@ JIT_EXECUTOR_TESTS = [
 # options.run_specified_test_cases is enabled.
 # For example:
 # {
-#   "`test_nn`": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
+#   "test_nn": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
 #   ...
 # }
 # then for test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
