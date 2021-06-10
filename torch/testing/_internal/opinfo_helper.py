@@ -42,10 +42,8 @@ EXTENSIBLE_DTYPE_DISPATCH = (
 # Better way to acquire devices?
 DEVICES = ['cpu'] + (['cuda'] if TEST_CUDA else [])
 
-# Class to tag the dynamically generated types.
-
-
 class _dynamic_dispatch_dtypes(_dispatch_dtypes):
+    # Class to tag the dynamically generated types.
     pass
 
 
@@ -58,7 +56,12 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
 
     supported_dtypes = set()
     for dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
-        samples = sample_inputs_fn(op, device_type, dtype, False)
+        try:
+            samples = sample_inputs_fn(op, device_type, dtype, False)
+        except RuntimeError:
+            # If `sample_inputs_fn` doesn't support sampling for a given
+            # `dtype`, we assume that the `dtype` is not supported.
+            continue
 
         # We assume the dtype is supported
         # only if all samples pass for the given dtype.
@@ -72,6 +75,7 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
                 else:
                     # dtype is not supported
                     supported = False
+                    break
 
         if supported:
             supported_dtypes.add(dtype)
@@ -80,44 +84,49 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
 
 
 def dtypes_dispatch_hint(dtypes):
+    # Function returns the appropriate dispatch function (from COMPLETE_DTYPES_DISPATCH and EXTENSIBLE_DTYPE_DISPATCH)
+    # and its string representation for the passed `dtypes`.
     return_type = collections.namedtuple('return_type', 'dispatch_fn dispatch_fn_str')
 
     # CUDA is not available, dtypes will be empty.
     if len(dtypes) == 0:
         return return_type((), str(tuple()))
 
-    # Find the closest dispatcher from the set of available dispatchers
+    set_dtypes = set(dtypes)
+    for dispatch in COMPLETE_DTYPES_DISPATCH:
+        # Short circuit if we get an exact match.
+        if set(dispatch()) == set_dtypes:
+            return return_type(dispatch, dispatch.__name__ + "()")
 
     # Metric for finding the closest dispatcher
     # Intersection Over Union
     def iou(dispatch_dtypes):
-        return len(set(dtypes).intersection(dispatch_dtypes)) * 1.0 / len(set(dtypes).union(dispatch_dtypes))
+        return len(set_dtypes.intersection(dispatch_dtypes)) * 1.0 / len(set_dtypes.union(dispatch_dtypes))
 
-    dispatch_iou_score = {dispatch: iou(dispatch()) for dispatch in COMPLETE_DTYPES_DISPATCH}
+    chosen_dispatch = None
+    chosen_dispatch_score = 0.
+    for dispatch in EXTENSIBLE_DTYPE_DISPATCH:
+        dispatch_dtypes = set(dispatch())
+        if not dispatch_dtypes.issubset(set_dtypes):
+            continue
 
-    dispatch, score = max(dispatch_iou_score.items(), key=lambda x: x[1])
-
-    if dispatch in COMPLETE_DTYPES_DISPATCH and score == 1.0:
-        return return_type(dispatch, dispatch.__name__ + "()")
-
-    def subset_or_equal(dispatch_dtypes):
-        return len(set(dispatch_dtypes) - set(dtypes)) == 0
-
-    filtered_dispatches = list(filter(lambda dispatch: subset_or_equal(dispatch()), EXTENSIBLE_DTYPE_DISPATCH))
+        score = iou(dispatch_dtypes)
+        if score > chosen_dispatch_score:
+            chosen_dispatch_score = score
+            chosen_dispatch = dispatch
 
     # If user passed dtypes which are lower than the lowest
     # dispatch type available (not likely but possible in code path).
-    if len(filtered_dispatches) == 0:
+    if chosen_dispatch is None:
         return return_type((), str(dtypes))
-
-    dispatch_iou_score = {dispatch: iou(dispatch()) for dispatch in filtered_dispatches}
-    dispatch, _ = max(dispatch_iou_score.items(), key=lambda x: x[1])
 
     return return_type(partial(dispatch, *tuple(set(dtypes) - set(dispatch()))),
                        dispatch.__name__ + str(tuple(set(dtypes) - set(dispatch()))))
 
 
 def is_dynamic_dtype_set(op):
+    # Detect if the OpInfo entry acquired dtypes dynamically
+    # using `get_supported_dtypes`.
     return op.dynamic_dtypes
 
 
@@ -132,14 +141,3 @@ def str_format_dynamic_dtype(op):
                    dtypesIfCUDA=dtypes_dispatch_hint(op.dtypesIfCUDA).dispatch_fn_str)
 
     return fmt_str
-
-
-# Run using `python -m torch.testing._internal.opinfo_helper`
-if __name__ == '__main__':
-    # import here to break circular dependency(?)
-    import torch.testing._internal.common_methods_invocations as cmi
-
-    filtered_ops = list(filter(is_dynamic_dtype_set, cmi.op_db))
-    print("The operator/s below is using dynamic_dtypes in the OpInfo entry!")
-    for op in filtered_ops:
-        print(str_format_dynamic_dtype(op))
