@@ -2744,7 +2744,7 @@ def linspace(g, start, end, steps, dtype, layout, device, pin_memory):
     dtype = sym_help._maybe_get_const(dtype, "i")
     step = div(g, sub(g, end, start), sub(g, steps, g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))))
     end_epsilon = g.op("Add", step, end)
-    return arange(g, start, end_epsilon, step, dtype, None, None, None)
+    return sym_help._linspace_helper(g, start, end_epsilon, step, dtype)
 
 def masked_fill(g, self, mask, value):
     mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
