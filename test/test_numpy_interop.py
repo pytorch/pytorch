@@ -156,9 +156,20 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
-    def test_to_numpy_with_force(self, device) -> None:
+    def test_to_numpy_with_force_dense_tensor(self, device) -> None:
         for requires_grad in [False, True]:
             x = torch.tensor([[1, 2],[3, 4]], dtype = torch.float, requires_grad = requires_grad, device = device)    	
+            y = x.numpy(force = True)
+            self.assertEqual(x, y)
+            y = x.numpy(True)
+            self.assertEqual(x, y)
+    
+    def test_to_numpy_with_force_sparse_tensor(self, device) -> None:
+        for requires_grad in [False, True]:
+            i = [[0, 1, 1],
+                [2, 0, 2]]
+            v =  [3, 4, 5]
+            x = torch.sparse_coo_tensor(i, v, (2, 3), dtype = torch.float, requires_grad = requires_grad, device = device)
             y = x.numpy(force = True)
             self.assertEqual(x, y)
             y = x.numpy(True)
