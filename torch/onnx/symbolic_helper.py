@@ -661,13 +661,12 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     step = g.op("Cast", step, to_i=scalar_type_to_onnx[type]) if step else None
     return type, end, start, step
 
-def _linspace_helper(g, start, end, step, dtype):
+def _arange_helper(g, *args):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import arange
-        return arange(g, start, end, step, dtype, None, None, None)
     else:
-        type, end, start, step = _arange_cast_helper(g, start=start, end=end, step=step, dtype=dtype)
-        return g.op("Range", start, end, step)
+        from torch.onnx.symbolic_opset11 import arange
+    return arange(g, *args)
 
 def _size_helper(g, self, dim):
     full_shape = g.op("Shape", self)
