@@ -392,6 +392,7 @@ class CUDATestBase(DeviceTypeTestBase):
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         # has_magma shows up after cuda is initialized
         t = torch.ones(1).cuda()
         cls.no_magma = not torch.cuda.has_magma

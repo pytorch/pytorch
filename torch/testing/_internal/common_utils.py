@@ -969,7 +969,6 @@ class TestCase(expecttest.TestCase):
     def precision(self, prec: float) -> None:
         self._precision = prec
 
-    # (TODO implement this feature) do cuda memory leak check per class
     _do_cuda_memory_leak_check = False
     # do cuda memory leak check per test method
     _do_cuda_memory_leak_check_per_method = False
@@ -1001,7 +1000,7 @@ class TestCase(expecttest.TestCase):
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
-        return CudaMemoryLeakCheck(self, name)
+        return CudaMemoryLeakCheck(name, self.assertEqual)
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
@@ -1056,6 +1055,18 @@ class TestCase(expecttest.TestCase):
         check_disabled(str(self))
 
         set_rng_seed(SEED)
+    
+    @classmethod
+    def setUpClass(cls):
+        if cls._do_cuda_memory_leak_check:
+            cls._instance = cls()
+            cls._instance._cuda_memory_leak_checker = CudaMemoryLeakCheck(cls._instance, cls.__name__)
+            cls._instance._cuda_memory_leak_checker.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._do_cuda_memory_leak_check:
+            cls._instance._cuda_memory_leak_checker.__exit__(None, None, None)
 
     def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
         sparse_dim = 2
