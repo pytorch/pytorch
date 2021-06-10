@@ -74,6 +74,12 @@ if [[ ${DESIRED_CUDA} == "cpu" ]]; then
   USE_GOLD_LINKER="ON"
 fi
 
+USE_WHOLE_CUDNN="OFF"
+# Link whole cuDNN for CUDA-11.1 to include fp16 fast kernels
+if [[  "$(uname)" == "Linux" && "${DESIRED_CUDA}" == "cu111" ]]; then
+  USE_WHOLE_CUDNN="ON"
+fi
+
 # Default to nightly, since that's where this normally uploads to
 PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
@@ -176,7 +182,8 @@ export CIRCLE_BRANCH="$CIRCLE_BRANCH"
 export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
 
 export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
-export USE_GLOO_WITH_OPENSSL=1
+export USE_GLOO_WITH_OPENSSL="ON"
+export USE_WHOLE_CUDNN="${USE_WHOLE_CUDNN}"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 
