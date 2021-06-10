@@ -236,7 +236,7 @@ class OpInfo(object):
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
                  inplace_variant=_NOTHING,  # explicitly pass the inplace variant of the operator if required
                  method_variant=_NOTHING,  # explicitly pass the method variant of the operator if required
-                 has_fake_function = False  # does this opinfo use a function to simulate functional behavior
+                 has_fake_function=False  # does this opinfo use a function to simulate functional behavior
                                             # of a mutating op
                  ):
 
