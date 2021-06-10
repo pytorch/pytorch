@@ -105,49 +105,61 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
   return result;
 }
 
-PyObject* tensor_to_numpy(const at::Tensor& tensor) {
+PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force/*=false*/) {
   TORCH_CHECK(is_numpy_available(), "Numpy is not available");
+  TORCH_CHECK(!tensor.unsafeGetTensorImpl()->is_python_dispatch(),
+              ".numpy() is not supported for tensor subclasses.");
 
-  TORCH_CHECK_TYPE(tensor.device().type() == DeviceType::CPU,
+  bool is_on_cpu = tensor.device().type() == DeviceType::CPU;
+  TORCH_CHECK_TYPE(is_on_cpu && force == false,
       "can't convert ", tensor.device().str().c_str(),
       " device type tensor to numpy. Use Tensor.cpu() to ",
       "copy the tensor to host memory first.");
+  auto tensor_on_cpu = (requires_grad && force == true)? tensor.cpu() : tensor;
 
-  TORCH_CHECK_TYPE(tensor.layout() == Layout::Strided,
+  bool is_dense = tensor_on_cpu.layout() == Layout::Strided;
+  TORCH_CHECK_TYPE(is_sparse && force == false,
       "can't convert ", c10::str(tensor.layout()).c_str(),
       " layout tensor to numpy.",
-      "convert the tensor to a strided layout first.");
+                   "convert the tensor to a strided layout first.");
+  auto dense_cpu_tensor = (is_dense && force == true)? tensor_on_cpu.to_dense() : tensor_on_cpu;
 
-  TORCH_CHECK(!(at::GradMode::is_enabled() && tensor.requires_grad()),
+  bool requires_grad = (at::GradMode::is_enabled() && dense_cpu_tensor.requires_grad());
+  TORCH_CHECK(!(requires_grad) && force == false,
       "Can't call numpy() on Tensor that requires grad. "
       "Use tensor.detach().numpy() instead.");
+  auto detatched_cpu_tensor = (requires_grad && force == true)? dense_cpu_tensor.detach() : dense_cpu_tensor;
 
-  TORCH_CHECK(!tensor.is_conj(),
+  bool is_conj = detatched_cpu_tensor.is_conj();
+  TORCH_CHECK(!is_conj && force == false,
       "Can't call numpy() on Tensor that has conjugate bit set. ",
       "Use tensor.resolve_conj().numpy() instead.");
+  auto not_conj_cpu_detatched_dense_tensor = (is_conj && force == true)? detatched_cpu_tensor.resolve_conj() : detatched_cpu_tensor;
 
-  TORCH_CHECK(!tensor.is_neg(),
+  bool is_neg = not_conj_cpu_detatched_dense_tensor.is_neg();
+  TORCH_CHECK(!is_neg && force == false,
       "Can't call numpy() on Tensor that has negative bit set. "
       "Use tensor.resolve_neg().numpy() instead.");
+  auto prepared_tensor = (is_neg && force == true)? not_conj_cpu_detatched_dense_tensor.resolve_neg() : not_conj_cpu_detatched_dense_tensor;
 
-  TORCH_CHECK(!tensor.unsafeGetTensorImpl()->is_python_dispatch(), ".numpy() is not supported for tensor subclasses.");
 
-  auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
-  auto sizes = to_numpy_shape(tensor.sizes());
-  auto strides = to_numpy_shape(tensor.strides());
+  auto dtype = aten_to_numpy_dtype(prepared_tensor.scalar_type());
+  auto sizes = to_numpy_shape(prepared_tensor.sizes());
+  auto strides = to_numpy_shape(prepared_tensor.strides());
+
   // NumPy strides use bytes. Torch strides use element counts.
-  auto element_size_in_bytes = tensor.element_size();
+  auto element_size_in_bytes = prepared_tensor.element_size();
   for (auto& stride : strides) {
     stride *= element_size_in_bytes;
   }
 
   auto array = THPObjectPtr(PyArray_New(
       &PyArray_Type,
-      tensor.dim(),
+      prepared_tensor.dim(),
       sizes.data(),
       dtype,
       strides.data(),
-      tensor.data_ptr(),
+      prepared_tensor.data_ptr(),
       0,
       NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE,
       nullptr));
@@ -157,13 +169,13 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
-  PyObject* py_tensor = THPVariable_Wrap(tensor);
+  PyObject* py_tensor = THPVariable_Wrap(prepared_tensor);
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return nullptr;
   }
   // Use the private storage API
-  tensor.storage().unsafeGetStorageImpl()->set_resizable(false);
+  prepared_tensor.storage().unsafeGetStorageImpl()->set_resizable(false);
 
   return array.release();
 }
