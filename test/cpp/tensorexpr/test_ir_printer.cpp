@@ -30,13 +30,9 @@ TEST(IRPrinter, BasicValueTest) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRPrinter, BasicValueTest02) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(4.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle d(5.0f);
   ExprHandle f = (a + b) - (c + d);
 
@@ -50,9 +46,7 @@ TEST(IRPrinter, CastTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle body = ExprHandle(2.f) +
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       (Cast::make(kFloat, x) * ExprHandle(3.f) + ExprHandle(4.f) * y);
 
   std::stringstream ss;
@@ -64,7 +58,6 @@ TEST(IRPrinter, CastTest) {
 TEST(IRPrinter, FunctionName) {
   KernelScope kernel_scope;
   int M = 4;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int N = 20;
 
   Tensor* producer = Compute(

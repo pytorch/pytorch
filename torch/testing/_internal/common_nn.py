@@ -3269,6 +3269,17 @@ new_module_tests = [
         reference_fn=lambda x, *_: x * torch.sigmoid(x),
     ),
     dict(
+        module_name='Mish',
+        input_size=(),
+        desc='scalar',
+        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
+    ),
+    dict(
+        module_name='Mish',
+        input_size=(5, 6, 7),
+        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
+    ),
+    dict(
         constructor=wrap_functional(F.softmax, dim=-1),
         cpp_options_args='F::SoftmaxFuncOptions(-1)',
         input_size=(2, 128),  # trigger the last-dim algo in CUDA

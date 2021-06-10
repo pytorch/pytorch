@@ -133,21 +133,13 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(int nDims) {
       return std::make_unique<TensorArg<TensorArgCodegen<T, 3>>>();
     case (4):
       return std::make_unique<TensorArg<TensorArgCodegen<T, 4>>>();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case (5):
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return std::make_unique<TensorArg<TensorArgCodegen<T, 5>>>();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case (6):
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return std::make_unique<TensorArg<TensorArgCodegen<T, 6>>>();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case (7):
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return std::make_unique<TensorArg<TensorArgCodegen<T, 7>>>();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case (8):
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return std::make_unique<TensorArg<TensorArgCodegen<T, 8>>>();
     default:
       TORCH_INTERNAL_ASSERT(

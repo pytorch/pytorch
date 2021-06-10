@@ -107,40 +107,12 @@ class LayerNormFakeFp16Op final : public Operator<CPUContext> {
 
     const float* gamma_data = nullptr;
     const float* beta_data = nullptr;
-    std::vector<float> gamma_rounded(N);
-    std::vector<float> beta_rounded(N);
-
-    if (elementwise_affine_) {
-      CAFFE_ENFORCE_EQ(InputSize(), 3);
-      const auto& gamma = Input(1);
-      const auto& beta = Input(2);
-      CAFFE_ENFORCE_EQ(gamma.numel(), N);
-      CAFFE_ENFORCE_EQ(beta.numel(), N);
-
-      gamma_data = gamma.template data<float>();
-      fbgemm::RoundToFloat16(
-          gamma_data,
-          gamma_rounded.data(),
-          N,
-          FLAGS_caffe2_fbgemm_fake_fp16_clamp,
-          false /*USE_ACC_FP16*/);
-      gamma_data = gamma_rounded.data();
-
-      beta_data = beta.template data<float>();
-      fbgemm::RoundToFloat16(
-          beta_data,
-          beta_rounded.data(),
-          N,
-          FLAGS_caffe2_fbgemm_fake_fp16_clamp,
-          false /*USE_ACC_FP16*/);
-      beta_data = beta_rounded.data();
-    }
 
     // Layer Normalized Output computation
     LayerNormUtils::calcY(
         M, N, X_data, mean_data, sigma_data, gamma_data, beta_data, Y_data);
 
-    if (InputSize() == 3 && !elementwise_affine_) {
+    if (InputSize() == 3) {
       // handle scale and bias via fp16_fma
       std::vector<float> scale_data(N);
       std::vector<float> bias_data(N);
@@ -223,6 +195,9 @@ class LayerNormFakeFp16Op final : public Operator<CPUContext> {
  private:
   const int axis_;
   const float epsilon_;
+  // LayerNorm FP16 FakeLowP Op applies the scales and biases (or gamma and beta)
+  // whenever those inputs are provided else it will omit them.
+  // We are keeping elementwise_affine to keep it consistent with LayerNorm FP32 Op.
   const bool elementwise_affine_;
 
   INPUT_TAGS(INPUT);

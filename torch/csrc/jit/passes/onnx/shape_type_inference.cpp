@@ -373,7 +373,7 @@ bool IsBlockReturnTypeSame(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == ::c10::onnx::If);
   auto then_block = n->blocks()[0];
   auto else_block = n->blocks()[1];
-  for (size_t i = 0; i < n->outputs().size(); i++) {
+  for (const auto i : c10::irange(n->outputs().size())) {
     // check the type
     auto then_block_type = then_block->outputs()[i]->type();
     auto else_block_type = else_block->outputs()[i]->type();
@@ -598,7 +598,7 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
     Node* lc_node) {
   auto rank = lc_node->inputs().size();
   std::vector<int64_t> shape_size;
-  for (size_t i = 0; i < rank; i++) {
+  for (const auto i : c10::irange(rank)) {
     if (TensorTypePtr shape_type =
             lc_node->input(i)->type()->cast<TensorType>()) {
       if (ConstantValueMap::HasValue(lc_node->input(i)->debugName())) {
@@ -721,11 +721,9 @@ void ProcessSliceNode(Node* n, int opset_version) {
     if (shape_size_0.rank().has_value()) {
       auto input0_shape_value = shape_size_0.sizes().value();
       auto valid = true;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (opset_version >= 10) {
         valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
             ConstantValueMap::HasValue(n->input(2)->debugName());
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (auto input_idx = 3; input_idx < 5; ++input_idx) {
           if (n->inputs().size() > input_idx) {
             valid = valid &&
@@ -750,7 +748,6 @@ void ProcessSliceNode(Node* n, int opset_version) {
       }
       std::vector<int64_t> step_vector;
 
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (opset_version < 10) {
         start_vector = n->is(attr::starts);
         end_vector = n->is(attr::ends);
@@ -1001,7 +998,6 @@ void ComputeConstant(Node* n, int opset_version) {
             auto value =
                 input_node->t(attr::value).toType(at::ScalarType::Float);
             auto value_a = value.accessor<float, 1>();
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             if (value_a.size(0) == 1 && std::abs(value_a[0]) > 1e-6) {
               if (ConstantValueMap::HasShape(n->input()->debugName())) {
                 auto shape_size_0 =
@@ -1082,11 +1078,21 @@ bool IsListConstructIntType(const Value* v) {
   return false;
 }
 
+bool AllGraphInputsStatic(const Graph* g) {
+  for (auto n : g->inputs()) {
+    if (!n->isCompleteTensor()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void ProcessConstantValueMap(Node* n, int opset_version) {
   // Update ConstantValueMap on node outputs from onnx shape inference
   // For outputs, only update static shapes. For input, we update symbolic
   // shapes also. ONNX If can have different types on different branches, skip
   // here.
+  auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
   for (auto i = 0; i < n->outputs().size(); i++) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
@@ -1107,9 +1113,17 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
       if (input_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(input_type->dim().value());
         ConstantValueMap::SetRank(n->input(i)->debugName(), rank);
-        auto shape = input_type->symbolic_sizes();
-        if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
-          UpdateShape(n->input(i), shape);
+        // Only update shape if the input is onnx node.
+        // If it is aten operators, for example,
+        //   Float(20, 20, strides=[1, 0], requires_grad=0, device=cpu),
+        //     %399 : Float(20, 20, strides=[0, 1], requires_grad=0, device=cpu)
+        //     = prim::ListUnpack(%397)
+        // The tracer shape may not be correct when dynamic_axes is enabled.
+        if (n->input(i)->node()->kind().is_onnx() || static_input_shape) {
+          auto shape = input_type->symbolic_sizes();
+          if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
+            UpdateShape(n->input(i), shape);
+          }
         }
       }
     } else if (IsListConstructIntType(n->input(i))) {
@@ -1143,7 +1157,7 @@ void SpecialPostProcess(Node* n) {
       if (!IsBlockReturnTypeSame(n) && IsStaticConditionONNX(n)) {
         auto cond = ConditionValueONNX(n);
         auto block_idx = cond ? 0 : 1;
-        for (size_t i = 0; i < n->outputs().size(); i++) {
+        for (const auto i : c10::irange(n->outputs().size())) {
           n->outputs()[i]->setType(
               n->blocks()[block_idx]->outputs()[i]->type());
         }
@@ -1156,16 +1170,140 @@ void SpecialPostProcess(Node* n) {
       // If the list to insert is empty, we set the elem type by
       // looking at the tensor being inserted.
       auto list_node = n->input(0)->node();
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-      auto t_node = n->input(1)->node();
-      if (!list_node || list_node->kind() != prim::ListConstruct ||
-          list_node->inputs().size() != 0) {
-        break;
+      auto seq_node = n->input(0)->node();
+      auto t_type = n->input(1)->type()->cast<TensorType>();
+
+      auto update_sequence_empty_dtype = [](Node* n, TensorTypePtr t_type) {
+        TORCH_INTERNAL_ASSERT(n && n->kind() == ::c10::onnx::SequenceEmpty);
+        TORCH_INTERNAL_ASSERT(t_type && t_type->scalarType().has_value());
+        auto scalar_type = t_type->scalarType().value();
+        auto onnx_type = ATenTypeToOnnxType(scalar_type);
+        n->i_(attr::dtype, onnx_type);
+        n->output()->setType(ListType::create(t_type));
+      };
+
+      auto find_sequence_empty = [](Value* input,
+                                    TensorTypePtr t_type) -> Node* {
+        auto find_sequence_empty_impl =
+            [](Value* input,
+               TensorTypePtr t_type,
+               auto& find_sequence_empty_ref) -> Node* {
+          auto input_node = input->node();
+          TORCH_INTERNAL_ASSERT(input_node);
+
+          // 1. Input is from SequenceEmpty.
+          if (input_node->kind() == ::c10::onnx::SequenceEmpty) {
+            return input_node;
+          }
+
+          // 2. Input is subblock input of a Loop node, which takes outer block
+          // SequenceEmpty as input.
+          if (input_node->kind() == prim::Param) {
+            auto loop_n = input_node->owningBlock()->owningNode();
+            if (nullptr == loop_n || loop_n->kind() != ::c10::onnx::Loop) {
+              return nullptr;
+            }
+
+            auto it = std::find(
+                input_node->outputs().begin(),
+                input_node->outputs().end(),
+                input);
+            auto idx = std::distance(input_node->outputs().begin(), it);
+
+            auto outer_block_node = loop_n->input(idx)->node();
+            if (outer_block_node &&
+                outer_block_node->kind() == ::c10::onnx::SequenceEmpty) {
+              // Found SequenceEmpty
+              input->setType(ListType::create(t_type));
+              return outer_block_node;
+            } else {
+              // Outer block node still not SequenceEmpty, call recursively in
+              // case of nested loop.
+              auto found_n = find_sequence_empty_ref(
+                  loop_n->input(idx), t_type, find_sequence_empty_ref);
+              if (found_n) {
+                input->setType(ListType::create(t_type));
+              }
+              return found_n;
+            }
+          }
+
+          // Could not find source SequenceEmpty node.
+          return nullptr;
+        };
+        return find_sequence_empty_impl(
+            input, t_type, find_sequence_empty_impl);
+      };
+
+      if (seq_node && t_type && t_type->scalarType()) {
+        if (seq_node->kind() == prim::ListConstruct &&
+            seq_node->inputs().size() != 0) {
+          // When prim::ListConstruct is not yet converted to
+          // onnx::SequenceEmpty
+          n->output()->setType(ListType::create(t_type));
+        } else if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
+          update_sequence_empty_dtype(seq_node, t_type);
+        } else if (seq_node->kind() == prim::Param) {
+          // Try to find original onnx::SequenceEmpty node in outer block.
+          auto seq_empty_n = find_sequence_empty(n->input(0), t_type);
+          if (seq_empty_n) {
+            update_sequence_empty_dtype(seq_empty_n, t_type);
+          }
+        }
       }
 
-      if (TensorTypePtr t_type = n->input(1)->type()->cast<TensorType>()) {
-        if (t_type->scalarType()) {
-          n->output()->setType(ListType::create(t_type));
+      break;
+    }
+    case ::c10::onnx::Cast: {
+      // ONNX shape inference is not able to assign output tensor shape,
+      // when input to onnx::Cast has incomplete tensor shape, for example
+      // missing shape, rank, dtype, etc. This postprocess sets the correct
+      // dtype for output tensor, since the dtype info is stored in Cast
+      // attribute.
+      TensorTypePtr t_type = n->output()->type()->cast<TensorType>();
+      if (nullptr != t_type && !t_type->scalarType().has_value()) {
+        auto onnx_dtype = n->i(attr::to);
+        auto aten_dtype = ONNXTypeToATenType(onnx_dtype);
+        n->output()->setType(t_type->withScalarType(aten_dtype));
+      }
+      break;
+    }
+    case ::c10::onnx::ConstantOfShape: {
+      // ONNX shape inference is not able to propagate output tensor shape
+      // for onnx::ConstantOfShape if input `shape` is not constant.
+      // This is a temporary solution when some partial information is
+      // available, for example, knowing rank of output tensor, or knowing
+      // symbolic shape. This solution won't be needed once we have proper
+      // symbolic propagation.
+      auto shape_node = n->input(0)->node();
+      if (shape_node->kind() == ::c10::onnx::Shape) {
+        // Shape -> ConstantOfShape
+        auto orig_type = shape_node->input()->type()->cast<TensorType>();
+        auto v_type = n->output()->type()->cast<TensorType>();
+        if (v_type && !v_type->sizes().concrete_sizes()) {
+          if (orig_type && orig_type->dim()) {
+            // Assign symbolic shape of original input of onnx::Shape.
+            v_type = v_type->withSymbolicShapes(orig_type->symbolic_sizes());
+            n->output()->setType(v_type);
+          } else if (
+              shape_node->input()->node()->kind() ==
+              ::c10::prim::ListConstruct) {
+            // Assign rank of original input of onnx::Shape.
+            v_type = v_type->withSizes({static_cast<int64_t>(
+                shape_node->input()->node()->inputs().size())});
+            n->output()->setType(v_type);
+          }
+        }
+      } else if (shape_node->kind() == ::c10::prim::ListConstruct) {
+        // ListConstruct -> ConstantOfShape
+        auto v_type = n->output()->type()->cast<TensorType>();
+        if (v_type && !v_type->sizes().concrete_sizes()) {
+          auto value = n->t(attr::value);
+          v_type = v_type->withScalarType(value.scalar_type());
+          std::vector<c10::ShapeSymbol> sizes(
+              shape_node->inputs().size(), c10::ShapeSymbol::newSymbol());
+          v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
+          n->output()->setType(v_type);
         }
       }
       break;
@@ -1426,6 +1564,11 @@ size_t ONNXAssignOutputShape(
   } else if (PyList_Check(output_obj)) {
     size_t list_len = PyList_GET_SIZE(output_obj);
     if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
+      auto output_type = graph->outputs().at(outputs_index)->type();
+      TORCH_CHECK(
+          output_type->cast<ListType>(),
+          "Expected a sequence type, but received a non-iterable type in graph output index ",
+          outputs_index);
       if (list_len > 0) {
         auto list_elem = PyList_GET_ITEM(output_obj, 0);
         TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
@@ -1483,6 +1626,11 @@ size_t ONNXAssignOutputShape(
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
+  } else if (strcmp(THPUtils_typename(output_obj), "NoneType") == 0) {
+    // For cases with tracing, simply ignore NoneType outputs
+    // For cases with scripting, TODO: Add logic to handle NoneType outputs
+    // when such output types are supported. For now test cases with NoneType
+    // outputs have been disabled.
   } else {
     std::string msg =
         "Only tuples, lists and Variables are supported as JIT inputs/outputs. "

@@ -104,6 +104,7 @@ def build_constructor_arg_db():
         torch.nn.MaxUnpool1d: ((5,), {}),
         torch.nn.MaxUnpool2d: ((5,), {}),
         torch.nn.MaxUnpool3d: ((5,), {}),
+        torch.nn.Mish: ((), {}),
         torch.nn.ModuleDict: ((), {}),
         torch.nn.ModuleList: ((), {}),
         torch.nn.MultiLabelMarginLoss: ((), {}),
