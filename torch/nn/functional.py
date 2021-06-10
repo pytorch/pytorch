@@ -2719,8 +2719,8 @@ def kl_div(
         and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
     .. note::
-        :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
-        :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
+        :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if has_torch_function_variadic(input, target):
