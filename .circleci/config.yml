@@ -7741,7 +7741,7 @@ workflows:
             - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_fulljit_build
             - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_fulljit_build
             - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_fulljit_build
-      - pytorch_android_fulljit_publish_snapshot:
+      - pytorch_android_publish_snapshot:
           context: org-member
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_android_fulljit_publish_snapshot
           requires:

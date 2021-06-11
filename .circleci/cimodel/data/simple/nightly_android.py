@@ -72,7 +72,7 @@ WORKFLOW_DATA = [
                           "nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_fulljit_build",
                           "nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_fulljit_build",
                           "nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_fulljit_build"]),
-    AndroidNightlyJob(["x86_32_android_fulljit_publish_snapshot"], "pytorch_android_fulljit_publish_snapshot",
+    AndroidNightlyJob(["x86_32_android_fulljit_publish_snapshot"], "pytorch_android_publish_snapshot",
                       extra_props={"context": "org-member"},
                       with_docker=False,
                       requires=["nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_fulljit_gradle_build"],
