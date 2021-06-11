@@ -27,6 +27,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-push:
+    runs-on: linux.2xlarge
+    steps:
+      - name: test push
+        run: |
+          echo hello
+          git checkout git@github.com:pytorch/test-infra
+          cd test-infra
+          git checkout -b its_a_test123
+          echo 'hi' > out.txt
+          git add .
+          git c -m"stuff"
+          git push
+          gh pr create --repo https://github.com/pytorch/test-infra --title "test PR please delete" --body "something"
+
   calculate-docker-image:
     runs-on: linux.2xlarge
     env:
@@ -409,6 +424,25 @@ jobs:
           name: pytorch_github_io
           if-no-files-found: error
           path: pytorch_github_io.zip
+      - name: Deploy preview to Netlify
+        env:
+          NETLIFY_OAUTH_TOKEN: ${{ secrets.NETLIFY_OAUTH_TOKEN }}
+        run: |
+          mkdir deploy-site
+          cp pytorch_github_io.zip deploy-site
+          cd deploy-site
+
+          # this is twice on purpose
+          unzip -o pytorch_github_io.zip
+          unzip -o pytorch_github_io.zip
+          
+          cd home/ec2-user/actions-runner/_work/pytorch/pytorch/pytorch.github.io/docs/master
+          zip -r website.zip *
+          
+          curl -H "Content-Type: application/zip" \
+              -H "Authorization: Bearer $NETLIFY_OAUTH_TOKEN" \
+              --data-binary "@website.zip" \
+              https://api.netlify.com/api/v1/sites
       - name: Clean up docker images
         if: always()
         run: |
