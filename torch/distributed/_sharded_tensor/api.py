@@ -1,5 +1,8 @@
 from dataclasses import dataclass
-from typing import List
+from typing import (
+    Dict,
+    List
+)
 
 import threading
 import torch
@@ -20,13 +23,13 @@ _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
 _sharded_tensor_map = {}
 
-def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef]):
+def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef], rpc_rank: int):
     with _sharded_tensor_lock:
         if sharded_tensor_id not in _sharded_tensor_map:
             raise RuntimeError(
                 f'Could not find sharded_tensor_id: {sharded_tensor_id} in map: {_sharded_tensor_map.keys()}')
 
-        _sharded_tensor_map[sharded_tensor_id]._register_remote_shards(rrefs)
+        _sharded_tensor_map[sharded_tensor_id]._register_remote_shards(rrefs, rpc_rank)
 
 @dataclass
 class Shard(object):
@@ -159,7 +162,7 @@ class ShardedTensor(object):
                 _sharded_tensor_map.pop(self._sharded_tensor_id)
 
     def _init_rpc(self):
-        self._remote_shards = []
+        self._remote_shards = {}
 
         # Gather all the sharded tensor ids.
         world_size = dist.get_world_size(self._process_group)
@@ -183,6 +186,7 @@ class ShardedTensor(object):
 
         # Share the local shards to the entire world.
         futs = []
+        rpc_rank = rpc.get_worker_info().id
         for rank in range(world_size):
             # Skip self.
             if rank == dist.get_rank(self._process_group):
@@ -195,7 +199,10 @@ class ShardedTensor(object):
 
             if len(self.local_shards()) != 0:
                 rrefs = [rpc.RRef(shard) for shard in self.local_shards()]
-                fut = rpc.rpc_async(global_rank, _register_remote_shards, args=(all_tensor_ids[rank_to_name[global_rank]], rrefs))
+                fut = rpc.rpc_async(
+                    global_rank,
+                    _register_remote_shards,
+                    args=(all_tensor_ids[rank_to_name[global_rank]], rrefs, rpc_rank))
                 futs.append(fut)
 
         torch.futures.wait_all(futs)
@@ -347,13 +354,14 @@ class ShardedTensor(object):
         """
         return torch.Size(self._dims)
 
-    def _register_remote_shards(self, remote_shards: List[rpc.RRef]):
-        self._remote_shards.extend(remote_shards)
+    def _register_remote_shards(self, remote_shards: List[rpc.RRef], rpc_rank: int):
+        self._remote_shards[rpc_rank] = remote_shards
 
-    def remote_shards(self) -> List[rpc.RRef]:
+    def remote_shards(self) -> Dict[int, rpc.RRef]:
         """
-        Returns RRefs pointing to remote shards for the Tensor.
-        Need to initialize the RPC framework for this functionality.
+        Returns a Dict[int, RRef] with keys being the RPC rank and values
+        being RRefs to shards on that rank. Need to initialize the
+        RPC framework for this functionality.
         """
         if self._remote_shards is None:
             raise RuntimeError(

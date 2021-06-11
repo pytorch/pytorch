@@ -117,13 +117,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             remote_shards = sharded_tensor.remote_shards()
             self.assertEqual(3, len(remote_shards))
 
-            for remote_shard in remote_shards:
-                shard = remote_shard.to_here()
-                d_index = int(shard.metadata.placement.split(':')[2])
-                if d_index == 3:
-                    self.assertEqual((1, 20), shard.tensor.size())
-                else:
-                    self.assertEqual((3, 20), shard.tensor.size())
+            for rpc_rank, shards in remote_shards.items():
+                self.assertEqual(1, len(shards))
+                for remote_shard in shards:
+                    self.assertEqual(rpc_rank, remote_shard.owner().id)
+                    shard = remote_shard.to_here()
+                    self.assertEqual(f'rank:{rpc_rank}/cuda:{rpc_rank}', shard.metadata.placement)
+                    if rpc_rank == 3:
+                        self.assertEqual((1, 20), shard.tensor.size())
+                    else:
+                        self.assertEqual((3, 20), shard.tensor.size())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -165,9 +168,13 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         else:
             self.assertEqual(2, len(remote_shards))
 
-        for remote_shard in remote_shards:
-            shard = remote_shard.to_here()
-            self.assertEqual((5, 20), shard.tensor.size())
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(1, len(shards))
+            for remote_shard in shards:
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                shard = remote_shard.to_here()
+                self.assertEqual(f'rank:{rpc_rank}/cuda:{rpc_rank}', shard.metadata.placement)
+                self.assertEqual((5, 20), shard.tensor.size())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -212,15 +219,18 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             else:
                 self.assertEqual(2, len(remote_shards))
 
-            for remote_shard in remote_shards:
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 20), shard.tensor.size())
+            for rpc_rank, shards in remote_shards.items():
+                self.assertEqual(1, len(shards))
+                for remote_shard in shards:
+                    shard = remote_shard.to_here()
+                    self.assertEqual(rpc_rank, remote_shard.owner().id)
+                    self.assertEqual(f'rank:{rpc_rank - 1}/cuda:{rpc_rank}', shard.metadata.placement)
+                    self.assertEqual((5, 20), shard.tensor.size())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_multiple_local_shards(self):
-
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -254,22 +264,14 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
 
         # Validate remote shards.
         remote_shards = sharded_tensor.remote_shards()
-        self.assertEqual(6, len(remote_shards))
-
+        self.assertEqual(3, len(remote_shards))
         owners = {}
-        for remote_shard in remote_shards:
-            shard = remote_shard.to_here()
-            self.assertEqual((2, 20), shard.tensor.size())
-
-            owner = remote_shard.owner()
-            if owner not in owners:
-                owners[owner] = 1
-            else:
-                owners[owner] += 1
-
-        self.assertEqual(3, len(owners))
-        for owner in owners.keys():
-            self.assertEqual(2, owners[owner])
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(2, len(shards))
+            for remote_shard in shards:
+                shard = remote_shard.to_here()
+                self.assertEqual((2, 20), shard.tensor.size())
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
 
 
     @skip_if_lt_x_gpu(4)
@@ -478,20 +480,12 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
         remote_shards = sharded_tensor.remote_shards()
         self.assertEqual(3, len(remote_shards))
 
-        owners = {}
-        for remote_shard in remote_shards:
-            shard = remote_shard.to_here()
-            self.assertEqual((5, 5), shard.tensor.size())
-
-            owner = remote_shard.owner()
-            if owner not in owners:
-                owners[owner] = 1
-            else:
-                owners[owner] += 1
-
-        self.assertEqual(3, len(owners))
-        for owner in owners.keys():
-            self.assertEqual(1, owners[owner])
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(1, len(shards))
+            for remote_shard in shards:
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -613,24 +607,13 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
         else:
             self.assertEqual(2, len(remote_shards))
 
-        owners = {}
-        for remote_shard in remote_shards:
-            shard = remote_shard.to_here()
-            self.assertEqual((5, 5), shard.tensor.size())
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(1, len(shards))
 
-            owner = remote_shard.owner()
-            if owner not in owners:
-                owners[owner] = 1
-            else:
-                owners[owner] += 1
-
-        if self.rank <= 1:
-            self.assertEqual(1, len(owners))
-        else:
-            self.assertEqual(2, len(owners))
-
-        for owner in owners.keys():
-            self.assertEqual(1, owners[owner])
+            for remote_shard in shards:
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -681,23 +664,13 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
                 self.assertEqual(2, len(remote_shards))
 
             owners = {}
-            for remote_shard in remote_shards:
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 5), shard.tensor.size())
+            for rpc_rank, shards in remote_shards.items():
+                self.assertEqual(1, len(shards))
 
-                owner = remote_shard.owner()
-                if owner not in owners:
-                    owners[owner] = 1
-                else:
-                    owners[owner] += 1
-
-            if self.rank == 1 or self.rank == 3:
-                self.assertEqual(1, len(owners))
-            else:
-                self.assertEqual(2, len(owners))
-
-            for owner in owners.keys():
-                self.assertEqual(1, owners[owner])
+                for remote_shard in shards:
+                    self.assertEqual(rpc_rank, remote_shard.owner().id)
+                    shard = remote_shard.to_here()
+                    self.assertEqual((5, 5), shard.tensor.size())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -755,28 +728,17 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
         # Validate remote shards.
         remote_shards = sharded_tensor.remote_shards()
         if self.rank <= 1:
-            self.assertEqual(2, len(remote_shards))
+            self.assertEqual(1, len(remote_shards))
         else:
-            self.assertEqual(4, len(remote_shards))
+            self.assertEqual(2, len(remote_shards))
 
         owners = {}
-        for remote_shard in remote_shards:
-            shard = remote_shard.to_here()
-            self.assertEqual((5, 5), shard.tensor.size())
-
-            owner = remote_shard.owner()
-            if owner not in owners:
-                owners[owner] = 1
-            else:
-                owners[owner] += 1
-
-        if self.rank <= 1:
-            self.assertEqual(1, len(owners))
-        else:
-            self.assertEqual(2, len(owners))
-
-        for owner in owners.keys():
-            self.assertEqual(2, owners[owner])
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(2, len(shards))
+            for remote_shard in shards:
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -831,17 +793,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
         remote_shards = sharded_tensor.remote_shards()
         self.assertEqual(3, len(remote_shards))
 
-        owners = {}
-        for remote_shard in remote_shards:
-            shard = remote_shard.to_here()
-            self.assertEqual((5, 5), shard.tensor.size())
-
-            owner = remote_shard.owner()
-            if owner not in owners:
-                owners[owner] = 1
-            else:
-                owners[owner] += 1
-
-        self.assertEqual(3, len(owners))
-        for owner in owners.keys():
-            self.assertEqual(1, owners[owner])
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(1, len(shards))
+            for remote_shard in shards:
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
