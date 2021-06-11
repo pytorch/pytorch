@@ -21,7 +21,7 @@ void check_zero_points_cuda(
   TORCH_CHECK(
     zp_within_upper and zp_within_lower,
     fn_name,
-    " zero_point is out of range.");
+    "zero_point is above upper bound." if zp_within_lower else "zero_point is below lower bound.");
 }
 
 void quantize_tensor_per_tensor_affine_cuda(
