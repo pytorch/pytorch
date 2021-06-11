@@ -95,6 +95,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CPU, TensorpipeCpuConverter);
 
 #ifdef USE_CUDA_NOT_ROCM
@@ -149,6 +150,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter);
 #endif
 
@@ -180,6 +182,7 @@ const c10::Stream& getStreamForDevice(
 std::array<
     std::atomic<const TensorpipeDeviceTypeConverter*>,
     static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     device_type_converter_registry;
 
 TensorpipeDeviceTypeConverterRegistrar::TensorpipeDeviceTypeConverterRegistrar(
