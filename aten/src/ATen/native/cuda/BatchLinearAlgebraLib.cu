@@ -105,38 +105,6 @@ void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
 }
 
 template <typename scalar_t>
-static void apply_lu_cublas_batched(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-#ifndef CUDART_VERSION
-  TORCH_INTERNAL_ASSERT(false, "getrf: cuBLAS backend does not support getrf.")
-#else
-  auto batch_size = cuda_int_cast(batchCount(self), "batch_size");
-  auto m = cuda_int_cast(self.size(-2), "m");
-  auto lda = std::max<int>(1, m);
-  auto infos_data = infos.data_ptr<int>();
-
-  // cuBLAS batched getrf requires input to be the device array of pointers to device single matrices
-  Tensor self_ptr_array = get_device_pointers<scalar_t>(self);
-  auto self_ptr_array_data = reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr());
-
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  if (get_pivots) {
-    auto pivots_data = pivots.data_ptr<int>();
-    at::cuda::blas::getrfBatched<scalar_t>(m, self_ptr_array_data, lda, pivots_data, infos_data, batch_size);
-  }
-  else {
-    at::cuda::blas::getrfBatched<scalar_t>(m, self_ptr_array_data, lda, nullptr, infos_data, batch_size);
-  }
-
-#endif
-}
-
-void lu_cublas_batched(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cublas_batched", [&]{
-    apply_lu_cublas_batched<scalar_t>(self, pivots, infos, get_pivots);
-  });
-}
-
-template <typename scalar_t>
 static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;

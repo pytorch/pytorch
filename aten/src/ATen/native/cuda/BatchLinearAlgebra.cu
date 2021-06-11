@@ -1839,11 +1839,6 @@ static void apply_lu_looped_magma(const Tensor& input, const Tensor& pivots, con
       int* infos_working_ptr = &infos_data[i];
       magmaLuNoPiv<scalar_t>(m, n, input_working_ptr, leading_dimension, infos_working_ptr);
     }
-
-    // fill the pivots tensor with indices using 1-based (Fortran) indexing
-    auto k = std::min(m, n);
-    Tensor pivots_tmp = at::arange(1, k + 1, input.options().dtype(at::kInt)).expand_as(pivots);
-    pivots.copy_(pivots_tmp);
   }
   infos.copy_(infos_cpu, /*non_blocking=*/true);
 #endif
@@ -1908,13 +1903,20 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
     magmaLuBatched<scalar_t>(m, n, input_array, leading_dimension, pivots_array, infos_data, batch_size, magma_queue);
   } else {
     magmaLuNoPivBatched<scalar_t>(m, n, input_array, leading_dimension, infos_data, batch_size, magma_queue);
-
-    // fill the pivots tensor with indices using 1-based (Fortran) indexing
-    auto k = std::min(m, n);
-    Tensor pivots_tmp = at::arange(1, k + 1, input.options().dtype(at::kInt)).expand_as(pivots);
-    pivots.copy_(pivots_tmp);
   }
 #endif
+}
+
+static void lu_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_looped", [&]{
+    apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
+  });
+}
+
+static void lu_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_batched", [&]{
+    apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
+  });
 }
 
 static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
@@ -1928,15 +1930,11 @@ static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& in
   }
 #else
   if (batch_size == 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
-      apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
-    });
+    lu_looped_magma(input, pivots, infos, compute_pivots);
   }
 #endif // USE_CUSOLVER
   else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
-      apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
-    });
+    lu_batched_magma(input, pivots, infos, compute_pivots);
   }
 }
 

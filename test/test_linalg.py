@@ -5442,7 +5442,6 @@ class TestLinalg(TestCase):
                 # 0. This however conveys that the factorization was
                 # successful albeit with a singular input. Therefore,
                 # we require info.min() >= 0
-
                 self.assertGreaterEqual(info_.min(), 0)
                 a_LU, pivots = a.lu(pivot=pivot)
                 self.assertEqual(a_LU, a_LU_info)
