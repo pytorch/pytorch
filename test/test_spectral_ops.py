@@ -602,7 +602,6 @@ class TestFFT(TestCase):
         self._test_fft_ifft_rfft_irfft(device, dtype)
 
     @deviceCountAtLeast(1)
-    @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(torch.double)
     def test_cufft_plan_cache(self, devices, dtype):
