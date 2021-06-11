@@ -250,25 +250,22 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
 // -----------------------------------
 // rrelu
 // -----------------------------------
-template<typename scalar_t>
-inline scalar_t __device__ curand_uniform_type(curandStatePhilox4_32_10_t *state);
+template <typename scalar_t>
+inline scalar_t __device__ curand_uniform_type(curandState_t* state);
 
 template <>
-inline at::Half __device__ curand_uniform_type<at::Half>(curandStatePhilox4_32_10_t *state) {
-  auto rand = curand_uniform4(state);
-  return rand.x;
+inline at::Half __device__ curand_uniform_type<at::Half>(curandState_t* state) {
+  return curand_uniform(state);
 }
 
 template <>
-inline float __device__ curand_uniform_type<float>(curandStatePhilox4_32_10_t *state) {
-  auto rand = curand_uniform4(state);
-  return rand.x;
+inline float __device__ curand_uniform_type<float>(curandState_t *state) {
+  return curand_uniform(state);
 }
 
 template <>
-inline double __device__ curand_uniform_type<double>(curandStatePhilox4_32_10_t *state) {
-  auto rand = curand_uniform2_double(state);
-  return rand.x;
+inline double __device__ curand_uniform_type<double>(curandState_t* state) {
+  return curand_uniform_double(state);
 }
 
 template <typename scalar_t>
@@ -282,7 +279,7 @@ __global__ void rrelu_with_noise_cuda_kernel(
     double b) {
   auto seeds = at::cuda::philox::unpack(philox_args);
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  curandStatePhilox4_32_10_t state;
+  curandState_t state;
   curand_init(std::get<0>(seeds),
               idx,
               std::get<1>(seeds),
@@ -293,7 +290,7 @@ __global__ void rrelu_with_noise_cuda_kernel(
     if (input[i] <= 0)
     {
       scalar_t r = curand_uniform_type<scalar_t>(&state);
-      r = static_cast<scalar_t>(r * (b - a) + a);
+      r = r * (b - a) + a;
       output[i] = input[i] * r;
       noise[i] = r;
     }
