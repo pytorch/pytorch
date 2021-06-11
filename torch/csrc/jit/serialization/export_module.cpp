@@ -480,7 +480,7 @@ void ScriptModuleSerializer::writeArchive(
           std::string cdata_str =
               std::to_string(reinterpret_cast<std::intptr_t>(
                   tensor.storage().unsafeGetStorageImpl()));
-          uint64_t id;
+          uint64_t id = 0;
           if (storage_context_.hasStorage(cdata_str)) {
             // this case is hit when storage has been serialized already
             // from a torch.package context

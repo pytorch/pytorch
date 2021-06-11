@@ -20,7 +20,7 @@ namespace jit {
 // used in torch.package deserialization
 class TORCH_API StorageContext {
  public:
-  explicit StorageContext() : unique_id(0){};
+  explicit StorageContext() : unique_id(0){}
 
   uint64_t addStorage(const std::string& name, c10::Storage storage) {
     TORCH_INTERNAL_ASSERT(!hasStorage(name));
