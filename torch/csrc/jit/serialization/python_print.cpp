@@ -410,8 +410,9 @@ struct PythonPrintImpl {
     }
     TORCH_INTERNAL_ASSERT(
         false,
-        "Value was not present in either expressions"
-        " table or ident refs table");
+        "Value (debug name: \"",
+        v->debugName(),
+        "\") was not present in either expressions table or ident refs table");
   }
   void assignValue(Value* v, const std::string& s) {
     ident_refs_[v] = s;
