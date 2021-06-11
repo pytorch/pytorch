@@ -25,8 +25,6 @@
 #include <ATen/core/QuantizerBase.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-${static_dispatch_extra_headers}
-
 namespace caffe2 {
 class Tensor;
 }
@@ -803,7 +801,7 @@ class TORCH_API Tensor {
 
   //example
   //Tensor * add(Tensor & b);
-  ${tensor_method_definitions}
+  ${tensor_method_declarations}
 
   // Special C++ only overloads for std()-like functions (See gh-40287)
   // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
@@ -1031,6 +1029,13 @@ static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {
 }
 
 } // namespace at
+
+// See Note [Avoiding Include Cycles In Static Dispatch]
+${static_dispatch_extra_headers}
+namespace at {
+${tensor_method_definitions}
+} // namespace at
+
 
 namespace c10 {
 template <>
