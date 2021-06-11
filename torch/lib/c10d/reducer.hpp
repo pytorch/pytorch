@@ -228,11 +228,18 @@ class Reducer {
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
 
+  // We'd like to use DistAutogradContext::GradCallback here but dist autograd
+  // doesn't exist under Windows. So we just directly use the concrete type but
+  // to preserve and enforce our original intent we do a static assert when dist
+  // autograd is available.
   using GradCallback = std::function<bool(at::Tensor&)>;
 #ifndef _WIN32
-  static_assert(std::is_same<
-    GradCallback,
-    torch::distributed::autograd::DistAutogradContext::GradCallback>::value, "");
+  static_assert(
+      std::is_same<
+          GradCallback,
+          torch::distributed::autograd::DistAutogradContext::GradCallback>::
+          value,
+      "");
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 

@@ -897,7 +897,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1386,7 +1387,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1616,7 +1618,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1817,7 +1820,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -2144,7 +2148,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -2326,7 +2331,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     case at::kCPU:
       break;
     case at::kCUDA:
-      TORCH_INTERNAL_ASSERT(c10::impl::hasDeviceGuardImpl(at::kCUDA));
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
