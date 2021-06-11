@@ -533,11 +533,8 @@ def get_slow_tests_based_on_S3() -> List[str]:
 
 def get_test_case_args(test_module, using_pytest) -> List[str]:
     args = []
-    if test_module not in SPECIFIED_TEST_CASES_DICT:
-        return args
-
-    # if specified with __all__ then run all tests
-    if '__all__' in SPECIFIED_TEST_CASES_DICT[test_module]:
+    # if test_module not specified or specified with '__all__' then run all tests
+    if test_module not in SPECIFIED_TEST_CASES_DICT or '__all__' in SPECIFIED_TEST_CASES_DICT[test_module]:
         return args
 
     if using_pytest:
@@ -849,17 +846,19 @@ def parse_args():
         ' ...\n'
         ' <test_module>,__all__\n'
         ' ...\n'
-        'file content is used based on option "--use-specified-test-cases-for".'
+        'how we use the stats will be based on option "--use-specified-test-cases-by".'
     )
     parser.add_argument(
-        '--use-specified-test-cases-for',
+        '--use-specified-test-cases-by',
         type=str,
         choices=['include', 'bring-to-front'],
         default='include',
         help='used together with option "--run-specified-test-cases". When specified test case '
-        'file is set. This option allow user to control whether to only run the specified test '
-        'modules or to also run the remaining modules. Note: regardless of this option, we '
-        'only run the specified test cases within a test module.',
+        'file is set, this option allows the user to control whether to only run the specified test '
+        'modules or to simply bring the specified modules to front and also run the remaining '
+        'modules. Note: regardless of this option, we will only run the specified test cases '
+        ' within a specified test module. For unspecified test modules with the bring-to-front '
+        'option, all test cases will be run, as one may expect.',
     )
     return parser.parse_args()
 
