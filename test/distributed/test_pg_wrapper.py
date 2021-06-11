@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TSAN,
 )
-import test_c10d_common
 from test_c10d_common import LOOPBACK
 
 
