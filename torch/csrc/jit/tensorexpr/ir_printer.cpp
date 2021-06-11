@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -260,7 +262,7 @@ void IRPrinter::visit(const IfThenElse* v) {
 
 void IRPrinter::visit(const Intrinsics* v) {
   os() << v->func_name() << "(";
-  for (int i = 0; i < v->nparams(); i++) {
+  for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -413,7 +415,7 @@ void IRPrinter::visit(const Allocate* v) {
        << "); // dtype=" << v->dtype().ToCppString();
   os() << ", dims=[";
   const std::vector<const Expr*>& dims = v->dims();
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     if (i != 0) {
       os() << ", ";
     }
@@ -583,7 +585,7 @@ std::string to_string(const Tensor* t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
   oss << "Tensor " << t->buf()->name_hint() << "[";
-  for (size_t i = 0; i < t->buf()->ndim(); i++) {
+  for (const auto i : c10::irange(t->buf()->ndim())) {
     if (i != 0) {
       oss << ", ";
     }
