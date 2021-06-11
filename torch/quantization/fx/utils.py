@@ -13,6 +13,14 @@ from torch.fx.graph import (
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
 import operator
 
+# A dictionary for querying the weight index for a given op
+WEIGHT_INDEX_DICT = {
+    torch.nn.functional.conv1d : [1],
+    torch.nn.functional.conv2d : [1],
+    torch.nn.functional.conv3d : [1],
+    torch.nn.functional.linear : [1],
+}
+
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
     r = target.rsplit('.', 1)
