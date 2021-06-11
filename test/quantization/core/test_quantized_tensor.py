@@ -610,10 +610,10 @@ class TestQuantizedTensor(TestCase):
 
     def test_qtensor_per_channel_permute(self):
         for device in get_supported_device_types():
-            r = torch.rand(20, 10, 2, 2, dtype=torch.float).to(device) * 4 - 2
+            r = torch.rand(20, 10, 2, 2, dtype=torch.float, device=device) * 4 - 2
             dtype = torch.qint8
-            scales = torch.rand(10).to(device) * 0.02 + 0.01
-            zero_points = torch.round(torch.rand(10) * 2 - 1).to(torch.long).to(device)
+            scales = torch.rand(10, device=device) * 0.02 + 0.01
+            zero_points = torch.round(torch.rand(10, device=device) * 2 - 1).to(torch.long)
             qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
 
             # we can't reorder the axis
@@ -699,7 +699,7 @@ class TestQuantizedTensor(TestCase):
             # copy from float doesn't support cuda
             device = 'cpu'
             # check copy from non-quantized to quantized
-            r = torch.randn([numel], dtype=torch.float).to(device)
+            r = torch.randn([numel], dtype=torch.float, device=device)
             q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=dtype, device=device)
             q.copy_(r)
             qr = torch.quantize_per_tensor(r, scale=scale, zero_point=zero_point, dtype=dtype)
@@ -811,7 +811,7 @@ class TestQuantizedTensor(TestCase):
             sizes4 = [1 * 2 * 3 * 4]
             sizes5 = [1, 2, 1, 3, 1, 4]
 
-            q1_int = torch.randint(0, 100, sizes1, dtype=dtype).to(device)
+            q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
             q1 = torch._make_per_tensor_quantized_tensor(q1_int, scale=scale, zero_point=zero_point)
             q2 = q1.resize(*sizes2)
             q3 = q2.resize(*sizes3)
@@ -824,7 +824,7 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(q1.numel(), q5.numel())
 
             # Compare original and post-transpose
-            a_int = torch.randint(0, 100, sizes1, dtype=dtype).to(device)
+            a_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
             a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
             b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
             c = b.resize(*sizes1)  # Change the sizes back to the original
@@ -842,7 +842,7 @@ class TestQuantizedTensor(TestCase):
                 self.assertRaises(RuntimeError, lambda: torch.equal(b, c))
 
             # Throws an error if numel is wrong
-            q1_int = torch.randint(0, 100, sizes1, dtype=dtype).to(device)
+            q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
             q1 = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
             err_str = "requested resize to*"
             with self.assertRaisesRegex(RuntimeError, err_str):
@@ -885,7 +885,7 @@ class TestQuantizedTensor(TestCase):
 
     def test_qtensor_unsqueeze(self):
         for device in get_supported_device_types():
-            x = torch.randn((1, 3, 4)).to(device)
+            x = torch.randn((1, 3, 4), device=device)
             qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
             qy = qx.unsqueeze(2)
             self.assertEqual(qy.size(), (1, 3, 1, 4))
@@ -893,8 +893,8 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(qy.size(), qx.size())
 
             # Per channel qtensor
-            scales = torch.tensor([1.0]).to(device)
-            zero_points = torch.tensor([0]).to(device)
+            scales = torch.tensor([1.0], device=device)
+            zero_points = torch.tensor([0], device=device)
             qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=torch.quint8, axis=0)
             qy = qx.unsqueeze(0)
             self.assertEqual(qy.size(), (1, 1, 3, 4))
@@ -907,9 +907,9 @@ class TestQuantizedTensor(TestCase):
                 qz = qy.squeeze(1)
 
             # squeeze without dim specified
-            x = torch.randn((3, 1, 2, 1, 4)).to(device)
-            scales = torch.tensor([1.0, 1.0]).to(device)
-            zero_points = torch.tensor([0, 0]).to(device)
+            x = torch.randn((3, 1, 2, 1, 4), device=device)
+            scales = torch.tensor([1.0, 1.0], device=device)
+            zero_points = torch.tensor([0, 0], device=device)
             qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=torch.quint8, axis=2)
             qz = qx.squeeze()
             self.assertEqual(qz.size(), (3, 2, 4))
