@@ -174,7 +174,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])
 
-    # No `def __len__(self)` default?
+    # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
     def __getattr__(self, attribute_name):
