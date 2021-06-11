@@ -39,8 +39,6 @@ class CudaTimer : public Timer {
       default:
         TORCH_INTERNAL_ASSERT(false);
     }
-    // In case the compiler doesn't get it.
-    return forward_start;
   }
 
  public:
