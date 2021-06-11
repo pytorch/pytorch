@@ -203,7 +203,7 @@ class ParametrizationList(ModuleList):
                 if hasattr(module, "right_inverse"):
                     value = module.right_inverse(value)
                 # else we assume that right_inverse is the identity
-            if self.is_tensor == 1:
+            if self.is_tensor:
                 # These exceptions should only throw when a right_inverse function does not
                 # return the same dtype for every input, which should most likely be caused by a bug
                 if not isinstance(value, Tensor):
@@ -244,7 +244,7 @@ class ParametrizationList(ModuleList):
 
     def forward(self) -> Tensor:
         # Unpack the originals for the first parametrization
-        if self.is_tensor == 1:
+        if self.is_tensor:
             x = self[0](self.original)
         else:
             originals = (getattr(self, f"original{i}") for i in range(self.ntensors))
@@ -563,7 +563,7 @@ def remove_parametrizations(
     # Fetch the original tensor
     assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
     parametrizations = module.parametrizations[tensor_name]
-    if parametrizations.is_tensor == 1:
+    if parametrizations.is_tensor:
         original = parametrizations.original
         if leave_parametrized:
             with torch.no_grad():
