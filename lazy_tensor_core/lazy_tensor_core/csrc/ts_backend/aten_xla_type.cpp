@@ -622,21 +622,6 @@ at::Tensor& AtenXlaType::ne_(at::Tensor& self, const at::Tensor& other) {
   return self;
 }
 
-at::Tensor& AtenXlaType::normal_(at::Tensor& self, double mean, double std,
-                                 c10::optional<at::Generator> generator) {
-  LTC_FN_TRACK(3);
-  LTC_COUNTER("aten::normal_", 1);
-  LTC_VLOG(3) << "TS normal_ :"
-              << " self=" << self.toString();
-  std::vector<at::Tensor> xlatens_tensors = {self};
-  auto xlatens = bridge::LtcCreateTensorList(xlatens_tensors);
-  auto&& x_result = xlatens[0].normal_(mean, std, generator);
-  std::vector<size_t> xlatens_update_indices = {0};
-  bridge::LtcUpdateTensors(xlatens_tensors, xlatens, xlatens_update_indices);
-  static_cast<void>(x_result);  // Avoid warnings in case not used
-  return self;
-}
-
 std::tuple<at::Tensor, at::Tensor> AtenXlaType::max_pool2d_with_indices(
     const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
