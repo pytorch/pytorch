@@ -33,7 +33,7 @@ jobs:
       - name: test push
         run: |
           echo hello
-          git checkout git@github.com:pytorch/test-infra
+          git clone git@github.com:pytorch/test-infra
           cd test-infra
           git checkout -b its_a_test123
           echo 'hi' > out.txt
