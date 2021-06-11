@@ -32,8 +32,8 @@ class _SpectralNorm(Module):
 
             u = weight_mat.new_empty(h).normal_(0, 1)
             v = weight_mat.new_empty(w).normal_(0, 1)
-            self.register_buffer('u', F.normalize(u, dim=0, eps=self.eps))
-            self.register_buffer('v', F.normalize(v, dim=0, eps=self.eps))
+            self.register_buffer('_u', F.normalize(u, dim=0, eps=self.eps))
+            self.register_buffer('_v', F.normalize(v, dim=0, eps=self.eps))
 
             # Start with u, v initialized to some reasonable values by performing a number
             # of iterations of the power method
@@ -88,13 +88,13 @@ class _SpectralNorm(Module):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
             # are the first left and right singular vectors.
             # This power iteration produces approximations of `u` and `v`.
-            self.u = F.normalize(torch.mv(weight_mat, self.v),      # type: ignore[has-type]
-                                 dim=0, eps=self.eps, out=self.u)   # type: ignore[has-type]
-            self.v = F.normalize(torch.mv(weight_mat.t(), self.u),  # type: ignore[has-type]
-                                 dim=0, eps=self.eps, out=self.v)   # type: ignore[has-type]
+            self._u = F.normalize(torch.mv(weight_mat, self._v),      # type: ignore[has-type]
+                                  dim=0, eps=self.eps, out=self._u)   # type: ignore[has-type]
+            self._v = F.normalize(torch.mv(weight_mat.t(), self._u),  # type: ignore[has-type]
+                                  dim=0, eps=self.eps, out=self._v)   # type: ignore[has-type]
         # See above on why we need to clone
-        self.u = self.u.clone(memory_format=torch.contiguous_format)
-        self.v = self.v.clone(memory_format=torch.contiguous_format)
+        self._u = self._u.clone(memory_format=torch.contiguous_format)
+        self._v = self._v.clone(memory_format=torch.contiguous_format)
 
     def forward(self, weight: torch.Tensor) -> torch.Tensor:
         if weight.ndim == 1:
@@ -104,7 +104,10 @@ class _SpectralNorm(Module):
             weight_mat = self._reshape_weight_to_matrix(weight)
             if self.training:
                 self._power_method(weight_mat, self.n_power_iterations)
-            sigma = torch.dot(self.u, torch.mv(weight_mat, self.v))
+            # The proper way of computing this should be through F.bilinear, but
+            # it seems to have some efficiency issues:
+            # https://github.com/pytorch/pytorch/issues/58093
+            sigma = torch.dot(self._u, torch.mv(weight_mat, self._v))
             return weight / sigma
 
     def right_inverse(self, value: torch.Tensor) -> torch.Tensor:
@@ -124,16 +127,40 @@ def spectral_norm(module: Module,
         \mathbf{W}_{SN} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})},
         \sigma(\mathbf{W}) = \max_{\mathbf{h}: \mathbf{h} \ne 0} \dfrac{\|\mathbf{W} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
 
+    When applied on a vector, it simplifies to
+
+    .. math::
+        \mathbf{x}_{SN} = \dfrac{\mathbf{x}}{\|\mathbf{x}\|_2}
+
     Spectral normalization stabilizes the training of discriminators (critics)
-    in Generative Adversarial Networks (GANs) by rescaling the weight tensor
-    with spectral norm :math:`\sigma` of the weight matrix calculated using
-    power iteration method. If the dimension of the weight tensor is greater
-    than 2, it is reshaped to 2D in power iteration method to get spectral
-    norm.
+    in Generative Adversarial Networks (GANs) by reducing the Lipschitz constant
+    of the model. :math:`\sigma` is approximated performing one iteration of the
+    `power method`_ every time the weight is accessed. If the dimension of the
+    weight tensor is greater than 2, it is reshaped to 2D in power iteration
+    method to get spectral norm.
+
 
     See `Spectral Normalization for Generative Adversarial Networks`_ .
 
+    .. _`power method`: https://en.wikipedia.org/wiki/Power_iteration
     .. _`Spectral Normalization for Generative Adversarial Networks`: https://arxiv.org/abs/1802.05957
+
+    .. note::
+        This function is implemented using the new parametrization functionality
+        in :func:`torch.nn.utils.parametrize.register_parametrization`. It is a
+        reimplementation of :func:`torch.nn.utils.spectral_norm`.
+
+    .. note::
+        When this constraint is registered, the singular vectors associated to the largest
+        singular value are estimated rather than sampled at random. These are then updated
+        performing :attr:`n_power_iterations` of the `power method`_ whenever the tensor
+        is accessed with the module on `training` mode.
+
+    .. note::
+        If the `_SpectralNorm` module, i.e., `module.parametrization.weight[idx]`,
+        is in training mode on removal, it will perform another power iteration.
+        If you'd like to avoid this iteration, set the module to eval mode
+        before its removal.
 
     Args:
         module (nn.Module): containing module
@@ -149,23 +176,6 @@ def spectral_norm(module: Module,
     Returns:
         The original module with a new parametrization registered to the specified
         weight
-
-    .. note::
-        This function is implemented using the new parametrization functionality
-        in :func:`torch.nn.utils.parametrize.register_parametrization`. It is a
-        reimplementation of :func:`torch.nn.utils.spectral_norm`.
-
-    .. note::
-        When this constraint is registered, the singular vectors associated to the largest
-        singular value are estimated rather than sampled at random. These are then updated
-        performing :attr:`n_power_iterations` of the power method whenever the tensor
-        is accessed with the module on `training` mode.
-
-    .. note::
-        If the `_SpectralNorm` module, i.e., `module.parametrization.weight[idx]`,
-        is in training mode on removal, it will perform another power iteration.
-        If you'd like to avoid this iteration, set the module to eval mode
-        before its removal.
 
     Example::
 
