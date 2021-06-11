@@ -52,8 +52,7 @@ class _ModuleProviderAction(Enum):
 
 
 class VerbosityLevel(IntFlag):
-    """List of different levels of verbosity info to print after class:`PackageExporter` closes.
-    """
+    """List of different levels of verbosity info to print after class:`PackageExporter` closes."""
 
     NONE = 0
     PACKAGE_INFO = 1
