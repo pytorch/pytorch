@@ -1,4 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/mem_dependency_checker.h>
+
+#include <c10/util/irange.h>
+
 #include <fstream>
 
 namespace torch {
@@ -725,7 +728,7 @@ void MemDependencyChecker::visit(const For* v) {
     loopIndicesStride.resize(indices.size());
 
     // index expr must depend on the loop var in some way to have a stride.
-    for (size_t i = 0; i < indices.size(); i++) {
+    for (const auto i : c10::irange(indices.size())) {
       VarFinder vf;
       if (vf.find(indices[i]).count(var) == 0) {
         loopIndicesStride[i] = new IntImm(0);
