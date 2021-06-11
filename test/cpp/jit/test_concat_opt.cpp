@@ -600,5 +600,129 @@ TEST(OptimizeConcatTest, NoOptimizationWhenInputListIsMutated) {
   }
 }
 
+TEST(OptimizeConcatTest, UseVariadicCat1) {
+  auto graph = std::make_shared<Graph>();
+
+  const std::string input =
+      R"IR(
+        graph(%0: Float(64, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %1: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
+          %2 : int = prim::Constant[value=0]()
+          %input : Tensor[] = prim::ListConstruct(%0, %1)
+          %concat : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %2)
+          return (%concat)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {
+      at::rand({64, 56, 56}, at::kCPU), at::rand({32, 56, 56}, at::kCPU)};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  UseVariadicCat(graph);
+  graph->lint();
+  auto opt_outputs = runGraph(graph, inputs);
+
+  checkOutputs(orig_outputs, opt_outputs);
+
+  // After full concat optimization we should have the following graph:
+  //
+  //  graph(%0 : ...,
+  //        %1 : ...):
+  //    %zero : int = prim:Constant[value=0]()
+  //    %varcat : Tensor = prim::Concat(%0, %1, %zero)  // variadic cat
+  //    return (%varcat)
+  testing::FileCheck()
+      .check_count("= prim::Concat(", 1, /*exactly*/ true)
+      ->check_count("= aten::cat(", 0, /*exactly*/ true)
+      ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
+      ->run(*graph);
+}
+
+TEST(OptimizeConcatTest, UseVariadicCat2) {
+  auto graph = std::make_shared<Graph>();
+
+  const std::string input =
+      R"IR(
+        graph(%0: Float(64, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %1: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %2: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %3: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %4: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %5: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
+          %10 : int = prim::Constant[value=0]()
+          %input : Tensor[] = prim::ListConstruct(%0, %1, %2, %3, %4, %5)
+          %concat : Float(224, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
+          return (%concat)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {
+      at::rand({64, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU)};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  UseVariadicCat(graph);
+  graph->lint();
+  auto opt_outputs = runGraph(graph, inputs);
+
+  checkOutputs(orig_outputs, opt_outputs);
+
+  // After full concat optimization we should have the following graph:
+  //
+  //  graph(%0 : ...,
+  //        %1 : ...):
+  //    %zero : int = prim:Constant[value=0]()
+  //    %varcat : Tensor = prim::Concat(%0, %1, %2, %3, %4, %5, %zero)  //
+  //    variadic cat return (%varcat)
+  testing::FileCheck()
+      .check_count("= prim::Concat(", 1, /*exactly*/ true)
+      ->check_count("= aten::cat(", 0, /*exactly*/ true)
+      ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
+      ->run(*graph);
+}
+
+TEST(OptimizeConcatTest, UseVariadicCat3) {
+  auto graph = std::make_shared<Graph>();
+
+  const std::string input =
+      R"IR(
+        graph(%0: Float(64, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %1: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %2: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %3: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %4: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %5: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
+          %10 : int = prim::Constant[value=0]()
+          %input : Tensor[] = prim::ListConstruct(%0, %1, %2, %3, %4, %5)
+          aten::append(%input, %5)
+          %concat : Float(256, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
+          return (%concat)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {
+      at::rand({64, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU)};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  UseVariadicCat(graph);
+  graph->lint();
+  auto opt_outputs = runGraph(graph, inputs);
+  checkOutputs(orig_outputs, opt_outputs);
+
+  // No transformation should have happened since the `prim::ListConstruct` has
+  // > 1 uses.
+  testing::FileCheck()
+      .check_count("= prim::ListConstruct(", 1, /*exactly*/ true)
+      ->check_count("= aten::cat(", 1, /*exactly*/ true)
+      ->check_count("= prim::Concat(", 0, /*exactly*/ true)
+      ->run(*graph);
+}
+
 } // namespace jit
 } // namespace torch

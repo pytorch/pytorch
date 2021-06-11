@@ -510,5 +510,65 @@ void OptimizeConcat(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After ConcatOpt", graph);
 }
 
+namespace {
+
+class VariadicCatUpdater {
+ public:
+  explicit VariadicCatUpdater(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}
+
+  void run() {
+    collectCatNodes(graph_->block());
+    for (auto c : cat_nodes_) {
+      replaceWithVariadicCat(c);
+    }
+  }
+
+ private:
+  void collectCatNodes(Block* block) {
+    for (auto node : block->nodes()) {
+      if (node->kind() == aten::cat) {
+        cat_nodes_.push_back(node);
+      }
+      for (Block* block : node->blocks()) {
+        collectCatNodes(block);
+      }
+    }
+  }
+
+  void replaceWithVariadicCat(Node* cat) {
+    if (cat->input(0)->node()->kind() != prim::ListConstruct) {
+      return;
+    }
+    auto list = cat->input(0)->node();
+    // We do not transform cat ops whose list input has > 1 use. This is
+    // because these uses could be modifying the list using ops like
+    // `aten::append`. So, we conservatively assume that any use other than
+    // the one in cat mutates the list.
+    if (list->output()->uses().size() > 1) {
+      return;
+    }
+    std::vector<Value*> inputs = list->inputs().vec();
+    inputs.push_back(cat->input(1));
+    auto var_cat = cat->owningGraph()->create(prim::Concat, inputs);
+    var_cat->insertBefore(list);
+    cat->output()->replaceAllUsesWith(var_cat->output());
+    cat->destroy();
+    TORCH_INTERNAL_ASSERT(!list->hasUses());
+    list->destroy();
+  }
+
+  std::shared_ptr<Graph> graph_;
+  std::vector<Node*> cat_nodes_;
+};
+
+} // namespace
+
+void UseVariadicCat(const std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("Before VariadicCat", graph);
+  VariadicCatUpdater(graph).run();
+  GRAPH_DUMP("After VariadicCat", graph);
+}
+
 } // namespace jit
 } // namespace torch
