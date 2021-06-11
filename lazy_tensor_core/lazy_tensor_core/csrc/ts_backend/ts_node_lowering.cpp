@@ -7,6 +7,7 @@
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
+#include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
@@ -89,6 +90,9 @@ class TSNodeLowering : public NodeLowering {
       return LowerAsStridedViewUpdate(
           ir::NodeCast<ir::ops::AsStridedViewUpdate>(
               node, *ir::ops::ltc_as_strided_view_update));
+    }
+    if (node->op() == *ir::ops::ltc_cast) {
+      return LowerCast(ir::NodeCast<ir::ops::Cast>(node, *ir::ops::ltc_cast));
     }
     if (node->op().op == at::prim::Constant) {
       auto scalar_node = dynamic_cast<const ir::ops::Scalar*>(node);
@@ -194,6 +198,13 @@ class TSNodeLowering : public NodeLowering {
     copy_from_arguments.emplace_back(loctx()->GetOutputOp(input_op));
     LowerBuiltin(at::aten::copy_, copy_from_arguments);
     return {destination};
+  }
+
+  TSOpVector LowerCast(const ir::ops::Cast* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.emplace_back(node->dtype());
+    return LowerBuiltin(at::aten::to, arguments);
   }
 
   TSOpVector LowerConstant(const ir::ops::Constant* node) {
