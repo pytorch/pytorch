@@ -59,8 +59,7 @@ BUILD_CONFIGS = [
 ]
 
 
-WORKFLOW_DATA = [
-]
+WORKFLOW_DATA = []
 
 
 def get_workflow_jobs():
