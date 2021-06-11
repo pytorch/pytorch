@@ -536,6 +536,10 @@ def get_test_case_args(test_module, using_pytest) -> List[str]:
     if test_module not in SPECIFIED_TEST_CASES_DICT:
         return args
 
+    # if specified with __all__ then run all tests
+    if '__all__' in SPECIFIED_TEST_CASES_DICT[test_module]:
+        return args
+
     if using_pytest:
         args.append('-k')
         args.append(' or '.join(SPECIFIED_TEST_CASES_DICT[test_module]))
@@ -739,7 +743,8 @@ class TestChoices(list):
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Run the PyTorch unit test suite',
-        epilog='where TESTS is any of: {}'.format(', '.join(TESTS)))
+        epilog='where TESTS is any of: {}'.format(', '.join(TESTS)),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument(
         '-v',
         '--verbose',
@@ -839,6 +844,11 @@ def parse_args():
         type=str,
         const=SPECIFIED_TEST_CASES_FILE,
         help='load specified test cases file dumped from previous OSS CI stats, format CSV. '
+        ' If all test cases should run for a <test_module> please add a single row: \n'
+        ' test_filename,test_case_name\n'
+        ' ...\n'
+        ' <test_module>,__all__\n'
+        ' ...\n'
         'file content is used based on option "--use-specified-test-cases-for".'
     )
     parser.add_argument(
@@ -849,7 +859,7 @@ def parse_args():
         help='used together with option "--run-specified-test-cases". When specified test case '
         'file is set. This option allow user to control whether to only run the specified test '
         'modules or to also run the remaining modules. Note: regardless of this option, we '
-        'only run the specified test cases within a test module. ',
+        'only run the specified test cases within a test module.',
     )
     return parser.parse_args()
 
