@@ -55,9 +55,13 @@ BASE_REQUIRES = [DOCKER_REQUIREMENT_NDK]
 
 WORKFLOW_DATA = [
     AndroidNightlyJob(["x86_32"], "pytorch_linux_build", requires=BASE_REQUIRES),
+    AndroidNightlyJob(["x86_3_fulljit"], "pytorch_linux_build", requires=BASE_REQUIRES),
     AndroidNightlyJob(["x86_64"], "pytorch_linux_build", requires=BASE_REQUIRES),
+    AndroidNightlyJob(["x86_64_fulljit"], "pytorch_linux_build", requires=BASE_REQUIRES),
     AndroidNightlyJob(["arm", "v7a"], "pytorch_linux_build", requires=BASE_REQUIRES),
+    AndroidNightlyJob(["arm", "v7a", "fulljit"], "pytorch_linux_build", requires=BASE_REQUIRES),
     AndroidNightlyJob(["arm", "v8a"], "pytorch_linux_build", requires=BASE_REQUIRES),
+    AndroidNightlyJob(["arm", "v8a", "fulljit"], "pytorch_linux_build", requires=BASE_REQUIRES),
     AndroidNightlyJob(["android_gradle"], "pytorch_android_gradle_build",
                       with_docker=False,
                       requires=[
