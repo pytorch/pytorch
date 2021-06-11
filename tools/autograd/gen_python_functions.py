@@ -69,7 +69,7 @@ from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 #
 
 # These functions require manual Python bindings or are not exposed to Python
-SKIP_PYTHON_BINDINGS = [
+_SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'is_cuda', 'is_sparse', 'is_sparse_csr', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
@@ -93,7 +93,7 @@ SKIP_PYTHON_BINDINGS = [
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
 ]
-SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), SKIP_PYTHON_BINDINGS))
+SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))
 
 # These function signatures are not exposed to Python. Note that this signature
 # list does not support regex.
@@ -111,8 +111,8 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 @with_native_function
 def should_generate_py_binding(f: NativeFunction) -> bool:
     name = cpp.name(f.func)
-    for pattern in SKIP_PYTHON_BINDINGS:
-        if pattern.match(name):
+    for skip_regex in SKIP_PYTHON_BINDINGS:
+        if skip_regex.match(name):
             return False
 
     signature = str(f.func)
@@ -210,7 +210,7 @@ def create_python_bindings(
     })
 
 def load_signatures(
-    native_functions: str,
+    native_functions: List[NativeFunction],
     deprecated_yaml_path: str,
     *,
     method: bool,

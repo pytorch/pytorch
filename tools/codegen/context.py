@@ -1,4 +1,4 @@
-from tools.codegen.utils import S, T, context
+from tools.codegen.utils import S, T
 from tools.codegen.model import (NativeFunction, NativeFunctionsGroup, BackendIndex, DispatchKey)
 import tools.codegen.local as local
 
