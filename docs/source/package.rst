@@ -7,6 +7,14 @@ torch.package
 
     This module is experimental and has not yet been publicly released.
 
+``torch.package`` adds support for creating hermetic packages containing arbitrary
+PyTorch code. These packages can be saved, shared, used to load and execute models
+at a later date or on a different machine, and can even be deployed to production using
+``torch::deploy``.
+
+This document contains tutorials, how-to guides, explanations, and an API reference that
+will help you learn more about ``torch.package`` and how to use it.
+
 API Reference
 -------------
 .. autoclass:: torch.package.PackagingError
