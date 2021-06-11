@@ -89,7 +89,7 @@ std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, ParamsHash<CacheKey>
 
 }
 
-void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
    memset(&key, 0, sizeof(key));
    setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
    key.operation = operation;
@@ -98,7 +98,7 @@ void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, c
    key.w_alignment = getAlignment(w);
 }
 
-void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, cudnn_frontend::ExecutionPlan& plan) {
+void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const cudnn_frontend::ExecutionPlan& plan) {
     auto workspace_size = plan.getWorkspaceSize();
     Tensor workspace;
     workspace = at::empty({workspace_size}, x.options().dtype(kByte));
