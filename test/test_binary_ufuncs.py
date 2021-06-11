@@ -2011,6 +2011,58 @@ class TestBinaryUfuncs(TestCase):
                          torch.bitwise_xor(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
 
+    def test_bitwise_left_shift(self, device):
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.tensor([19, -20, -21, 22], dtype=dtype, device=device)
+            b = torch.tensor([2, 1, 3, 1], dtype=dtype, device=device)
+            expected_res = torch.tensor(np.left_shift(a.cpu().numpy(), b.cpu().numpy()), device=device)
+            b_scalar = 2
+            expected_res_scalar = torch.tensor(np.left_shift(a.cpu().numpy(), b_scalar), device=device)
+
+            # standard version
+            self.assertEqual(torch.bitwise_left_shift(a, b), expected_res)
+            self.assertEqual(torch.bitwise_left_shift(a, b_scalar), expected_res_scalar)
+
+            # out
+            c = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_left_shift(a, b, out=c)
+            self.assertEqual(c, expected_res)
+            torch.bitwise_left_shift(a, b_scalar, out=c)
+            self.assertEqual(c, expected_res_scalar)
+
+            # in-place
+            a1 = a.clone()
+            a1.bitwise_left_shift_(b)
+            self.assertEqual(a1, expected_res)
+            a.bitwise_left_shift_(b_scalar)
+            self.assertEqual(a, expected_res_scalar)
+
+    def test_bitwise_right_shift(self, device):
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.tensor([19, -20, -21, 22], dtype=dtype, device=device)
+            b = torch.tensor([2, 1, 3, 1], dtype=dtype, device=device)
+            expected_res = torch.tensor(np.right_shift(a.cpu().numpy(), b.cpu().numpy()), device=device)
+            b_scalar = 2
+            expected_res_scalar = torch.tensor(np.right_shift(a.cpu().numpy(), b_scalar), device=device)
+
+            # standard version
+            self.assertEqual(torch.bitwise_right_shift(a, b), expected_res)
+            self.assertEqual(torch.bitwise_right_shift(a, b_scalar), expected_res_scalar)
+
+            # out
+            c = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_right_shift(a, b, out=c)
+            self.assertEqual(c, expected_res)
+            torch.bitwise_right_shift(a, b_scalar, out=c)
+            self.assertEqual(c, expected_res_scalar)
+
+            # in-place
+            a1 = a.clone()
+            a1.bitwise_right_shift_(b)
+            self.assertEqual(a1, expected_res)
+            a.bitwise_right_shift_(b_scalar)
+            self.assertEqual(a, expected_res_scalar)
+
     @onlyOnCPUAndCUDA
     @dtypes(*list(product(torch.testing.get_all_dtypes(include_complex=False),
                           torch.testing.get_all_dtypes(include_complex=False))))
@@ -2774,8 +2826,8 @@ tensor_binary_ops = [
     '__floordiv__', '__rfloordiv__', '__ifloordiv__',
     '__mod__', '__rmod__', '__imod__',
     '__pow__', '__rpow__', '__ipow__',
-    '__lshift__', '__ilshift__',
-    '__rshift__', '__irshift__',
+    '__lshift__', '__rlshift__', '__ilshift__',
+    '__rshift__', '__rrshift__', '__irshift__',
     '__and__', '__iand__',
     '__xor__', '__ixor__',
     '__or__', '__ior__',
@@ -2783,7 +2835,7 @@ tensor_binary_ops = [
     # Unsupported operators
     # '__imatmul__',
     # '__divmod__', '__rdivmod__', '__idivmod__',
-    # '__rand__', '__ror__', '__rxor__', '__rlshift__', '__rrshift__',
+    # '__rand__', '__ror__', '__rxor__',
 ]
 
 # Test that binary math operations return NotImplemented for unknown types.
