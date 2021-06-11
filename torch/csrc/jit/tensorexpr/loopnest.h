@@ -86,7 +86,6 @@ class TORCH_API LoopNest {
   //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
   std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(const Buf*) const;
 
-  static bool vectorize(For*);
   Stmt* simplify();
 
   bool computeInline(Stmt* s);
@@ -403,16 +402,21 @@ class TORCH_API LoopNest {
   bool rfactor(Stmt* s, For* outer_reduction_for);
   bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
 
+  // Vectorize the given loop. This method requires that the given loop
+  // does not perform a reduction.
+  // It returns true if vectorization is successful and false otherwise.
+  static bool vectorize(For*);
+
+  // Find the inner-most loops and vectorize them. Currently, this only works
+  // for the LLVM backend, when no reductions are involved.
+  void vectorizeInnerLoops();
+
   void setBufferMap(
       For* f,
       const std::unordered_map<std::string, const Buf*>& map);
 
   void eliminateDeadStores();
   void prepareForCodegen();
-
-  // Find the inner-most loops and vectorize them. Currently, this only works
-  // for the LLVM backend, when no reductions are involved.
-  void vectorizeInnerLoops();
 
   const std::unordered_set<const Buf*> getInputBufs() const;
   const std::unordered_set<const Buf*> getOutputBufs() const {
