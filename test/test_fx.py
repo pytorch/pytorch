@@ -2789,6 +2789,7 @@ class TestFunctionalTracing(JitTestCase):
         "celu": CONTROL_FLOW,
         "cosine_embedding_loss": CONTROL_FLOW,
         "cross_entropy": CONTROL_FLOW,
+        "cross_entropy_with_soft_labels": CONTROL_FLOW,
         "ctc_loss": CONTROL_FLOW,
         "dropout": CONTROL_FLOW,
         "dropout2d": CONTROL_FLOW,
