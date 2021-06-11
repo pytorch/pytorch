@@ -2227,10 +2227,16 @@ class TestNN(NNTestCase):
         self.assertEqual(model.bias[-1].item(), 0.)
         self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happpened
         # Should not throw
+
+        sgd = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        weight_copy = model.weight.clone()
+        bias_copy = model.bias.clone()
+        sgd.zero_grad()
         (model.weight.T @ model.bias).sum().backward()
-        with torch.no_grad():
-            for p in model.parameters():
-                p.add_(- p.grad, alpha=0.01)
+        sgd.step()
+        self.assertNotEqual(model.weight, weight_copy)
+        self.assertNotEqual(model.bias, bias_copy)
 
         # Remove first parametrization.
         # Check that the model is still parametrized and so is the second parameter
@@ -2244,10 +2250,13 @@ class TestNN(NNTestCase):
         self.assertEqual(id(model.weight), initial_weight_id)           # Keeps the same id
         self.assertEqual(len(list(model.parameters())), 2)              # Nothing weird has happened
         # Should not throw
+        weight_copy = model.weight.clone()
+        bias_copy = model.bias.clone()
+        sgd.zero_grad()
         (model.weight.T @ model.bias).sum().backward()
-        with torch.no_grad():
-            for p in model.parameters():
-                p.add_(- p.grad, alpha=0.01)
+        sgd.step()
+        self.assertNotEqual(model.weight, weight_copy)
+        self.assertNotEqual(model.bias, bias_copy)
 
         # Remove the second parametrization.
         # Check that the module is not parametrized
@@ -2260,22 +2269,33 @@ class TestNN(NNTestCase):
         self.assertFalse(hasattr(model, "parametrizations"))  # Not parametrized the module
         self.assertEqual(model.__class__, nn.Linear)          # Resores the previous class
         self.assertEqual(len(list(model.parameters())), 2)    # Nothing weird has happeed
-        # Should not throw
+
+        # Should not throw things are updated
+        weight_copy = model.weight.clone()
+        bias_copy = model.bias.clone()
+        sgd.zero_grad()
         (model.weight.T @ model.bias).sum().backward()
-        with torch.no_grad():
-            for p in model.parameters():
-                p.add_(- p.grad, alpha=0.01)
+        sgd.step()
+        self.assertNotEqual(model.weight, weight_copy)
+        self.assertNotEqual(model.bias, bias_copy)
 
         # Test leave_parametrized=True
         for _ in range(2):
             parametrize.register_parametrization(model, "weight", Skew())
             parametrize.register_parametrization(model, "weight", Orthogonal())
             parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
-            # Should not throw
+            # We didn't change the dtype nor had multiple inputs, so the id should be the same
+            self.assertEqual(id(model.weight), initial_weight_id)
+            self.assertEqual(id(model.bias), initial_bias_id)
+
+            # Should not throw. Things are updated
+            weight_copy = model.weight.clone()
+            bias_copy = model.bias.clone()
+            sgd.zero_grad()
             (model.weight.T @ model.bias).sum().backward()
-            with torch.no_grad():
-                for p in model.parameters():
-                    p.add_(- p.grad, alpha=0.01)
+            sgd.step()
+            self.assertNotEqual(model.weight, weight_copy)
+            self.assertNotEqual(model.bias, bias_copy)
 
     def test_register_and_remove_buffer_parametrization(self):
         r"""Test that it is possible to add and remove parametrizations on buffers"""
@@ -2548,10 +2568,24 @@ class TestNN(NNTestCase):
             parametrize.register_parametrization(module, "weight", ChangeDtypeMulti())
         self.assertFalse(parametrize.is_parametrized(module))
 
+        # Returning a sequence of size one, although weird, it's correct
+        class SequenceLen1(nn.Module):
+            def forward(self, x):
+                return x
+
+            def right_inverse(self, w):
+                return (w,)
+
+        parametrize.register_parametrization(module, "weight", SequenceLen1())
+        self.assertTrue(hasattr(module.parametrizations.weight, "original0"))
+        self.assertFalse(hasattr(module.parametrizations.weight, "original1"))
+        _ = module.weight   # Does not throw
+        self.assertTrue(parametrize.is_parametrized(module))
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
 
         # None of the operations above should have altered the weight
         self.assertFalse(parametrize.is_parametrized(module))
-        self.assertTrue(torch.allclose(module.weight, weight_init))
+        self.assertEqual(module.weight, weight_init)
 
     def test_errors_parametrized_tensor_parametrization(self):
         # Test errors when registering a parametrization on a parametrized tensor

@@ -104,7 +104,7 @@ class ParametrizationList(ModuleList):
         #    X = module.weight
         #    Y = param.right_inverse(X)
         #    assert isinstance(Y, Tensor) or
-        #           (isinstance(Y, collections.Sequence) and all(isinstance(t, Tensor) for t in Y))
+        #           (isinstance(Y, collections.abc.Sequence) and all(isinstance(t, Tensor) for t in Y))
         #    Z = param(Y) if isisntance(Y, Tensor) else param(*Y)
         #    # Consistency checks
         #    assert X.dtype == Z.dtype and X.shape == Z.shape
@@ -126,20 +126,16 @@ class ParametrizationList(ModuleList):
                     new = module.right_inverse(new)
                 # else, we assume that right_inverse is the identity
 
-        if not isinstance(new, Tensor) and not isinstance(new, collections.Sequence):
+        if not isinstance(new, Tensor) and not isinstance(new, collections.abc.Sequence):
             raise ValueError("'right_inverse' must return a Tensor or a Sequence of tensors (list, tuple...). "
                              f"Got {type(new).__name__}")
 
-        # If it is a sequence of one tensor, we unpack it
-        if not isinstance(new, Tensor) and len(new) == 1:
-            new = new[0]
-
         # Set the number of original tensors
-        is_tensor = isinstance(new, Tensor)
-        self.ntensors = 1 if is_tensor else len(new)
+        self.is_tensor = isinstance(new, Tensor)
+        self.ntensors = 1 if self.is_tensor else len(new)
 
         # Register the tensor(s)
-        if self.ntensors == 1:
+        if self.is_tensor:
             if original.dtype != new.dtype:
                 raise ValueError(
                     "When `right_inverse` outputs one tensor, it may not change the dtype.\n"
@@ -197,8 +193,9 @@ class ParametrizationList(ModuleList):
             value (Tensor): Value to which initialize the module
         """
         # All the exceptions in this function should almost never throw.
-        # They could throw if, for example, right_inverse function does not return the same dtype
-        # for every input, which should most likely be caused by a bug in the code
+        # They could throw if, for example, right_inverse function returns a different
+        # dtype when given a different input, which should most likely be caused by a
+        # bug in the user's code
 
         with torch.no_grad():
             # See https://github.com/pytorch/pytorch/issues/53103
@@ -206,7 +203,7 @@ class ParametrizationList(ModuleList):
                 if hasattr(module, "right_inverse"):
                     value = module.right_inverse(value)
                 # else we assume that right_inverse is the identity
-            if self.ntensors == 1:
+            if self.is_tensor == 1:
                 # These exceptions should only throw when a right_inverse function does not
                 # return the same dtype for every input, which should most likely be caused by a bug
                 if not isinstance(value, Tensor):
@@ -221,7 +218,7 @@ class ParametrizationList(ModuleList):
                 # We know that the result is going to have the same dtype
                 self.original.set_(value)  # type: ignore[call-overload]
             else:
-                if not isinstance(value, collections.Sequence):
+                if not isinstance(value, collections.abc.Sequence):
                     raise ValueError(
                         "'right_inverse' must return a sequence of tensors. "
                         f"Got {type(value).__name__}."
@@ -247,7 +244,7 @@ class ParametrizationList(ModuleList):
 
     def forward(self) -> Tensor:
         # Unpack the originals for the first parametrization
-        if self.ntensors == 1:
+        if self.is_tensor == 1:
             x = self[0](self.original)
         else:
             originals = (getattr(self, f"original{i}") for i in range(self.ntensors))
@@ -566,7 +563,7 @@ def remove_parametrizations(
     # Fetch the original tensor
     assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
     parametrizations = module.parametrizations[tensor_name]
-    if parametrizations.ntensors == 1:
+    if parametrizations.is_tensor == 1:
         original = parametrizations.original
         if leave_parametrized:
             with torch.no_grad():
@@ -586,7 +583,7 @@ def remove_parametrizations(
             original = Parameter(t) if t.requires_grad else t
         else:
             raise ValueError("Cannot leave unparametrized (`leave_parametrized=False`) a tensor "
-                             "that is parametrized in terms of more than one tensor.")
+                             "that is parametrized in terms of a sequence of tensors.")
 
     # Delete the property that manages the parametrization
     delattr(module.__class__, tensor_name)
