@@ -15,6 +15,11 @@ at a later date or on a different machine, and can even be deployed to productio
 This document contains tutorials, how-to guides, explanations, and an API reference that
 will help you learn more about ``torch.package`` and how to use it.
 
+
+.. contents:: :local:
+    :depth: 2
+
+
 Tutorials
 ---------
 Packaging your first model
