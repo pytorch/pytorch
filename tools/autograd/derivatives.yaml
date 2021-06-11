@@ -578,10 +578,6 @@
 - name: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   self: not_implemented("geqrf")
 
-- name: ger(Tensor self, Tensor vec2) -> Tensor
-  self: grad.mv(vec2.conj())
-  vec2: grad.t().mv(self.conj())
-
 - name: indices(Tensor(a) self) -> Tensor(a)
   output_differentiability: [False]
 
