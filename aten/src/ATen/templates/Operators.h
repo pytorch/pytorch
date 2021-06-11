@@ -89,8 +89,8 @@ struct Storage;
 namespace at {
 
 class Tensor;
-class Dimname;
-class Generator;
+struct Dimname;
+struct Generator;
 using TensorList = c10::ArrayRef<Tensor>;
 using DimnameList = c10::ArrayRef<Dimname>;
 using Stream = c10::Stream;
