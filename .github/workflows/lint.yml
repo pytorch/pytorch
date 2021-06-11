@@ -124,7 +124,19 @@ jobs:
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
       - name: Assert that regenerating the workflows didn't change them
-        run: .github/scripts/report_git_status.sh .github/workflows
+        run: |
+          if ! .github/scripts/report_git_status.sh .github/workflows; then
+            echo
+            echo 'As shown by the above diff, the committed .github/workflows'
+            echo 'are not up to date according to .github/templates.'
+            echo 'Please run this command, commit, and push again to your PR:'
+            echo
+            echo '    .github/scripts/generate_ci_workflows.py'
+            echo
+            echo 'If running that command does nothing, you may need to rebase'
+            echo 'onto a more recent commit from the PyTorch master branch.'
+            false
+          fi
       - name: Install ShellCheck
         id: install_shellcheck
         if: always()
