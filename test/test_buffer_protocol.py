@@ -25,6 +25,9 @@ def get_dtype_size(dtype):
         bytes = torch.iinfo(dtype).bits / 8
     return int(bytes)
 
+# Tests for the `from_buffer` function (only work on CPU):
+#   Constructs tensors from Python objects that implement the buffer protocol,
+#   without copying data.
 class TestBufferProtocol(common.TestCase):
     INPUT = [0, 1, 2, 3]
 
