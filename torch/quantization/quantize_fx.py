@@ -145,7 +145,7 @@ def _prepare_fx(model: torch.nn.Module, qconfig_dict: Any,
                 is_standalone_module: bool = False) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
-      `model`, `qconfig_dict`, `prepare_custom_config_dict`, `equalization_qonfig_dict`: 
+      `model`, `qconfig_dict`, `prepare_custom_config_dict`, `equalization_qonfig_dict`:
       see docs for :func:`~torch.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
       quantizing a standalone module or not, a standalone module

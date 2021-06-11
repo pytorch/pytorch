@@ -179,15 +179,17 @@ class TestEqualizeFx(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear1 = Linear()
+                self.linear2 = Linear()
 
             def forward(self, x):
                 x = self.linear1(x)
+                x = self.linear2(x)
                 return x
 
         functionalLinear_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
-            ns.call_module(_WeightEqualizationObserver): 1,
-            ns.call_module(MinMaxObserver): 3,
+            ns.call_module(_WeightEqualizationObserver): 2,
+            ns.call_module(MinMaxObserver): 5,
         }
 
         # Test where we have a Linear layer followed by a fp32 operation
@@ -212,7 +214,7 @@ class TestEqualizeFx(QuantizationTestCase):
         }
 
         functionalLinearFP32_node_occurrence = {
-            ns.call_module(_InputEqualizationObserver): 4,
+            ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(_WeightEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 6,
         }
