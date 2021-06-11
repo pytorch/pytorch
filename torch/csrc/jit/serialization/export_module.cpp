@@ -436,7 +436,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*tensor_cdata_naming_scheme=*/false);
+        /*tensor_cdata_naming_scheme=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -463,6 +463,7 @@ void ScriptModuleSerializer::writeArchive(
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
   std::vector<std::string> tensor_names;
+  // tensors which need their storages written in tensor_cdata_naming_scheme
   std::unordered_set<std::string> tensors_to_serialize;
   Pickler data_pickle(
       [&](const char* buf, size_t size) {
@@ -476,12 +477,13 @@ void ScriptModuleSerializer::writeArchive(
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
         if (tensor_cdata_naming_scheme) {
-            std::string cdata_str =
+          std::string cdata_str =
               std::to_string(reinterpret_cast<std::intptr_t>(
                   tensor.storage().unsafeGetStorageImpl()));
-             uint64_t id = 0;
+          uint64_t id;
           if (storage_context_.hasStorage(cdata_str)) {
-            // storage has been serialzed already, skip
+            // this case is hit when storage has been serialized already
+            // from a torch.package context
             id = storage_context_.getStorageID(cdata_str);
           } else {
             id = storage_context_.addStorage(cdata_str, tensor.storage());
@@ -504,12 +506,16 @@ void ScriptModuleSerializer::writeArchive(
 
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
-    std::string tensor_name = tensor_names[i++]; 
-    if (tensor_cdata_naming_scheme && !tensors_to_serialize.count(tensor_name)) {
-        // storage has been serialzed already, skip
-        continue;
-    } 
-    writer_.writeRecord(tensor_dir + tensor_name, writable_td.data(), writable_td.sizeInBytes());
+    std::string tensor_name = tensor_names[i++];
+    if (tensor_cdata_naming_scheme &&
+        !tensors_to_serialize.count(tensor_name)) {
+      // storage has been serialzed already, skip
+      continue;
+    }
+    writer_.writeRecord(
+        tensor_dir + tensor_name,
+        writable_td.data(),
+        writable_td.sizeInBytes());
   }
 
   std::string fname = archive_dir + archive_name + ".pkl";
@@ -647,8 +653,8 @@ void ScriptModuleSerializer::writeByteCode(
       telements,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
-      /*tensor_dir=*/"bytecode/",
-      /*tensor_cdata_naming_scheme=*/false);
+      /*tensor_dir=*/"constants/",
+      /*tensor_cdata_naming_scheme=*/true);
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 

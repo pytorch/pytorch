@@ -61,6 +61,46 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
 
+@functional_datapipe('unbatch')
+class UnBatchIterDataPipe(IterDataPipe):
+    r""" :class:`UnBatchIterDataPipe`.
+
+    Iterable DataPipe to undo batching of data. In other words, it flattens the data up to the specified level
+    within a batched DataPipe.
+    args:
+        datapipe: Iterable DataPipe being un-batched
+        unbatch_level: Defaults to `1` (only flattening the top level). If set to `2`, it will flatten the top 2 levels,
+        and `-1` will flatten the entire DataPipe.
+    """
+    def __init__(self, datapipe, unbatch_level: int = 1):
+        self.datapipe = datapipe
+        self.unbatch_level = unbatch_level
+
+    def __iter__(self):
+        for element in self.datapipe:
+            for i in self._dive(element, unbatch_level=self.unbatch_level):
+                yield i
+
+    def _dive(self, element, unbatch_level):
+        if unbatch_level < -1:
+            raise ValueError("unbatch_level must be -1 or >= 0")
+        if unbatch_level == -1:
+            if isinstance(element, list):
+                for item in element:
+                    for i in self._dive(item, unbatch_level=-1):
+                        yield i
+            else:
+                yield element
+        elif unbatch_level == 0:
+            yield element
+        else:
+            if not isinstance(element, list):
+                raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
+            for item in element:
+                for i in self._dive(item, unbatch_level=unbatch_level - 1):
+                    yield i
+
+
 @functional_datapipe('bucket_batch')
 class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BucketBatchIterDataPipe`.

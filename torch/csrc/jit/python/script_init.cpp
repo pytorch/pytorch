@@ -1003,8 +1003,7 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "get_storage_id",
-          [](ScriptModuleSerializer& m,
-             const std::string& name) {
+          [](ScriptModuleSerializer& m, const std::string& name) {
             return m.storage_context().getStorageID(name);
           })
       .def(

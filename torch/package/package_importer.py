@@ -29,7 +29,7 @@ from .importer import Importer
 
 
 class PackageImporter(Importer):
-    """Importers allow you to load code written to packages by PackageExporter.
+    """Importers allow you to load code written to packages by :class:`PackageExporter`.
     Code is loaded in a hermetic way, using files from the package
     rather than the normal python import system. This allows
     for the packaging of PyTorch model code and data so that it can be run
@@ -37,12 +37,12 @@ class PackageImporter(Importer):
 
     The importer for packages ensures that code in the module can only be loaded from
     within the package, except for modules explicitly listed as external during export.
-    The file `extern_modules` in the zip archive lists all the modules that a package externally depends on.
+    The file ``extern_modules`` in the zip archive lists all the modules that a package externally depends on.
     This prevents "implicit" dependencies where the package runs locally because it is importing
     a locally-installed package, but then fails when the package is copied to another machine.
     """
 
-    """The dictionary of already loaded modules from this package, equivalent to `sys.modules` but
+    """The dictionary of already loaded modules from this package, equivalent to ``sys.modules`` but
     local to this importer.
     """
     modules: Dict[str, types.ModuleType]
@@ -52,12 +52,12 @@ class PackageImporter(Importer):
         file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
-        """Open `file_or_buffer` for importing. This checks that the imported package only requires modules
-        allowed by `module_allowed`
+        """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
+        allowed by ``module_allowed``
 
         Args:
             file_or_buffer: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
-                or a string or os.PathLike object containing a file name.
+                a string, or an ``os.PathLike`` object containing a filename.
             module_allowed (Callable[[str], bool], optional): A method to determine if a externally provided module
                 should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
                 does not support. Defaults to allowing anything.
@@ -111,14 +111,14 @@ class PackageImporter(Importer):
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
         the module. Modules are loaded locally
-        to the importer and will appear in `self.modules` rather than `sys.modules`
+        to the importer and will appear in ``self.modules`` rather than ``sys.modules``.
 
         Args:
             name (str): Fully qualified name of the module to load.
-            package ([type], optional): Unused, but present to match the signature of importlib.import_module. Defaults to None.
+            package ([type], optional): Unused, but present to match the signature of importlib.import_module. Defaults to ``None``.
 
         Returns:
-            types.ModuleType: the (possibly already) loaded module.
+            types.ModuleType: The (possibly already) loaded module.
         """
         return self._gcd_import(name)
 
@@ -126,7 +126,7 @@ class PackageImporter(Importer):
         """Load raw bytes.
 
         Args:
-            package (str): The name of module package (e.g. "my_package.my_subpackage")
+            package (str): The name of module package (e.g. ``"my_package.my_subpackage"``).
             resource (str): The unique name for the resource.
 
         Returns:
@@ -146,10 +146,10 @@ class PackageImporter(Importer):
         """Load a string.
 
         Args:
-            package (str): The name of module package (e.g. "my_package.my_subpackage")
+            package (str): The name of module package (e.g. ``"my_package.my_subpackage"``).
             resource (str): The unique name for the resource.
-            encoding (str, optional): Passed to `decode`. Defaults to 'utf-8'.
-            errors (str, optional): Passed to `decode`. Defaults to 'strict'.
+            encoding (str, optional): Passed to ``decode``. Defaults to ``'utf-8'``.
+            errors (str, optional): Passed to ``decode``. Defaults to ``'strict'``.
 
         Returns:
             str: The loaded text.
@@ -159,15 +159,15 @@ class PackageImporter(Importer):
 
     def load_pickle(self, package: str, resource: str, map_location=None) -> Any:
         """Unpickles the resource from the package, loading any modules that are needed to construct the objects
-        using :meth:`import_module`
+        using :meth:`import_module`.
 
         Args:
-            package (str): The name of module package (e.g. "my_package.my_subpackage")
+            package (str): The name of module package (e.g. ``"my_package.my_subpackage"``).
             resource (str): The unique name for the resource.
-            map_location: Passed to `torch.load` to determine how tensors are mapped to devices. Defaults to None.
+            map_location: Passed to `torch.load` to determine how tensors are mapped to devices. Defaults to ``None``.
 
         Returns:
-            Any: the unpickled object.
+            Any: The unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
         restore_location = _get_restore_location(map_location)
@@ -249,7 +249,7 @@ class PackageImporter(Importer):
 
     def id(self):
         """
-        Returns internal identifier that torch.package uses to distinguish PackageImporter instances.
+        Returns internal identifier that torch.package uses to distinguish :class:`PackageImporter` instances.
         Looks like::
 
             <torch_package_0>
@@ -262,7 +262,7 @@ class PackageImporter(Importer):
         """Returns a file structure representation of package's zipfile.
 
         Args:
-            include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
+            include (Union[List[str], str]): An optional string e.g. ``"my_package.my_subpackage"``, or optional list of strings
                 for the names of the files to be inluded in the zipfile representation. This can also be
                 a glob-style pattern, as described in :meth:`PackageExporter.mock`
 
