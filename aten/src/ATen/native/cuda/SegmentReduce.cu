@@ -42,7 +42,6 @@ Tensor _get_complete_sum(const Tensor& lengths) {
 }
 
 Tensor _segment_reduce_cuda_kernel(
-    SegmentReductionType reduction,
     const Tensor& data,
     const Tensor& lengths,
     int64_t axis,
