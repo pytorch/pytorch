@@ -186,7 +186,7 @@ Keyword args:
 Example::
 
     >>> a = torch.randn(3, 3)
-    >>> torch.logsumexp(a, 1)
+    >>> torch.special.logsumexp(a, 1)
     tensor([ 0.8442,  1.4322,  0.8711])
 """.format(**multi_dim_common))
 
