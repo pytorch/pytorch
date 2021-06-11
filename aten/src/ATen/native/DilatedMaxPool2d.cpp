@@ -132,10 +132,6 @@ const Tensor& indices) {
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
-  const int64_t outputHeight = gradOutput.size(-2);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
-  const int64_t outputWidth = gradOutput.size(-1);
 
   /* XXX preserve the existing shape check behavior */
   const int64_t outputHeight_for_shape_check = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
