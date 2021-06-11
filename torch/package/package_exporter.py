@@ -728,7 +728,7 @@ node [shape=box];
                 if obj.device.type != "cpu":
                     obj = obj.cpu()
                 num_bytes = obj.size() * obj.element_size()
-                storage_id = str(self.script_module_serializer.track_storage(obj_key, obj))
+                storage_id = self.script_module_serializer.track_storage(obj_key, obj)
                 self.zip_file.write_record(f".data/{storage_id}.storage", obj.data_ptr(), num_bytes)
             else:
                 storage_id = self.script_module_serializer.get_storage_id(obj_key)
