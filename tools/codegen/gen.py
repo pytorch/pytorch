@@ -40,6 +40,12 @@ try:
 except ImportError:
     from yaml import SafeLoader as Loader  # type: ignore[misc]
 
+try:
+    # use faster C Dumper if available
+    from yaml import CSafeDumper as Dumper
+except ImportError:
+    from yaml import SafeDumper as Dumper  # type: ignore[misc]
+
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
 # various generated files (e.g., TypeDefault.cpp) based on the operators
@@ -531,14 +537,14 @@ def dict_representer(dumper: Any, data: Any) -> Any:
     return dumper.represent_dict(data.items())
 
 def format_yaml(data: object) -> str:
-    noalias_dumper = yaml.dumper.SafeDumper
+    noalias_dumper = Dumper
     noalias_dumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
     # Support serializing OrderedDict
     noalias_dumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
     # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
-    # width=float('Inf') turns off optional line breaks and improves
+    # width=1e9 turns off optional line breaks and improves
     # the portability of the outputted yaml.
-    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))  # type: ignore[no-any-return]
+    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=1e9)  # type: ignore[no-any-return]
 
 # For some reason, some defaults we write to YAML are written as native
 # YAML objects, rather than doing them uniformly as strings.  This
