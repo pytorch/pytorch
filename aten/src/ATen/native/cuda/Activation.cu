@@ -268,37 +268,50 @@ inline double __device__ curand_uniform_type<double>(curandState_t* state) {
   return curand_uniform_double(state);
 }
 
-template <typename scalar_t>
+template <typename scalar_t, int unroll_factor, typename F>
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_2(256, 4)
+#endif
 __global__ void rrelu_with_noise_cuda_kernel(
-    int64_t n,
+    int numel,
     PhiloxCudaState philox_args,
     scalar_t* output,
     scalar_t* input,
     scalar_t* noise,
-    double a,
-    double b) {
+    double lower,
+    double upper,
+    const F& random_func) {
   auto seeds = at::cuda::philox::unpack(philox_args);
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  curandState_t state;
+  curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
               idx,
               std::get<1>(seeds),
               &state);
 
-  CUDA_KERNEL_LOOP(i, n)
-  {
-    if (input[i] <= 0)
-    {
-      scalar_t r = curand_uniform_type<scalar_t>(&state);
-      r = r * (b - a) + a;
-      output[i] = input[i] * r;
-      noise[i] = r;
+  int grid_stride = blockDim.x * gridDim.x * unroll_factor;
+  int rounded_size = ((numel - 1) / grid_stride + 1) * grid_stride;
+  double range = upper - lower;
+
+  for (int linear_index = idx; linear_index < rounded_size; linear_index += grid_stride) {
+    auto rand = random_func(&state);
+    #pragma unroll
+    for (int ii = 0; ii < unroll_factor; ii++) {
+      int li = linear_index + blockDim.x * gridDim.x * ii;
+      if (li >= numel) {
+        continue;
+      }
+      scalar_t r = static_cast<scalar_t>((&rand.x)[ii]);
+      r = r * range + lower;
+      if (input[li] <= 0) {
+        output[li] = input[li] * r;
+        noise[li] = r;
+      } else {
+        output[li] = input[li];
+        noise[li] = static_cast<scalar_t>(0);
+      }
     }
-    else
-    {
-      output[i] = input[i];
-      noise[i] = 1;
-    }
+    __syncthreads();
   }
 }
 
@@ -311,7 +324,7 @@ inline void _rrelu_with_noise_cuda_train(
     const Scalar& upper_,
     c10::optional<Generator> generator) {
 
-  const int64_t numel = input.numel();
+  int64_t numel = input.numel();
   auto execution_policy = calc_execution_policy(numel);
 
   auto counter_offset = std::get<0>(execution_policy);
@@ -335,14 +348,32 @@ inline void _rrelu_with_noise_cuda_train(
   double upper = upper_.to<double>();
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  rrelu_with_noise_cuda_kernel<scalar_t><<<grid, block, 0, stream>>>(
-      numel,
-      rng_engine_inputs,
-      output_data,
-      input_data,
-      noise_data,
-      lower,
-      upper);
+
+  if (std::is_same<scalar_t, double>::value) {
+    rrelu_with_noise_cuda_kernel<scalar_t, 2><<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        output_data,
+        input_data,
+        noise_data,
+        lower,
+        upper,
+        [] __device__ (curandStatePhilox4_32_10_t* state) {
+          return curand_uniform2_double(state);
+        });
+  } else {
+    // half and float
+    rrelu_with_noise_cuda_kernel<scalar_t, 4><<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        output_data,
+        input_data,
+        noise_data,
+        lower, upper,
+        [] __device__ (curandStatePhilox4_32_10_t* state) {
+          return curand_uniform4(state);
+        });
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
