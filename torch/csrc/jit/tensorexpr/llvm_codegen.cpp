@@ -4,10 +4,9 @@
 
 #include <aten/src/ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
-
-#include <memory>
 
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
@@ -44,6 +43,8 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <torch/csrc/jit/jit_log.h>
+
+#include <memory>
 
 using namespace torch::jit::tensorexpr;
 
@@ -401,7 +402,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
   std::vector<llvm::Type*> params;
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     auto const& arg = args[i];
     if (arg.isVar()) {
       params.push_back(dtypeToLLVM(arg.dtype()));
@@ -416,7 +417,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   fn_->addAttribute(
       llvm::AttributeList::AttrIndex::FunctionIndex,
       llvm::Attribute::AlwaysInline);
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
     }
@@ -465,7 +466,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
-  for (size_t i = 0; i < params.size(); i++) {
+  for (const auto i : c10::irange(params.size())) {
     auto argp = irb_.CreateGEP(
         wrapper->arg_begin(), llvm::ConstantInt::getSigned(IntTy_, i));
     if (params[i]->isPointerTy()) {
@@ -1018,8 +1019,7 @@ void LLVMCodeGenImpl::replaceVarMapping(
     const std::vector<const Var*>& vars,
     const std::vector<llvm::Value*>& vals) {
   TORCH_CHECK(vars.size() == vals.size());
-  int i = 0;
-  for (int i = 0; i < vars.size(); i++) {
+  for (const auto i : c10::irange(vars.size())) {
     const Var* var = vars[i];
     llvm::Value* val = vals[i];
     if (val) {
@@ -1182,14 +1182,14 @@ llvm::Value* LLVMCodeGenImpl::packFuncArgs(
     return NullPtr;
   }
   std::vector<llvm::Type*> arg_types(func_args.size());
-  for (int i = 0; i < func_args.size(); i++) {
+  for (const auto i : c10::irange(func_args.size())) {
     arg_types[i] = func_args[i]->getType();
   }
   llvm::StructType* packed_type = llvm::StructType::create(arg_types);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
   llvm::Value* one = llvm::ConstantInt::get(IntTy_, 1);
   llvm::Value* packed = irb_.CreateAlloca(packed_type, one);
-  for (int i = 0; i < func_args.size(); i++) {
+  for (const auto i : c10::irange(func_args.size())) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     irb_.CreateStore(func_args[i], dst_ptr);
@@ -1204,7 +1204,7 @@ std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
   // TODO: extract arg_count from packed.
   std::vector<llvm::Value*> func_args(arg_count);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
-  for (int i = 0; i < arg_count; i++) {
+  for (const auto i : c10::irange(arg_count)) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     func_args[i] = irb_.CreateLoad(dst_ptr);
@@ -1833,7 +1833,7 @@ void LLVMCodeGenImpl::visit(const ExternalCall* v) {
         llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
 
     // Store dims of the buf
-    for (int dim = 0; dim < b->dims().size(); dim++) {
+    for (const auto dim : c10::irange(b->dims().size())) {
       gep = irb_.CreateInBoundsGEP(
           buf_dims, {llvm::ConstantInt::getSigned(IntTy_, dim_idx)});
       b->dims()[dim]->accept(this);
