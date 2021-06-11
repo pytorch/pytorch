@@ -29,11 +29,12 @@ inline Tensor& gammaln_out(Tensor& result, const Tensor& self) {
 /// auto t = torch::randn(128, dtype=kDouble);
 /// torch::special::polygamma(2, t);
 /// ```
-inline Tensor polygamma(const Tensor& self, int64_t n) {
-  return torch::special_polygamma(self, n);
+inline Tensor polygamma(int64_t n, const Tensor& self) {
+  return torch::special_polygamma(n, self);
 }
-inline Tensor& polygamma_out(const Tensor& self, int64_t n, Tensor& result) {
-  return torch::special_polygamma_out(result, self, n);
+
+inline Tensor& polygamma_out(int64_t n, Tensor& result, const Tensor& self) {
+  return torch::special_polygamma_out(n, result, self);
 }
 
 /// Computes entropy of input, elementwise

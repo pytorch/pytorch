@@ -9413,10 +9413,10 @@
 - func: special_logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
-- func: special_polygamma.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
+- func: special_polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
-- func: special_polygamma(Tensor self, int n) -> Tensor
+- func: special_polygamma(int n, Tensor self) -> Tensor
   python_module: special
   variants: function, method
 
