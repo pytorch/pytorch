@@ -1923,7 +1923,7 @@ static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& in
   // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
   auto m = input.size(-2);
   // exclude complex128 since nan_to_num_ does not work with it.
-  if (batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_ || !input.is_complex()) {
+  if ((batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_ ) && !input.is_complex()) {
     lu_cusolver_looped(input, pivots, infos, compute_pivots);
   }
 #else
@@ -1932,7 +1932,7 @@ static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& in
       apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
     });
   }
-#endif
+#endif // USE_CUSOLVER
   else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
       apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
