@@ -280,7 +280,7 @@ else
     CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
     CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
     python --version
-    mkdir -p "$CUSTOM_BACKEND_BUILD"
+    mkdir -p $CUSTOM_BACKEND_BUILD
     pushd "$CUSTOM_BACKEND_BUILD"
     cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
