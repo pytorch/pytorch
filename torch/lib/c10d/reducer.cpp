@@ -1,5 +1,5 @@
-#include <c10d/reducer.hpp>
 #include <c10d/default_comm_hooks.hpp>
+#include <c10d/reducer.hpp>
 
 #include <functional>
 
@@ -23,20 +23,6 @@ namespace {
 
 inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
-}
-
-// FIXME: Should make this a static method of C++ comm hook,
-// and reuse it instead of createing duplicate code.
-std::vector<at::Tensor> parseHookResult(const c10::IValue& result) {
-  TORCH_INTERNAL_ASSERT(
-      result.isTensor() || result.isTensorList(),
-      "expected the hook result is either a Tensor or a TensorList");
-
-  if (result.isTensor()) {
-    return {result.toTensor()};
-  }
-
-  return result.toTensorVector();
 }
 
 constexpr int kUnsetDivFactor = -1;
@@ -75,8 +61,7 @@ Reducer::Reducer(
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
-      // Only used for handling unevent input.
-      divFactor_(kUnsetDivFactor),
+      div_factor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
       thread_local_state_(at::ThreadLocalState()),
@@ -131,8 +116,7 @@ Reducer::Reducer(
     size_t replica_index = 0;
     const auto variable_count = replicas_[replica_index].size();
     grad_accumulators_[replica_index].resize(variable_count);
-    for (size_t variable_index = 0; variable_index < variable_count;
-         variable_index++) {
+    for (const auto variable_index : c10::irange(variable_count)) {
       auto& variable = replicas_[replica_index][variable_index];
 
       // The gradient accumulator function is lazily initialized once.
@@ -426,8 +410,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
   }
   const auto replica_count = replicas_.size();
   const auto variable_count = replicas_[0].size();
-  for (size_t variable_index = 0; variable_index < variable_count;
-       ++variable_index) {
+  for (const auto variable_index : c10::irange(variable_count)) {
     push_rebuilt_params(variable_index);
   }
 }
@@ -440,8 +423,8 @@ void Reducer::push_rebuilt_params(const size_t& index) {
 void Reducer::set_divide_factor() {
   // If it was scheduled, wait on allreduce in forward pass that tells us
   // division factor based on no. of currently participating processes.
-  if (divFactor_ == kUnsetDivFactor) {
-    divFactor_ = process_group_->getSize();
+  if (div_factor_ == kUnsetDivFactor) {
+    div_factor_ = process_group_->getSize();
     auto& workHandle = forwardPassWorkHandle_.workHandle;
     if (workHandle && !forwardPassWorkHandle_.useStaticWorldSize) {
       workHandle->wait();
@@ -449,7 +432,7 @@ void Reducer::set_divide_factor() {
       // Guard against the results being empty
       TORCH_INTERNAL_ASSERT(results.size() > 0);
       at::Tensor& res = results.front();
-      divFactor_ = res.item().to<int>();
+      div_factor_ = res.item().to<int>();
     }
   }
 }
@@ -828,7 +811,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec);
   if (comm_hook_ == nullptr) {
-    _AllReduceCommHookWithDivFactorState state(process_group_.get(), divFactor_);
+    _AllReduceCommHookWithDivFactorState state(process_group_.get(), div_factor_);
     _AllReduceCommHookWithDivFactor allreduce_hook(state);
     bucket.future_work = allreduce_hook.runHook(grad_bucket);
   } else {
@@ -1263,8 +1246,7 @@ std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
 std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
   std::vector<size_t> unmarked_param_indices;
   const auto variable_count = replicas_[0].size();
-  for (size_t variable_index = 0; variable_index < variable_count;
-       variable_index++) {
+  for (const auto variable_index : c10::irange(variable_count)) {
     if (perIterationReadyParams_.find(variable_index) ==
         perIterationReadyParams_.end()) {
       unmarked_param_indices.push_back(variable_index);
@@ -1277,9 +1259,7 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
   size_t replica_index = 0;
   auto& replica = bucket.replicas[replica_index];
-  for (size_t intra_bucket_index = 0;
-       intra_bucket_index < replica.variables.size();
-       intra_bucket_index++) {
+  for (const auto intra_bucket_index : c10::irange(replica.variables.size())) {
     auto& variable = replica.variables[intra_bucket_index];
     const auto offset = replica.offsets[intra_bucket_index];
     const auto length = replica.lengths[intra_bucket_index];
@@ -1313,7 +1293,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         // Wait for local_used_maps reduction to complete.
         local_used_work_->wait();
         // D2H from local_used_maps_dev_ to local_used_maps_
-        for (size_t i = 0; i < local_used_maps_.size(); i++) {
+        for (const auto i : c10::irange(local_used_maps_.size())) {
           // Blocking copy, if local_used_maps_dev_ is cuda
           local_used_maps_[i].copy_(local_used_maps_dev_[i]);
         }
@@ -1384,7 +1364,7 @@ void Reducer::finalize_backward() {
 
   // Unset allreduce division factor, as it may change in next backwards pass
   // when running with DDP join mode.
-  divFactor_ = kUnsetDivFactor;
+  div_factor_ = kUnsetDivFactor;
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
@@ -1395,7 +1375,7 @@ void Reducer::finalize_backward() {
         "This may indicate that communication hook was not properly installed.");
     bucket.future_work->wait();
     auto future_result = comm_hook_ == nullptr
-        ? parseHookResult(bucket.future_work->value())
+        ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
     for (const auto i : c10::irange(future_result.size())) {
       auto& replica = bucket.replicas[i];

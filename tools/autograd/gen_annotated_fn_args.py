@@ -48,7 +48,7 @@ def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
 
     template_path = os.path.join(autograd_dir, 'templates')
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    fm.write_with_template('annotated_fn_args.py', 'annotated_fn_args.py', lambda: {
+    fm.write_with_template('annotated_fn_args.py', 'annotated_fn_args.py.in', lambda: {
         'annotated_args': textwrap.indent('\n'.join(annotated_args), '    '),
     })
 
