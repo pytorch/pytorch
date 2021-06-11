@@ -42,6 +42,18 @@ at::Tensor DoBinaryOp(const at::Tensor& self, const at::Tensor& other,
   return bridge::AtenFromLtcTensor(result);
 }
 
+void CheckBinaryOpTypePromotion(const at::Tensor& out, const at::Tensor& self,
+                                const at::Tensor& other) {
+  at::ScalarType resultType = at::result_type(self, other);
+  LTC_CHECK(at::canCast(/*from=*/resultType, /*to=*/out.scalar_type()));
+}
+
+void CheckBinaryOpTypePromotion(const at::Tensor& out, const at::Tensor& self,
+                                const at::Scalar& other) {
+  at::ScalarType resultType = at::result_type(self, other);
+  LTC_CHECK(at::canCast(/*from=*/resultType, /*to=*/out.scalar_type()));
+}
+
 at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
   if (!tensor.defined()) {
     return at::Tensor();
@@ -299,6 +311,48 @@ at::Tensor AtenXlaType::_copy_from(const at::Tensor& self,
     }
   }
   return dst;
+}
+
+at::Tensor AtenXlaType::div(const at::Tensor& self, const at::Tensor& other) {
+  return div(self, other, /*rounding_mode=*/c10::nullopt);
+}
+
+at::Tensor AtenXlaType::div(const at::Tensor& self, const at::Tensor& other,
+                            c10::optional<std::string> rounding_mode) {
+  LTC_FN_COUNTER("xla::");
+  at::ScalarType dtype = at::result_type(self, other);
+  auto operands = GetBinaryOperands(self, other);
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::div(operands.first, operands.second, rounding_mode, dtype));
+}
+
+at::Tensor AtenXlaType::div(const at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::div(bridge::GetLtcTensor(self), other));
+}
+
+at::Tensor& AtenXlaType::div_(at::Tensor& self, const at::Tensor& other) {
+  return div_(self, other, /*rounding_mode=*/c10::nullopt);
+}
+
+at::Tensor& AtenXlaType::div_(at::Tensor& self, const at::Tensor& other,
+                              c10::optional<std::string> rounding_mode) {
+  LTC_FN_COUNTER("xla::");
+  CheckBinaryOpTypePromotion(self, self, other);
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::div_(self_tensor,
+                   bridge::GetOrCreateLtcTensor(other, self_tensor.GetDevice()),
+                   rounding_mode);
+  return self;
+}
+
+at::Tensor& AtenXlaType::div_(at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  CheckBinaryOpTypePromotion(self, self, other);
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::div_(self_tensor, other);
+  return self;
 }
 
 at::Tensor AtenXlaType::empty(at::IntArrayRef size,

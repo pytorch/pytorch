@@ -8,6 +8,12 @@ supported:
   - convolution_overrideable
   - convolution_backward_overrideable
   - _copy_from
+  - div.Tensor
+  - div_.Tensor
+  - div.Tensor_mode
+  - div_.Tensor_mode
+  - div.Scalar
+  - div_.Scalar
   - empty.memory_format
   - empty_strided
   - expand
