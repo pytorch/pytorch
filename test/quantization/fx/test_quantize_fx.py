@@ -3272,6 +3272,43 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
 
+    def test_norm_weight_bias(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = Linear()
+                self.scale = torch.randn(5, 5)
+                self.bias = torch.randn(5, 5)
+
+            def forward(self, x):
+                x1 = self.mods1(x)
+                y = F.layer_norm(x1, [5, 5], weight=self.scale, bias=self.bias)
+                return y
+
+        model = M()
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_function(torch.ops.quantized.linear): 1,
+            ns.call_function(torch.ops.quantized.layer_norm): 1,
+            ns.call_method("dequantize"): 1,
+        }
+
+        self.checkGraphModeFxOp(
+            model,
+            (torch.rand(5, 5),),
+            QuantType.STATIC,
+            expected_node_occurrence=expected_occurrence
+        )
+
     def _test_default_node_quant_handler_ops(
             self, module, functional, qconfig, is_reference=True, node_list=None, additional_quant_pattern_dict=None
     ):
