@@ -249,7 +249,6 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
       workStartTime_(w.workStartTime_) {
-  completed_ = w.completed_;
   exception_ = w.exception_;
 }
 
@@ -319,7 +318,6 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
 
 void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
   std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
   if (exception_) {
     auto exceptionMsg = c10::str(
         "Some NCCL operations have failed or timed out. Due to the ",
