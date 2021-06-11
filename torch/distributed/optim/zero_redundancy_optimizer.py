@@ -302,13 +302,20 @@ class ZeroRedundancyOptimizer(Optimizer):
             element of the list contains the param_groups for a rank. Element 0
             corresponds to rank 0, etc. We need all the ranks for the broadcast
             inside ``step()``.
+
+        NOTE: `test_sharding()` and `test_add_param_group()` rely on this
+        function using the sorted-greedy algorithm for partitioning. If the
+        algorithm is changed, please re-examine those two tests in
+        `test_zero_redundancy_optimizer.py` accordingly.
         """
         if len(self._partition_parameters_cache) == 0:
             self._partition_parameters_cache = [list() for _ in range(self.world_size)]
             sizes = [0] * self.world_size
             for param_group in self.param_groups:
                 param_lists: List[List] = [list() for _ in range(self.world_size)]
-                for param in param_group["params"]:
+                # Sort the params by size (largest first)
+                params_sorted = sorted(param_group["params"], key=lambda t: t.size()[0], reverse=True)
+                for param in params_sorted:
                     # Add this param to rank with smallest size.
                     rank = sizes.index(min(sizes))
                     param_lists[rank].append(param)
