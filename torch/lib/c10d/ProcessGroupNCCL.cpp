@@ -1,6 +1,6 @@
-#include <c10/util/irange.h>
-#include <c10/util/Optional.h>
 #include <c10d/ProcessGroupNCCL.hpp>
+
+#ifdef USE_C10D_NCCL
 
 #include <exception>
 #include <map>
@@ -12,7 +12,9 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Optional.h>
 #include <c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/cuda/nccl.h>
 
@@ -1925,3 +1927,5 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL
