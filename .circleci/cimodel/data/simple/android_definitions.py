@@ -85,10 +85,12 @@ class AndroidGradleJob:
 
 WORKFLOW_DATA = [
     AndroidJob(["x86_32"], "pytorch_linux_build", is_master_only=False),
-    AndroidJob(["x86_32_fulljit"], "pytorch_linux_build", is_master_only=False,
-        extra_props=tuple({
-            "lite_interpreter": miniutils.quote(str(int(False)))
-        }.items())),
+    AndroidJob(
+        ["x86_32_fulljit"],
+        "pytorch_linux_build",
+        is_master_only=False,
+        extra_props=tuple(
+            {"lite_interpreter": miniutils.quote(str(int(False)))}.items())),
     AndroidJob(["x86_64"], "pytorch_linux_build"),
     AndroidJob(["x86_64_fulljit"], "pytorch_linux_build",
         extra_props=tuple({
