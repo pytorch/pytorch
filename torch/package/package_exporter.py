@@ -653,17 +653,21 @@ node [shape=box];
                 string will be mocked out automatically.
 
                 Examples :
-                    ``'torch.**'`` -- matches ``torch`` and all submodules of torch, e.g. ``'torch.nn'`` and ``'torch.nn.functional'``
+                    ``'torch.**'`` -- matches ``torch`` and all submodules of torch, e.g. ``'torch.nn'``
+                    and ``'torch.nn.functional'``
 
-                    ``'torch.*'`` -- matches ``'torch.nn'`` or ``'torch.functional'``, but not ``'torch.nn.functional'``
+                    ``'torch.*'`` -- matches ``'torch.nn'`` or ``'torch.functional'``, but not
+                    ``'torch.nn.functional'``
 
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
-                e.g. ``include='torch.**', exclude='torch.foo'`` will mock all torch packages except ``'torch.foo'``, Default: is ``[]``.
+                e.g. ``include='torch.**', exclude='torch.foo'`` will mock all torch packages except ``'torch.foo'``,
+                Default: is ``[]``.
 
             allow_empty (bool): An optional flag that specifies whether the mock implementation(s) specified by this call
-                to the :meth:`mock` method must be matched to some module during packaging. If a mock is added with ``allow_empty=False``,
-                and :meth:`close` is called (either explicitly or via ``__exit__``) and the mock has not been matched to a module
-                used by the package being exported, an exception is thrown. If ``allow_empty=True``, no such exception is thrown.
+                to the :meth:`mock` method must be matched to some module during packaging. If a mock is added with
+                ``allow_empty=False``, and :meth:`close` is called (either explicitly or via ``__exit__``) and the mock has
+                not been matched to a module used by the package being exported, an exception is thrown.
+                If ``allow_empty=True``, no such exception is thrown.
 
         """
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
@@ -684,14 +688,17 @@ node [shape=box];
 
         Args:
             include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
-                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
+                for the names of the modules to be externed. This can also be a glob-style pattern, as
+                described in :meth:`mock`.
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the
+                include string.
 
             allow_empty (bool): An optional flag that specifies whether the extern modules specified by this call
-                to the ``extern`` method must be matched to some module during packaging. If an extern module glob pattern is added
-                with ``allow_empty=False``, and :meth:`close` is called (either explicitly or via ``__exit__``) before any modules match that
-                pattern, an exception is thrown. If ``allow_empty=True``, no such exception is thrown.
+                to the ``extern`` method must be matched to some module during packaging. If an extern module glob
+                pattern is added with ``allow_empty=False``, and :meth:`close` is called (either explicitly or via
+                ``__exit__``) before any modules match that pattern, an exception is thrown. If ``allow_empty=True``,
+                no such exception is thrown.
 
         """
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
