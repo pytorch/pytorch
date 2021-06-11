@@ -42,6 +42,15 @@ at::Tensor DoBinaryOp(const at::Tensor& self, const at::Tensor& other,
   return bridge::AtenFromLtcTensor(result);
 }
 
+template <typename B>
+at::Tensor DoBinaryOp(const at::Tensor& self, const at::Scalar& other,
+                      const B& bin_op) {
+  at::ScalarType dtype = at::result_type(self, other);
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor result = bin_op(self_tensor, other, dtype);
+  return bridge::AtenFromLtcTensor(result);
+}
+
 void CheckBinaryOpTypePromotion(const at::Tensor& out, const at::Tensor& self,
                                 const at::Tensor& other) {
   at::ScalarType resultType = at::result_type(self, other);
@@ -420,6 +429,41 @@ at::Tensor AtenXlaType::max_pool3d(const at::Tensor& self,
                                    at::IntArrayRef dilation, bool ceil_mode) {
   return aten_autograd_ops_ts::MaxPool3dAutogradFunctionTS::apply(
       self, kernel_size, stride, padding, dilation, ceil_mode);
+}
+
+at::Tensor AtenXlaType::mul(const at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  return DoBinaryOp(self, other,
+                    [&](const LazyTensor& xself, const LazyTensor& xother,
+                        at::ScalarType dtype) {
+                      return LazyTensor::mul(xself, xother, dtype);
+                    });
+}
+
+at::Tensor AtenXlaType::mul(const at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  return DoBinaryOp(self, other,
+                    [&](const LazyTensor& xself, const at::Scalar& other,
+                        at::ScalarType dtype) {
+                      return LazyTensor::mul(xself, other, dtype);
+                    });
+}
+
+at::Tensor& AtenXlaType::mul_(at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  CheckBinaryOpTypePromotion(self, self, other);
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::mul_(self_tensor, bridge::GetOrCreateLtcTensor(
+                                    other, self_tensor.GetDevice()));
+  return self;
+}
+
+at::Tensor& AtenXlaType::mul_(at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  CheckBinaryOpTypePromotion(self, self, other);
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::mul_(self_tensor, other);
+  return self;
 }
 
 at::Tensor& AtenXlaType::normal_(at::Tensor& self, double mean, double std,
