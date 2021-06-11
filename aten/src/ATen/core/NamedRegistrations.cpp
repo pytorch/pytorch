@@ -117,7 +117,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("clamp_min_.Tensor", CppFunction::makeFallthrough());
   m.impl("clone", CppFunction::makeFallthrough());
   m.impl("conj", CppFunction::makeFallthrough());
-  m.impl("conj.out", CppFunction::makeFallthrough());
   m.impl("contiguous", CppFunction::makeFallthrough());
   m.impl("copy_", CppFunction::makeFallthrough());
   m.impl("cos", CppFunction::makeFallthrough());
@@ -235,6 +234,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("is_coalesced", CppFunction::makeFallthrough());
   m.impl("is_complex", CppFunction::makeFallthrough());
   m.impl("is_floating_point", CppFunction::makeFallthrough());
+  m.impl("is_inference", CppFunction::makeFallthrough());
   m.impl("is_nonzero", CppFunction::makeFallthrough());
   m.impl("is_pinned", CppFunction::makeFallthrough());
   m.impl("is_same_size", CppFunction::makeFallthrough());
