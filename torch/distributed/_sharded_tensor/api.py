@@ -21,15 +21,8 @@ from torch.distributed.utils import _parse_remote_device
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
-_sharded_tensor_map = {}
+_sharded_tensor_map: Dict[int, 'ShardedTensor'] = {}
 
-def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef], rpc_rank: int):
-    with _sharded_tensor_lock:
-        if sharded_tensor_id not in _sharded_tensor_map:
-            raise RuntimeError(
-                f'Could not find sharded_tensor_id: {sharded_tensor_id} in map: {_sharded_tensor_map.keys()}')
-
-        _sharded_tensor_map[sharded_tensor_id]._register_remote_shards(rrefs, rpc_rank)
 
 @dataclass
 class Shard(object):
@@ -41,6 +34,15 @@ class Shard(object):
 
     tensor: torch.Tensor
     metadata: ShardMetadata
+
+
+def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
+    with _sharded_tensor_lock:
+        if sharded_tensor_id not in _sharded_tensor_map:
+            raise RuntimeError(
+                f'Could not find sharded_tensor_id: {sharded_tensor_id} in map: {_sharded_tensor_map.keys()}')
+
+        _sharded_tensor_map[sharded_tensor_id]._register_remote_shards(rrefs, rpc_rank)
 
 
 class ShardedTensor(object):
@@ -93,6 +95,7 @@ class ShardedTensor(object):
         memory_format=torch.contiguous_format,
         process_group=None,
     ):
+        self._rpc_initialized = False
         self._sharded_tensor_id = None
         if rpc._is_current_rpc_agent_set():
             # Validate PG and RPC ranks match.
@@ -123,7 +126,7 @@ class ShardedTensor(object):
             raise ValueError(f'Global rank: {dist.get_rank()} not part of process group')
 
         self._local_shards: List[Shard] = []
-        self._remote_shards: List[rpc.RRef] = None
+        self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
         self._sharding_metadata: List[ShardMetadata] = []
         if isinstance(self._sharding_spec, ChunkShardingSpec):
             self._init_chunked(
@@ -162,6 +165,7 @@ class ShardedTensor(object):
                 _sharded_tensor_map.pop(self._sharded_tensor_id)
 
     def _init_rpc(self):
+        self._rpc_initialized = True
         self._remote_shards = {}
 
         # Gather all the sharded tensor ids.
@@ -198,7 +202,7 @@ class ShardedTensor(object):
                 global_rank = distributed_c10d._get_global_rank(self._process_group, rank)
 
             if len(self.local_shards()) != 0:
-                rrefs = [rpc.RRef(shard) for shard in self.local_shards()]
+                rrefs: List[rpc.RRef[Shard]] = [rpc.RRef(shard) for shard in self.local_shards()]
                 fut = rpc.rpc_async(
                     global_rank,
                     _register_remote_shards,
@@ -354,16 +358,16 @@ class ShardedTensor(object):
         """
         return torch.Size(self._dims)
 
-    def _register_remote_shards(self, remote_shards: List[rpc.RRef], rpc_rank: int):
+    def _register_remote_shards(self, remote_shards: List[rpc.RRef[Shard]], rpc_rank: int):
         self._remote_shards[rpc_rank] = remote_shards
 
-    def remote_shards(self) -> Dict[int, rpc.RRef]:
+    def remote_shards(self) -> Dict[int, List[rpc.RRef[Shard]]]:
         """
         Returns a Dict[int, RRef] with keys being the RPC rank and values
         being RRefs to shards on that rank. Need to initialize the
         RPC framework for this functionality.
         """
-        if self._remote_shards is None:
+        if not self._rpc_initialized:
             raise RuntimeError(
                 "RPC was not initialized before creating the ShardedTensor. Please initialize it using "
                 "torch.distributed.rpc.init_rpc before creating the ShardedTensor for remote_shards support"
