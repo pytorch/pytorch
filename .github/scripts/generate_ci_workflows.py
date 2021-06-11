@@ -23,11 +23,13 @@ def PyTorchWindowsWorkflow(
     *,
     build_environment: str,
     test_runner_type: str,
+    cuda_version: str,
     on_pull_request: bool = False
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
         "test_runner_type": test_runner_type,
+        "cuda_version": cuda_version,
         "on_pull_request": on_pull_request,
     }
 
@@ -70,8 +72,14 @@ def generate_workflow_file(
 WINDOWS_WORKFLOWS = [
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cpu-py3",
+        cuda_version="cpu",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
         on_pull_request=True
+    ),
+    PyTorchWindowsWorkflow(
+        build_environment="pytorch-win-vs2019-cuda10-cudnn7-py3",
+        cuda_version="10.1",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
     )
 ]
 
@@ -201,8 +209,8 @@ if __name__ == "__main__":
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
     )
     template_and_workflows = [
-        (jinja_env.get_template("linux_ci_workflow.yml.in"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.in"), WINDOWS_WORKFLOWS)
+        (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
+        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS)
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:
