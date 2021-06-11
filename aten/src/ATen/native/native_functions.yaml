@@ -10078,10 +10078,10 @@
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: segment_reduce_backward(Tensor grad, Tensor output, Tensor data, *, Tensor? lengths=None) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: segment_reduce_backward_kernel
+    CPU, CUDA: _segment_reduce_backward_kernel
 
 - func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0) -> Tensor
   python_module: nn
