@@ -29,52 +29,72 @@ Tensor _segment_reduce_cpu_kernel(
     const Tensor& lengths,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
-  int64_t batch_size = lengths.numel();
-  auto output = at::empty({batch_size}, data.options());
+  int64_t segment_count = lengths.numel();
+  auto output_shape = data.sizes().vec();
+  output_shape[0] = segment_count;
+  auto output = at::empty(output_shape, data.options());
 
+  int64_t seg_element_count = output_shape.size() > 1 ? output_shape.back() : 1;
+  int64_t stride_count = data.numel() / (seg_element_count * data.size(0));
   const auto* lengths_data = lengths.data_ptr<int64_t>();
 
   AT_DISPATCH_ALL_TYPES_AND2(
       kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", ([&]() {
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.data_ptr<scalar_t>();
-        int64_t k = 0;
-        for (int64_t i = 0; i < batch_size; ++i) {
-          // ===== step1: initialize starting value
-          scalar_t initial_value;
-          if (initial.has_value()) {
-            initial_value = initial.value().to<scalar_t>();
-          } else if (reduction == SegmentReductionType::MAX) {
-            initial_value = std::numeric_limits<scalar_t>::lowest();
-          } else if (reduction == SegmentReductionType::MEAN) {
-            initial_value = 0;
-          }
+        int64_t lengths_cum_sum = 0;
+        for (int64_t i = 0; i < segment_count; ++i) {
 
-          // ===== step2: apply reduction
-          for (int64_t j = 0; j < lengths_data[i]; ++j) {
-            const auto data = values_data[k];
-            // TODO: There is no need to branch with every element
-            if (reduction == SegmentReductionType::MAX) {
-              initial_value = at::_isnan(data)
-                  ? data
-                  : std::max<scalar_t>(initial_value, data);
-            } else if (reduction == SegmentReductionType::MEAN) {
-              initial_value = at::_isnan(data) ? data : (initial_value + data);
+          for (int64_t l = 0; l < stride_count; ++l) {
+            int64_t stride_index =
+                (lengths_cum_sum * stride_count * seg_element_count) +
+                (l * seg_element_count);
+
+            for (int64_t k = 0; k < seg_element_count; ++k) {
+              // ===== step1: initialize starting value
+              scalar_t initial_value;
+              if (initial.has_value()) {
+                initial_value = initial.value().to<scalar_t>();
+              } else if (reduction == SegmentReductionType::MAX) {
+                initial_value = std::numeric_limits<scalar_t>::lowest();
+              } else if (reduction == SegmentReductionType::MEAN) {
+                initial_value = 0;
+              }
+
+              // ===== step2: apply reduction
+              int64_t starting_index = stride_index + k;
+              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+                const auto data = values_data[starting_index];
+                // TODO: There is no need to branch with every element
+                if (reduction == SegmentReductionType::MAX) {
+                  initial_value = at::_isnan(data)
+                      ? data
+                      : std::max<scalar_t>(initial_value, data);
+                } else if (reduction == SegmentReductionType::MEAN) {
+                  initial_value =
+                      at::_isnan(data) ? data : (initial_value + data);
+                }
+                starting_index += (stride_count * seg_element_count);
+              }
+
+              // ===== step3: finalize reduction
+              TORCH_CHECK(lengths_data[i] >= 0);
+              int64_t output_index = (i * stride_count * seg_element_count) +
+                  (l * seg_element_count) + k;
+              if (lengths_data[i] == 0 && !initial.has_value()) {
+                output_data[output_index] = static_cast<scalar_t>(NAN);
+              } else {
+                output_data[output_index] = initial_value;
+                if (reduction == SegmentReductionType::MEAN &&
+                    lengths_data[i] > 0 &&
+                    !at::_isnan(output_data[output_index])) {
+                  output_data[output_index] =
+                      output_data[output_index] / lengths_data[i];
+                }
+              }
             }
-            k++;
           }
-
-          // ===== step3: finalize reduction
-          TORCH_CHECK(lengths_data[i] >= 0);
-          if (lengths_data[i] == 0 && !initial.has_value()) {
-            output_data[i] = static_cast<scalar_t>(NAN);
-            continue;
-          }
-          output_data[i] = initial_value;
-          if (reduction == SegmentReductionType::MEAN && lengths_data[i] > 0 &&
-              !at::_isnan(output_data[i])) {
-            output_data[i] = output_data[i] / lengths_data[i];
-          }
+          lengths_cum_sum += lengths_data[i];
         }
       }));
 
@@ -152,8 +172,7 @@ Tensor segment_reduce_kernel(
     bool unsafe,
     const c10::optional<Scalar>& initial) {
   axis = maybe_wrap_dim(axis, data.ndimension());
-  TORCH_CHECK(axis == 0, "Currently only dim=0 is supported!");
-  TORCH_CHECK(data.dim() == 1);
+  TORCH_CHECK(axis == 0, "Currently only dim=0 is supported! ", axis);
   TORCH_CHECK(data.numel() > 0);
 
   // length related checks
@@ -169,7 +188,7 @@ Tensor segment_reduce_kernel(
     auto min_length = lengths_value.min().item<int64_t>();
     TORCH_CHECK((min_length >= 0), "lengths contains negative value!");
     TORCH_CHECK(min_length != 0 || initial.has_value());
-    TORCH_CHECK(lengths_value.sum().item<int64_t>() == data.numel());
+    TORCH_CHECK(lengths_value.sum().item<int64_t>() == data.size(0));
   }
 
   auto reduction = get_reduction_enum(reduce);
