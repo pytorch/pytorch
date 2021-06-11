@@ -87,6 +87,23 @@ class TORCH_PYTHON_API CommHookInterface {
       const c10::IValue& result) = 0;
 };
 
+namespace detail {
+// This helper function is called both by CppCommHookInterface below and inside
+// reducer.
+inline std::vector<at::Tensor> parseCppCommHookResult(
+    const c10::IValue& result) {
+  TORCH_INTERNAL_ASSERT(
+      result.isTensor() || result.isTensorList(),
+      "expected the hook result is either a Tensor or a TensorList");
+
+  if (result.isTensor()) {
+    return {result.toTensor()};
+  }
+
+  return result.toTensorVector();
+}
+} // namespace detail
+
 // This CppCommHook interface only requires implementing runHook method that
 // potentially uses a state.
 // Still need TORCH_PYTHON_API instead of TORCH_API to support Windows platform.
@@ -98,19 +115,11 @@ class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
   virtual ~CppCommHookInterface() {}
 
   std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override {
-    TORCH_INTERNAL_ASSERT(
-        result.isTensor() || result.isTensorList(),
-        "expected the hook result is either a Tensor or a TensorList");
-
-    if (result.isTensor()) {
-      return {result.toTensor()};
-    }
-
-    return result.toTensorVector();
+    return detail::parseCppCommHookResult(result);
   }
 
  protected:
-  T state_; // Not owned.
+  T state_;
 };
 
 } // namespace c10d
