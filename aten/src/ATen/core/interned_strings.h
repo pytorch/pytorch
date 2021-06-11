@@ -26,6 +26,7 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
+  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
