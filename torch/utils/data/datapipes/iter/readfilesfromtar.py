@@ -15,6 +15,11 @@ class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     args:
         datapipe: Iterable datapipe that provides pathname and tar binary stream in tuples
         length: a nominal length of the datapipe
+
+    Note:
+        The opened file handles will be closed automatically if the default DecoderDataPipe
+        is attached. Otherwise, user should be responsible to close file handles explicitly
+        or let Python's GC close them periodly.
     """
     def __init__(
             self,
@@ -44,7 +49,7 @@ class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                     inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
                     # Add a reference of the source tarfile into extracted_fobj, so the source
                     # tarfile handle won't be released until all the extracted file objs are destroyed.
-                    extracted_fobj.source_tarfile_ref = tar  # type: ignore[attr-defined]
+                    extracted_fobj.source_ref = tar  # type: ignore[attr-defined]
                     # typing.cast is used here to silence mypy's type checker
                     yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
             except Exception as e:
@@ -55,5 +60,5 @@ class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
 
     def __len__(self):
         if self.length == -1:
-            raise NotImplementedError
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length
