@@ -2595,6 +2595,14 @@ LazyTensor LazyTensor::softmax_backward(const LazyTensor& grad_output,
       grad_output.GetIrValue(), output.GetIrValue(), dim));
 }
 
+LazyTensor LazyTensor::ts_softmax_backward(const LazyTensor& grad_output,
+                                           const LazyTensor& output,
+                                           lazy_tensors::int64 dim,
+                                           const LazyTensor& self) {
+  return grad_output.CreateFrom(ir::ops::TSSoftmaxBackwardOp(
+      grad_output.GetIrValue(), output.GetIrValue(), dim, self.GetIrValue()));
+}
+
 LazyTensor LazyTensor::softplus(const LazyTensor& input, const at::Scalar& beta,
                                 const at::Scalar& threshold) {
   return tensor_ops::Softplus(input, beta, threshold);

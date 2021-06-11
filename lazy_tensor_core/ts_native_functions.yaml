@@ -19,6 +19,8 @@ supported:
   - max_pool3d_with_indices_backward
   - normal_
   - permute
+  - _softmax
+  - _softmax_backward_data
   - squeeze_
   - squeeze_.dim
   - t
