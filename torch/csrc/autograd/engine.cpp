@@ -584,7 +584,8 @@ void GraphTask::exec_post_processing() {
     c10::MultiStreamGuard g(caller_current_streams_filtered);
     // WARNING: Don't use a range-for loop here because more callbacks may be
     // added in between callback calls, so iterators may become invalidated.
-    for (const auto i : c10::irange(final_callbacks_.size())) {
+    // NOLINTNEXTLINE(modernize-loop-convert)
+    for (size_t i = 0; i < final_callbacks_.size(); ++i) {
       cb_lock.unlock();
       final_callbacks_[i]();
       cb_lock.lock();
@@ -950,7 +951,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
     }
   }
 
-  if (might_use_cuda && will_use_cuda) {
+  if (will_use_cuda) {
     // Collects current and default streams for devices where this process has a context,
     // so GraphTask::exec_post_processing can sync them with leaf_streams.
     task.stash_current_streams();
