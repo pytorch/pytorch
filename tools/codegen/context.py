@@ -1,11 +1,10 @@
-from tools.codegen.utils import S, T
+from tools.codegen.utils import S, T, context
 from tools.codegen.model import (NativeFunction, NativeFunctionsGroup, BackendIndex, DispatchKey)
 import tools.codegen.local as local
 
 import functools
 from typing import TypeVar, Union, Iterator, Callable, Dict
 import contextlib
-import textwrap
 
 # Helper functions for defining generators on things in the model
 
@@ -26,26 +25,9 @@ def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction]) -> I
         f = g.out
     else:
         f = g
-
-    # The rest of this function is the same as the 3 lines below.
-    # We inline them here as it is a significant boost in runtime
-    # with context(lambda: f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
-    #     with local.parametrize(use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors):
-    #         yield
-
-    old_use_const_ref_for_mutable_tensors = local._locals.use_const_ref_for_mutable_tensors
-    try:
-        local._locals.use_const_ref_for_mutable_tensors = f.use_const_ref_for_mutable_tensors
-        yield
-    except Exception as e:
-        # TODO: this does the wrong thing with KeyError
-        msg = f'in native_functions.yaml line {f.loc}:\n  {f.func}'
-        msg = textwrap.indent(msg, '  ')
-        msg = f'{e.args[0]}\n{msg}' if e.args else msg
-        e.args = (msg,) + e.args[1:]
-        raise
-    finally:
-        local._locals.use_const_ref_for_mutable_tensors = old_use_const_ref_for_mutable_tensors
+    with context(lambda: f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
+        with local.parametrize(use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors):
+            yield
 
 # Given a function that operates on NativeFunction, wrap it into a new function
 # that sets some appropriate context managers for that native function.
