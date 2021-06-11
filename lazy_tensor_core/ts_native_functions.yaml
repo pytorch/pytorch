@@ -17,6 +17,10 @@ supported:
   - empty.memory_format
   - empty_strided
   - expand
+  - mul.Tensor
+  - mul_.Tensor
+  - mul.Scalar
+  - mul_.Scalar
   - gelu
   - gelu_backward
   - max_pool2d_with_indices
