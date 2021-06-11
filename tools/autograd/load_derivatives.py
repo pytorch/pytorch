@@ -10,7 +10,7 @@ import yaml
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
-                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT, boolT,
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
                                      OptionalCType, stringT)
 from tools.codegen.api import cpp
@@ -137,7 +137,7 @@ def postprocess_forward_derivatives(
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type == 'TensorList':
+            if arg.type == 'at::TensorList':
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -498,6 +498,11 @@ def saved_variables(
             'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
             'expr': stride_expr,
         }),
+        # replace self.is_conj() with self_conjugate
+        (r'{}.is_conj\(\)', {
+            'suffix': '_conjugate',
+            'nctype': lambda name: NamedCType(name, BaseCType(boolT)),
+        })
     ]
 
     # find which arguments need to be saved
