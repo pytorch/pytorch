@@ -8,10 +8,11 @@ This template will be consumed by `cpp_jit.py`, and will replace:
 sections with user provided statements.
 */
 
-#include <string>
-
 #include <callgrind.h>
+#include <c10/util/irange.h>
 #include <torch/torch.h>
+
+#include <string>
 
 // Global setup. (e.g. #includes)
 // GLOBAL_SETUP_TEMPLATE_LOCATION
@@ -42,15 +43,15 @@ int main(int argc, char* argv[]) {
     // SETUP_TEMPLATE_LOCATION
 
     // Warmup
-    for (int i = 0; i < number_warmup; i++) {
+    for(const auto i : c10::irange(number_warmup)) {
         // STMT_TEMPLATE_LOCATION
     }
 
     // Main loop
-    for (int repeat = 0; repeat < repeats; repeat++) {
+    for(const auto repeat : c10::irange(repeats)) {
         CALLGRIND_TOGGLE_COLLECT;
 
-        for (int i = 0; i < number; i++) {
+        for(const auto i : c10::irange(number)) {
         // STMT_TEMPLATE_LOCATION
         }
 

@@ -1313,7 +1313,7 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
   auto result = at::native::split(self, split_size, dim);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
-    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+    if (!t.is_inference()) {
       t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
     }
   }
@@ -1364,7 +1364,7 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
   auto result = at::native::split_with_sizes(self, split_sizes, dim);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
-    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+    if (!t.is_inference()) {
       t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
     }
   }
@@ -2168,6 +2168,12 @@ Tensor view(const Tensor& self, IntArrayRef size) {
 
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+}
+
+Tensor detach(const Tensor& self) {
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  //AT_ERROR("detach is not implemented for Tensor");
+  return native::alias(self);
 }
 
 Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
