@@ -1,9 +1,20 @@
 import re
-from typing import Tuple, List, Iterable, Iterator, Callable, Sequence, TypeVar, Optional
+from typing import Tuple, List, Iterable, Iterator, Callable, Sequence, TypeVar, Optional, Any, OrderedDict
 from tools.codegen.model import NativeFunction
 from enum import Enum
 import contextlib
 import textwrap
+
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+    from yaml import CSafeLoader as YamlLoader
+except ImportError:
+    from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
+
+try:
+    from yaml import CSafeDumper as YamlDumper
+except ImportError:
+    from yaml import SafeDumper as YamlDumper  # type: ignore[misc]
 
 # Many of these functions share logic for defining both the definition
 # and declaration (for example, the function signature is the same), so

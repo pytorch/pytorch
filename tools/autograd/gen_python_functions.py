@@ -56,15 +56,9 @@ from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
                                  Type, Variant)
-from tools.codegen.utils import split_name_params
+from tools.codegen.utils import split_name_params, YamlLoader
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 #
 # declarations blocklist
@@ -282,7 +276,7 @@ def load_deprecated_signatures(
     results: List[PythonSignatureNativeFunctionPair] = []
 
     with open(deprecated_yaml_path, 'r') as f:
-        deprecated_defs = yaml.load(f, Loader=Loader)
+        deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
         _, params = split_name_params(deprecated['name'])
