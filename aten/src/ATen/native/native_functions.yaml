@@ -1277,6 +1277,9 @@
   dispatch:
     CompositeExplicitAutograd: count_nonzero
 
+- func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
+  variants: function, method
+
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
@@ -9858,20 +9861,16 @@
 
 - func: inner.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
-# torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
 
 - func: outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
 
+# torch.ger, alias for torch.outer
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: ger
 
 - func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CompositeExplicitAutograd: ger_out
 
 - func: linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
@@ -10078,10 +10077,10 @@
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: segment_reduce_backward(Tensor grad, Tensor output, Tensor data, *, Tensor? lengths=None) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: segment_reduce_backward_kernel
+    CPU, CUDA: _segment_reduce_backward_kernel
 
 - func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0) -> Tensor
   python_module: nn

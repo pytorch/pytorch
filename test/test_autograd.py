@@ -2894,6 +2894,18 @@ class TestAutograd(TestCase):
         # This will segfault if things have been erroneously released
         out.backward(torch.randn(out.size()))
 
+    def test_maximum_and_minimum_subgradient(self):
+        def run_test(f, a, b, expected_a_grad, expected_b_grad):
+            a = torch.tensor(a, requires_grad=True)
+            b = torch.tensor(b, requires_grad=True)
+            z = f(a, b)
+            z.sum().backward()
+            self.assertEqual(a.grad, expected_a_grad)
+            self.assertEqual(b.grad, expected_b_grad)
+
+        run_test(torch.maximum, [0., 1., 2.], [1., 1., 1.], [0., 0.5, 1.], [1., 0.5, 0.])
+        run_test(torch.minimum, [0., 1., 2.], [1., 1., 1.], [1., 0.5, 0.], [0., 0.5, 1.])
+
     # TODO: norm is deprecated, update these tests and port them to OpInfos
     #   or test_linalg.py
     def test_norm_subgradient(self):
@@ -5408,6 +5420,25 @@ for shape in [(1,), ()]:
             self.assertFalse(ref.expired())
         gc.collect()
         self.assertTrue(ref.expired())
+
+    def test_input_buffer_accum(self):
+        leaf = torch.rand(2, 2, requires_grad=True)
+
+        # An op that returns sparse gradients
+        ind = torch.tensor([[0, 0]], dtype=torch.long)
+        out2 = leaf.gather(0, ind, sparse_grad=True)
+
+        # An op that returns the gradients as-is
+        out1 = leaf.clone()
+
+        grad_out1_original = torch.rand_like(out1)
+        grad_out1 = grad_out1_original.clone()
+        grad_out2 = torch.rand_like(out2)
+
+        torch.autograd.backward((out1, out2), (grad_out1, grad_out2))
+
+        # Given gradients should not be modified inplace
+        self.assertEqual(grad_out1, grad_out1_original)
 
 
 def index_perm_variable(shape, max_indices):
