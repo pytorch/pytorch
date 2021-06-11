@@ -2379,6 +2379,23 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def test_quant_op_after_ndim(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                d = x.ndim
+                x = torch.add(x, d)
+                return x, d
+
+        m = M().eval()
+        mp = prepare_fx(m, {"": default_qconfig})
+        mc = convert_fx(mp)
+        # if the above code does not crash, the test is successful
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
