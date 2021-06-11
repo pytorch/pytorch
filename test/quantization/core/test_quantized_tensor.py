@@ -277,9 +277,9 @@ class TestQuantizedTensor(TestCase):
     def _test_per_channel_qtensor_creation(self, device):
         numel = 10
         ch_axis = 0
-        scales = torch.rand(numel).to(device)
-        zero_points_int = torch.randint(0, 10, size=(numel,)).to(device)
-        zero_points_float = torch.randn(numel).to(device)
+        scales = torch.rand(numel, device=device)
+        zero_points_int = torch.randint(0, 10, size=(numel,), device=device)
+        zero_points_float = torch.randn(numel, device=device)
         for dtype, zero_points in itertools.product([torch.qint8, torch.quint8], [zero_points_float, zero_points_int]):
             q = torch._empty_per_channel_affine_quantized(
                 [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=dtype, device=device)
@@ -290,7 +290,7 @@ class TestQuantizedTensor(TestCase):
 
         # create Tensor from uint8_t Tensor, scales and zero_points
         for zero_points in [zero_points_float, zero_points_int]:
-            int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8).to(device)
+            int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8, device=device)
             q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
             self.assertEqual(int_tensor, q.int_repr())
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
