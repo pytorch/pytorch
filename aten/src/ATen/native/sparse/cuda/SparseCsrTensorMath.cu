@@ -35,13 +35,13 @@ using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
 
-Tensor& addmm_out_sparse_csr_dense_cuda(
+const Tensor& addmm_out_sparse_csr_dense_cuda(
   const Tensor& self,
   const SparseCsrTensor& sparse,
   const Tensor& dense,
   const Scalar& beta,
   const Scalar& alpha,
-  Tensor& r)
+  const Tensor& r)
 {
 
   TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
@@ -103,8 +103,8 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   return r;
 }
 
-Tensor& add_out_dense_sparse_csr_cuda(
-    Tensor& output,
+const Tensor& add_out_dense_sparse_csr_cuda(
+    const Tensor& output,
     const Tensor& dense,
     const SparseCsrTensor& src,
     const Scalar& alpha) {
@@ -211,11 +211,11 @@ Tensor& add_out_dense_sparse_csr_cuda(
   return output;
 }
 
-Tensor& add_out_sparse_csr_cuda(
+const Tensor& add_out_sparse_csr_cuda(
     const Tensor& self,
     const SparseCsrTensor& other,
     const Scalar& alpha,
-    SparseCsrTensor& out) {
+    const SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
     return add_out_dense_sparse_csr_cuda(out, self, other, alpha);
   } else {

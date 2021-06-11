@@ -17,6 +17,9 @@ parameters:
   run_master_build:
     type: boolean
     default: false
+  run_slow_gradcheck_build:
+    type: boolean
+    default: false
 
 executors:
   windows-with-nvidia-gpu:
@@ -9349,6 +9352,31 @@ workflows:
           vc_version: ""
           vc_year: "2019"
     when: << pipeline.parameters.run_master_build >>
+  slow_gradcheck_build:
+    jobs:
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_old_gradcheck_build
+          requires:
+            - "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_old_gradcheck_test1
+          requires:
+            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_old_gradcheck_build
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-test1"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_old_gradcheck_test2
+          requires:
+            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_old_gradcheck_build
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-test2"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+    when: << pipeline.parameters.run_slow_gradcheck_build >>
   scheduled-ci:
     triggers:
       - schedule:
