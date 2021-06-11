@@ -1493,17 +1493,20 @@ void Reducer::finalize_backward() {
 void Reducer::runGradCallbackForVariable(
     at::Tensor& variable,
     GradCallback&& cb) {
+#ifdef _WIN32
+  cb(variable.mutable_grad());
+#else
   auto context_ptr = rpc_context_.context_ptr.load();
   if (context_ptr == nullptr) {
     cb(variable.mutable_grad());
   } else {
     // Under distributed autograd
-#ifndef _WIN32
     context_ptr->runGradCallbackForVariable(variable, std::move(cb));
-#endif
   }
+#endif
 }
 
+#ifndef _WIN32
 void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
   // We should set 'new_context_ptr' even if it's nullptr. That means the
   // reducer is under a local backward run.
@@ -1515,6 +1518,7 @@ void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
     context_ptr_holder = std::move(new_context_ptr);
   }
 }
+#endif
 
 void Reducer::sync_bucket_indices(
     std::vector<std::vector<size_t>>& bucket_indices) {
