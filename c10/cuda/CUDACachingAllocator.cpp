@@ -1192,7 +1192,7 @@ class THCCachingAllocator {
   }
 
   void init(int device_count) {
-    const auto size = device_allocator.size();
+    const auto size = static_cast<int64_t>(device_allocator.size());
     if (size < device_count) {
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(device_count)) {
@@ -1375,7 +1375,9 @@ std::mutex* getFreeMutex() {
 
 static inline void assertValidDevice(int device) {
   const auto device_num = caching_allocator.device_allocator.size();
-  TORCH_CHECK(0 <= device && device < device_num, "Invalid device argument.");
+  TORCH_CHECK(
+      0 <= device && device < static_cast<int64_t>(device_num),
+      "Invalid device argument.");
 }
 
 DeviceStats getDeviceStats(int device) {
