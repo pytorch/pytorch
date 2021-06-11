@@ -133,5 +133,10 @@ inline std::string PrintNode(const Node* node) {
   return ss.str();
 }
 
+inline void LogAndDumpSchema(const Node* node) {
+  VLOG(1) << "Found schema mismatch";
+  node->schema().dump();
+}
+
 } // namespace jit
 } // namespace torch
