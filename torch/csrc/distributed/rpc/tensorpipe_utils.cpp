@@ -61,7 +61,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return storageData;
+      return c10::make_optional(std::move(storageData));
     } else {
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = storage.data<char>();
