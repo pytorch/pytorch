@@ -270,7 +270,7 @@ class TestQuantizedTensor(TestCase):
     def test_per_channel_qtensor_creation_cpu(self):
         self._test_per_channel_qtensor_creation(torch.device('cpu'))
 
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_per_channel_qtensor_creation_cuda(self):
         self._test_per_channel_qtensor_creation(torch.device('cuda'))
 

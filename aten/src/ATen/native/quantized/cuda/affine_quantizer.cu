@@ -19,9 +19,13 @@ void check_zero_points_cuda(
   auto zp_within_upper = at::any(at::gt(zero_points, qmax)).item().equal(false);
   auto zp_within_lower = at::any(at::lt(zero_points, qmin)).item().equal(false);
   TORCH_CHECK(
-    zp_within_upper and zp_within_lower,
+    zp_within_lower,
     fn_name,
-    "zero_point is above upper bound." if zp_within_lower else "zero_point is below lower bound.");
+    "zero_point is below lower bound.");
+  TORCH_CHECK(
+    zp_within_upper,
+    fn_name,
+    "zero_point is above upper bound.");
 }
 
 void quantize_tensor_per_tensor_affine_cuda(
