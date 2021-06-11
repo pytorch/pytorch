@@ -189,7 +189,7 @@ jobs:
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
         run: |
-          set -eux
+          set -eu
           export PATH=~/.npm-global/bin:"$PATH"
           for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
             markdown-toc --bullets='-' -i "$FILE"
@@ -202,10 +202,12 @@ jobs:
             echo 'You can either apply that Git diff directly to correct the'
             echo 'table of contents, or if you have npm installed, you can'
             echo 'install the npm package markdown-toc and run the following'
+            # shellcheck disable=SC2016
             echo 'command (replacing $FILE with the filename for which you want'
             echo 'to regenerate the table of contents):'
             echo
-            echo '    markdown-toc --bullets='"'"-"'"' -i "$FILE"'
+            # shellcheck disable=SC2016
+            echo "    markdown-toc --bullets='-' -i \"\$FILE\""
             false
           fi
 
@@ -255,7 +257,7 @@ jobs:
           path: flake8-output/
       - name: Fail if there were any warnings
         run: |
-          set -eux
+          set -eu
           # Re-output flake8 status so GitHub logs show it on the step that actually failed
           cat "${GITHUB_WORKSPACE}"/flake8-output.txt
           if [ -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]; then
