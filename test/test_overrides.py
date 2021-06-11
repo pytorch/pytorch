@@ -546,8 +546,6 @@ def generate_tensor_like_override_tests(cls):
 
     def test_generator(func, override):
         # If func corresponds to a torch.Tensor method or property.
-        if 'logsumexp' in func.__name__:
-            print(func.__name__, func, is_tensor_method_or_property(func))
         if is_tensor_method_or_property(func):
             # Generate an instance by using SubTensor,
             def instance_gen():
@@ -555,17 +553,11 @@ def generate_tensor_like_override_tests(cls):
         else:
             # Otherwise, TensorLike.
             def instance_gen():
-                # print("Why am I here")
-                # if 'logsumexp' in func.__name__:
-                #   print(func.__name__, override)
                 return TensorLike()
 
         func_args = []
         is_method = is_tensor_method_or_property(func)
         if func in annotated_args:
-            # print(func.__name__)
-            if 'logsumexp' in func.__name__:
-                print(func.__name__, annotated_args[func])
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
                 t = arg['simple_type']
@@ -621,13 +613,10 @@ def generate_tensor_like_override_tests(cls):
             if args.defaults is not None:
                 nargs -= len(args.defaults)
             func_args = [instance_gen() for _ in range(nargs)]
-            if 'special' in func.__name__:
-                print(func.__name__, args.varargs, args)
             if args.varargs is not None:
                 func_args += [instance_gen(), instance_gen()]
 
         def test(self):
-            print(func_args)
             ret = func(*func_args)
             # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
             # This is currently the best check but doesn't work for, for example,
