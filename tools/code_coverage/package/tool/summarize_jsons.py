@@ -55,7 +55,7 @@ def transform_file_name(
 
 def is_intrested_file(
     file_path: str, interested_folders: List[str], platform: TestPlatform
-):
+) -> bool:
     ignored_patterns = ["cuda", "aten/gen_aten", "aten/aten_", "build/"]
     if any([pattern in file_path for pattern in ignored_patterns]):
         return False
