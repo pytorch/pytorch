@@ -2559,7 +2559,8 @@ class TestReductions(TestCase):
             torch.histogram(values, 2, range=(1, 0))
 
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
-            torch.histogram(torch.tensor([float("nan")]), device, dtype=dtype)
+            values = torch.tensor([float("nan")], device=device, dtype=dtype)
+            torch.histogram(values, 2)
 
     # Tests to ensure that reduction functions employing comparison operators are usable when there
     # exists a zero dimension (i.e. when the the tensors are empty) in the tensor. These tests specifically
