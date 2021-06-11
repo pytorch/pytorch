@@ -202,8 +202,13 @@ class RegisterDispatchKey:
                 return result
             elif self.target is Target.NAMESPACED_DEFINITION:
                 def generate_defn(cpp_sig: CppSignature) -> str:
+                    class_name_opt = self.backend_index.native_function_class_name()
+                    if class_name_opt is None:
+                        target_name = sig.name()
+                    else:
+                        target_name = f'{class_name_opt}::{sig.name()}'
                     return f"""
-{cpp_sig.defn()} {{
+{cpp_sig.defn(name=target_name)} {{
 return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
 }}
 """
@@ -232,11 +237,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
-                class_name_opt = self.backend_index.native_function_class_name()
-                if class_name_opt is None:
-                    impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
-                else:
-                    impl_name = f"{self.cpp_namespace}::{class_name_opt}::{metadata.kernel}"
+                impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
 
                 args_exprs_str = ', '.join(a.name for a in args)
 
