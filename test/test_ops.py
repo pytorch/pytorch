@@ -330,6 +330,7 @@ class TestCommon(JitCommonTestCase):
                                                       **sample.kwargs)
                         continue
 
+                    print(cloned, *sample.args, **sample.kwargs)
                     variant_forward = variant(cloned,
                                               *sample.args,
                                               **sample.kwargs)

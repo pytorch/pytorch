@@ -6001,7 +6001,9 @@ op_db: List[OpInfo] = [
                        # def the_method(i0):
                        #     return torch.polygamma(i0, 1)
                        #            ~~~~~~~~~~~~~~~ <--- HERE
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                       SkipInfo('TestCommon', 'test_jit_alias_remapping'),
+                       SkipInfo('TestCommon', 'test_variant_consistency_eager')),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
                    aliases=("special.polygamma",),

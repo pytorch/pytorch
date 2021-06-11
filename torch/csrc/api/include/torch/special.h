@@ -34,7 +34,7 @@ inline Tensor polygamma(int64_t n, const Tensor& self) {
 }
 
 inline Tensor& polygamma_out(int64_t n, Tensor& result, const Tensor& self) {
-  return torch::special_polygamma_out(n, result, self);
+  return torch::special_polygamma_out(result, n, self);
 }
 
 /// Computes entropy of input, elementwise
