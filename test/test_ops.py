@@ -66,9 +66,6 @@ class TestOpInfo(TestCase):
         except RuntimeError as e:
             self.skipTest(f"Skipped! unable to generate sample. {e}")
 
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         # NOTE: assert exception raised on ANY sample input
         with self.assertRaises(RuntimeError):
             for sample in op.sample_inputs(device, dtype, requires_grad=True):
