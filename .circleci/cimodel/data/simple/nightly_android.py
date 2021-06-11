@@ -55,7 +55,7 @@ BASE_REQUIRES = [DOCKER_REQUIREMENT_NDK]
 
 WORKFLOW_DATA = [
     AndroidNightlyJob(["x86_32"], "pytorch_linux_build", requires=BASE_REQUIRES),
-    AndroidNightlyJob(["x86_3_fulljit"], "pytorch_linux_build", requires=BASE_REQUIRES),
+    AndroidNightlyJob(["x86_32_fulljit"], "pytorch_linux_build", requires=BASE_REQUIRES),
     AndroidNightlyJob(["x86_64"], "pytorch_linux_build", requires=BASE_REQUIRES),
     AndroidNightlyJob(["x86_64_fulljit"], "pytorch_linux_build", requires=BASE_REQUIRES),
     AndroidNightlyJob(["arm", "v7a"], "pytorch_linux_build", requires=BASE_REQUIRES),
