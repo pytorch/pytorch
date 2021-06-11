@@ -27,21 +27,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-push:
-    runs-on: linux.2xlarge
-    steps:
-      - name: test push
-        run: |
-          echo hello
-          git clone git@github.com:pytorch/test-infra
-          cd test-infra
-          git checkout -b its_a_test123
-          echo 'hi' > out.txt
-          git add .
-          git c -m"stuff"
-          git push
-          gh pr create --repo https://github.com/pytorch/test-infra --title "test PR please delete" --body "something"
-
   calculate-docker-image:
     runs-on: linux.2xlarge
     env:
