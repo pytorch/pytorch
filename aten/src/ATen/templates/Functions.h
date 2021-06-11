@@ -16,6 +16,8 @@
 #include <ATen/TracerMode.h>
 #include <ATen/Operators.h>
 
+${static_dispatch_extra_headers}
+
 namespace at {
 
 // These functions are defined in ATen/Utils.cpp.
