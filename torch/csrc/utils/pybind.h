@@ -6,7 +6,6 @@
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <TH/THTensor.hpp>
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
