@@ -3402,7 +3402,7 @@ class TestAutograd(TestCase):
         test_reduction(torch.cumprod, False)
         test_reduction(torch.logcumsumexp, False, takes_dtype=False)
 
-    def test_inplace_view_saved_output(self):
+    def test_inplace_on_view_saved_output(self):
         # Test an in-place operation on a view in which the in-place op saves
         # its output. Previously, this created a reference cycle.
         dealloc = [0]
@@ -3421,7 +3421,7 @@ class TestAutograd(TestCase):
         test()
         self.assertEqual(dealloc[0], 1)
 
-    def test_inplace_view_leaf_errors(self):
+    def test_inplace_on_view_leaf_errors(self):
         # Issue #21875: Fail faster (when we try to modify the view vs. in backward())
         x = torch.zeros(1, requires_grad=True)
         y = x.view_as(x)
@@ -3431,7 +3431,7 @@ class TestAutograd(TestCase):
                                     "an in-place operation."):
             y.add_(1)
 
-    def test_inplace_view_backward(self):
+    def test_inplace_on_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
             nn.InstanceNorm2d(2),
@@ -3460,7 +3460,7 @@ class TestAutograd(TestCase):
         fn = gradient_penalty.grad_fn.next_functions[0][0].next_functions[1][0]
         self.assertEqual(fn.name(), "ThresholdBackwardBackward")
 
-    def test_inplace_view_weak_grad_fn(self):
+    def test_inplace_on_view_weak_grad_fn(self):
         # Issue 23502: Test that b's grad_fn is preserved.
         a = torch.arange(10.0, requires_grad=True)
 
@@ -4914,7 +4914,7 @@ for shape in [(1,), ()]:
                 res.select(0, 0).copy_(grad)
                 return res, None
 
-        fn_id_to_inplace_view_err_msg = {
+        fn_id_to_inplace_on_view_err_msg = {
             "one_output": ("Output 0 of IdOneOutputBackward is a view and is being "
                            "modified inplace. This view was created inside a custom Function"),
             "two_output": ("Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
@@ -4957,7 +4957,7 @@ for shape in [(1,), ()]:
                     a = torch.ones(2, dtype=dtype, requires_grad=True)
                     b = torch.ones(2, dtype=dtype, requires_grad=True)
 
-                    err_msg = fn_id_to_inplace_view_err_msg[fn_id]
+                    err_msg = fn_id_to_inplace_on_view_err_msg[fn_id]
 
                     if not inplace or not output_is_a_view:
                         gradcheck(fn, (a, b), check_batched_grad=False)
@@ -4985,7 +4985,92 @@ for shape in [(1,), ()]:
         self._do_test_autograd_simple_views_python(torch.double)
         self._do_test_autograd_simple_views_python(torch.cdouble)
 
-    def test_autograd_complex_views_python(self):
+    def test_autograd_inplace_views_creation_meta(self):
+        # Tests creation_meta properly handled for inplace views
+        #
+        # This is not necessarily the absolute correct behavior, but this is the current
+        # one. This test is here to make sure that any change to this behavior is detected
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.view_as(x)
+
+            @staticmethod
+            def backward(ctx, x):
+                return x
+        inplace_custom = Func.apply
+
+        def run_test(fn, fn_type, grad_mode_view, grad_mode_iview, requires_grad, error1, error2):
+            # This test checks the behavior of inplace-view functions when
+            # the views are created in grad mode or not
+            base = torch.rand(2, requires_grad=requires_grad).clone()
+            # 1. Create a view with `grad_mode=grad_mode_view`
+            with torch.set_grad_enabled(grad_mode_view):
+                if fn_type == "multi_view":
+                    inp = base.unbind()[0]
+                elif fn_type == "custom" :
+                    inp = inplace_custom(base)
+                else:
+                    inp = base.view_as(base)
+
+            # 2. Perform inplace view with `grad_mode=grad_mode_iview`
+            with torch.set_grad_enabled(grad_mode_iview):
+                if error1 is not None:
+                    with self.assertRaisesRegex(RuntimeError, error1):
+                        fn(inp)
+                    return
+                else:
+                    fn(inp)
+            # 3. Do inplace on the (new) view
+            if error2 is not None:
+                with self.assertRaisesRegex(RuntimeError, error2):
+                    inp.add_(1)
+            else:
+                inp.add_(1)
+
+        no_grad_err = "A view was created in no_grad mode"
+        multi_view_err = "function that returns multiple views"
+        custom_err = "view was created inside a custom Function"
+
+        def run_tests(fn):
+            for fn_type in ("normal", "multi_view", "custom"):
+                for grad_mode_view in (True, False):
+                    for grad_mode_iview in (True, False):
+                        for requires_grad in (True, False):
+                            error1 = None  # expected error when we do inplace_view on original view
+                            error2 = None  # expected error when we do inplace on the resulting view
+
+                            if not grad_mode_view and grad_mode_iview and requires_grad:
+                                error1 = no_grad_err
+                            if not grad_mode_view and not grad_mode_iview and requires_grad:
+                                error2 = no_grad_err
+
+                            if fn_type == "multi_view":
+                                if grad_mode_view and grad_mode_iview and requires_grad:
+                                    error1 = multi_view_err
+                                if grad_mode_view and not grad_mode_iview and requires_grad:
+                                    error2 = multi_view_err
+
+                            if fn_type == "custom":
+                                if grad_mode_view and grad_mode_iview and requires_grad:
+                                    error1 = custom_err
+                                if grad_mode_view and not grad_mode_iview and requires_grad:
+                                    error2 = custom_err
+
+                            print(fn_type, grad_mode_view, grad_mode_iview, requires_grad, error1, error2)
+                            run_test(fn, fn_type, grad_mode_view, grad_mode_iview, requires_grad, error1, error2)
+
+        # TODO maybe we should just run all of theses?
+        # as_strided_, detach_, squeeze_, swapaxes_, swapdims_, t_,
+        # transpose_, unsqueeze_,
+        run_tests(lambda v: v.as_strided_((1, 0), (2, 2)))
+        run_tests(lambda v: v.transpose_(0, 0))
+        run_tests(lambda v: v.t_())
+
+    def test_autograd_multiple_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
         # and not silent. The TODOs below mark the places with unexpected behavior.
@@ -5027,7 +5112,7 @@ for shape in [(1,), ()]:
                                     "Output 0 of ComplexViewBackward is a view and is being modified inplace"):
             out += 1
 
-    def test_autograd_inplace_views_python(self):
+    def test_autograd_python_custom_function_inplace(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
         # and not silent. The TODOs below mark the places with unexpected behavior.
@@ -8073,7 +8158,7 @@ class TestAutogradDeviceType(TestCase):
         # gpu thread ReadyQueue
         out.sum().backward()
 
-    def test_inplace_view_backprop_base(self, device):
+    def test_inplace_on_view_backprop_base(self, device):
         # modify view and back-prop through base
         root = torch.randn(2, 2, device=device, requires_grad=True)
         x = root.clone()
@@ -8082,7 +8167,7 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[2, 2], [1, 1]])
 
-    def test_inplace_view_backprop_view_of_view(self, device):
+    def test_inplace_on_view_backprop_view_of_view(self, device):
         # modify view and backprop through view-of-view
         root = torch.randn(2, 2, device=device, requires_grad=True)
         x = root.clone()
@@ -8092,7 +8177,7 @@ class TestAutogradDeviceType(TestCase):
         v2.sum().backward()
         self.assertEqual(root.grad.tolist(), [[2, 2], [0, 0]])
 
-    def test_inplace_view_of_view(self, device):
+    def test_inplace_on_view_of_view(self, device):
         # modify view-of-view and backprop through base
         root = torch.randn(2, 2, device=device, requires_grad=True)
         x = root.clone()
@@ -8102,7 +8187,7 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1]])
 
-    def test_inplace_view_then_no_grad(self, device):
+    def test_inplace_on_view_then_no_grad(self, device):
         # Perform an in-place operation on a view of a non-leaf variable.
         a = torch.ones(3, 1, dtype=torch.double, device=device, requires_grad=True)
         b = a * 2
@@ -8115,7 +8200,7 @@ class TestAutogradDeviceType(TestCase):
 
         c.sum().backward()
 
-    def test_inplace_view_gradcheck(self, device):
+    def test_inplace_on_view_gradcheck(self, device):
         # gradcheck modifications to views
         a = torch.randn(4, 4, dtype=torch.double, device=device, requires_grad=True)
         b = torch.randn(2, 2, dtype=torch.double, device=device, requires_grad=True)
@@ -8130,14 +8215,14 @@ class TestAutogradDeviceType(TestCase):
         go = torch.randn(a.size(), dtype=torch.double, device=device, requires_grad=True)
         gradgradcheck(func, (a, b), (go,))
 
-    def test_inplace_view_multiple_outputs(self, device):
+    def test_inplace_on_view_multiple_outputs(self, device):
         root = torch.arange(9., dtype=torch.double).reshape(3, 3).requires_grad_()
         x = root.clone()
         v1 = x.unbind()
         with self.assertRaises(RuntimeError):
             v1[0].mul_(2)
 
-    def test_inplace_view_of_multiple_output_view(self, device):
+    def test_inplace_on_view_of_multiple_output_view(self, device):
         a = torch.rand(10, dtype=torch.double, device=device, requires_grad=True).clone()
         b = a.unbind(0)
         c = b[0].view_as(b[0])
@@ -8151,7 +8236,7 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             c[0].mul_(2)
 
-    def test_inplace_view_makes_base_require_grad(self, device):
+    def test_inplace_on_view_makes_base_require_grad(self, device):
         # in-place modification to view makes base require grad
         a = torch.randn(4, 4, dtype=torch.double, device=device, requires_grad=False)
         b = torch.randn(4, 2, dtype=torch.double, device=device, requires_grad=True)
@@ -8167,7 +8252,7 @@ class TestAutogradDeviceType(TestCase):
         go = torch.randn(a.size(), dtype=torch.double, device=device, requires_grad=True)
         gradgradcheck(func, (a, b), (go,))
 
-    def test_inplace_view_backprop_view(self, device):
+    def test_inplace_on_view_backprop_view(self, device):
         # modify view and backprop through view
         a = torch.tensor([2., 5.], device=device, requires_grad=False)
         b = torch.tensor([3.], device=device, requires_grad=True)
@@ -8176,7 +8261,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(b.grad.tolist(), [5])
         self.assertIsNone(a.grad)
 
-    def test_inplace_view_modify_base(self, device):
+    def test_inplace_on_view_modify_base(self, device):
         # Test that an in-place operation on a base that forced it to require
         # grad also forces any previous views to require grad and backprop
         # correctly
@@ -8194,7 +8279,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(fn, [r])
         gradgradcheck(fn, [r])
 
-    def test_inplace_view_python(self, device):
+    def test_inplace_on_view_python(self, device):
         # in-place modifications of Python-autograd created view
         a = torch.randn(4, 4, dtype=torch.double, device=device, requires_grad=True)
         b = torch.randn(2, 2, dtype=torch.double, device=device, requires_grad=True)
@@ -8220,7 +8305,7 @@ class TestAutogradDeviceType(TestCase):
         go = torch.randn(a.size(), dtype=torch.double, device=device, requires_grad=True)
         gradgradcheck(func, (a, b), (go,))
 
-    def test_inplace_view_non_contig(self, device):
+    def test_inplace_on_view_non_contig(self, device):
         root = torch.ones(2, 3, 2, device=device).select(2, 1).t().requires_grad_(True)
         x = root.clone()
         v1 = x.narrow(0, 0, 1)
@@ -8229,7 +8314,7 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
-    def test_inplace_view_multi_output_unsafe(self, device):
+    def test_inplace_on_view_multi_output_unsafe(self, device):
         for f in [lambda t: t.unsafe_split(1),
                   lambda t: t.unsafe_split_with_sizes((1, 1, 1)),
                   lambda t: t.unsafe_chunk(3)]:
@@ -8239,7 +8324,7 @@ class TestAutogradDeviceType(TestCase):
             s1.mul_(s2)
             s1.sum().backward()
 
-    def test_inplace_view_multi_output_safe(self, device):
+    def test_inplace_on_view_multi_output_safe(self, device):
         for f in [lambda t: t.split(1),
                   lambda t: t.split_with_sizes((1, 1, 1)),
                   lambda t: t.chunk(3)]:
