@@ -47,9 +47,9 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
 Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
-  TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   TORCH_CHECK(n <= std::numeric_limits<int>::max(),
     "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
+
   check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
@@ -73,13 +73,15 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   const double log_threshold_12 = std::log(0.9) * 12;
   double nd = static_cast<double>(n);
 
-  constexpr bool is_reduced_bits = true;
   int bits = std::min(64,
     static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
 
   if (n == 0) {
     return result;
   } else if (bits <= 32) {
+    // For asserting device type match of the generator and result,
+    // we deligate that to the 'random_' function below.
+
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
       std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
