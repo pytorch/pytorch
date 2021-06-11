@@ -126,6 +126,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter);
 
 } // namespace
