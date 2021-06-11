@@ -326,7 +326,7 @@ class TestIterableDataPipeBasic(TestCase):
 
         for (url, data) in datapipe_tob:
             self.assertLessEqual(len(data), max_limit)
-            self.assertGreater(len(data), WEB_TEST_FILE_SIZE/2)
+            self.assertGreater(len(data), WEB_TEST_FILE_SIZE / 2)
 
 
 class IDP_NoLen(IterDataPipe):
