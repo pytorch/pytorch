@@ -1185,6 +1185,11 @@ class LazyTensor {
   static LazyTensor trunc(const LazyTensor& input);
   static void trunc_(LazyTensor& input);
 
+  static LazyTensor ts_softmax_backward(const LazyTensor& grad_output,
+                                        const LazyTensor& output,
+                                        lazy_tensors::int64 dim,
+                                        const LazyTensor& self);
+
   // Returns a tuple of all slices along a given dimension with that dimension
   // removed.
   static std::vector<LazyTensor> unbind(const LazyTensor& input,

@@ -141,6 +141,9 @@ NodePtr LogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
 NodePtr SoftmaxBackwardOp(const Value& grad_output, const Value& output,
                           lazy_tensors::int64 dim);
 
+NodePtr TSSoftmaxBackwardOp(const Value& grad_output, const Value& output,
+                            lazy_tensors::int64 dim, const Value& self);
+
 NodePtr Clamp(const Value& input, const Value& min, const Value& max);
 
 NodePtr Ceil(const Value& input);

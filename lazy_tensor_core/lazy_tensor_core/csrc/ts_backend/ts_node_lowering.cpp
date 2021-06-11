@@ -14,6 +14,8 @@
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
+#include "lazy_tensor_core/csrc/ops/softmax.h"
+#include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
@@ -107,6 +109,14 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::permute) {
       return LowerPermute(
           ir::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute)));
+    }
+    if (node->op().op == at::aten::softmax) {
+      return LowerSoftmax(
+          ir::NodeCast<ir::ops::Softmax>(node, ir::OpKind(at::aten::softmax)));
+    }
+    if (node->op().op == at::aten::_softmax_backward_data) {
+      return LowerSoftmaxBackward(ir::NodeCast<ir::ops::TSSoftmaxBackward>(
+          node, ir::OpKind(at::aten::_softmax_backward_data)));
     }
     if (node->op().op == at::aten::unsqueeze) {
       return LowerUnsqueeze(ir::NodeCast<ir::ops::Unsqueeze>(
@@ -217,6 +227,23 @@ class TSNodeLowering : public NodeLowering {
     const lazy_tensors::Shape& shape = node->shape();
     return {loctx()->graph()->insertConstant(at::scalar_tensor(
         value, lazy_tensors::PrimitiveToScalarType(shape.element_type())))};
+  }
+
+  TSOpVector LowerSoftmax(const ir::ops::Softmax* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.emplace_back(node->dim());
+    arguments.emplace_back(node->dtype());
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerSoftmaxBackward(const ir::ops::TSSoftmaxBackward* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
+    arguments.emplace_back(node->dim());
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
+    return LowerBuiltin(node, arguments);
   }
 
   TSOpVector LowerUnsqueeze(const ir::ops::Unsqueeze* node) {
