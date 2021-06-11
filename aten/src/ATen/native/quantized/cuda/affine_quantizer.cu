@@ -30,7 +30,7 @@ void quantize_tensor_per_tensor_affine_cuda(
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
-      qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cuda", [&]() {        
+      qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cuda", [&]() {
         constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
         constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
 

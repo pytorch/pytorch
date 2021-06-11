@@ -221,7 +221,7 @@ std::vector<std::vector<at::Tensor>> waitFuture(
     } else if (result.isTensorList()) {
       outputTensors.emplace_back(result.toTensorVector());
     } else {
-      throw std::runtime_error("future result should be tensor list or none");
+      TORCH_CHECK(false, "future result should be tensor list or none");
     }
   }
   return copyTensors(outputTensors);
