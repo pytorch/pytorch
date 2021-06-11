@@ -213,7 +213,7 @@ def create_python_bindings(
     })
 
 def load_signatures(
-    native_functions: str,
+    native_functions: List[NativeFunction],
     deprecated_yaml_path: str,
     *,
     method: bool,

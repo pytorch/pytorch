@@ -1,6 +1,5 @@
 import re
 from typing import Tuple, List, Iterable, Iterator, Callable, Sequence, TypeVar, Optional
-from tools.codegen.model import NativeFunction
 from enum import Enum
 import contextlib
 import textwrap
