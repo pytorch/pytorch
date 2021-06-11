@@ -225,7 +225,7 @@ class TestGradients(TestCase):
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
-            with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
+            with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
 
 
@@ -452,6 +452,9 @@ class TestCommon(JitCommonTestCase):
 
     @_alias_ops((op for op in op_db if op.aliases))
     def test_jit_alias_remapping(self, device, dtype, op):
+        # Local import needed for test scripting
+        from torch import tensor
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")

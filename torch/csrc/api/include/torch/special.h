@@ -97,7 +97,7 @@ inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   return torch::special_logsumexp(self, dims, keepdim);
 }
 
-inline Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
+inline Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   return torch::special_logsumexp_out(result, self, dims, keepdim);
 }
 

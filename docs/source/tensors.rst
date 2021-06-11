@@ -564,6 +564,7 @@ Tensor class reference
     Tensor.resize_
     Tensor.resize_as_
     Tensor.retain_grad
+    Tensor.retains_grad
     Tensor.roll
     Tensor.rot90
     Tensor.round
