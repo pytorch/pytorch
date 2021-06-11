@@ -317,20 +317,20 @@ libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_tr
 libtorch_distributed_windows_sources = [
     "torch/lib/c10d/comm.cpp",
     "torch/lib/c10d/default_comm_hooks.cpp",
-    "torch/lib/c10d/reducer.cpp",
-    "torch/lib/c10d/logger.cpp",
     "torch/lib/c10d/FileStore.cpp",
+    "torch/lib/c10d/GlooDeviceFactory.cpp",
+    "torch/lib/c10d/logger.cpp",
     "torch/lib/c10d/ParamCommsUtils.cpp",
     "torch/lib/c10d/PrefixStore.cpp",
     "torch/lib/c10d/ProcessGroup.cpp",
+    "torch/lib/c10d/ProcessGroupGloo.cpp",
+    "torch/lib/c10d/ProcessGroupMPI.cpp",
+    "torch/lib/c10d/ProcessGroupWrapper.cpp",
+    "torch/lib/c10d/reducer.cpp",
     "torch/lib/c10d/sequence_num.cpp",
     "torch/lib/c10d/Store.cpp",
     "torch/lib/c10d/TCPStore.cpp",
     "torch/lib/c10d/Utils.cpp",
-    "torch/lib/c10d/ProcessGroupMPI.cpp",
-    "torch/lib/c10d/ProcessGroupGloo.cpp",
-    "torch/lib/c10d/GlooDeviceFactory.cpp",
-    "torch/lib/c10d/ProcessGroupWrapper.cpp",
 ]
 
 libtorch_distributed_sources = libtorch_distributed_windows_sources + [
@@ -517,8 +517,8 @@ libtorch_cuda_distributed_windows_sources = [
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_windows_sources + [
-    "torch/lib/c10d/ProcessGroupNCCL.cpp",
     "torch/lib/c10d/NCCLUtils.cpp",
+    "torch/lib/c10d/ProcessGroupNCCL.cpp",
 ]
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
@@ -696,9 +696,9 @@ libtorch_python_core_sources = [
 ]
 
 libtorch_python_distributed_core_sources = [
-    "torch/lib/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
+    "torch/lib/c10d/frontend.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
