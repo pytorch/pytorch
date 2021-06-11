@@ -30,7 +30,7 @@ void quantize_tensor_per_tensor_affine_cuda(
     double scale,
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
-      qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cuda", [&]() {
+      qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cuda", [&]() {        
         constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
         constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
 
@@ -51,7 +51,6 @@ void quantize_tensor_per_tensor_affine_cuda(
               return quantized_val;
             });
       });
-  });
 }
 
 void dequantize_tensor_per_tensor_affine_cuda(
@@ -95,7 +94,9 @@ void quantize_tensor_per_channel_affine_cuda(
                   .build();
 
   AT_DISPATCH_QINT_TYPES(
-    qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cuda_handler", [&]() {
+    qtensor.scalar_type(), fn_name, [&]() {
+      check_zero_points_cuda<underlying_t>(fn_name, zero_points);
+
       constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
       constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
       // trying to match _quantize_per_channel_ref_nd in test_quantized_tensor.py
@@ -128,8 +129,10 @@ void dequantize_tensor_per_channel_affine_cuda(
 
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(),
-      "dequantize_tensor_per_channel_affine_cuda_handler",
+      fn_name,
       [&]() {
+        check_zero_points_cuda<underlying_t>(fn_name, zero_points);
+
         auto iter = TensorIteratorConfig()
                         .check_all_same_dtype(false)
                         .add_output(rtensor)
@@ -171,12 +174,13 @@ void quantize_tensor_per_channel_float_qparams_cuda(
 
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(),
-      "quantize_tensor_per_channel_float_qparams_cuda_handler",
+      fn_name,
       [&]() {
+        check_zero_points_cuda<underlying_t>(fn_name, zero_points);
+
         constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
         constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
         // trying to match _quantize_per_channel_ref_nd in
-        // test_quantized_tensor.py
         gpu_kernel(
             iter,
             [=] GPU_LAMBDA(
@@ -209,8 +213,10 @@ void dequantize_tensor_per_channel_float_qparams_cuda(
 
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(),
-      "dequantize_tensor_per_channel_float_qparams_cuda_handler",
+      fn_name,
       [&]() {
+        check_zero_points_cuda<underlying_t>(fn_name, zero_points);
+
         auto iter = TensorIteratorConfig()
                         .check_all_same_dtype(false)
                         .add_output(rtensor)
