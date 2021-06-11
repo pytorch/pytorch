@@ -1137,7 +1137,7 @@ class CrossEntropyLossWithSoftLabels(_Loss):
 
     .. math::
         L = l_{n,c} = y_{n,c} \cdot \left( \log y_{n,c} - \\
-        \log\left(\frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} \right)
+        \log\left(\frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} \right) \right)
 
     where :math:`x_{n,c}` represents each element of ``input``, :math:`y_{n,c}` represents each element of
     ``target``, and :math:`L` has the same shape as ``input`` and ``target``.  If :attr:`reduction` is not
