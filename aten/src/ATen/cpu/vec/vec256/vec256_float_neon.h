@@ -308,7 +308,10 @@ public:
     return Vectorized<float>(vabsq_f32(values.val[0]), vabsq_f32(values.val[1]));
   }
   Vectorized<float> angle() const {
-    return Vectorized<float>(0.f);
+    auto zero = Vectorized<float>(0);
+    auto pi = Vectorized<float>(c10::pi<float>);
+    auto tmp = blendv(zero, pi, *this < zero);
+    return blendv(tmp, *this, isnan());
   }
   Vectorized<float> real() const {
     return *this;
