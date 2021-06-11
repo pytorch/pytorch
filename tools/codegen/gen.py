@@ -524,6 +524,7 @@ C10_ALWAYS_INLINE
 def format_yaml(data: object) -> str:
     # Ignore alias in Dumper
     YamlDumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
+
     # Support serializing OrderedDict
     def dict_representer(dumper: Any, data: Any) -> Any:
         return dumper.represent_dict(data.items())
