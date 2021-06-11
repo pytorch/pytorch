@@ -115,10 +115,7 @@ WORKFLOW_DATA = [
         "pytorch_android_gradle_build-x86_32_fulljit",
         ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_fulljit_build"],
         is_master_only=False,
-        is_pr_only=True,
-        extra_props=tuple({
-            "lite_interpreter": miniutils.quote(str(int(False)))
-        }.items())),
+        is_pr_only=True),
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
         "pytorch_android_gradle_custom_build_single",
