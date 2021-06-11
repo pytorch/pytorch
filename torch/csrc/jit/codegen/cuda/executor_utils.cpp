@@ -3,6 +3,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -230,7 +231,7 @@ StatefulExpressionEvaluator statefulBindInputs(
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
-  for (size_t i = 0; i < fusion->inputs().size(); i++) {
+  for (const auto i : c10::irange(fusion->inputs().size())) {
     if (fusion->inputs()[i]->getValType() == ValType::TensorView) {
       TensorView* cg_tensor = fusion->inputs()[i]->as<TensorView>();
 
@@ -244,7 +245,7 @@ StatefulExpressionEvaluator statefulBindInputs(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs no longer match.");
 
-      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+      for (const auto dim : c10::irange(root_dom.size())) {
         evaluator.safeBind(
             root_dom[dim]->extent(), aten_tensor.sizes()[dim], lower);
       }
