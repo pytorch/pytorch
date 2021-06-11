@@ -13,6 +13,7 @@ from weakref import WeakValueDictionary
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
+from ._directory_reader import DirectoryReader
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -21,7 +22,6 @@ from ._importlib import (
     _sanity_check,
 )
 from ._mangling import PackageMangler, demangle
-from ._mock_zipreader import MockZipReader
 from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
@@ -74,7 +74,7 @@ class PackageImporter(Importer):
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
-                self.zip_reader = MockZipReader(self.filename)
+                self.zip_reader = DirectoryReader(self.filename)
         else:
             self.filename = "<binary>"
             self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
@@ -624,6 +624,14 @@ class _PackageResourceReader:
     def resource_path(self, resource):
         # The contract for resource_path is that it either returns a concrete
         # file system path or raises FileNotFoundError.
+        if isinstance(
+            self.importer.zip_reader, DirectoryReader
+        ) and self.importer.zip_reader.has_record(
+            os.path.join(self.fullname, resource)
+        ):
+            return os.path.join(
+                self.importer.zip_reader.directory, self.fullname, resource
+            )
         raise FileNotFoundError
 
     def is_resource(self, name):
