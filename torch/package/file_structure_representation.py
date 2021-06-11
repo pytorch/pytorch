@@ -7,7 +7,7 @@ from .glob_group import GlobPattern, GlobGroup
 class Directory:
     """A file structure representation. Organized as Directory nodes that have lists of
     their Directory children. Directories for a package are created by calling
-    :meth:`PackageExporter.file_structure` or :meth:`PackageImporter.file_structure`."""
+    :meth:`PackageImporter.file_structure`."""
 
     def __init__(self, name: str, is_dir: bool):
         self.name = name
@@ -43,12 +43,12 @@ class Directory:
         dir.children[file] = Directory(file, False)
 
     def has_file(self, filename: str) -> bool:
-        """Checks if a file is present in a Directory.
+        """Checks if a file is present in a :class:`Directory`.
 
         Args:
             filename (str): Path of file to search for.
         Returns:
-            bool: if a Directory contains the specified file.
+            bool: If a :class:`Directory` contains the specified file.
         """
         lineage = filename.split("/", maxsplit=1)
         child = lineage[0]
