@@ -498,6 +498,29 @@ def async_add_multi_fanout(to, x, num, step):
     return ret_future
 
 
+@rpc.functions.async_execution
+def async_cuda_sleep_and_set_to_one(t):
+    device = t.device
+    original_stream = torch.cuda.current_stream(device)
+    new_stream = torch.cuda.Stream(device)
+    new_stream.wait_stream(original_stream)
+    with torch.cuda.stream(new_stream):
+        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        t.fill_(1)
+        fut = Future(devices=[device])
+        fut.set_result(t)
+        return fut
+
+
+@rpc.functions.async_execution
+def async_cuda_nested_add(to, x, y, z):
+    def cb(fut):
+        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        return fut.value() + z
+
+    return rpc.rpc_async(to, torch.add, args=(x, y)).then(cb)
+
+
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
@@ -4901,7 +4924,7 @@ class MyConvNetForMNIST(nn.Module):
 
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
-    def _test_device_maps(self, options, errMsg="Invalid device_map"):
+    def _test_device_maps(self, options, errMsg):
         with self.assertRaisesRegex(ValueError, errMsg):
             rpc.init_rpc(
                 name=worker_name(self.rank),
@@ -4917,7 +4940,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def test_device_maps_wrong_worker_name(self):
         options = self.rpc_backend_options
         options.set_device_map("none_exist", {0: 1})
-        self._test_device_maps(options, "Wrong worker names")
+
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has invalid target node names in its device maps"
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_invalid_max_local_device(self):
@@ -4927,7 +4954,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         self._test_device_maps(
             options,
-            errMsg="Invalid device in TensorPipe options"
+            errMsg="Node worker0 has source devices with invalid indices in its device map for worker1"
         )
 
     @skip_if_lt_x_gpu(1)
@@ -4936,7 +4963,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {0: torch.cuda.device_count()})
 
-        self._test_device_maps(options)
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has target devices with invalid indices in its device map for worker1"
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_many_to_one(self):
@@ -4945,7 +4975,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         options.set_device_map(dst, {1: 0})
         options.set_device_map(dst, {0: 0})
 
-        self._test_device_maps(options)
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has duplicated target devices in its device map for worker1"
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_one_to_many(self):
@@ -5527,13 +5560,14 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def _slow_add_on_user_stream(x, y):
         s0 = torch.cuda.current_stream(x.device)
         s1 = torch.cuda.Stream(device=x.device)
+        s1.wait_stream(s0)
+        x.record_stream(s1)
+        y.record_stream(s1)
         with torch.cuda.stream(s1):
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
-            s1.wait_stream(s0)
             z = x + y
-            event = torch.cuda.Event()
-            event.record(s1)
-        event.wait(s0)
+        s0.wait_stream(s1)
+        z.record_stream(s0)
         return z
 
     def _test_custom_stream(self, fn, device_map):
@@ -5939,11 +5973,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     def test_devices_option_mismatch(self):
         with self.assertRaisesRegex(
-            RuntimeError,
-            "but not included the devices field"
+            ValueError,
+            "Node worker0 has unexpected source devices in its device map for worker1"
         ):
             dst = worker_name((self.rank + 1) % self.world_size)
             options = self.rpc_backend_options
@@ -5960,11 +5994,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
             rpc.shutdown()
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     def test_devices_option_mismatch_reverse(self):
         with self.assertRaisesRegex(
-            RuntimeError,
-            "but not included the devices field"
+            ValueError,
+            "Node worker0 has unexpected target devices in its device map for worker1"
         ):
             dst = worker_name((self.rank + 1) % self.world_size)
 
@@ -6094,3 +6128,50 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(another_stream):
                 self.assertTrue(torch.eq(child_future.wait(), 1).all().item())
+
+    @skip_if_lt_x_gpu(1)
+    def test_async_execution_with_cuda_future(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        t = torch.zeros((100,), device="cuda:0")
+        fut = rpc.rpc_async(dst, async_cuda_sleep_and_set_to_one, args=(t,))
+        another_stream = torch.cuda.Stream("cuda:0")
+        with torch.cuda.stream(another_stream):
+            self.assertTrue(torch.eq(fut.wait(), 1).all().item())
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_async_execution_nested_with_cuda_future(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        nested_dst = worker_name((self.rank + 2) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        a = torch.ones((100,), device="cuda:0")
+        b = torch.ones((100,), device="cuda:0")
+        c = torch.ones((100,), device="cuda:0")
+        fut = rpc.rpc_async(dst, async_cuda_nested_add, args=(nested_dst, a, b, c))
+        another_stream = torch.cuda.Stream("cuda:0")
+        with torch.cuda.stream(another_stream):
+            self.assertTrue(torch.eq(fut.wait(), 3).all().item())
+
+        rpc.shutdown()
