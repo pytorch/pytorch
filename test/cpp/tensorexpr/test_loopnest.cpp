@@ -2662,7 +2662,8 @@ TEST(LoopNest, OuterLoopVectorization) {
       });
   LoopNest l({tensor});
 
-  l.vectorize(l.getAllLoopNestsWritingToBuf(tensor->buf())[0][0]);
+  ASSERT_TRUE(
+      LoopNest::vectorize(l.getAllLoopNestsWritingToBuf(tensor->buf())[0][0]));
 
   Stmt* root_stmt = l.root_stmt();
   Block* outer_block = dynamic_cast<Block*>(root_stmt);
@@ -2679,6 +2680,30 @@ TEST(LoopNest, OuterLoopVectorization) {
   Block* for_body = for_loop->body();
   ASSERT_EQ(for_body->nstmts(), 1);
   ASSERT_EQ(dynamic_cast<For*>(for_body->front()), nullptr);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, VectorizeLoopNotNormalized) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     for (int j = 1; j < 5; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto inner_for = For::make(j, 1, 5, for_body);
+  auto outer_for = For::make(i, 0, 10, inner_for);
+  auto block = Block::make({outer_for});
+  LoopNest l(block, {a_buf.node()});
+
+  ASSERT_TRUE(LoopNest::vectorize(inner_for));
+  ASSERT_EQ(outer_for->body()->nstmts(), 1);
+  ASSERT_EQ(dynamic_cast<For*>(outer_for->body()->front()), nullptr);
 }
 
 namespace {
@@ -4727,9 +4752,9 @@ TEST(LoopNest, VectorizeUse) {
       "c", {{N, "n"}}, [&](const VarHandle& n) { return b->load(n) + 2.0f; });
   LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
-  nest.vectorize(loops[0]);
+  ASSERT_TRUE(LoopNest::vectorize(loops[0]));
   loops = nest.getAllLoopNestsWritingToBuf(c->buf())[0];
-  nest.vectorize(loops[0]);
+  ASSERT_TRUE(LoopNest::vectorize(loops[0]));
   nest.prepareForCodegen();
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   Stmt* s = nest.root_stmt();
