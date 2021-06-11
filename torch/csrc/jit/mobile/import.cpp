@@ -310,12 +310,12 @@ void BytecodeDeserializer::parseMethods(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          model_version <= caffe2::serialize::kProducedBytecodeVersion,
+          model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
       " and ",
-      caffe2::serialize::kProducedBytecodeVersion,
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
       "But the model version is ",
       model_version);
 
@@ -662,13 +662,6 @@ mobile::Module _load_for_mobile_impl(
   }
   const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-
-  TORCH_CHECK(
-      reader->hasRecord("bytecode.pkl"),
-      "The model is not generated from the api _save_for_lite_interpreter. "
-      "Please regenerate the module by running: module._save_for_lite_interpreter('model.ptl'). "
-      "Refer to https://pytorch.org/tutorials/prototype/lite_interpreter.html for more details.");
-
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   std::string error_message;
   auto guard = c10::make_scope_exit([&]() {
