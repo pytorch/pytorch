@@ -27,32 +27,31 @@ PYTORCH_ANDROID_DIR=$PYTORCH_DIR/android
 
 echo "PYTORCH_DIR:$PYTORCH_DIR"
 
-# source "$PYTORCH_ANDROID_DIR/common.sh"
+source "$PYTORCH_ANDROID_DIR/common.sh"
 
-# check_android_sdk
-# check_gradle
-# parse_abis_list "$@"
-# build_android
+check_android_sdk
+check_gradle
+parse_abis_list "$@"
+build_android
 
 # To set proxy for gradle add following lines to ./gradle/gradle.properties:
-# systemProp.http.proxyHost=...
-# systemProp.http.proxyPort=8080
-# systemProp.https.proxyHost=...
-# systemProp.https.proxyPort=8080
+systemProp.http.proxyHost=...
+systemProp.http.proxyPort=8080
+systemProp.https.proxyHost=...
+systemProp.https.proxyPort=8080
 
-# if [ "$CUSTOM_ABIS_LIST" = true ]; then
-#   # Skipping clean task here as android gradle plugin 3.3.2 exteralNativeBuild has problems
-#   # with it when abiFilters are specified.
-#   $GRADLE_PATH -PABI_FILTERS=$ABIS_LIST -p $PYTORCH_ANDROID_DIR assembleRelease
-# else
-#   $GRADLE_PATH -p $PYTORCH_ANDROID_DIR clean assembleRelease
-# fi
+if [ "$CUSTOM_ABIS_LIST" = true ]; then
+  # Skipping clean task here as android gradle plugin 3.3.2 exteralNativeBuild has problems
+  # with it when abiFilters are specified.
+  $GRADLE_PATH -PABI_FILTERS=$ABIS_LIST -p $PYTORCH_ANDROID_DIR assembleRelease
+else
+  $GRADLE_PATH -p $PYTORCH_ANDROID_DIR clean assembleRelease
+fi
 
-# find $PYTORCH_ANDROID_DIR -type f -name *aar | xargs ls -lah
+find $PYTORCH_ANDROID_DIR -type f -name *aar | xargs ls -lah
 
 if [ "${GRADLE_RELEASE}" == 1 ] && [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
-  echo "Run"
-else
+  echo "Running gradle for release and building full jit"
   GRADLE_PROPERTIES_FILE="$PYTORCH_DIR/android/pytorch_android/gradle.properties"
   echo ${GRADLE_PROPERTIES_FILE}
   # Clean the existing content in gradle.properties

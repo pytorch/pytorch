@@ -9,11 +9,13 @@ class AndroidJob:
     def __init__(self,
                  variant,
                  template_name,
-                 is_master_only=True):
+                 is_master_only=True,
+                 extra_props=tuple()):
 
         self.variant = variant
         self.template_name = template_name
         self.is_master_only = is_master_only
+        self.extra_props = dict(extra_props)
 
     def gen_tree(self):
 
@@ -43,6 +45,8 @@ class AndroidJob:
         if self.is_master_only:
             props_dict["filters"] = branch_filters.gen_filter_dict(branch_filters.NON_PR_BRANCH_LIST)
 
+        if self.extra_props:
+                    props_dict.update(self.extra_props)
         return [{self.template_name: props_dict}]
 
 
@@ -81,9 +85,25 @@ class AndroidGradleJob:
 
 WORKFLOW_DATA = [
     AndroidJob(["x86_32"], "pytorch_linux_build", is_master_only=False),
+    AndroidJob(["x86_32_fulljit"], "pytorch_linux_build", is_master_only=False,
+        extra_props=tuple({
+            "lite_interpreter": miniutils.quote(str(int(False)))
+        }.items())),
     AndroidJob(["x86_64"], "pytorch_linux_build"),
+    AndroidJob(["x86_64_fulljit"], "pytorch_linux_build",
+        extra_props=tuple({
+            "lite_interpreter": miniutils.quote(str(int(False)))
+        }.items())),
     AndroidJob(["arm", "v7a"], "pytorch_linux_build"),
+    AndroidJob(["arm", "v7a", "fulljit"], "pytorch_linux_build",
+        extra_props=tuple({
+            "lite_interpreter": miniutils.quote(str(int(False)))
+        }.items())),
     AndroidJob(["arm", "v8a"], "pytorch_linux_build"),
+    AndroidJob(["arm", "v8a", "fulljit"], "pytorch_linux_build",
+        extra_props=tuple({
+            "lite_interpreter": miniutils.quote(str(int(False)))
+        }.items())),
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32",
         "pytorch_android_gradle_build-x86_32",
@@ -112,6 +132,13 @@ WORKFLOW_DATA = [
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build",
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build",
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build"]),
+    AndroidGradleJob(
+        "pytorch-fulljit-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build",
+        "pytorch_android_fulljit_gradle_build",
+        ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_fulljit_build",
+         "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_fulljit_build",
+         "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_fulljit_build",
+         "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_fulljit_build"]),
 ]
 
 

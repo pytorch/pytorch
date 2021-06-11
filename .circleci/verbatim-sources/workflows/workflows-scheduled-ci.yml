@@ -186,10 +186,18 @@
           build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
       - pytorch_linux_test:
-          name: periodic_pytorch_xenial_cuda10_2_cudnn7_gcc7_old_gradcheck_tests
+          name: periodic_pytorch_xenial_cuda10_2_cudnn7_gcc7_old_gradcheck_test1
           requires:
             - periodic_pytorch_xenial_cuda10_2_cudnn7_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-tests"
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-test1"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - pytorch_linux_test:
+          name: periodic_pytorch_xenial_cuda10_2_cudnn7_gcc7_old_gradcheck_test2
+          requires:
+            - periodic_pytorch_xenial_cuda10_2_cudnn7_gcc7_build
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-test2"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
