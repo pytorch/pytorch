@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <nvToolsExt.h>
 
 #include <sstream>
@@ -75,7 +76,7 @@ struct CUDAMethods : public CUDAStubs {
     at::cuda::OptionalCUDAGuard device_guard;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int count = at::cuda::device_count();
-    for(int i = 0; i < count; i++) {
+    for(const auto i : c10::irange(count)) {
       device_guard.set_index(i);
       op(i);
     }

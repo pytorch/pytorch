@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -328,7 +329,7 @@ void ONNXFixupUninitializedOutput(Node* node) {
   // Infer shape and type for subblock outputs
   TORCH_INTERNAL_ASSERT(
       then_block->outputs().size() == else_block->outputs().size())
-  for (size_t i = 0; i < else_block->outputs().size(); i++) {
+  for (const auto i : c10::irange(else_block->outputs().size())) {
     Value* then_block_output = then_block->outputs()[i];
     Value* else_block_output = else_block->outputs()[i];
 
