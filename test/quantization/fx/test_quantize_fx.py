@@ -2396,6 +2396,25 @@ class TestQuantizeFx(QuantizationTestCase):
         mc = convert_fx(mp)
         # if the above code does not crash, the test is successful
 
+    def test_quant_op_after_expand_as(self):
+        # TODO(before land): make the test pass
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x1 = x.expand_as(x)
+                x2 = torch.add(x, x1)
+                return x2
+
+        m = M().eval()
+        mp = prepare_fx(m, {"": default_qconfig})
+        print(mp)
+        mc = convert_fx(mp)
+        # if the above code does not crash, the test is successful
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
