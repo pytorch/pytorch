@@ -385,7 +385,10 @@ class TestFunctionalIterDataPipe(TestCase):
             data = torch.tensor(item, dtype=dtype)
             return data if not sum else data.sum()
 
-        map_dp = input_dp.map(lambda ls: ls * 2, nesting_level=0)
+        with warnings.catch_warnings(record=True) as wa:
+            map_dp = input_dp.map(lambda ls: ls * 2, nesting_level=0)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
         self.assertEqual(len(input_dp), len(map_dp))
         for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, y * 2)
@@ -406,11 +409,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         map_dp = input_dp.map(fn, nesting_level=4)
         with self.assertRaises(IndexError):
-            for x, y in zip(map_dp, input_dp):
-                self.assertEqual(len(x), len(y))
-                for a, b in zip(x, y):
-                    print(a, b)
-                    self.assertEqual(a, torch.tensor(b, dtype=torch.float))
+            list(map_dp)
 
         with self.assertRaises(ValueError):
             input_dp.map(fn, nesting_level=-2)
@@ -1052,7 +1051,7 @@ class TestTyping(TestCase):
                [1, '1', 2, '2'])
         for ds in dss:
             dp = DP(ds)
-            with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
+            with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
                 list(dp)
 
             with runtime_validation_disabled():
@@ -1060,8 +1059,45 @@ class TestTyping(TestCase):
                 with runtime_validation_disabled():
                     self.assertEqual(list(dp), ds)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
+            with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
                 list(dp)
+
+
+    def test_reinforce(self):
+        T = TypeVar('T', int, str)
+
+
+        class DP(IterDataPipe[T]):
+            def __init__(self, ds):
+                self.ds = ds
+
+            @runtime_validation
+            def __iter__(self) -> Iterator[T]:
+                for d in self.ds:
+                    yield d
+
+        ds = list(range(10))
+        # Valid type reinforcement
+        dp = DP(ds).reinforce_type(int)
+        self.assertTrue(dp.type, int)
+        self.assertEqual(list(dp), ds)
+
+        # Invalid type
+        with self.assertRaisesRegex(TypeError, r"'expected_type' must be a type"):
+            dp = DP(ds).reinforce_type(1)
+
+        # Type is not subtype
+        with self.assertRaisesRegex(TypeError, r"Expected 'expected_type' as subtype of"):
+            dp = DP(ds).reinforce_type(float)
+
+        # Invalid data at runtime
+        dp = DP(ds).reinforce_type(str)
+        with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
+            list(dp)
+
+        # Context Manager to disable the runtime validation
+        with runtime_validation_disabled():
+            self.assertEqual(list(d for d in dp), ds)
 
 
 if __name__ == '__main__':
