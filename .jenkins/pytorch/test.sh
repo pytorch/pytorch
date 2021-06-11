@@ -422,8 +422,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
-  source $(pwd)/xla/.circleci/common.sh
-  run_torch_xla_tests $(pwd) $(pwd)/xla
+  source "$(pwd)/xla/.circleci/common.sh"
+  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test ]]; then
   test_python_legacy_jit
