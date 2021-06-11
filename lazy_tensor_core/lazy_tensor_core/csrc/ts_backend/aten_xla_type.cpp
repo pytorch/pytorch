@@ -392,12 +392,64 @@ at::Tensor AtenXlaType::empty_strided(at::IntArrayRef size,
   return as_strided(t, size, stride, /*storage_offset=*/0);
 }
 
+at::Tensor AtenXlaType::eq(const at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::eq(bridge::GetLtcTensor(self), other));
+}
+
+at::Tensor AtenXlaType::eq(const at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::eq(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
+}
+
+at::Tensor& AtenXlaType::eq_(at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::eq_(self_tensor, other);
+  return self;
+}
+
+at::Tensor& AtenXlaType::eq_(at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::eq_(self_tensor, bridge::GetLtcTensor(other));
+  return self;
+}
+
 at::Tensor AtenXlaType::expand(const at::Tensor& self, at::IntArrayRef size,
                                bool implicit) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(LazyTensor::expand(
       bridge::GetLtcTensor(self),
       lazy_tensors::util::ToVector<lazy_tensors::int64>(size)));
+}
+
+at::Tensor AtenXlaType::ge(const at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::ge(bridge::GetLtcTensor(self), other));
+}
+
+at::Tensor AtenXlaType::ge(const at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::ge(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
+}
+
+at::Tensor& AtenXlaType::ge_(at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::ge_(self_tensor, other);
+  return self;
+}
+
+at::Tensor& AtenXlaType::ge_(at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::ge_(self_tensor, bridge::GetLtcTensor(other));
+  return self;
 }
 
 at::Tensor AtenXlaType::gelu(const at::Tensor& self) {
@@ -411,6 +463,84 @@ at::Tensor AtenXlaType::gelu_backward(const at::Tensor& grad,
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(LazyTensor::gelu_backward(
       bridge::GetLtcTensor(grad), bridge::GetLtcTensor(self)));
+}
+
+at::Tensor AtenXlaType::gt(const at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::gt(bridge::GetLtcTensor(self), other));
+}
+
+at::Tensor AtenXlaType::gt(const at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::gt(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
+}
+
+at::Tensor& AtenXlaType::gt_(at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::gt_(self_tensor, other);
+  return self;
+}
+
+at::Tensor& AtenXlaType::gt_(at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::gt_(self_tensor, bridge::GetLtcTensor(other));
+  return self;
+}
+
+at::Tensor AtenXlaType::le(const at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::le(bridge::GetLtcTensor(self), other));
+}
+
+at::Tensor AtenXlaType::le(const at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::le(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
+}
+
+at::Tensor& AtenXlaType::le_(at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::le_(self_tensor, other);
+  return self;
+}
+
+at::Tensor& AtenXlaType::le_(at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::le_(self_tensor, bridge::GetLtcTensor(other));
+  return self;
+}
+
+at::Tensor AtenXlaType::lt(const at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::lt(bridge::GetLtcTensor(self), other));
+}
+
+at::Tensor AtenXlaType::lt(const at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::lt(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
+}
+
+at::Tensor& AtenXlaType::lt_(at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::lt_(self_tensor, other);
+  return self;
+}
+
+at::Tensor& AtenXlaType::lt_(at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::lt_(self_tensor, bridge::GetLtcTensor(other));
+  return self;
 }
 
 at::Tensor AtenXlaType::max_pool2d(const at::Tensor& self,
@@ -463,6 +593,32 @@ at::Tensor& AtenXlaType::mul_(at::Tensor& self, const at::Scalar& other) {
   CheckBinaryOpTypePromotion(self, self, other);
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   LazyTensor::mul_(self_tensor, other);
+  return self;
+}
+
+at::Tensor AtenXlaType::ne(const at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::ne(bridge::GetLtcTensor(self), other));
+}
+
+at::Tensor AtenXlaType::ne(const at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::ne(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
+}
+
+at::Tensor& AtenXlaType::ne_(at::Tensor& self, const at::Scalar& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::ne_(self_tensor, other);
+  return self;
+}
+
+at::Tensor& AtenXlaType::ne_(at::Tensor& self, const at::Tensor& other) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::ne_(self_tensor, bridge::GetLtcTensor(other));
   return self;
 }
 

@@ -40,6 +40,30 @@ supported:
   - unsqueeze
   - unsqueeze_
   - view
+  - ne.Scalar
+  - ne.Tensor
+  - ne_.Scalar
+  - ne_.Tensor
+  - eq.Scalar
+  - eq.Tensor
+  - eq_.Scalar
+  - eq_.Tensor
+  - ge.Scalar
+  - ge.Tensor
+  - ge_.Scalar
+  - ge_.Tensor
+  - le.Scalar
+  - le.Tensor
+  - le_.Scalar
+  - le_.Tensor
+  - gt.Scalar
+  - gt.Tensor
+  - gt_.Scalar
+  - gt_.Tensor
+  - lt.Scalar
+  - lt.Tensor
+  - lt_.Scalar
+  - lt_.Tensor
   - alias
 autograd:
   - max_pool2d

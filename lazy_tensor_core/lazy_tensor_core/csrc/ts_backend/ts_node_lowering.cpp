@@ -5,6 +5,7 @@
 #include <torch/torch.h>
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
@@ -47,38 +48,49 @@ class TSNodeLowering : public NodeLowering {
   }
 
   lazy_tensors::Shape Infer(const ir::Node* node) override {
-    if (node->op().op == at::aten::expand) {
-      auto expand =
-          ir::NodeCast<ir::ops::Expand>(node, ir::OpKind(at::aten::expand));
-      const ir::Output& argument = node->operand(0);
-      return lazy_tensors::Shape(argument.shape().element_type(),
-                                 expand->size());
-    }
-    if (node->op().op == at::aten::permute) {
-      auto permute =
-          ir::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute));
-      const ir::Output& argument = node->operand(0);
-      return ir::ops::Permute::MakePermuteShape(argument.shape(),
-                                                permute->dims());
-    }
-    if (node->op().op == at::aten::constant_pad_nd) {
-      auto constant_pad_nd = ir::NodeCast<ir::ops::ConstantPadNd>(
-          node, ir::OpKind(at::aten::constant_pad_nd));
-      const ir::Output& argument = node->operand(0);
-      const lazy_tensors::Shape& argument_shape = argument.shape();
-      const auto argument_dimensions = argument_shape.dimensions();
-      const auto& pad = constant_pad_nd->pad();
-      LTC_CHECK_EQ(argument_dimensions.size() * 2, pad.size());
-      std::vector<lazy_tensors::int64> padded_dimensions(
-          argument_dimensions.begin(), argument_dimensions.end());
-      size_t i = 0;
-      for (auto rit = pad.rbegin(); rit != pad.rend(); rit += 2, ++i) {
-        padded_dimensions[i] += (*rit + *(rit + 1));
+    switch (node->op().op) {
+      case at::aten::expand: {
+        auto expand =
+            ir::NodeCast<ir::ops::Expand>(node, ir::OpKind(at::aten::expand));
+        const ir::Output& argument = node->operand(0);
+        return lazy_tensors::Shape(argument.shape().element_type(),
+                                   expand->size());
       }
-      return lazy_tensors::Shape(argument_shape.element_type(),
-                                 padded_dimensions);
+      case at::aten::permute: {
+        auto permute =
+            ir::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute));
+        const ir::Output& argument = node->operand(0);
+        return ir::ops::Permute::MakePermuteShape(argument.shape(),
+                                                  permute->dims());
+      }
+      case at::aten::constant_pad_nd: {
+        auto constant_pad_nd = ir::NodeCast<ir::ops::ConstantPadNd>(
+            node, ir::OpKind(at::aten::constant_pad_nd));
+        const ir::Output& argument = node->operand(0);
+        const lazy_tensors::Shape& argument_shape = argument.shape();
+        const auto argument_dimensions = argument_shape.dimensions();
+        const auto& pad = constant_pad_nd->pad();
+        LTC_CHECK_EQ(argument_dimensions.size() * 2, pad.size());
+        std::vector<lazy_tensors::int64> padded_dimensions(
+            argument_dimensions.begin(), argument_dimensions.end());
+        size_t i = 0;
+        for (auto rit = pad.rbegin(); rit != pad.rend(); rit += 2, ++i) {
+          padded_dimensions[i] += (*rit + *(rit + 1));
+        }
+        return lazy_tensors::Shape(argument_shape.element_type(),
+                                   padded_dimensions);
+      }
+      case at::aten::eq:
+      case at::aten::ge:
+      case at::aten::gt:
+      case at::aten::le:
+      case at::aten::lt:
+      case at::aten::ne: {
+        return InferComparison(node);
+      }
+      default:
+        LTC_LOG(FATAL) << *node << "Not implemented yet.";
     }
-    LTC_LOG(FATAL) << *node << "Not implemented yet.";
   }
 
   TSOpVector LowerToTS(const ir::Node* node) {
@@ -143,6 +155,15 @@ class TSNodeLowering : public NodeLowering {
   }
 
  private:
+  lazy_tensors::Shape InferComparison(const ir::Node* node) {
+    const ir::Output& lhs = node->operand(0);
+    const ir::Output& rhs = node->operand(1);
+    return lazy_tensors::Shape(
+        lazy_tensors::PrimitiveType::PRED,
+        Helpers::GetPromotedShape(lhs.shape().dimensions(),
+                                  rhs.shape().dimensions()));
+  }
+
   TSOpVector LowerBuiltin(
       const ir::Node* node,
       const std::vector<torch::jit::NamedValue>& arguments) {
