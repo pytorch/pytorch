@@ -692,7 +692,7 @@ class TestQuantizedTensor(TestCase):
             # copy from float doesn't support cuda
             device = 'cpu'
             # check copy from non-quantized to quantized
-            r = torch.randn([numel], dtype=torch.float).to(device)
+            r = torch.randn([numel], dtype=torch.float, device=device)
             q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=dtype, device=device)
             q.copy_(r)
             qr = torch.quantize_per_tensor(r, scale=scale, zero_point=zero_point, dtype=dtype)
@@ -804,7 +804,7 @@ class TestQuantizedTensor(TestCase):
             sizes4 = [1 * 2 * 3 * 4]
             sizes5 = [1, 2, 1, 3, 1, 4]
 
-            q1_int = torch.randint(0, 100, sizes1, dtype=dtype).to(device)
+            q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
             q1 = torch._make_per_tensor_quantized_tensor(q1_int, scale=scale, zero_point=zero_point)
             q2 = q1.resize(*sizes2)
             q3 = q2.resize(*sizes3)
@@ -817,7 +817,7 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(q1.numel(), q5.numel())
 
             # Compare original and post-transpose
-            a_int = torch.randint(0, 100, sizes1, dtype=dtype).to(device)
+            a_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
             a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
             b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
             c = b.resize(*sizes1)  # Change the sizes back to the original
@@ -835,7 +835,7 @@ class TestQuantizedTensor(TestCase):
                 self.assertRaises(RuntimeError, lambda: torch.equal(b, c))
 
             # Throws an error if numel is wrong
-            q1_int = torch.randint(0, 100, sizes1, dtype=dtype).to(device)
+            q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
             q1 = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
             err_str = "requested resize to*"
             with self.assertRaisesRegex(RuntimeError, err_str):
