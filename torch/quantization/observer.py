@@ -9,6 +9,20 @@ import torch
 import torch.nn as nn
 
 
+class _PartialWrapper(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, *args, **keywords):
+        return self.p(*args, **keywords)
+
+    def __repr__(self):
+        return self.p.__repr__()
+
+    def with_args(self, **kwargs):
+        return _with_args(self, **kwargs)
+
+
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
 
@@ -24,19 +38,6 @@ def _with_args(cls_or_self, **kwargs):
         >>> id(foo_instance1) == id(foo_instance2)
         False
     """
-
-    class _PartialWrapper(object):
-        def __init__(self, p):
-            self.p = p
-
-        def __call__(self, *args, **keywords):
-            return self.p(*args, **keywords)
-
-        def __repr__(self):
-            return self.p.__repr__()
-
-        with_args = _with_args
-
     r = _PartialWrapper(partial(cls_or_self, **kwargs))
     return r
 
@@ -878,7 +879,7 @@ class HistogramObserver(_ObserverBase):
         if dst_bin_width == 0.0:
             return 0.0
 
-        src_bin = torch.arange(self.bins)
+        src_bin = torch.arange(self.bins, device=self.histogram.device)
         # distances from the beginning of first dst_bin to the beginning and
         # end of src_bin
         src_bin_begin = (src_bin - next_start_bin) * bin_width
@@ -897,11 +898,13 @@ class HistogramObserver(_ObserverBase):
 
         density = self.histogram / bin_width
 
-        norm = torch.zeros(self.bins)
+        norm = torch.zeros(self.bins, device=self.histogram.device)
 
         delta_begin = src_bin_begin - dst_bin_of_begin_center
         delta_end = dst_bin_width / 2
-        norm += self._get_norm(delta_begin, torch.ones(self.bins) * delta_end, density)
+        norm += self._get_norm(delta_begin,
+                               torch.ones(self.bins, device=self.histogram.device) * delta_end,
+                               density)
 
         norm += (dst_bin_of_end - dst_bin_of_begin - 1) * self._get_norm(
             torch.tensor(-dst_bin_width / 2), torch.tensor(dst_bin_width / 2), density
