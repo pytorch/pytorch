@@ -140,14 +140,24 @@ def cpp_string(s: str) -> str:
 # to be generated.  This pattern makes it convenient to use map, concatMap
 # and similar functional combinators.
 
-def static_dispatch_extra_headers(backend: Optional[BackendIndex]) -> str:
+def static_dispatch_keys(backend: Optional[BackendIndex]) -> List[DispatchKey]:
     if backend is None:
-        return ''
-    return f"""
-#include <ATen/{backend.dispatch_key}Functions.h>
-#include <ATen/CompositeExplicitAutogradFunctions.h>
-#include <ATen/CompositeImplicitAutogradFunctions.h>
-"""
+        return []
+    else:
+        return [
+            backend.dispatch_key,
+            DispatchKey.CompositeImplicitAutograd,
+            DispatchKey.CompositeExplicitAutograd
+        ]
+
+def static_dispatch_extra_headers(backend: Optional[BackendIndex], skip_tensor_include: bool = False) -> str:
+    if skip_tensor_include:
+        # See Note [Avoiding Include Cycles In Static Dispatch]
+        maybe_inl = '_inl'
+    else:
+        maybe_inl = ''
+    return '\n'.join([
+        f'#include <ATen/{dispatch_key}Functions{maybe_inl}.h>' for dispatch_key in static_dispatch_keys(backend)])
 
 def static_dispatch(
     f: NativeFunction, cpp_sig: CppSignature,
@@ -318,6 +328,10 @@ TORCH_API inline {sig.decl()} {{
 # public C++ API, and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeTensorMethod:
+    target: Union[
+        Literal[Target.DECLARATION],
+        Literal[Target.DEFINITION]
+    ]
     static_dispatch_backend_index: Optional[BackendIndex]
 
     @method_with_native_function
@@ -329,6 +343,15 @@ class ComputeTensorMethod:
         assert f.func.arguments.self_arg is not None
 
         sig_group = CppSignatureGroup.from_native_function(f, method=True, fallback_binding=f.manual_cpp_binding)
+
+        if self.target is Target.DECLARATION:
+            result = f"{sig_group.signature.decl()} const;\n"
+            if sig_group.faithful_signature is not None:
+                result += f"{sig_group.faithful_signature.decl()} const;\n"
+            return result
+
+        if self.target is not Target.DEFINITION:
+            assert_never(self.target)
 
         def generate_defn(faithful: bool) -> str:
             if faithful:
@@ -345,14 +368,14 @@ class ComputeTensorMethod:
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}
-inline {sig.decl()} const {{
+inline {sig.defn(prefix="Tensor::")} const {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
             else:
                 return f"""
 // aten::{f.func}
-inline {sig.decl()} const {{
+inline {sig.defn(prefix="Tensor::")} const {{
     {static_dispatch_block}
 }}
 """
@@ -1029,7 +1052,17 @@ def main() -> None:
         })
 
         if dispatch_key in functions_keys:
+            if dispatch_key in static_dispatch_keys(static_dispatch_idx):
+                # See Note [Avoiding Include Cycles In Static Dispatch]
+                inl_headers = ''
+            else:
+                inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+
             fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+                'dispatch_key': str(dispatch_key),
+                'inline_headers_for_nonstatic_build': inl_headers,
+            })
+            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
                 'dispatch_namespace': dispatch_key.lower(),
                 'dispatch_namespaced_declarations': list(concatMap(
                     dest.RegisterDispatchKey(
@@ -1079,9 +1112,11 @@ def main() -> None:
     })
 
     core_fm.write('TensorBody.h', lambda: {
-        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
+        'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(
+            target=Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
         'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
-            static_dispatch_backend_index=static_dispatch_idx), native_functions)),
+            target=Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
 
     cpu_fm.write('RedispatchFunctions.h', lambda: {
