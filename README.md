@@ -10,7 +10,7 @@ You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to 
 
 <!-- toc -->
 
-- [More About PyTorch](#more-about-pytorch)
+- [Moar About PyTorch](#more-about-pytorch)
   - [A GPU-Ready Tensor Library](#a-gpu-ready-tensor-library)
   - [Dynamic Neural Networks: Tape-Based Autograd](#dynamic-neural-networks-tape-based-autograd)
   - [Python First](#python-first)
