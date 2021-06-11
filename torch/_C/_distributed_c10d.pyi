@@ -277,6 +277,11 @@ class ProcessGroup:
         output_tensors: Tensor,
         input_tensor: List[Tensor],
     ) -> Work: ...
+    def _reduce_scatter_base(
+        self,
+        outputTensor: Tensor,
+        inputTensor: Tensor,
+    ) -> Work: ...
     @overload
     def alltoall_base(
         self,
