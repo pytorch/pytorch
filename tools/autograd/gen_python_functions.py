@@ -93,6 +93,7 @@ _SKIP_PYTHON_BINDINGS = [
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
 ]
+
 SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))
 
 # These function signatures are not exposed to Python. Note that this signature
