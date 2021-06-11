@@ -1246,7 +1246,7 @@ add_docstr(torch.bitwise_left_shift,
            r"""
 bitwise_left_shift(input, other, *, out=None) -> Tensor
 
-Computes the bitwise shift of :attr:`input` to the left by :attr:`other` bits.
+Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
 Both :attr:`input` and :attr:`other` must have integer dtypes. The result will have the same dtype as :attr:`input`.
 
 Args:
@@ -1266,7 +1266,7 @@ add_docstr(torch.bitwise_right_shift,
            r"""
 bitwise_right_shift(input, other, *, out=None) -> Tensor
 
-Computes the bitwise shift of :attr:`input` to the right by :attr:`other` bits.
+Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
 Both :attr:`input` and :attr:`other` must have integer dtypes. The result will have the same dtype as :attr:`input`.
 
 Args:
