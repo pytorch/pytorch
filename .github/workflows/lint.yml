@@ -99,7 +99,10 @@ jobs:
         uses: actions/checkout@v2
       - name: Attempt to run setup.py
         run: |
-          python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
+          if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
+            echo 'Running setup.py with Python 2 did not give the expected error message.'
+            false
+          fi
 
   shellcheck:
     runs-on: ubuntu-18.04
@@ -157,7 +160,16 @@ jobs:
       - name: Run ShellCheck
         if: always() && steps.install_shellcheck.outcome == 'success'
         run: |
-          tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch
+          if ! tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
+            echo
+            echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
+            echo 'listed above. Note that if a path in one of the above warning'
+            echo 'messages starts with .extracted_scripts/ then that means it'
+            echo 'is referring to a shell script embedded within another file,'
+            echo 'whose path is given by the path components immediately'
+            echo 'following the .extracted_scripts/ prefix.'
+            false
+          fi
       - name: Check that jobs will be cancelled
         if: always() && steps.generate_workflows.outcome == 'success'
         run: |
@@ -183,7 +195,19 @@ jobs:
             markdown-toc --bullets='-' -i "$FILE"
           done
 
-          .github/scripts/report_git_status.sh
+          if ! .github/scripts/report_git_status.sh .; then
+            echo
+            echo 'As shown by the above diff, the table of contents in one or'
+            echo 'more Markdown files is not up to date with the file contents.'
+            echo 'You can either apply that Git diff directly to correct the'
+            echo 'table of contents, or if you have npm installed, you can'
+            echo 'install the npm package markdown-toc and run the following'
+            echo 'command (replacing $FILE with the filename for which you want'
+            echo 'to regenerate the table of contents):'
+            echo
+            echo '    markdown-toc --bullets='"'"-"'"' -i "$FILE"'
+            false
+          fi
 
   flake8-py3:
     runs-on: ubuntu-18.04
@@ -234,7 +258,10 @@ jobs:
           set -eux
           # Re-output flake8 status so GitHub logs show it on the step that actually failed
           cat "${GITHUB_WORKSPACE}"/flake8-output.txt
-          [ ! -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]
+          if [ -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]; then
+            echo 'Please fix the above Flake8 warnings.'
+            false
+          fi
 
   clang-tidy:
     if: github.event_name == 'pull_request'
