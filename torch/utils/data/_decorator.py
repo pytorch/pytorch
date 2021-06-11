@@ -109,7 +109,7 @@ class non_deterministic(object):
 
 
 ######################################################
-# Type validation
+# typing
 ######################################################
 # Validate each argument of DataPipe with hint as a subtype of the hint.
 def argument_validation(f):
@@ -173,8 +173,8 @@ def runtime_validation(f):
             it = f(self)
             for d in it:
                 if not self.type.issubtype_of_instance(d):
-                    raise RuntimeError("Expected an instance as subtype of {}, but found {}({})"
-                                       .format(self.type, d, type(d)))
+                    raise RuntimeError("Expected an instance of subtype {}, but found {}"
+                                       .format(self.type, d))
                 yield d
 
     return wrapper
