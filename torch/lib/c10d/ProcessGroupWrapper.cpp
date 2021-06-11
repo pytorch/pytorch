@@ -1,3 +1,7 @@
+#include <c10d/ProcessGroupWrapper.hpp>
+
+#ifdef USE_C10D_GLOO
+
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
@@ -6,7 +10,6 @@
 #include <c10/util/irange.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/ProcessGroupWrapper.hpp>
 #include <stdexcept>
 
 namespace c10d {
@@ -321,3 +324,5 @@ void ProcessGroupWrapper::runCollectiveChecks(
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO
