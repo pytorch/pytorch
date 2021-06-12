@@ -92,6 +92,7 @@ TORCH_MODULE(ReflectionPad2d);
 ///
 /// Example:
 /// ```
+/// ReflectionPad3d model(ReflectionPad3dOptions(1));
 /// ReflectionPad3d model(ReflectionPad3dOptions({1, 1, 2, 0, 1, 2}));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)

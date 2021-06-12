@@ -103,7 +103,7 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
   int64_t pad_top = padding[2];
   int64_t pad_bottom = padding[3];
   int64_t pad_front = padding[4];
-  int64_t pad_back = padding[4];
+  int64_t pad_back = padding[5];
   int64_t dim_w = 3;
   int64_t dim_h = 2;
   int64_t dim_d = 1;
@@ -175,7 +175,7 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
   int64_t pad_top = padding[2];
   int64_t pad_bottom = padding[3];
   int64_t pad_front = padding[4];
-  int64_t pad_back = padding[4];
+  int64_t pad_back = padding[5];
   int64_t dim_w = 3;
   int64_t dim_h = 2;
   int64_t dim_d = 1;
