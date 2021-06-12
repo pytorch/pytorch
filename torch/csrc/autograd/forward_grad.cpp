@@ -27,7 +27,7 @@ void ForwardADLevel::release_idx(uint64_t idx) {
     TORCH_CHECK(idx == all_forward_levels_.size() - 1, "Exiting a forward AD level that is not the "
                 "last that was created is not support. Ensure they are released in the reverse "
                 "order they were created.");
-    TORCH_CHECK(idx >= 0, "No forward AD level was created so you cannot exit it.");
+    TORCH_CHECK(next_forward_idx_ > 0, "No forward AD level was created so you cannot exit it.");
     next_forward_idx_--;
     all_forward_levels_.pop_back();
 
