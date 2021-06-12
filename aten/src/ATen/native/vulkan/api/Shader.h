@@ -229,31 +229,29 @@ inline bool operator==(
 }
 
 inline Shader::Descriptor::Descriptor(const char* const glsl)
- : type(Type::Source),
-   shader{
-    .source = {
-      glsl,
-      0u,
-    },
-   } {
+ : type(Type::Source) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       glsl,
       "Invalid shader source code!");
+
+  shader.source = {
+      glsl,
+      0u,
+  };
 }
 
 inline Shader::Descriptor::Descriptor(
     const uint32_t* const code,
     const uint32_t size)
- : type(Type::Binary),
-   shader{
-    .binary = {
-      code,
-      size,
-    },
-   } {
+ : type(Type::Binary) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       code && (0u != size),
       "Invalid shader binary!");
+
+  shader.binary = {
+    code,
+    size,
+  };
 }
 
 inline bool operator==(

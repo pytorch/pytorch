@@ -24,8 +24,10 @@
 #include <iostream>
 #include <numeric>
 #include <stdio.h>
+#ifdef _MSC_VER
+#else
 #include <unistd.h>
-
+#endif
 
 #define VK_CHECK(f)                                                \
   {                                                                \

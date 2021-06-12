@@ -87,7 +87,7 @@ void release_image(const Resource::Image& image) {
 
 } // namespace
 
-void* map(
+void* _map(
     const Resource::Memory& memory,
     const Resource::Memory::Access::Flags access) {
   void* data = nullptr;
@@ -374,7 +374,8 @@ Resource::Pool::Pool(
       std::move(policy),
     },
     image_{
-      .sampler = Image::Sampler{gpu},
+      std::vector<Handle<Image, void(*)(const Image&)>>(), 
+      Image::Sampler{gpu},
     },
     fence_{} {
   buffer_.pool.reserve(Configuration::kReserve);

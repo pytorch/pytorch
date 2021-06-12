@@ -357,22 +357,19 @@ class Resource::Memory::Scope final {
   Access::Flags access_;
 };
 
+// Forward declaration
+void* _map(const Resource::Memory&, Resource::Memory::Access::Flags);
+
 template<typename, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
-  // Forward declaration
-  void* map(const Memory&, Access::Flags);
-
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this, Access::Read)),
+    reinterpret_cast<Pointer>(_map(*this, Access::Read)),
     Scope(allocator, allocation, Access::Read),
   };
 }
 
 template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
-  // Forward declaration
-  void* map(const Memory&, Access::Flags);
-
   static_assert(
       (kAccess == Access::Read) ||
       (kAccess == Access::Write) ||
@@ -380,7 +377,7 @@ inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
       "Invalid memory access!");
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this, kAccess)),
+    reinterpret_cast<Pointer>(_map(*this, kAccess)),
     Scope(allocator, allocation, kAccess),
   };
 }
