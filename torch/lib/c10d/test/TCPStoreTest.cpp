@@ -4,7 +4,6 @@
 #include <cstdlib>
 #include <future>
 #include <iostream>
-#include <system_error>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -74,7 +73,7 @@ void testHelper(const std::string& prefix = "") {
     EXPECT_EQ(numKeys, 4);
     auto timeout = std::chrono::milliseconds(kShortStoreTimeoutMillis);
     serverStore->setTimeout(timeout);
-    EXPECT_THROW(serverStore->get("key0"), c10::Error);
+    EXPECT_THROW(serverStore->get("key0"), std::runtime_error);
   });
 
   // Hammer on TCPStore
@@ -239,7 +238,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
       numCallbacksExecutedPromise.get_future();
   std::chrono::milliseconds span(kStoreCallbackTimeoutMillis);
   if (numCallbacksExecutedFuture.wait_for(span) == std::future_status::timeout)
-    TORCH_CHECK(false, "Callback execution timed out.");
+    throw std::runtime_error("Callback execution timed out.");
 
   // Check number of callbacks executed equal to number of key change operations
   // Wait for all callbacks to be triggered
@@ -303,7 +302,7 @@ void testKeyChangeHelper(
   std::future<bool> callbackFuture = callbackPromise.get_future();
   std::chrono::milliseconds span(kStoreCallbackTimeoutMillis);
   if (callbackFuture.wait_for(span) == std::future_status::timeout)
-    TORCH_CHECK(false, "Callback execution timed out.");
+    throw std::runtime_error("Callback execution timed out.");
 
   // Any exceptions raised from asserts should be rethrown
   if (eptr)
@@ -374,7 +373,7 @@ TEST(TCPStoreTest, testCleanShutdown) {
   clientTCPStore->get("key");
 
   auto clientThread = std::thread([&clientTCPStore] {
-    EXPECT_THROW(clientTCPStore->get("invalid_key"), std::system_error);
+    EXPECT_THROW(clientTCPStore->get("invalid_key"), std::runtime_error);
   });
 
   // start server shutdown during a client request

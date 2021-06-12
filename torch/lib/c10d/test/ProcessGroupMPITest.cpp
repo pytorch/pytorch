@@ -48,7 +48,7 @@ std::vector<std::vector<at::Tensor>> waitFuture(
     } else if (result.isTensorList()) {
       outputTensors.emplace_back(result.toTensorVector());
     } else {
-      TORCH_CHECK(false, "future result should be tensor list or none");
+      throw std::runtime_error("future result should be tensor list or none");
     }
   }
   return outputTensors;
@@ -80,7 +80,7 @@ void testAllreduce(int iter = 1000) {
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != expected) {
-        TORCH_CHECK(false, "BOOM!");
+        throw std::runtime_error("BOOM!");
       }
     }
   }
@@ -113,7 +113,7 @@ void testBroadcast(int iter = 10000) {
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != expected) {
-        TORCH_CHECK(false, "BOOM!");
+        throw std::runtime_error("BOOM!");
       }
     }
   }
@@ -143,7 +143,7 @@ void testReduce(int iter = 10000) {
       auto data = outputTensors[i][0].data_ptr<float>();
       for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
         if (data[j] != expected) {
-          TORCH_CHECK(false, "BOOM!");
+          throw std::runtime_error("BOOM!");
         }
       }
     }
@@ -183,7 +183,7 @@ void testAllgather(int iter = 10000) {
       auto data = outputTensors[i][j].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
         if (data[k] != expected) {
-          TORCH_CHECK(false, "BOOM!");
+          throw std::runtime_error("BOOM!");
         }
       }
     }
@@ -227,7 +227,7 @@ void testGather(int iter = 10000) {
         auto data = outputTensors[i][j].data_ptr<float>();
         for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
           if (data[k] != expected) {
-            TORCH_CHECK(false, "BOOM!");
+            throw std::runtime_error("BOOM!");
           }
         }
       }
@@ -235,7 +235,7 @@ void testGather(int iter = 10000) {
   } else {
     for (const auto i : c10::irange(iter)) {
       if (outputTensors[i].size() != 0) {
-        TORCH_CHECK(false, "BOOM!");
+        throw std::runtime_error("BOOM!");
       }
     }
   }
@@ -277,7 +277,7 @@ void testScatter(int iter = 1) {
       auto data = outputTensors[i][0].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][0].numel(); ++k) {
         if (data[k] != expected) {
-          TORCH_CHECK(false, "BOOM!");
+          throw std::runtime_error("BOOM!");
         }
       }
     }
@@ -333,13 +333,13 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   // Verify outputs
   for (const auto i : c10::irange(iter)) {
     if (recvAnysource && srcRanks[i] != 0) {
-      TORCH_CHECK(false, "src rank is wrong for recvAnysource");
+      throw std::runtime_error("src rank is wrong for recvAnysource");
     }
     const auto expected = i;
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != expected) {
-        TORCH_CHECK(false, "BOOM!");
+        throw std::runtime_error("BOOM!");
       }
     }
   }
@@ -348,7 +348,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
 void testBackendName() {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   if (pg->getBackendName() != std::string(c10d::MPI_BACKEND_NAME)) {
-    TORCH_CHECK(false, "BOOM!");
+    throw std::runtime_error("BOOM!");
   }
 }
 
