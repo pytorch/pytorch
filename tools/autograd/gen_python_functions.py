@@ -157,12 +157,14 @@ def is_py_special_function(f: NativeFunction) -> bool:
 
 def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
 
-    methods = load_signatures(native_yaml_path, deprecated_yaml_path, method=True)
+    methods = load_signatures(native_functions, deprecated_yaml_path, method=True)
     create_python_bindings(
         fm, methods, is_py_variable_method, None, 'python_variable_methods.cpp', method=True)
 
-    functions = load_signatures(native_yaml_path, deprecated_yaml_path, method=False)
+    functions = load_signatures(native_functions, deprecated_yaml_path, method=False)
     create_python_bindings(
         fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp', method=False)
 
@@ -211,15 +213,13 @@ def create_python_bindings(
     })
 
 def load_signatures(
-    native_yaml_path: str,
+    native_functions: List[NativeFunction],
     deprecated_yaml_path: str,
     *,
     method: bool,
     skip_deprecated: bool = False,
     pyi: bool = False,
 ) -> Sequence[PythonSignatureNativeFunctionPair]:
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
-    native_functions = list(filter(should_generate_py_binding, native_functions))
 
     @with_native_function
     def gen_signature_pairs(f: NativeFunction) -> PythonSignatureNativeFunctionPair:
