@@ -78,7 +78,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     backend_key: Optional[DispatchKey] = None
     if len(supported) > 0:
-        with context(f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
+        with context(lambda: f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
             backend_key = DispatchKey.parse(backend)
 
         backend_idx = create_backend_index(supported, backend_key)
@@ -87,7 +87,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     autograd_key: Optional[DispatchKey] = None
     if len(supported_autograd) > 0:
-        with context(f'The "autograd" key was specified, which indicates that you would like to override \
+        with context(lambda: f'The "autograd" key was specified, which indicates that you would like to override \
 the behavior of autograd for some operators on your backend. However "Autograd{backend}" is not a valid DispatchKey.'):
             autograd_key = DispatchKey.parse(f'Autograd{backend}')
 
