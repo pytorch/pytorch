@@ -3730,16 +3730,16 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.parametrizations.spectral_norm(m)
         spectral_norm_m = m.parametrizations.weight[0]
 
-        self.assertEqual(spectral_norm_m.u.size(), torch.Size([m.weight.size(0)]))
+        self.assertEqual(spectral_norm_m._u.size(), torch.Size([m.weight.size(0)]))
 
         # .parametrizations.weight.original should be trainable
         self.assertTrue(hasattr(m.parametrizations.weight, 'original'))
         self.assertTrue('original' in m.parametrizations.weight._parameters)
 
         # u should be just a reused buffer
-        self.assertTrue(hasattr(spectral_norm_m, 'u'))
-        self.assertTrue('u' in spectral_norm_m._buffers)
-        self.assertTrue('v' in spectral_norm_m._buffers)
+        self.assertTrue(hasattr(spectral_norm_m, '_u'))
+        self.assertTrue('_u' in spectral_norm_m._buffers)
+        self.assertTrue('_v' in spectral_norm_m._buffers)
 
         # weight should be a plain attribute, not counted as a buffer or a param
         self.assertIsNotNone(m.weight)
@@ -3774,6 +3774,7 @@ class TestNN(NNTestCase):
         # Neither weight and bias are parametrized
         self.assertFalse(hasattr(m, 'parametrizations'))
         self.assertTrue('weight' in m._parameters)
+        self.assertFalse(torch.nn.utils.parametrize.is_parametrized(m))
 
         # test correctness in training/eval modes and cpu/multi-gpu settings
         for apply_dp in (True, False):
@@ -3803,16 +3804,24 @@ class TestNN(NNTestCase):
 
                 m, wrapped_m, spectral_norm_m = get_modules()
 
-                self.assertTrue(hasattr(spectral_norm_m, 'u'))
-                u0 = spectral_norm_m.u.clone()
-                v0 = spectral_norm_m.v.clone()
+                self.assertTrue(hasattr(spectral_norm_m, '_u'))
+                u0 = spectral_norm_m._u.clone()
+                v0 = spectral_norm_m._v.clone()
 
                 # TEST TRAINING BEHAVIOR
 
-                # run forward again and assert that u and v are updated
+                # We perform GD first to modify the initial matrix
+                opt = torch.optim.SGD(wrapped_m.parameters(), lr=0.1)
+
+                opt.zero_grad()
+                wrapped_m(input).sum().backward()
+                opt.step()
+
                 out = wrapped_m(input)
-                self.assertNotEqual(u0, spectral_norm_m.u)
-                self.assertNotEqual(v0, spectral_norm_m.v)
+                if requires_grad:
+                    # run forward again and assert that u and v are updated
+                    self.assertNotEqual(u0, spectral_norm_m._u)
+                    self.assertNotEqual(v0, spectral_norm_m._v)
 
                 # assert that backprop reaches original weight
                 # can't use gradcheck because the function changes as we
@@ -3823,12 +3832,12 @@ class TestNN(NNTestCase):
                 # test backward works with multiple forwards
                 # it uses training mode so we need to reset `u` and `v` vectors
                 # to same value at beginning for finite difference test to pass
-                saved_u = spectral_norm_m.u.clone()
-                saved_v = spectral_norm_m.v.clone()
+                saved_u = spectral_norm_m._u.clone()
+                saved_v = spectral_norm_m._v.clone()
 
                 def fn(input):
-                    spectral_norm_m.u.data.copy_(saved_u)
-                    spectral_norm_m.v.data.copy_(saved_v)
+                    spectral_norm_m._u.data.copy_(saved_u)
+                    spectral_norm_m._v.data.copy_(saved_v)
                     out0 = wrapped_m(input)
                     out1 = wrapped_m(input)
                     return out0 + out1
@@ -3845,13 +3854,6 @@ class TestNN(NNTestCase):
                 self.assertEqual(wrapped_m(input), pre_remove_out)
 
                 torch.nn.utils.parametrizations.spectral_norm(m)
-                pre_remove_out = wrapped_m(input)
-                m.train()
-                self.assertTrue(m.parametrizations.weight[0].training)
-                m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
-                self.assertNotEqual(wrapped_m(input), pre_remove_out)
-
-                torch.nn.utils.parametrizations.spectral_norm(m)
                 for _ in range(3):
                     pre_remove_out = wrapped_m(input)
                 m.eval()
@@ -3862,8 +3864,8 @@ class TestNN(NNTestCase):
                 m, wrapped_m, spectral_norm_m = get_modules()
                 wrapped_m(input)
                 last_train_out = wrapped_m(input)
-                last_train_u = spectral_norm_m.u.clone()
-                last_train_v = spectral_norm_m.v.clone()
+                last_train_u = spectral_norm_m._u.clone()
+                last_train_v = spectral_norm_m._v.clone()
                 wrapped_m.zero_grad()
                 wrapped_m.eval()
 
@@ -3872,8 +3874,8 @@ class TestNN(NNTestCase):
                 self.assertEqual(eval_out0, last_train_out)
                 # assert doing more iteartion in eval don't change things
                 self.assertEqual(eval_out0, wrapped_m(input))
-                self.assertEqual(last_train_u, spectral_norm_m.u)
-                self.assertEqual(last_train_v, spectral_norm_m.v)
+                self.assertEqual(last_train_u, spectral_norm_m._u)
+                self.assertEqual(last_train_v, spectral_norm_m._v)
 
                 # FIXME: the code below is flaky when executed with DataParallel
                 # see https://github.com/pytorch/pytorch/issues/13818
@@ -3884,12 +3886,12 @@ class TestNN(NNTestCase):
                 # and eval modes
                 # it uses training mode so we need to reset `u` and `v` vectors
                 # to same value at beginning for finite difference test to pass
-                saved_u = spectral_norm_m.u.clone()
-                saved_v = spectral_norm_m.v.clone()
+                saved_u = spectral_norm_m._u.clone()
+                saved_v = spectral_norm_m._v.clone()
 
                 def fn(input):
-                    spectral_norm_m.u.data.copy_(saved_u)
-                    spectral_norm_m.v.data.copy_(saved_v)
+                    spectral_norm_m._u.data.copy_(saved_u)
+                    spectral_norm_m._v.data.copy_(saved_v)
                     wrapped_m.train()
                     out0 = wrapped_m(input)
                     wrapped_m.eval()
@@ -3923,8 +3925,8 @@ class TestNN(NNTestCase):
             self.assertEqual({
                 'parametrizations.weight.original',
                 'bias',
-                'parametrizations.weight.0.v',
-                'parametrizations.weight.0.u'
+                'parametrizations.weight.0._v',
+                'parametrizations.weight.0._u'
             }, set(state_dict.keys()))
 
             # test that non-strict loading works
@@ -3935,9 +3937,9 @@ class TestNN(NNTestCase):
             snm.load_state_dict(non_strict_state_dict, strict=False)
             del non_strict_state_dict['parametrizations.weight.original']
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['parametrizations.weight.0.u']
+            del non_strict_state_dict['parametrizations.weight.0._u']
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['parametrizations.weight.0.v']
+            del non_strict_state_dict['parametrizations.weight.0._v']
             snm.load_state_dict(non_strict_state_dict, strict=False)
             non_strict_state_dict['weight'] = snm.weight.detach().clone()     # set W as a buffer
             snm.load_state_dict(non_strict_state_dict, strict=False)
@@ -4094,7 +4096,7 @@ class TestNN(NNTestCase):
         # this should not run into incompatible shapes
         x = m(inp)
         # check that u refers to the same dimension
-        self.assertEqual(snm.u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape)
+        self.assertEqual(snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape)
 
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
@@ -4119,7 +4121,7 @@ class TestNN(NNTestCase):
         snm = m.parametrizations.weight[0]
         # naive forward
         _weight = m.parametrizations.weight.original
-        _bias, _v = m.bias, snm.v
+        _bias, _v = m.bias, snm._v
         _weight_mat = _weight.view(_weight.size(0), -1)
         _u = torch.mv(_weight_mat, _v)
         _u = F.normalize(_u, dim=0, eps=1e-12)
