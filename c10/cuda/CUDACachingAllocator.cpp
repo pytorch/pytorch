@@ -1195,7 +1195,7 @@ class THCCachingAllocator {
     const auto size = static_cast<int64_t>(device_allocator.size());
     if (size < device_count) {
       device_allocator.resize(device_count);
-      for (const auto i : c10::irange(device_count)) {
+      for (const auto i : c10::irange(size, device_count)) {
         device_allocator[i] = std::unique_ptr<DeviceCachingAllocator>(
             new DeviceCachingAllocator());
       }
