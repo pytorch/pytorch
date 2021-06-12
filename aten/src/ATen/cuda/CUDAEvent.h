@@ -163,7 +163,7 @@ private:
   bool is_created_ = false;
   bool was_recorded_ = false;
   DeviceIndex device_index_ = -1;
-  cudaEvent_t event_;
+  cudaEvent_t event_{};
 
   void createEvent(DeviceIndex device_index) {
     device_index_ = device_index;
