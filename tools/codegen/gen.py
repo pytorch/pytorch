@@ -93,7 +93,7 @@ def parse_native_yaml(path: str) -> ParsedYaml:
             assert isinstance(e.get('__line__'), int), e
             loc = Location(path, e['__line__'])
             funcs = e.get('func')
-            with context(f'in {loc}:\n  {funcs}'):
+            with context(lambda: f'in {loc}:\n  {funcs}'):
                 func, m = NativeFunction.from_yaml(e, loc)
                 rs.append(func)
                 BackendIndex.grow_index(bs, m)
