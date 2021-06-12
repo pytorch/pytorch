@@ -17,13 +17,7 @@ from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
 from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type, SchemaKind
-from tools.codegen.utils import IDENT_REGEX, split_name_params
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
+from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
@@ -34,7 +28,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
     if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
 
         with open(derivatives_yaml_path, 'r') as f:
-            definitions = yaml.load(f, Loader=Loader)
+            definitions = yaml.load(f, Loader=YamlLoader)
 
         functions = parse_native_yaml(native_yaml_path).native_functions
 

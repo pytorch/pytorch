@@ -8,15 +8,9 @@ from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_n
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, concatMap, context
+from tools.codegen.utils import Target, concatMap, context, YamlLoader
 import tools.codegen.dest as dest
 import tools.codegen.api.dispatcher as dispatcher
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -35,7 +29,7 @@ def parse_backend_yaml(
     }
 
     with open(backend_yaml_path, 'r') as f:
-        yaml_values = yaml.load(f, Loader=Loader)
+        yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
     valid_keys = ['backend', 'cpp_namespace', 'extra_headers', 'supported', 'autograd']

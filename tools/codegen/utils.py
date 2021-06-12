@@ -4,6 +4,19 @@ from enum import Enum
 import contextlib
 import textwrap
 
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
+YamlLoader = Loader
+
+try:
+    from yaml import CSafeDumper as Dumper
+except ImportError:
+    from yaml import SafeDumper as Dumper  # type: ignore[misc]
+YamlDumper = Dumper
+
 # Many of these functions share logic for defining both the definition
 # and declaration (for example, the function signature is the same), so
 # we organize them into one function that takes a Target to say which
