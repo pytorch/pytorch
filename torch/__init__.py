@@ -30,6 +30,7 @@ else:
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING
+from math import e , nan , inf , pi
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
