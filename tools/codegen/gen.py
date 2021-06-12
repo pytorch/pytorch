@@ -27,24 +27,12 @@ import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, concatMap, context, mapMaybe
+from tools.codegen.utils import Target, concatMap, context, mapMaybe, YamlDumper, YamlLoader
 from tools.codegen.context import (method_with_native_function,
                                    native_function_manager,
                                    with_native_function_and_indices,
                                    with_native_function)
 import tools.codegen.dest as dest
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
-
-try:
-    # use faster C Dumper if available
-    from yaml import CSafeDumper as Dumper
-except ImportError:
-    from yaml import SafeDumper as Dumper  # type: ignore[misc]
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -76,7 +64,7 @@ except ImportError:
 
 # A custom loader for YAML to let us also keep track of line numbers
 # of each entry in the YAML file
-class LineLoader(Loader):
+class LineLoader(YamlLoader):
     def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
         mapping = super().construct_mapping(node, deep=deep)  # type: ignore[no-untyped-call]
         # Add 1 so line numbering starts at 1
@@ -533,18 +521,18 @@ C10_ALWAYS_INLINE
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def dict_representer(dumper: Any, data: Any) -> Any:
-    return dumper.represent_dict(data.items())
-
 def format_yaml(data: object) -> str:
-    noalias_dumper = Dumper
-    noalias_dumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
+    # Ignore alias in Dumper
+    YamlDumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
+
     # Support serializing OrderedDict
-    noalias_dumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
+    def dict_representer(dumper: Any, data: Any) -> Any:
+        return dumper.represent_dict(data.items())
+    YamlDumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
     # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
     # width=1e9 turns off optional line breaks and improves
     # the portability of the outputted yaml.
-    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=1e9)  # type: ignore[no-any-return]
+    return yaml.dump(data, default_flow_style=False, Dumper=YamlDumper, width=1e9)  # type: ignore[no-any-return]
 
 # For some reason, some defaults we write to YAML are written as native
 # YAML objects, rather than doing them uniformly as strings.  This
