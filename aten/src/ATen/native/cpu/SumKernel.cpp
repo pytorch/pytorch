@@ -34,16 +34,15 @@ T load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
 
 template <typename scalar_t>
 void accumulate_result(char * C10_RESTRICT data, int64_t stride, int64_t index, scalar_t value) {
-  auto * ptr = reinterpret_cast<scalar_t*>(data + index * stride);
+  auto *const ptr = reinterpret_cast<scalar_t*>(data + index * stride);
   *ptr += value;
 }
 
 template <typename scalar_t, size_t numel>
 void accumulate_result(char * C10_RESTRICT data, int64_t stride, int64_t index,
     const std::array<scalar_t, numel> &values) {
-  auto *base_ptr = data + stride * index;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t k = 0; k < numel; ++k) {
+  auto *const base_ptr = data + stride * index;
+  for (const auto k : c10::irange(numel)) {
     accumulate_result(base_ptr, stride, k, values[k]);
   }
 }
