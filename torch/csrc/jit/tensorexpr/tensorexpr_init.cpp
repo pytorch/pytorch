@@ -503,6 +503,12 @@ void initTensorExprBindings(PyObject* module) {
           "vectorize",
           [](const LoopNest& self, For* f) { self.vectorize(f); },
           py::return_value_policy::reference)
+      .def_static(
+          "compress_buffer",
+          [](BufHandle& buf, Stmt* stmt) {
+            return LoopNest::compressBuffer(buf.node(), stmt);
+          },
+          py::return_value_policy::reference)
       .def(
           "cache_accesses",
           [](LoopNest& self,
