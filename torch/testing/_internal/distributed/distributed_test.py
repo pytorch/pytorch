@@ -7175,6 +7175,12 @@ class DistributedTest:
                 static_graph=False, find_unused_parameters=False
             )
 
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_bwd_with_retain_graph_find_unused_params(self):
             self._test_ddp_bwd_with_retain_graph(
                 static_graph=False, find_unused_parameters=True
             )
@@ -7189,6 +7195,12 @@ class DistributedTest:
                 static_graph=True, find_unused_parameters=False
             )
 
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_bwd_with_retain_graph_static_find_unused_params(self):
             self._test_ddp_bwd_with_retain_graph(
                 static_graph=True, find_unused_parameters=True
             )
