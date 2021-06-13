@@ -504,24 +504,10 @@ void Reducer::set_divide_factor() {
   }
 }
 
-const c10::Stream Reducer::get_current_stream() {
-  const auto& device = replicas_[0][0].device();
-  c10::DeviceType deviceType = device.type();
-  const c10::impl::VirtualGuardImpl guard =
-      c10::impl::VirtualGuardImpl{deviceType};
-  return guard.getStream(device);
-}
-
 // Right now delay_all_reduce is only called when static_graph_=true and
 // num_iterations_==1.
 void Reducer::delay_all_reduce() {
   std::lock_guard<std::mutex> lock(this->mutex_);
-
-  // The autograd engine uses the default stream when running callbacks, so we
-  // pass in the current CUDA stream in case it is not the default.
-  const c10::Stream currentStream = get_current_stream();
-  // Run callback with the current stream
-  c10::OptionalStreamGuard currentStreamGuard{currentStream};
 
   if (should_collect_runtime_stats()) {
     record_backward_compute_end_time();
@@ -832,13 +818,8 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       all_reduce_local_used_map();
     }
 
-    // The autograd engine uses the default stream when running callbacks, so we
-    // pass in the current CUDA stream in case it is not the default.
-    const c10::Stream currentStream = get_current_stream();
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
-      // Run callback with the current stream
-      c10::OptionalStreamGuard currentStreamGuard{currentStream};
       if (should_collect_runtime_stats()) {
         record_backward_compute_end_time();
       }
