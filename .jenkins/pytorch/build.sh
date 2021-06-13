@@ -115,6 +115,8 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
 fi
 
 # Use special scripts for Android builds
+echo "BUILD_ENVIRONMENT"
+echo "${BUILD_ENVIRONMENT}"
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   build_args=()
@@ -129,6 +131,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   fi
   if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
     build_args+=("-DUSE_VULKAN=ON")
+  fi
+  if [[ "${BUILD_ENVIRONMENT}" == *fulljit* ]]; then
+    build_args+=("-DBUILD_LITE_INTERPRETER=OFF")
   fi
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
