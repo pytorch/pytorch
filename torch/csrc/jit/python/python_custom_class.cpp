@@ -23,6 +23,7 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   if (overloaded_methods.has_value()) {
     auto resolved_init_method = match_overloaded_methods(
         instance._ivalue(), "__init__", input_args, input_kwargs);
+    // NOLINTNEXTLINE(performance-move-const-arg)
     invokeScriptMethodFromPython(
         resolved_init_method.value(), std::move(input_args), input_kwargs);
     return py::cast(instance);
