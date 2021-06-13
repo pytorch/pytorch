@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/mem_arena.h>
+#include <cassert>
+#include <stdexcept>
 
 namespace torch {
 namespace jit {
@@ -19,6 +21,10 @@ KernelArena::~KernelArena() {
 
 KernelScopedObject::KernelScopedObject() {
   KernelArena* kernel = KernelArena::GetCurrentKernelArena();
+  if (kernel == nullptr) {
+    throw std::runtime_error(
+        "KernelScope() must be constructed before calling this");
+  }
   kernel->kernel_objects_.push_back(this);
 }
 
@@ -30,21 +36,27 @@ KernelArena* KernelArena::GetCurrentKernelArena() {
   return current_arena;
 }
 
-KernelScope::KernelScope() : owning_(true) {
-  old_kernel_arena_ = KernelArena::GetCurrentKernelArena();
-  KernelArena::SetCurrentKernelArena(new KernelArena);
+KernelScope::KernelScope()
+    : kernel_arena_(new KernelArena()),
+      old_kernel_arena_(KernelArena::GetCurrentKernelArena()),
+      owning_(true) {
+  KernelArena::SetCurrentKernelArena(kernel_arena_);
 }
 
-KernelScope::KernelScope(KernelArena* arena_) : owning_(false) {
-  old_kernel_arena_ = KernelArena::GetCurrentKernelArena();
-  KernelArena::SetCurrentKernelArena(arena_);
+KernelScope::KernelScope(KernelArena* arena_)
+    : kernel_arena_(arena_),
+      old_kernel_arena_(KernelArena::GetCurrentKernelArena()),
+      owning_(false) {
+  KernelArena::SetCurrentKernelArena(kernel_arena_);
 }
 
 KernelScope::~KernelScope() {
-  if (owning_) {
-    delete KernelArena::GetCurrentKernelArena();
-  }
+  // Check for destructors called in correct order
+  assert(KernelArena::GetCurrentKernelArena() == kernel_arena_);
   KernelArena::SetCurrentKernelArena(old_kernel_arena_);
+  if (owning_) {
+    delete kernel_arena_;
+  }
 }
 
 } // namespace tensorexpr
