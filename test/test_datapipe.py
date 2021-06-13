@@ -324,7 +324,6 @@ class TestIterableDataPipeHttp(TestCase):
     def tearDownClass(cls):
         try:
             cls.__server.shutdown()
-            cls.__server_thread._stop()
             cls.__server_thread.join(timeout=15)
         except Exception as e:
             warnings.warn("TestIterableDataPipeHttp could\
@@ -338,7 +337,7 @@ class TestIterableDataPipeHttp(TestCase):
             base_tmp_dir = os.path.basename(os.path.normpath(tmpdir))
             file_url_template = ("http://{server_addr}/{tmp_dir}/"
                                  "/webfile_test_{num}.data\n")\
-                .format(server_addr=self.__server_addr, tmp_dir=base_tmp_dir, 
+                .format(server_addr=self.__server_addr, tmp_dir=base_tmp_dir,
                         num='{num}')
             create_temp_files_for_serving(tmpdir, test_file_count,
                                           test_file_size, file_url_template)
