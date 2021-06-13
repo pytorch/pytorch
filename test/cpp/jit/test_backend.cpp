@@ -146,6 +146,50 @@ TEST(BackendTest, TestCompiler) {
   AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
+TEST(BackendTest, TestComposite) {
+  c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
+  c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
+  fake_dict.insert("", "");
+  compile_spec.insert("forward", fake_dict);
+  auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
+
+  Module m_add("m_add");
+  m_add.define(R"(
+    def forward(self, x, y):
+      return x + y
+  )");
+  auto lm_add =  torch::jit::detail::codegen_backend_module(
+      "backend_with_compiler_demo", m_add, compile_spec, any_dict_ty);
+
+  Module m_sub("m_sub");
+  m_sub.define(R"(
+    def forward(self, x, y):
+      return x - y
+  )");
+  auto lm_sub =  torch::jit::detail::codegen_backend_module(
+      "backend_with_compiler_demo", m_sub, compile_spec, any_dict_ty);
+
+  Module c("C");
+  c.register_module("Add", lm_add);
+  c.register_module("Sub", lm_sub);
+  c.define(R"(
+    def forward(self, x, y):
+      return self.Add.forward(x, y) * self.Sub.forward(x, y)
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(3.0 * torch::ones({}));
+  inputs.emplace_back(1.0 * torch::ones({}));
+  auto res_jit = c.forward(inputs);
+
+  std::stringstream ss;
+  c._save_for_mobile(ss);
+  auto mc = _load_for_mobile(ss);
+  auto res_mobile = mc.forward(inputs);
+
+  AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, TestCompilerNotSupport) {
   Module m("m");
