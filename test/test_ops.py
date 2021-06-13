@@ -451,6 +451,8 @@ class TestCommon(JitCommonTestCase):
 
     @_alias_ops((op for op in op_db if op.aliases))
     def test_jit_alias_remapping(self, device, dtype, op):
+        tensor = torch.tensor
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
