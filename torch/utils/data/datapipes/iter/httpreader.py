@@ -27,9 +27,13 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
                     r = urllib.urlopen(furl, timeout=self.timeout)
 
                 yield(furl, r)
-            except (HTTPError, URLError) as e:
+            except HTTPError as e:
                 raise Exception("Could not get the file.\
-                                [Error] {code}: {reason}."
+                                [HTTP Error] {code}: {reason}."
                                 .format(code=e.code, reason=e.reason))
+            except URLError as e:
+                raise Exception("Could not get the file at {url}.\
+                                 [URL Error] {reason}."
+                                .format(reason=e.reason, url=furl))
             except Exception:
                 raise

@@ -10,7 +10,6 @@ import tempfile
 import warnings
 import zipfile
 
-import unittest
 from unittest import skipIf
 from typing import (
     Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
@@ -290,7 +289,7 @@ def setUpLocalServerInThread():
         raise
 
 
-def create_temp_files_for_serving(tmp_dir, file_count, file_size, 
+def create_temp_files_for_serving(tmp_dir, file_count, file_size,
                                   file_url_template):
     furl_local_file = os.path.join(tmp_dir, "urls_list")
     with open(furl_local_file, 'w') as fsum:
@@ -308,12 +307,15 @@ def create_temp_files_for_serving(tmp_dir, file_count, file_size,
 
 
 class TestIterableDataPipeHttp(TestCase):
+    __server_thread = None
+    __server_addr = ''
+    __server = None
+
     @classmethod
     def setUpClass(cls):
         try:
             (cls.__server_thread, cls.__server_addr,
              cls.__server) = setUpLocalServerInThread()
-            print(cls.__server_addr)
         except Exception as e:
             warnings.warn("TestIterableDataPipeHttp could\
                           not set up due to {0}".format(str(e)))
@@ -334,7 +336,8 @@ class TestIterableDataPipeHttp(TestCase):
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as tmpdir:
             # create tmp dir and files for test
             base_tmp_dir = os.path.basename(os.path.normpath(tmpdir))
-            file_url_template = "http://" + self.__server_addr + "/"
+            file_url_template = "http://{server_addr}/"\
+                                .format(server_addr=self.__server_addr)
             + base_tmp_dir + "/webfile_test_{num}.data\n"
             create_temp_files_for_serving(tmpdir, test_file_count,
                                           test_file_size, file_url_template)
@@ -347,7 +350,7 @@ class TestIterableDataPipeHttp(TestCase):
 
             for (url, data) in datapipe_tob:
                 self.assertGreater(len(url), 0)
-                self.assertRegex(url, "^http://.+\d+.data$")
+                self.assertRegex(url, r'^http://.+\d+.data$')
                 if chunk is not None:
                     self.assertEqual(len(data), chunk)
                 else:
@@ -364,7 +367,8 @@ class TestIterableDataPipeHttp(TestCase):
         test_file_count = 1
         timeout = 30
         chunk = 1024 * 1024 * 8
-        self.http_test_base(test_file_size, test_file_count, timeout=timeout, chunk=chunk)
+        self.http_test_base(test_file_size, test_file_count, timeout=timeout,
+                            chunk=chunk)
 
 
 class IDP_NoLen(IterDataPipe):
