@@ -375,5 +375,6 @@ Example::
 """.format(**common_args))
 
 zeta = _add_docstr(_special.special_zeta,
-                  r"""
+                   r"""
+zeta(input, other, *, out=None) -> Tensor
 """.format(**common_args))
