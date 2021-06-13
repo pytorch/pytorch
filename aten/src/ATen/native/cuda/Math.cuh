@@ -10,10 +10,10 @@ namespace native {
  * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-  static const accscalar_t MACHEP = 1.11022302462515654042E-16;
-  const accscalar_t A[] = {
+C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) {
+  using acc_t = at::acc_type<scalar_t, true>;
+  const acc_t MACHEP = 1.11022302462515654042E-16;
+  static const acc_t A[] = {
       12.0,
       -720.0,
       30240.0,
@@ -27,26 +27,23 @@ static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
       1.8152105401943546773e17, /*1.5511210043330985984e23/854513*/
       -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
   };
-  accscalar_t x = static_cast<accscalar_t>(_x);
-  accscalar_t q = static_cast<accscalar_t>(_q);
 
   int i = 0;
-  accscalar_t a, b, k, s, t, w;
-  if( x == 1.0 ) {
-    return static_cast<scalar_t>(INFINITY);
+  acc_t a, b, k, s, t, w;
+  if (x == 1.0) {
+    return std::numeric_limits<scalar_t>::infinity();
   }
 
-  if( x < 1.0 ){
-    std::numeric_limits<scalar_t>::quiet_NaN();
+  if (x < 1.0) {
+    return std::numeric_limits<scalar_t>::quiet_NaN();
   }
-  bool q_is_integer = q == ::floor(q);
 
-  if(q <= 0.0) {
-    if(q_is_integer) {
-      return static_cast<scalar_t>(INFINITY);
+  if (q <= 0.0) {
+    if (q == ::floor(q)) {
+      return std::numeric_limits<scalar_t>::infinity();
     }
-    else {
-      std::numeric_limits<scalar_t>::quiet_NaN();
+    if (x != ::floor(x)) {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
     }
   }
 
@@ -57,27 +54,25 @@ static inline C10_HOST_DEVICE scalar_t zeta(scalar_t _x, scalar_t _q) {
   while ((i < 9) || (a <= 9.0)) {
     i += 1;
     a += 1.0;
-    b = ::pow( a, -x );
+    b = ::pow(a, -x);
     s += b;
-    if ((-MACHEP < (b / s)) && ((b / s) < MACHEP)) {
+    if ((-MACHEP * s < b) && (b < MACHEP * s)) {
       return static_cast<scalar_t>(s);
     }
   };
+
   w = a;
   s += b * w / (x - 1.0);
   s -= 0.5 * b;
   a = 1.0;
   k = 0.0;
-  for (int i=0; i < 12; i++) {
+  for (int i = 0; i < 12; i++) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
     s = s + t;
-    t = t / s;
-    if (t < 0){
-      t = -t;
-    }
-    if ((-MACHEP <t) && (t < MACHEP)){
+    t = ::abs(t / s);
+    if (t < MACHEP) {
       return static_cast<scalar_t>(s);
     }
     k += 1.0;

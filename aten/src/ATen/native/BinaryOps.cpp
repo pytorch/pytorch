@@ -58,7 +58,7 @@ TORCH_META_FUNC(special_xlog1py) (const Tensor& self, const Tensor& other) {
 }
 
 TORCH_META_FUNC(special_zeta) (const Tensor& self, const Tensor& other) {
-  build_binary_float_op(maybe_get_output(), self, other);
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC2(copysign, Tensor) (
