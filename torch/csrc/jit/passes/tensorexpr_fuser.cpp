@@ -1116,6 +1116,17 @@ class TensorExprFuser {
     TORCH_INTERNAL_ASSERT(
         consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
 
+    // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
+    // The specific limit is a function of constant memory size, amount
+    // available to pass arguments, and some implementation dependence. Select a
+    // safe limit here.
+    constexpr size_t subgraphArgLimit = 128;
+    if ((consumer->inputs().size() + consumer->outputs().size() +
+         producer->inputs().size() + producer->outputs().size()) >
+        subgraphArgLimit) {
+      return false;
+    }
+
     // Device checks
     if (consumer->kind() != aten::cat && producer->kind() != aten::cat) {
       // aten::cat needs a special handling because it takes a Tensor[] as its
