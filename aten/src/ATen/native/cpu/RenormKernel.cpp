@@ -26,7 +26,7 @@ void renorm_scale_factor_impl(TensorIteratorBase& iter, double maxnorm) {
       },
       [maxnorm_v, eps_v, one_v](vec_t norm) -> vec_t {
         auto fct = maxnorm_v / (norm + eps_v);
-        return vec_t::blendv(fct, one_v, norm > maxnorm_v);
+        return vec_t::blendv(one_v, fct, norm > maxnorm_v);
       });
   });
 }
