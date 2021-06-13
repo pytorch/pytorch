@@ -307,9 +307,9 @@ def create_temp_files_for_serving(tmp_dir, file_count, file_size,
 
 
 class TestIterableDataPipeHttp(TestCase):
-    __server_thread = None
-    __server_addr = ''
-    __server = None
+    __server_thread: threading.Thread = None
+    __server_addr: str = ''
+    __server: socketserver.TCPServer = None
 
     @classmethod
     def setUpClass(cls):
