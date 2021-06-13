@@ -286,6 +286,7 @@ Tensor class reference
     Tensor.cosh
     Tensor.cosh_
     Tensor.count_nonzero
+    Tensor.cov
     Tensor.acosh
     Tensor.acosh_
     Tensor.arccosh

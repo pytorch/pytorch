@@ -1664,6 +1664,11 @@ if(BUILD_TEST)
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     target_link_libraries(${test_name} torch_library gtest_main)
+    if(USE_OPENMP)
+      # -fopenmp is a compile time flag and as result not guaranteed
+      # to link executable against OpenMP runtime library
+      target_link_libraries(${test_name} ${OpenMP_CXX_LIBRARIES})
+    endif()
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
