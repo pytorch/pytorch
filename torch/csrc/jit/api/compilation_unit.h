@@ -128,16 +128,20 @@ struct TORCH_API CompilationUnit {
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
       bool shouldMangle = false) {
-    auto index = dict_.find(name)->second;
-    unsafeRemoveMethod(name);
+    // auto index = dict_.find(name)->second;
+    // unsafeRemoveMethod(name);
+
+    dict_.erase(dict_.find(name));
     if (shouldMangle) {
       name = mangle(name);
     }
     auto new_fn = torch::make_unique<GraphFunction>(
         std::move(name), std::move(graph), nullptr);
     auto ret = new_fn.get();
-    functions_[index] = std::move(new_fn);
-    dict_[functions_[index]->qualname()] = index;
+    // functions_[index] = std::move(new_fn);
+    // dict_[functions_[index]->qualname()] = index;
+    functions_.push_back(std::move(new_fn));
+    dict_[functions_[functions_.size()-1]->qualname()] = functions_.size()-1;
     return ret;
   }
 

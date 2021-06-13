@@ -14,6 +14,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/irange.h>
 
 #include <cstdlib>
 
@@ -413,7 +414,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
       // take the short-cut for launch if we see a recorded input set again;
       launch_params = executor_entry->launch_params;
-      for (size_t i = 0; i < executor_entry->output_sizes.size(); i++) {
+      for (const auto i : c10::irange(executor_entry->output_sizes.size())) {
         alloced_outputs.push_back(at::native::empty_cuda(
             executor_entry->output_sizes[i],
             executor_entry->output_types[i],
@@ -421,7 +422,8 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
             options_.device,
             c10::nullopt));
       }
-      for (size_t i = 0; i < executor_entry->empty_buffer_sizes.size(); i++) {
+      for (const auto i :
+           c10::irange(executor_entry->empty_buffer_sizes.size())) {
         global_buffers.empty_buffers.push_back(at::native::empty_cuda(
             executor_entry->empty_buffer_sizes[i],
             executor_entry->empty_buffer_types[i],
@@ -430,7 +432,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
             c10::nullopt));
       }
     }
-    for (size_t i = 0; i < executor_entry->zero_buffer_sizes.size(); i++) {
+    for (const auto i : c10::irange(executor_entry->zero_buffer_sizes.size())) {
       auto tensor_options = at::TensorOptions()
                                 .dtype(executor_entry->zero_buffer_types[i])
                                 .device(options_.device);

@@ -882,20 +882,6 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
   return ss.str();
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static std::vector<bool> findContiguous(
-    const at::IntArrayRef& sizes,
-    const at::IntArrayRef& strides) {
-  AT_ASSERT(sizes.size() == strides.size());
-  std::vector<bool> cont(sizes.size());
-  for (size_t i = 0; i < sizes.size(); ++i) {
-    const auto expected_stride =
-        (i + 1 < sizes.size()) ? sizes[i + 1] * strides[i + 1] : 1;
-    cont[i] = (strides[i] == expected_stride);
-  }
-  return cont;
-}
-
 VaryingShape<int64_t> TensorType::strides() const {
   if (!strides_.size().has_value()) {
     return VaryingShape<int64_t>();
@@ -1083,28 +1069,8 @@ InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_modu
       new InterfaceType(std::move(qualifiedName), is_module));
 }
 
-void ClassType::replaceMethod(torch::jit::Function* new_method) {
-  size_t prev_index = 0;
-  for (prev_index = 0; prev_index < methods_.size(); prev_index++) {
-    // std::cout << "HEREE\n";
-    // std::cout << prev_index << std::endl;
-    // std::cout << methods_[prev_index]->name() << std::endl;
-    // std::cout << new_method->name() << std::endl;
-    if (!methods_[prev_index]) {
-      continue;
-    }
-
-    if (!new_method) {
-      continue;
-    }
-
-    if (new_method->name() == methods_[prev_index]->name()) {
-      break;
-    }
-  }
-  std::cout << "H: " << prev_index << std::endl;
-  methods_[prev_index] = new_method;
-  std::cout << "SS\n";
+void ClassType::replaceMethod(torch::jit::Function* new_method, size_t index) {
+  methods_[index] = new_method;
 }
 
 void ClassType::addMethod(torch::jit::Function* method) {
