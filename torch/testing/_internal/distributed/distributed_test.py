@@ -18,7 +18,6 @@ import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -822,6 +821,123 @@ class DistributedTest:
         @skip_if_lt_x_gpu(3)
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
+        @require_world_size(4)
+        @skip_if_lt_x_gpu(2)
+        def test_new_subgroups(self):
+            subgroup_size = 2
+            cur_subgroup, subgroups = dist.new_subgroups(subgroup_size)
+
+            world_size = dist.get_world_size()
+            self.assertEqual(cur_subgroup.size(), subgroup_size)
+            self.assertEqual(len(subgroups), world_size / subgroup_size)
+            self.assertFalse(dist._rank_not_in_group(cur_subgroup))
+
+            for subgroup in subgroups:
+                dist.destroy_process_group(subgroup)
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
+        @skip_if_no_gpu
+        def test_new_subgroups_group_size_exceeds_world_size(self):
+            with self.assertRaisesRegex(
+                ValueError, "The arg 'group_size' must not exceed the world size"
+            ):
+                dist.new_subgroups(100)
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
+        @require_world_size(4)
+        @skip_if_lt_x_gpu(4)
+        def test_new_subgroups_world_size_not_divisible_by_group_size(self):
+            with self.assertRaisesRegex(
+                ValueError, "The world size must be divisible by 'group_size'"
+            ):
+                dist.new_subgroups(3)
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
+        @require_world_size(4)
+        @skip_if_lt_x_gpu(4)
+        def test_new_subgroups_by_enumeration(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            cur_subgroup, subgroups = dist.new_subgroups_by_enumeration(
+                ranks_per_subgroup_list=[[0, 2], [1, 3]]
+            )
+            if device_id >= 4:
+                self.assertIsNone(cur_subgroup)
+            else:
+                self.assertEqual(cur_subgroup.size(), 2)
+                self.assertEqual(len(subgroups), 2)
+                if device_id == 0 or device_id == 2:
+                    self.assertEqual(cur_subgroup, subgroups[0])
+                else:
+                    self.assertEqual(cur_subgroup, subgroups[1])
+
+            for subgroup in subgroups:
+                dist.destroy_process_group(subgroup)
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
+        @require_world_size(4)
+        @skip_if_lt_x_gpu(4)
+        def test_new_subgroups_by_enumeration_input_rank_exceeds_world_size(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            world_size = get_world_size(group_id)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "The new group's rank should be within the the world_size set by init_process_group",
+            ):
+                dist.new_subgroups_by_enumeration(
+                    ranks_per_subgroup_list=[[0, 1], [world_size, 2]]
+                )
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
+        @skip_if_no_gpu
+        def test_new_subgroups_by_enumeration_negative_input_rank(self):
+            group, group_id, rank = self._init_global_test()
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "The new group's rank should be within the the world_size set by init_process_group",
+            ):
+                dist.new_subgroups_by_enumeration(
+                    ranks_per_subgroup_list=[[-1, -2], [-3, -4]]
+                )
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
+        @require_world_size(4)
+        @skip_if_lt_x_gpu(4)
+        def test_new_subgroups_overlap_not_allowed(self):
+            with self.assertRaisesRegex(
+                ValueError, "Rank 1 has appeared in both subgroup"
+            ):
+                dist.new_subgroups_by_enumeration(
+                    ranks_per_subgroup_list=[[0], [1, 2], [1, 3]]
+                )
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
@@ -6988,8 +7104,23 @@ class DistributedTest:
                     ):
                         self.assertEqual(p, p_static)
 
+        def _verify_ddp_model(self, ddp_model, local_model):
+            # Verify weights are appropriately synchronized.
+            all_params = [None for _ in range(dist.get_world_size())]
+            dist.all_gather_object(all_params, list(ddp_model.parameters()))
+            rank_0_params = all_params[0]
+            for param_list in all_params[1:]:
+                for i, p in enumerate(param_list):
+                    rank_0_param = rank_0_params[i]
+                    self.assertTrue(torch.equal(rank_0_param.data.cpu(), p.data.cpu()))
+            if self.rank == 0:
+                local_params = list(local_model.parameters())
+                for dist_param, local_param in zip(rank_0_params, local_params):
+                    self.assertTrue(torch.equal(dist_param.data.cpu(), local_param.data.cpu()))
+
         def _test_ddp_bwd_with_retain_graph(self, static_graph, find_unused_parameters):
-            # Test adapted from https://github.com/pytorch/pytorch/issues/47260.
+            # Ensures that calling backward multiple times with retain_graph=True
+            # is supported in DDP and verifies parity with local training.
             class ToyModel(nn.Module):
                 def __init__(self):
                     super(ToyModel, self).__init__()
@@ -7010,37 +7141,29 @@ class DistributedTest:
             if static_graph:
                 ddp_model._set_static_graph()
 
-            loss_fn = nn.MSELoss()
-            optimizer = optim.SGD(ddp_model.parameters(), lr=1)
-            local_optimizer = optim.SGD(local_model.parameters(), lr=1)
-            optimizer.zero_grad()
-            local_optimizer.zero_grad()
+            # Run multiple backwards for DDP and local model.
+            inp = torch.randn(20, 10, device=rank)
+            for _ in range(3):
+                loss = ddp_model(inp).sum()
+            loss.backward(retain_graph=True)
+            loss.backward(retain_graph=True)
+            loss.backward()
 
-            outputs = {}
-            outputs_local = {}
-            for i in range(3):
-                inp = torch.rand(20, 10).cuda(torch.cuda.current_device())
-                idx = str(i)
-                outputs[idx] = ddp_model(inp).sum(axis=1).unsqueeze(dim=1)
-                outputs_local[idx] = local_model(inp).sum(axis=1).unsqueeze(dim=1)
+            for _ in range(3):
+                local_loss = local_model(inp).sum()
+            local_loss.backward(retain_graph=True)
+            local_loss.backward(retain_graph=True)
+            local_loss.backward()
 
-            labels = torch.rand(20, 1).cuda(torch.cuda.current_device())
-
-            for i in range(3):
-                if i < 2:
-                    loss_fn(outputs[str(i)], labels).backward(retain_graph=True)
-                    loss_fn(outputs_local[str(i)], labels).backward(retain_graph=True)
-                else:
-                    loss_fn(outputs[str(i)], labels).backward()
-                    loss_fn(outputs_local[str(i)], labels).backward()
-
-                dist_grad_tensor = torch.cat(
-                    [param.grad for param in ddp_model.module.parameters()]
-                )
-                local_grad_tensor = torch.cat(
-                    [param.grad for param in local_model.parameters()]
-                )
-                self.assertEqual(dist_grad_tensor, local_grad_tensor)
+            # Run additional forward/backward steps to ensure that things like
+            # rebuild_buckets work appropriately.
+            for _ in range(3):
+                loss = ddp_model(inp).sum()
+                local_loss = local_model(inp).sum()
+                loss.backward()
+                local_loss.backward()
+            # Compare models.
+            self._verify_ddp_model(ddp_model, local_model)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
@@ -7051,6 +7174,7 @@ class DistributedTest:
             self._test_ddp_bwd_with_retain_graph(
                 static_graph=False, find_unused_parameters=False
             )
+
             self._test_ddp_bwd_with_retain_graph(
                 static_graph=False, find_unused_parameters=True
             )
@@ -7060,10 +7184,11 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
-        def test_static_ddp_bwd_with_retain_graph(self):
+        def test_ddp_bwd_with_retain_graph_static(self):
             self._test_ddp_bwd_with_retain_graph(
                 static_graph=True, find_unused_parameters=False
             )
+
             self._test_ddp_bwd_with_retain_graph(
                 static_graph=True, find_unused_parameters=True
             )
@@ -7073,7 +7198,7 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
-        def test_static_ddp_with_retain_graph_single_fwd(self):
+        def test_ddp_bwd_with_retain_graph_static_single_fwd(self):
             # Ensures that if we do 1 forward pass immediately followed by 2
             # backward passes, there is no issue. In particular, verifies that
             # delay allreduce is enqueued only once.

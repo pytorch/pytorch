@@ -38,6 +38,67 @@ constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
+C10_DEFINE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
+
+namespace {
+
+class CpuTimer : public Timer {
+ private:
+  // The timestamp of forward call start time in each iteration.
+  int64_t forward_start_time = -1;
+  // The timestamp of backward computation start and end time in each
+  // iteration.
+  int64_t backward_compute_start_time = -1;
+  int64_t backward_compute_end_time = -1;
+  // The timestamp of first communication call start time in each iteration.
+  int64_t backward_comm_start_time = -1;
+  // The timestamp of last communication call end time in each iteration.
+  int64_t backward_comm_end_time = -1;
+
+  int64_t& getTime(Event event) {
+    switch (event) {
+      case Event::kForwardStart:
+        return forward_start_time;
+      case Event::kBackwardComputeStart:
+        return backward_compute_start_time;
+      case Event::kBackwardComputeEnd:
+        return backward_compute_end_time;
+      case Event::kBackwardCommStart:
+        return backward_comm_start_time;
+      case Event::kBackwardCommEnd:
+        return backward_comm_end_time;
+      default:
+        TORCH_INTERNAL_ASSERT(false);
+    }
+  }
+
+ public:
+  explicit CpuTimer(c10::Device /* unused */) {}
+
+  void record(Event event) override {
+    getTime(event) = current_time_in_nanos();
+  }
+
+  c10::optional<int64_t> measureDifference(Event start, Event end) override {
+    int64_t start_time = getTime(start);
+    int64_t end_time = getTime(end);
+    // If cpu_end_time is not recorded in this iteration,
+    // avg_time will return invalid value.
+    // For some cases like DDP runs on non-sync mode, backward compute
+    // end time can not be recorded in this iteration and thus can not
+    // calculate the valid avg_time.
+    // In this case, skip calculating the avg_time and return.
+    if (end_time < start_time) {
+      return c10::nullopt;
+    }
+    return end_time - start_time;
+  }
+};
+
+C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
+
+} // namespace
+
 Reducer::Reducer(
     std::vector<std::vector<at::Tensor>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
@@ -87,6 +148,12 @@ Reducer::Reducer(
         }
       }
     }
+  }
+
+  // For CUDA, record events only for single device module.
+  c10::Device device = replicas_[0][0].device();
+  if (!(device.is_cuda() && is_multi_device_module_)) {
+    timer_ = TimerRegistry()->Create(device.type(), device);
   }
 
   // If `expect_sparse_gradients` is not specified, initialize it such that
@@ -188,6 +255,10 @@ Reducer::Reducer(
   if (find_unused_parameters_) {
     initialize_local_used_map();
   }
+
+  // Initializes various counters to manage autograd hooks and triggering of
+  // allreduce.
+  reset_bucket_counting();
 }
 
 // Note [Skip allreducing local_used_maps_dev]
@@ -416,6 +487,13 @@ void Reducer::push_rebuilt_params_for_all_indices() {
 }
 
 void Reducer::push_rebuilt_params(const size_t& index) {
+  // NOTE: We don't check this in should_rebuild_bucket because that controls
+  // whether we should push rebuilt params and whether to actually kick off
+  // process to rebuild buckets, if we check this in should_rebuild_buckets then
+  // the latter would break.
+  if (all_rebuilt_params_pushed_) {
+    return;
+  }
   rebuilt_params_.push_back(replicas_[0][index]);
   rebuilt_param_indices_.push_back(index);
 }
@@ -724,7 +802,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   checkAndRaiseMarkedTwiceError(variable_index);
   perIterationReadyParams_.insert(variable_index);
   backward_stats_[0][variable_index] =
-      current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
+      current_time_in_nanos() - backward_compute_start_time_;
 
   // Any time we mark a variable ready (be it in line due to unused parameters,
   // or via an autograd hook), we require a call to the finalize function. If
@@ -1181,15 +1259,13 @@ void Reducer::prepare_for_backward(
   std::lock_guard<std::mutex> lock(mutex_);
   ++num_backward_calls_;
 
-  cpu_timer_.backward_compute_start_time = current_time_in_nanos();
+  backward_compute_start_time_ = current_time_in_nanos();
   if (should_collect_runtime_stats()) {
     record_backward_compute_start_time();
   }
 
   // Reset accounting.
   expect_autograd_hooks_ = true;
-
-  reset_bucket_counting();
 
   // Reset unused parameter accounting.
   has_marked_unused_parameters_ = false;
@@ -1419,6 +1495,13 @@ void Reducer::finalize_backward() {
     local_used_maps_reduced_ = false;
   }
 
+  // Reset bucket counting to ensure we can appropriately launch allreduce for
+  // each bucket in the next backwards.
+  reset_bucket_counting();
+  // If we populated rebuilt params list in this backward call, avoid
+  // repopulating in subsequent backward calls.
+  all_rebuilt_params_pushed_ = !rebuilt_params_.empty();
+
   if (should_collect_runtime_stats()) {
     record_backward_comm_end_time();
   }
@@ -1427,17 +1510,20 @@ void Reducer::finalize_backward() {
 void Reducer::runGradCallbackForVariable(
     at::Tensor& variable,
     GradCallback&& cb) {
+#ifdef _WIN32
+  cb(variable.mutable_grad());
+#else
   auto context_ptr = rpc_context_.context_ptr.load();
   if (context_ptr == nullptr) {
     cb(variable.mutable_grad());
   } else {
     // Under distributed autograd
-#ifndef _WIN32
     context_ptr->runGradCallbackForVariable(variable, std::move(cb));
-#endif
   }
+#endif
 }
 
+#ifndef _WIN32
 void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
   // We should set 'new_context_ptr' even if it's nullptr. That means the
   // reducer is under a local backward run.
@@ -1449,6 +1535,7 @@ void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
     context_ptr_holder = std::move(new_context_ptr);
   }
 }
+#endif
 
 void Reducer::sync_bucket_indices(
     std::vector<std::vector<size_t>>& bucket_indices) {
@@ -1569,6 +1656,10 @@ bool Reducer::rebuild_buckets() {
   rebuilt_param_indices_.clear();
 
   initialize_buckets(std::move(rebuilt_bucket_indices));
+  // Need to reset bucket.pending and variable.pending as buckets have been
+  // re-initialized and they must be appropriately set before the next backward
+  // pass.
+  reset_bucket_counting();
   return true;
 }
 
@@ -1724,72 +1815,32 @@ bool Reducer::should_collect_runtime_stats() {
 }
 
 void Reducer::record_forward_compute_start_time() {
-  if (replicas_[0][0].is_cuda()) {
-#ifdef USE_CUDA
-    // Record event only for single device module.
-    if (!is_multi_device_module_) {
-      // Create and record event on the replicas_[0][0].device().
-      at::DeviceGuard g(replicas_[0][0].device());
-      gpu_timer_.forward_start.record();
-    }
-#endif
-  } else {
-    cpu_timer_.forward_start_time = current_time_in_nanos();
+  if (timer_) {
+    timer_->record(Timer::Event::kForwardStart);
   }
 }
 
 void Reducer::record_backward_compute_start_time() {
-  if (replicas_[0][0].is_cuda()) {
-#ifdef USE_CUDA
-    // Record event only for single device module.
-    if (!is_multi_device_module_) {
-      // Create and record event on the replicas_[0][0].device().
-      at::DeviceGuard g(replicas_[0][0].device());
-      gpu_timer_.backward_compute_start.record();
-    }
-#endif
+  if (timer_) {
+    timer_->record(Timer::Event::kBackwardComputeStart);
   }
 }
 
 void Reducer::record_backward_compute_end_time() {
-  if (replicas_[0][0].is_cuda()) {
-#ifdef USE_CUDA
-    // Record event only for single device module.
-    if (!is_multi_device_module_) {
-      at::DeviceGuard g(replicas_[0][0].device());
-      gpu_timer_.backward_compute_end.record();
-    }
-#endif
-  } else {
-    cpu_timer_.backward_compute_end_time = current_time_in_nanos();
+  if (timer_) {
+    timer_->record(Timer::Event::kBackwardComputeEnd);
   }
 }
 
 void Reducer::record_backward_comm_start_time() {
-  if (replicas_[0][0].is_cuda()) {
-#ifdef USE_CUDA
-    // Record event only for single device module
-    if (!is_multi_device_module_) {
-      at::DeviceGuard g(replicas_[0][0].device());
-      gpu_timer_.backward_comm_start.record();
-    }
-#endif
-  } else {
-    cpu_timer_.backward_comm_start_time = current_time_in_nanos();
+  if (timer_) {
+    timer_->record(Timer::Event::kBackwardCommStart);
   }
 }
 
 void Reducer::record_backward_comm_end_time() {
-  if (replicas_[0][0].is_cuda()) {
-#ifdef USE_CUDA
-    // Record event only for single device module.
-    if (!is_multi_device_module_) {
-      at::DeviceGuard g(replicas_[0][0].device());
-      gpu_timer_.backward_comm_end.record();
-    }
-#endif
-  } else {
-    cpu_timer_.backward_comm_end_time = current_time_in_nanos();
+  if (timer_) {
+    timer_->record(Timer::Event::kBackwardCommEnd);
   }
 }
 

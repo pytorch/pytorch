@@ -149,7 +149,9 @@ class _DDPSink(Function):
         # Note that we enqueue delay allreduce after prepare_for_backward in
         # static graph training as prepare_for_backward sets the
         # num_backwards_call counter in the reducer.
-        static_graph_first_bwd = ctx.reducer._static_graph_first_bwd()
+        static_graph_first_bwd = (
+            static_graph_training and ctx.reducer._static_graph_first_bwd()
+        )
         if static_graph_first_bwd:
             Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
 
@@ -852,26 +854,31 @@ class DistributedDataParallel(Module):
                 grad_enabled and self.require_backward_grad_sync
             )
 
-        state_dict = {
-            'static_graph': self.static_graph,
-            'find_unused': self.find_unused_parameters,
-            'grad_enabled': grad_enabled,
-            'require_backward_grad_sync': self.require_backward_grad_sync,
-        }
-        output_tensor_list, treespec = tree_flatten(output)
-        # Note: DDPSink helps to ensure that prepare_for_backward is called
-        # immediately before the backwards pass, to support a variety of
-        # features such as: enqueue delay allreduce for static graph, support
-        # multiple calls to backwards with retain_graph=True, and support
-        # finding all parameters that will not receive gradient.
-        passthrough_tensor_list = _DDPSink.apply(
-            self.reducer,
-            state_dict,
-            *output_tensor_list,
-        )
-        # Reconstruct output data structure.
-        output = tree_unflatten(passthrough_tensor_list, treespec)
-        return output
+            if not grad_enabled:
+                # Don't need to run through DDPSink as there will be no backward
+                # pass.
+                return output
+
+            state_dict = {
+                'static_graph': self.static_graph,
+                'find_unused': self.find_unused_parameters,
+                'grad_enabled': grad_enabled,
+                'require_backward_grad_sync': self.require_backward_grad_sync,
+            }
+            output_tensor_list, treespec = tree_flatten(output)
+            # Note: DDPSink helps to ensure that prepare_for_backward is called
+            # immediately before the backwards pass, to support a variety of
+            # features such as: enqueue delay allreduce for static graph, support
+            # multiple calls to backwards with retain_graph=True, and support
+            # finding all parameters that will not receive gradient.
+            passthrough_tensor_list = _DDPSink.apply(
+                self.reducer,
+                state_dict,
+                *output_tensor_list,
+            )
+            # Reconstruct output data structure.
+            output = tree_unflatten(passthrough_tensor_list, treespec)
+            return output
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
