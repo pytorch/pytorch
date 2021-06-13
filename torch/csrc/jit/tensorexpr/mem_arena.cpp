@@ -1,5 +1,5 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/tensorexpr/mem_arena.h>
-#include <cassert>
 #include <stdexcept>
 
 namespace torch {
@@ -51,8 +51,12 @@ KernelScope::KernelScope(KernelArena* arena_)
 }
 
 KernelScope::~KernelScope() {
-  // Check for destructors called in correct order
-  assert(KernelArena::GetCurrentKernelArena() == kernel_arena_);
+  if (KernelArena::GetCurrentKernelArena() != kernel_arena_) {
+    // This should be an error, but it gets triggered in
+    // caffe2/benchmarks/static_runtime:static_runtime_cpptest
+    TORCH_WARN("KernelScope() destructed out of order, leaking memory");
+    return;
+  }
   KernelArena::SetCurrentKernelArena(old_kernel_arena_);
   if (owning_) {
     delete kernel_arena_;
