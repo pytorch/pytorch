@@ -61,6 +61,9 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
         except RuntimeError:
             # If `sample_inputs_fn` doesn't support sampling for a given
             # `dtype`, we assume that the `dtype` is not supported.
+            # We raise a warning, so that user knows that this was the case
+            # and can investigate if there was an issue with the `sample_inputs_fn`.
+            warnings.warn(f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}")
             continue
 
         # We assume the dtype is supported
@@ -70,12 +73,9 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
             try:
                 op(sample.input, *sample.args, **sample.kwargs)
             except RuntimeError as re:
-                if "not implemented for" not in str(re):
-                    raise re
-                else:
-                    # dtype is not supported
-                    supported = False
-                    break
+                # dtype is not supported
+                supported = False
+                break
 
         if supported:
             supported_dtypes.add(dtype)
