@@ -599,6 +599,9 @@ if __name__ == '__main__':
 
     @onlyOnCPUAndCUDA
     def test_get_supported_dtypes(self, device):
+        # Test the `get_supported_dtypes` helper function.
+        # We acquire the dtypes for few Ops dynamically and verify them against
+        # the correct statically described values.
         ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
 
         for op in ops_to_test:

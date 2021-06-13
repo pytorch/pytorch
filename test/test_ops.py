@@ -27,6 +27,8 @@ class TestOpInfo(TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        super().tearDownClass()
+
         if IS_PYTORCH_CI:
             err_msg = ("The operator(s) below is(are) using dynamic_dtypes in the OpInfo entries."
                        "This is OK for testing, but be sure to set the dtypes manually before landing your PR!")

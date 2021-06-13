@@ -233,8 +233,9 @@ class OpInfo(object):
                  test_conjugated_samples=True,
                  ):
 
+        dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
-        for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
+        for dtype_list in dtypes_args:
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
@@ -243,7 +244,7 @@ class OpInfo(object):
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(map(lambda dtypes: isinstance(
-            dtypes, opinfo_helper._dynamic_dispatch_dtypes), (dtypes, dtypesIfCUDA)))
+            dtypes, opinfo_helper._dynamic_dispatch_dtypes), dtypes_args))
 
         if self.dynamic_dtypes:
             # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU

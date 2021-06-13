@@ -51,7 +51,7 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
     # Returns the supported dtypes for the given operator and device_type pair.
     assert device_type in ['cpu', 'cuda']
     if not TEST_CUDA and device_type == 'cuda':
-        warnings.warn("WARNING: CUDA is not available, information pertaining to CUDA dtypes could be wrong")
+        warnings.warn("WARNING: CUDA is not available, empty_dtypes dispatch will be returned!")
         return _dynamic_dispatch_dtypes(())
 
     supported_dtypes = set()
@@ -98,11 +98,6 @@ def dtypes_dispatch_hint(dtypes):
         if set(dispatch()) == set_dtypes:
             return return_type(dispatch, dispatch.__name__ + "()")
 
-    # Metric for finding the closest dispatcher
-    # Intersection Over Union
-    def iou(dispatch_dtypes):
-        return len(set_dtypes.intersection(dispatch_dtypes)) * 1.0 / len(set_dtypes.union(dispatch_dtypes))
-
     chosen_dispatch = None
     chosen_dispatch_score = 0.
     for dispatch in EXTENSIBLE_DTYPE_DISPATCH:
@@ -110,7 +105,7 @@ def dtypes_dispatch_hint(dtypes):
         if not dispatch_dtypes.issubset(set_dtypes):
             continue
 
-        score = iou(dispatch_dtypes)
+        score = len(dispatch_dtypes)
         if score > chosen_dispatch_score:
             chosen_dispatch_score = score
             chosen_dispatch = dispatch
