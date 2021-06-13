@@ -2,7 +2,6 @@ import itertools
 import numpy as np
 import os
 import os.path
-import errno
 import pickle
 import random
 import sys
@@ -11,14 +10,16 @@ import tempfile
 import warnings
 import zipfile
 
+import unittest
 from unittest import skipIf
 from typing import (
     Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
     Type, TypeVar, Set, Union)
-import threading
 import http.server
 import socketserver
+import threading
 import time
+from functools import partial
 
 import torch
 import torch.nn as nn
@@ -40,63 +41,6 @@ skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 T_co = TypeVar('T_co', covariant=True)
-
-PORT = 8000
-HOST = 'localhost'
-WEB_TEST_FILE_SIZE = 1024
-WEB_FILE_TEMP_DIR = tempfile.TemporaryDirectory(dir=os.getcwd())
-
-
-def set_up_local_server():
-    # The method sets up a localhost server at current working directory.
-    # The local server starts on a separate thread.
-    # The server is created only once.
-    # It uses a temp folder created above to save temporary files for test(s) of WebIterDataPipe.
-    # By setting the property daemon = True, it would be discarded when the main program exits.
-    #
-    try:
-        Handler = http.server.SimpleHTTPRequestHandler
-        socketserver.TCPServer.allow_reuse_address = True
-
-        server = socketserver.TCPServer(("", PORT), Handler)
-        server_thread = threading.Thread(target=server.serve_forever)
-        server_thread.daemon = True
-        server_thread.start()
-
-        # Wait a bit for the server to come up
-        time.sleep(3)
-        print("Server started ... at {host}:{port}".format(host=HOST, port=PORT))
-    except OSError as e:
-        if e.errno == errno.EADDRINUSE:
-            # localhost:port already in use, no need to initialize again
-            print("There is already an active server serving at {host}:{port}".format(host=HOST, port=PORT))
-            pass
-        else:
-            print("Unexpected error:", sys.exc_info()[0])
-            raise
-    except Exception:
-        raise
-
-
-def create_files_to_web_temp():
-    clean_web_temp_dir()
-
-    web_file_dir = WEB_FILE_TEMP_DIR.name
-    furl_local_file = os.path.join(web_file_dir, "urls_list")
-    web_tmp_subdir = os.path.basename(os.path.normpath(web_file_dir))
-    with open(furl_local_file, 'w') as fsum:
-        for i in range(0, 10):
-            f = os.path.join(web_file_dir, "webfile_test_{num}.data"
-                             .format(num=i))
-            with open(f, 'wb') as fout:
-                fout.write(os.urandom(WEB_TEST_FILE_SIZE))
-            fsum.write("http://{host}:{port}/{tmp}/webfile_test_{num}.data\n"
-                       .format(host=HOST, port=PORT, tmp=web_tmp_subdir, num=i))
-
-
-def clean_web_temp_dir():
-    for f in os.listdir(WEB_FILE_TEMP_DIR.name):
-        os.remove(os.path.join(WEB_FILE_TEMP_DIR.name, f))
 
 
 def create_temp_dir_and_files():
@@ -131,6 +75,7 @@ def create_temp_dir_and_files():
     return [(temp_dir, temp_file1_name, temp_file2_name, temp_file3_name),
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
 
+
 class TestIterableDataPipeBasic(TestCase):
 
     def setUp(self):
@@ -140,14 +85,10 @@ class TestIterableDataPipeBasic(TestCase):
         self.temp_sub_dir = ret[1][0]
         self.temp_sub_files = ret[1][1:]
 
-        set_up_local_server()
-        create_files_to_web_temp()
-
     def tearDown(self):
         try:
             self.temp_sub_dir.cleanup()
             self.temp_dir.cleanup()
-            clean_web_temp_dir()
         except Exception as e:
             warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
 
@@ -314,19 +255,116 @@ class TestIterableDataPipeBasic(TestCase):
                 rec[i][1].close()
         self.assertEqual(count, 8)
 
-    def test_web_iterable_datapipe(self):
+
+class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, logfile=None, **kwargs):
+        self.__loggerHandle = None
+        if logfile is not None:
+            self.__loggerHandle = open(logfile, 'a+')
+        super().__init__(*args, **kwargs)
+
+    def log_message(self, format, *args):
+        if self.__loggerHandle is not None:
+            self.__loggerHandle.write("%s - - [%s] %s\n" %
+                                      (self.address_string(),
+                                       self.log_date_time_string(),
+                                       format % args))
+        return
+
+
+def setUpLocalServerInThread():
+    try:
+        Handler = partial(FileLoggerSimpleHTTPRequestHandler, logfile=None)
+        socketserver.TCPServer.allow_reuse_address = True
+
+        server = socketserver.TCPServer(("", 0), Handler)
+        server_addr = "{host}:{port}".format(host=server.server_address[0], port=server.server_address[1])
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+
+        # Wait a bit for the server to come up
+        time.sleep(3)
+
+        return (server_thread, server_addr, server)
+    except Exception:
+        raise
+
+
+def create_temp_files_for_serving(tmp_dir, file_count, file_size, 
+                                  file_url_template):
+    furl_local_file = os.path.join(tmp_dir, "urls_list")
+    with open(furl_local_file, 'w') as fsum:
+        for i in range(0, file_count):
+            f = os.path.join(tmp_dir, "webfile_test_{num}.data".format(num=i))
+
+            write_chunk = 1024 * 1024 * 16
+            rmn_size = file_size
+            while rmn_size > 0:
+                with open(f, 'ab+') as fout:
+                    fout.write(os.urandom(min(rmn_size, write_chunk)))
+                rmn_size = rmn_size - min(rmn_size, write_chunk)
+
+            fsum.write(file_url_template.format(num=i))
+
+
+class TestIterableDataPipeHttp(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            (cls.__server_thread, cls.__server_addr,
+             cls.__server) = setUpLocalServerInThread()
+            print(cls.__server_addr)
+        except Exception as e:
+            warnings.warn("TestIterableDataPipeHttp could\
+                          not set up due to {0}".format(str(e)))
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.__server.shutdown()
+            cls.__server_thread._stop()
+            cls.__server_thread.join(timeout=15)
+        except Exception as e:
+            warnings.warn("TestIterableDataPipeHttp could\
+                           not tear down (clean up temp directory or terminate\
+                           local server) due to {0}".format(str(e)))
+
+    def http_test_base(self, test_file_size, test_file_count, timeout=None,
+                       chunk=None):
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as tmpdir:
+            # create tmp dir and files for test
+            base_tmp_dir = os.path.basename(os.path.normpath(tmpdir))
+            file_url_template = "http://" + self.__server_addr + "/"
+            + base_tmp_dir + "/webfile_test_{num}.data\n"
+            create_temp_files_for_serving(tmpdir, test_file_count,
+                                          test_file_size, file_url_template)
+
+            datapipe_dirf = dp.iter.ListDirFiles(tmpdir, '*_list')
+            datapipe_rf = dp.iter.ReadLinesFromFile(datapipe_dirf)
+            datapipe_tup = TupleToElementIDP(datapipe_rf, 1)
+            datapipe_http = dp.iter.HttpReader(datapipe_tup, timeout=timeout)
+            datapipe_tob = dp.iter.ToBytes(datapipe_http, chunk=chunk)
+
+            for (url, data) in datapipe_tob:
+                self.assertGreater(len(url), 0)
+                self.assertRegex(url, "^http://.+\d+.data$")
+                if chunk is not None:
+                    self.assertEqual(len(data), chunk)
+                else:
+                    self.assertEqual(len(data), test_file_size)
+
+    def test_stress_http_reader_iterable_datapipes(self):
+        test_file_size = 10
+        #   STATS: It takes about 5 hours to stress test 16M files locally
+        test_file_count = 1024 * 64
+        self.http_test_base(test_file_size, test_file_count)
+
+    def test_large_files_http_reader_iterable_datapipes(self):
+        test_file_size = 1024 * 1024 * 1024
+        test_file_count = 1
         timeout = 30
-        max_limit = 1024 * 512
-
-        web_file_dir = WEB_FILE_TEMP_DIR.name
-        datapipe_rf = dp.iter.ReadLinesFromFile(os.path.join(web_file_dir,
-                                                             "urls_list"))
-        datapipe_web = dp.iter.Web(datapipe_rf, timeout=timeout)
-        datapipe_tob = dp.iter.ToBytes(datapipe_web, max_limit=max_limit)
-
-        for (url, data) in datapipe_tob:
-            self.assertLessEqual(len(data), max_limit)
-            self.assertGreater(len(data), WEB_TEST_FILE_SIZE / 2)
+        chunk = 1024 * 1024 * 8
+        self.http_test_base(test_file_size, test_file_count, timeout=timeout, chunk=chunk)
 
 
 class IDP_NoLen(IterDataPipe):
@@ -366,11 +404,23 @@ class MDP(MapDataPipe):
         return self.length
 
 
+class TupleToElementIDP(IterDataPipe):
+    def __init__(self, source_datapipe, ind):
+        self.source_datapipe = source_datapipe
+        self.ind = ind
+
+    def __iter__(self):
+        for tup in self.source_datapipe:
+            yield tup[self.ind]
+
+
 def _fake_fn(data, *args, **kwargs):
     return data
 
+
 def _fake_filter_fn(data, *args, **kwargs):
     return data >= 5
+
 
 def _worker_init_fn(worker_id):
     random.seed(123)
