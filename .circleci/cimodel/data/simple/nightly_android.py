@@ -40,7 +40,7 @@ class AndroidNightlyJob:
         props_dict = {
             "name": full_job_name,
             "requires": self.requires,
-            "filters": {"branches": {"only": "nightly"}},
+            # "filters": {"branches": {"only": "nightly"}},
         }
 
         props_dict.update(self.extra_props)
