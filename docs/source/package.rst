@@ -16,7 +16,7 @@ will help you learn more about ``torch.package`` and how to use it.
     This module depends on the ``pickle`` module which is is not secure. Only unpackage data you trust.
 
     It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
-    Never unpickle data that could have come from an untrusted source, or that could have been tampered with.
+    Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
 
     For more information, review the `documentation <https://docs.python.org/3/library/pickle.html>`_ for the ``pickle`` module.
 
