@@ -818,6 +818,15 @@ class TestAsserts(TestCase):
             with self.assertRaises(UsageError):
                 fn()
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), reason="MKLDNN is not available.")
+    def test_unknown_layout(self):
+        actual = torch.empty((2, 2))
+        expected = actual.to_mkldnn()
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn()
+
     def test_mismatching_shape(self):
         actual = torch.empty(())
         expected = actual.clone().reshape((1,))
