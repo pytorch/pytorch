@@ -1,5 +1,6 @@
 import collections.abc
 import functools
+import itertools
 import numbers
 import sys
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union, cast
@@ -228,14 +229,19 @@ def _check_attributes_equal(
     if check_dtype and actual.dtype != expected.dtype:
         return AssertionError(msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
 
-    if actual.is_sparse != expected.is_sparse:
-        return AssertionError(msg_fmtstr.format("is_sparse", actual.is_sparse, expected.is_sparse))
-    elif actual.is_sparse and check_is_coalesced and actual.is_coalesced() != expected.is_coalesced():
-        return AssertionError(msg_fmtstr.format("is_coalesced()", actual.is_coalesced(), expected.is_coalesced()))
-    elif actual.is_sparse_csr != expected.is_sparse_csr:
-        return AssertionError(msg_fmtstr.format("is_sparse_csr", actual.is_sparse_csr, expected.is_sparse_csr))
-    elif not (actual.is_sparse or actual.is_sparse_csr) and check_stride and actual.stride() != expected.stride():
-        return AssertionError(msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
+    sparse_checks = any(
+        getattr(t, attr) for t, attr in itertools.product((actual, expected), ("is_sparse", "is_sparse_csr"))
+    )
+    if sparse_checks:
+        if actual.is_sparse != expected.is_sparse:
+            return AssertionError(msg_fmtstr.format("is_sparse", actual.is_sparse, expected.is_sparse))
+        elif actual.is_sparse and check_is_coalesced and actual.is_coalesced() != expected.is_coalesced():
+            return AssertionError(msg_fmtstr.format("is_coalesced()", actual.is_coalesced(), expected.is_coalesced()))
+        elif actual.is_sparse_csr != expected.is_sparse_csr:
+            return AssertionError(msg_fmtstr.format("is_sparse_csr", actual.is_sparse_csr, expected.is_sparse_csr))
+    else:
+        if check_stride and actual.stride() != expected.stride():
+            return AssertionError(msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
 
     return None
 
