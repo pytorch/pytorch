@@ -146,7 +146,7 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
               pg_name) { return pg_name.second == *group_name; });
 
   if (it != pg_names_.end()) {
-    TORCH_CHECK(false,
+    throw std::runtime_error(
         "The specified group name has already been "
         "created, please use a different group name");
   }
