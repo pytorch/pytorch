@@ -474,6 +474,24 @@ def test_partitions(setup_rpc):
     assert "partitions.0.0.weight" in model.state_dict()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+def test_merged_partitions(setup_rpc):
+    a = nn.Linear(1, 1).to(0)
+    b = nn.Sequential(nn.Linear(1, 1), nn.Linear(1, 2)).to(0)
+    c = nn.Linear(1, 1)
+    d = nn.Linear(1, 2)
+
+    model = nn.Sequential(a, b, c, d)
+    model = Pipe(model)
+
+    assert isinstance(model.partitions, nn.ModuleList)
+    assert isinstance(model.partitions[0], nn.Sequential)
+    assert isinstance(model.partitions[1], nn.Sequential)
+    assert list(model.partitions[0]) == [a, b[0], b[1]]
+    assert list(model.partitions[1]) == [c]
+    assert list(model.partitions[2]) == [d]
+
+
 def test_deny_moving(setup_rpc):
     a = nn.Linear(1, 1)
     b = nn.Linear(1, 1)
@@ -533,8 +551,8 @@ def test_named_children(setup_rpc):
     model = Pipe(model)
 
     names = set(n for n, _ in model.named_modules())
-    assert "partitions.0.a" in names
-    assert "partitions.1.b" in names
+    assert "partitions.0.0" in names
+    assert "partitions.1.0" in names
 
     # Pipe doesn't support __getattr__. Unlike nn.Sequential, Pipe requires
     # several methods in its namespace.

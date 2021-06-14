@@ -31,7 +31,6 @@ bool SparseDropoutWithReplacementOp<CPUContext>::RunOnDevice() {
   int32_t total_output_length = 0;
   vector<bool> selected(Lengths.numel(), true);
   for (int i = 0; i < Lengths.numel(); ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (dist(gen) > 0.5) {
       output_lengths_data[i] = input_lengths_data[i];
     } else {

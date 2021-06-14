@@ -29,14 +29,9 @@ Tensor conv2d(
   TORCH_INTERNAL_ASSERT(weight.dim() == 4, "Expected 4-dimensional weight");
   TORCH_CHECK(weight.device().type() == kCPU);
   MPSImage* X = imageFromTensor(input);
-  const int64_t oC = weight.sizes()[0];
-  const int64_t iC = weight.sizes()[1];
-  const int64_t kH = weight.sizes()[2];
-  const int64_t kW = weight.sizes()[3];
-  auto packedWeights = at::native::metal::permuteWeights(
-      weight.data_ptr<float>(), {oC, iC, kH, kW});
+  auto packedWeights = weight.contiguous(c10::MemoryFormat::ChannelsLast);
   // MPSCNN Convolution
-  float* w = packedWeights.data();
+  float* w = packedWeights.data_ptr<float>();
   float* b = bias.has_value() ? bias->data_ptr<float>() : nullptr;
   MPSCNNConvOp* op = [MPSCNNConvOp conv2d:params
                                   weights:w
@@ -45,7 +40,7 @@ Tensor conv2d(
   auto outputSize = params.output_sizes();
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y];
   auto output = makeTensor(std::move(mt), input.options());
@@ -63,7 +58,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
                       context.dilation,
                       context.groups};
   MPSCNNConvOp* op = (__bridge MPSCNNConvOp*)(context.conv2dOp);
-  NeuronType nt = neuronType(context);
+  NeuronType nt = neuronType(context.output_min, context.output_max);
   if (!op) {
     float* w = context.weight.data_ptr<float>();
     float* b = context.bias.has_value() ? ((*context.bias).data_ptr<float>())
@@ -80,7 +75,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
   auto outputSize = params.output_sizes();
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y1 = mt.texture()->image();
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y1];
   // fuse hardtanh with convolution
@@ -91,7 +86,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
     MPSCNNClampOp* clampOp =
         [MPSCNNClampOp newWithTextures:@[ Y1, Y2 ] Args:@[ @(min), @(max) ]];
     [clampOp encode:commandBuffer.buffer];
-    mt.texture()->setTexture(Y2);
+    mt.texture()->setImage(Y2);
   }
   auto output = makeTensor(std::move(mt), input.options());
   return output;

@@ -99,14 +99,14 @@ Tensor _segment_reduce_cpu_backward_kernel(
 } // namespace
 
 enum SegmentReductionType { MAX };
-static const std::map<std::string, SegmentReductionType> segmentReduce2REDUCE =
+static const std::map<c10::string_view, SegmentReductionType> segmentReduce2REDUCE =
     {
         {"max", MAX},
 };
 
 Tensor segment_reduce_kernel(
     const Tensor& data,
-    std::string reduce,
+    c10::string_view reduce,
     const c10::optional<Tensor>& lengths,
     const c10::optional<Tensor>& indices,
     int64_t axis,

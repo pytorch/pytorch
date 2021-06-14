@@ -22,15 +22,12 @@ struct EigenPowFunctor {
         if (b[0] == -1.) {
           EigenVectorArrayMap<R>(out, n) =
               ConstEigenVectorArrayMap<T1>(a, n).inverse();
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (b[0] == 0.5) {
           EigenVectorArrayMap<R>(out, n) =
               ConstEigenVectorArrayMap<T1>(a, n).sqrt();
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (b[0] == -0.5) {
           EigenVectorArrayMap<R>(out, n) =
               ConstEigenVectorArrayMap<T1>(a, n).rsqrt();
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (b[0] == 2.) {
           EigenVectorArrayMap<R>(out, n) =
               ConstEigenVectorArrayMap<T1>(a, n).square();

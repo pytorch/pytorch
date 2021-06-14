@@ -15,7 +15,7 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
-from .grad_mode import no_grad, enable_grad, set_grad_enabled
+from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
 from . import functional
@@ -255,10 +255,11 @@ if not torch._C._autograd_init():
 # Import all native method/classes
 from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
-                                _enable_record_function, _set_empty_test_observer, kineto_available)
+                                _enable_record_function, _set_empty_test_observer, kineto_available,
+                                _supported_kineto_activities, _add_metadata_json)
 
 if kineto_available():
-    from torch._C._autograd import (ProfilerResult, KinetoEvent,
-                                    _add_metadata, _prepare_profiler, _enable_profiler, _disable_profiler)
+    from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
+                                    _prepare_profiler, _enable_profiler, _disable_profiler)
 
 from . import profiler

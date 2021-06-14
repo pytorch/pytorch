@@ -34,7 +34,6 @@ void FloatToFused8BitRowwiseQuantized__base(
         *std::max_element(input_row, input_row + input_columns);
     float range = maximum_element - minimum_element;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output_row_scale_bias[0] = range / 255.0f;
     output_row_scale_bias[1] = minimum_element;
     const auto inverse_scale = 255.0f / (range + kEpsilon);
@@ -104,7 +103,6 @@ void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
     int input_rows,
     int input_columns,
     std::uint8_t* output) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int num_elem_per_byte = 8 / bit_rate;
   int output_columns =
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -165,7 +163,6 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
     int input_rows,
     int input_columns,
     float* output) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int num_elem_per_byte = 8 / bit_rate;
   int output_columns =
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)

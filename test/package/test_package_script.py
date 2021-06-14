@@ -29,6 +29,7 @@ class TestPackageScript(PackageTestCase):
 
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
             pe.save_pickle("model", "model.pkl", uses_interface)
         buffer.seek(0)
 

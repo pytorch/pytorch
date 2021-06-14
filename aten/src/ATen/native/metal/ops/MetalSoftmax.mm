@@ -37,7 +37,7 @@ Tensor mpscnn_softmax(
   T* softmax = [[T alloc] initWithDevice:[MPSCNNContext sharedInstance].device];
   MetalTensorImplStorage mt{newSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input_);
-  mt.texture()->allocateTemporaryTextureStorage(newSize, commandBuffer);
+  mt.texture()->allocateTemporaryStorage(newSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [softmax encodeToCommandBuffer:commandBuffer.buffer
                      sourceImage:X

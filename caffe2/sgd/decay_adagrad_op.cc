@@ -6,7 +6,6 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(DecayAdagrad, DecayAdagradOp<float, CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DecayAdagrad)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(3)
     .AllowInplace({{0, 0}, {1, 1}, {2, 2}})
@@ -16,7 +15,6 @@ OPERATOR_SCHEMA(DecayAdagrad)
       vector<DeviceOption> in_dev(def.input_size(), op_device);
       vector<DeviceOption> out_dev(def.output_size(), op_device);
       // ITER input lives on CPU
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_dev[5] = DeviceOption();
       return std::make_pair(in_dev, out_dev);
     })
@@ -41,7 +39,6 @@ and returns (param_o, m1_o, m2_o)
     .Input(2, "moment_2", "Second moment history")
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "iter", "iteration number")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated first moment")

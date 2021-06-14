@@ -13,6 +13,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
+#include <c10/util/irange.h>
 
 #include <torch/script.h>
 
@@ -131,7 +132,7 @@ struct RunJIT {
     if (!cuda) {
       models_.push_back(torch::jit::load(file_to_run + "_jit"));
     } else {
-      for (int i = 0; i < 2; ++i) {
+      for (const auto i : c10::irange(2)) {
         auto d = torch::Device(torch::DeviceType::CUDA, i);
         std::stringstream qualified;
         qualified << file_to_run << "_jit_" << i;
@@ -167,7 +168,6 @@ struct Benchmark {
       std::string strategy,
       // NOLINTNEXTLINE(modernize-pass-by-value)
       std::string file_to_run,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       size_t n_seconds = 5)
       : manager_(manager),
         n_threads_(n_threads),
@@ -209,7 +209,7 @@ struct Benchmark {
 
     std::vector<std::vector<double>> latencies(n_threads_);
 
-    for (size_t i = 0; i < n_threads_; ++i) {
+    for (const auto i : c10::irange(n_threads_)) {
       threads_.emplace_back([this, &latencies, i] {
         torch::NoGradGuard guard;
         // do initial work
@@ -301,9 +301,8 @@ int main(int argc, char* argv[]) {
     I.global("sys", "path").attr("append")({"torch/csrc/deploy/example"});
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto n_threads = {1, 2, 4, 8, 16, 32, 40};
-  for (int i = 4; i < argc; ++i) {
+  for (const auto i : c10::irange(4, argc)) {
     std::string model_file = argv[i];
     for (int n_thread : n_threads) {
       if (n_thread > max_thread) {
