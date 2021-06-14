@@ -1014,6 +1014,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Unfold3d.cpp",
     "aten/src/ATen/native/UnfoldBackward.cpp",
     "aten/src/ATen/native/Unique.cpp",
+    "aten/src/ATen/native/ViewsLab.cpp",
     # Low-level functions that can be directly referenced
     # "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/UpSampleBicubic2d.cpp",

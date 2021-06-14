@@ -223,6 +223,37 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
+    def test_lab_diagonal(self, device):
+        x = torch.randn((100, 100), device=device)
+        result = torch.lab_diagonal(x)
+        expected = torch.diag(x)
+        self.assertEqual(result, expected)
+
+        x = torch.randn((100, 100), device=device)
+        result = torch.lab_diagonal(x, 17)
+        expected = torch.diag(x, 17)
+        self.assertEqual(result, expected)
+
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_lab_diagonal_multidim(self, device, dtype):
+        x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
+        xn = x.numpy()
+        for args in [(2, 2, 3),
+                     (2,),
+                     (-2, 1, 2),
+                     (0, -2, -1)]:
+            result = torch.lab_diagonal(x, *args)
+            expected = xn.diagonal(*args)
+            self.assertEqual(expected.shape, result.shape)
+            self.assertEqual(expected, result)
+        # test non-continguous
+        xp = x.permute(1, 2, 3, 0)
+        result = torch.lab_diagonal(xp, 0, -2, -1)
+        expected = xp.numpy().diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertEqual(expected, result)
+
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
                                                include_bfloat16=False))

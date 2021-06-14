@@ -389,6 +389,21 @@ class TestViewOps(TestCase):
         v[0, 0] = 0
         self.assertEqual(t[0, 0, 1], v[0, 0])
 
+    def test_lab_diagonal_view(self, device) -> None:
+        t = torch.ones((5, 5), device=device)
+        v = torch.lab_diagonal(t)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[0] = 0
+        self.assertEqual(t[0, 0], v[0])
+
+        t = torch.ones((3, 3, 3), device=device)
+        v = torch.lab_diagonal(t, offset=1, dim1=1, dim2=2)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[0, 0] = 0
+        self.assertEqual(t[0, 0, 1], v[0, 0])
+
     def test_select_view(self, device) -> None:
         t = torch.ones((5, 5), device=device)
         v = t.select(0, 2)

@@ -10090,3 +10090,9 @@
 - func: unflatten_dense_tensors(Tensor flat, Tensor[] tensors) -> Tensor[]
   variants: function
   python_module: nn
+
+- func: lab_chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
+  variants: method, function
+
+- func: lab_diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
+  variants: method, function
