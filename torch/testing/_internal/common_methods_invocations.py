@@ -5512,7 +5512,7 @@ op_db: List[OpInfo] = [
            op=torch.linalg.det,
            aliases=('det', ),
            dtypes=floating_and_complex_types(),
-           backward_dtypes=floating_types(),
+           backward_dtypes=floating_and_complex_types(),
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCUDAIfRocm],
@@ -5534,6 +5534,8 @@ op_db: List[OpInfo] = [
                # This test fails because singular inputs cannot be reliably
                # generated unless we're using double types
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes'),
+               SkipInfo('TestOpInfo', 'test_unsupported_backward',
+                        dtypes=(torch.float32, torch.complex64,)),
            )),
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
