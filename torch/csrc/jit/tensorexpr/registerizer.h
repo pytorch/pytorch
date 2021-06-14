@@ -1,12 +1,14 @@
 #pragma once
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <vector>
 
 #include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -21,7 +23,7 @@ For example it can replace:
 
 {
   A[0] = 0;
-  for (int x = 0; x < 10; x++) {
+  for(const auto x : c10::irange(10)) {
     A[0] = (A[0]) + x;
   }
 }
@@ -30,7 +32,7 @@ with:
 
 {
   int A_ = 0;
-  for (int x = 0; x < 10; x++) {
+  for(const auto x : c10::irange(10)) {
     A_ = x + A_;
   }
   A[0] = A_;
