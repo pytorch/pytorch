@@ -57,7 +57,7 @@ run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
         if [[ -x "$path" ]]; then
-            "$path";
+            "$path" || echo "true";
             break
         fi
     done
