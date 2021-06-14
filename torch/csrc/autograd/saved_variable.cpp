@@ -38,11 +38,8 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
 
     was_default_constructed_ = false;
     is_inplace_on_view_ = is_inplace_on_view;
-    auto& version_counter = impl::version_counter(variable);
+    const auto& version_counter = impl::version_counter(variable);
     saved_version_ = version_counter.current_version();
-
-    // This check actually does not hold
-    // TORCH_CHECK(is_output && variable.is_leaf(), "Variable is both an output and a leaf");
 
     // If the variable is a leaf or is not an output, we can safely save the
     // original variable without running the risk of reference cycles.

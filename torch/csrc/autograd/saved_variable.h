@@ -52,7 +52,8 @@ class TORCH_API SavedVariable {
   // If storing the variable itself would create a circular reference,
   // we fall into the second case and its metadata is also saved separately.
   // In that case, the grad_fn must be passed in to the unpack function when
-  // reconstructing the Variable.
+  // reconstructing the Variable (except when we are doing an inplace operation on
+  // a view, see below).
   // The field saved_orignal_ below reflects the two cases: its value is true
   // in the first case and false in the second case.
   at::Tensor data_;
@@ -69,6 +70,10 @@ class TORCH_API SavedVariable {
   std::shared_ptr<Node> grad_fn_;
   // Weak version of grad_fn_ that prevents leaks in rebase_history() for
   // inplace views.
+  // This variable is used when the user chooses to create a SavedVariable with
+  // is_inplace_on_view = true.
+  // In that case, the grad_fn passed in to the unpack function at unwrapping
+  // time is unused.
   std::weak_ptr<Node> weak_grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
   c10::VariableVersion version_counter_;

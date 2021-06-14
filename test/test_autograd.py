@@ -5472,6 +5472,7 @@ for shape in [(1,), ()]:
         a_orig = a.detach().clone()
         b = a * a
         c = a * b
+        d = torch.exp(a)
 
         # a is leaf
         self.assertIs(b.grad_fn._saved_self, a)
@@ -5480,6 +5481,10 @@ for shape in [(1,), ()]:
 
         # b is not an output
         self.assertIs(c.grad_fn._saved_other, b)
+
+        # d is an output
+        self.assertEqual(d.grad_fn._saved_result, d)
+        self.assertIsNot(d.grad_fn._saved_result, d)
 
         c.sum().backward()
 
