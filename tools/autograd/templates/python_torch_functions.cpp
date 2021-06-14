@@ -475,7 +475,7 @@ static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObj
   }, /*traceable=*/false);
 
   PyObject* ret = nullptr;
-  ParsedArgs<6> parsed_args;
+  ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if (r.idx == 0) {
