@@ -144,21 +144,22 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getFuture() {
   return future_;
 }
 
+void ProcessGroup::Work::finish(c10::IValue value) {
+  future_->markCompleted(value);
+}
+
 void ProcessGroup::Work::finish(std::exception_ptr exception) {
-  // future_->markCompleted();
-  std::unique_lock<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  lock.unlock();
-  cv_.notify_all();
+  if (exception) {
+    future_->setError(exception);
+  } else {
+    future_->markCompleted(c10::IValue());
+  }
 }
 
 void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (exception_) {
-    std::rethrow_exception(exception_);
+  finish(exception);
+  if (exception) {
+    std::rethrow_exception(exception);
   }
 }
 

@@ -152,15 +152,16 @@ class ProcessGroup : public torch::CustomClassHolder {
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
     void finish(std::exception_ptr exception = nullptr);
+    void finish(c10::IValue);
 
     // Similar to finish, but throws an exception if one is already set or
     // provided by the user.
     void finishAndThrow(std::exception_ptr exception);
 
-    mutable std::mutex mutex_;
-    std::condition_variable cv_;
-    bool completed_ = false;
-    std::exception_ptr exception_;
+    // mutable std::mutex mutex_;
+    // std::condition_variable cv_;
+    // bool completed_ = false;
+    // std::exception_ptr exception_;
 
     // Current rank of the node.
     const int rank_;

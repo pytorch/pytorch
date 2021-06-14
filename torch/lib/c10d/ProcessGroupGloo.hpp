@@ -167,6 +167,8 @@ class ProcessGroupGloo : public ProcessGroup {
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+
+    mutable std::mutex mutex_;
     int srcRank_;
   };
 

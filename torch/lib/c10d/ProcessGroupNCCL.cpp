@@ -249,7 +249,9 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
       workStartTime_(w.workStartTime_) {
-  future_ = w.future_;
+  if (w.exception()) {
+    setError(w.exception());
+  }
 }
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
@@ -279,7 +281,7 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
     setError(exception_ptr);
     LOG(INFO) << "[Rank " << rank_ << "]"
               << " found async exception when checking for NCCL errors: "
-              << getExceptionMsgFromExceptionPtr(exception_);
+              << getExceptionMsgFromExceptionPtr(exception());
   }
 }
 
@@ -310,8 +312,6 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
 }
 
 void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
   if (exception()) {
     auto exceptionMsg = c10::str(
         "Some NCCL operations have failed or timed out. Due to the ",
@@ -320,7 +320,7 @@ void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
         "we are taking the entire process down.");
     LOG(ERROR) << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleNCCLGuard");
-    std::rethrow_exception(exception_);
+    std::rethrow_exception(exception());
   }
 }
 
