@@ -175,8 +175,9 @@ class Linear(torch.nn.Module):
         activation_post_process = mod.activation_post_process
         weight_post_process = mod.qconfig.weight()
 
-        # It is important to multiply by the mask BEFORE calling the `weight_post_process`
-        weight = mod.weight * mod.mask
+        # Assumption is that the weight is already sparsified by the
+        # `sparsifier.convert`
+        weight = mod.weight
 
         weight_post_process(weight)
         dtype = weight_post_process.dtype
