@@ -218,7 +218,8 @@ void writeArchiveV5(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
-    bool tensor_cdata_naming_scheme) {
+    bool tensor_cdata_naming_scheme,
+    StorageContext& storage_context) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -233,10 +234,11 @@ void writeArchiveV5(
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
         if (tensor_cdata_naming_scheme) {
-          tensor_names.push_back(
+          std::string string_id =
               std::to_string(reinterpret_cast<std::intptr_t>(
-                  tensor.storage().unsafeGetStorageImpl())) +
-              ".storage");
+                                 tensor.storage().unsafeGetStorageImpl()));
+          tensor_names.push_back(string_id + ".storage");
+          storage_context.addStorage(string_id, tensor.storage());
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }
@@ -268,11 +270,6 @@ void writeArchiveV5(
 
   std::string fname = archive_dir + archive_name + ".pkl";
   writer.writeRecord(fname, data.data(), data.size());
-
-  // serialize all the captured run-time class types
-  //  for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
-  //    convertNamedType(wroteType);
-  //  }
 }
 
 std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
@@ -340,21 +337,23 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
 
   update_bytecode_version(bytecode_values, kBytecodeVersionV5);
   auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
-
+  StorageContext storage_context;
   writeArchiveV5(
       writer_bytecode,
       c10::ivalue::Tuple::create(constants_values),
       /*archive_name=*/"constants",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*tensor_cdata_naming_scheme=*/true,
+      storage_context);
   writeArchiveV5(
       writer_bytecode,
       bytecode_tuple,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*tensor_cdata_naming_scheme=*/true,
+      storage_context);
 
   return ouput_model_stream;
 }
