@@ -186,7 +186,6 @@ void fillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   model->set_producer_name("caffe2");
   auto* opset_id = model->add_opset_import();
   opset_id->set_domain("");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   opset_id->set_version(7);
 }
 
@@ -737,6 +736,7 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   AddArgument("max_seq_size", opts_.bound_shape_spec.max_seq_size, &op);
   AddArgument("timeout", opts_.timeout, &op);
   AddArgument("nominal_batch_idx", nominal_batch_idx, &op);
+  AddArgument("use_onnxifi_batch_size", opts_.use_onnxifi_batch_size, &op);
 
   return op;
 }

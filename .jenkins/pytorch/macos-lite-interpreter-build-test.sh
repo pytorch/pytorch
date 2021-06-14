@@ -28,6 +28,7 @@ if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
     popd || exit
 
     "${CPP_BUILD}/caffe2/build/bin/test_lite_interpreter_runtime"
+    "${CPP_BUILD}/caffe2/build/bin/test_mobile_nnc"
 
     # Change the permission manually from 755 to 644 to keep git clean
     chmod 644 "${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh"

@@ -41,7 +41,6 @@ Optionally returns effective_lr and update as well.
 REGISTER_CPU_OPERATOR(SparseWngrad, SparseWngradOp<float, CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseWngrad)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(2)
     .EnforceOneToOneInplace()

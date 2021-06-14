@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/backends/backend_init.h>
 
+#include <pybind11/iostream.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
+#include <torch/csrc/jit/backends/generate_debug_handles.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -147,6 +149,10 @@ void initJitBackendBindings(PyObject* module) {
       [=](const std::string& backend_name,
           py::handle orig_module,
           const py::dict& method_compile_spec) {
+        py::scoped_ostream_redirect cerr(
+            std::cerr, py::module_::import("sys").attr("stderr"));
+        py::scoped_ostream_redirect cout(
+            std::cout, py::module_::import("sys").attr("stdout"));
         return py::module::import("torch.jit._recursive")
             .attr("wrap_cpp_module")(codegen_func(
                 backend_name,
@@ -159,6 +165,10 @@ void initJitBackendBindings(PyObject* module) {
       [=](py::handle orig_module,
           const py::function& to_backend,
           const std::vector<std::string>& modules_to_lower) {
+        py::scoped_ostream_redirect cerr(
+            std::cerr, py::module_::import("sys").attr("stderr"));
+        py::scoped_ostream_redirect cout(
+            std::cout, py::module_::import("sys").attr("stdout"));
         if (auto original_module =
                 as_module(py::cast<py::object>(orig_module))) {
           // Clone the Module to avoid editing types that are shared with
@@ -178,6 +188,11 @@ void initJitBackendBindings(PyObject* module) {
 
         throw py::cast_error(c10::str(
             "Object ", py::str(orig_module), " is not a ScriptModule"));
+      });
+
+  m.def(
+      "_jit_backend_generate_debug_handles", [](std::shared_ptr<Graph>& graph) {
+        return generate_debug_handles(graph);
       });
 }
 } // namespace jit
