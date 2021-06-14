@@ -1021,6 +1021,27 @@ class TestOldViewOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_regex):
             tensor.chunk(-2)
 
+    @onlyCPU
+    def test_lab_chunk(self, device):
+        tensor = torch.rand(4, 7)
+        num_chunks = 3
+        dim = 1
+        target_sizes = ([4, 3], [4, 3], [4, 1])
+        splits = tensor.lab_chunk(num_chunks, dim)
+        start = 0
+        for target_size, split in zip(target_sizes, splits):
+            self.assertEqual(split.size(), target_size)
+            self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split,
+                             atol=0, rtol=0)
+            start = start + target_size[dim]
+
+        # Invalid chunk sizes
+        error_regex = 'chunk expects.*greater than 0'
+        with self.assertRaisesRegex(RuntimeError, error_regex):
+            tensor.lab_chunk(0)
+        with self.assertRaisesRegex(RuntimeError, error_regex):
+            tensor.lab_chunk(-2)
+
     # TODO: make work on CUDA, too
     @onlyCPU
     def test_unsqueeze(self, device) -> None:

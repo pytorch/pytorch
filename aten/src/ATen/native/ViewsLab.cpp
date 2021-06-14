@@ -5,9 +5,32 @@
 namespace at {
 namespace native {
 
-std::vector<Tensor> lab_chunk(const Tensor& self, int64_t chunks, int64_t dim) {
-    // TODO
-    return {self};
+std::vector<Tensor> lab_chunk(const Tensor& self, int64_t chunks, int64_t _dim) {
+    TORCH_CHECK(chunks > 0, "torch.lab_chunk expects chunks greater than 0,"
+        " but got chunks ", chunks);
+
+    const int64_t dim = maybe_wrap_dim(_dim, self.dim());
+
+    /* Integer ceiling division; computes the smallest chunk_size such that
+     * chunk_size * chunks >= self.size(dim).
+     */
+    const int64_t chunk_size = (self.size(dim) + chunks - 1) / chunks;
+
+    std::vector<Tensor> out;
+
+    std::vector<int64_t> sizes = self.sizes().vec();
+
+    for (int64_t offset = 0; offset < self.size(dim); offset += chunk_size) {
+        /* The last chunk will be smaller if the tensor size along dimension dim
+         * is not divisible by chunks (and therefore not divisible by chunk_size).
+         */
+        sizes[dim] = std::min<int64_t>(chunk_size, self.size(dim) - offset);
+
+        out.push_back(self.as_strided(sizes, self.strides(),
+              self.storage_offset() + offset * self.stride(dim)));
+    }
+
+    return out;
 }
 
 Tensor lab_diagonal(const Tensor& self, int64_t offset, int64_t _dim1, int64_t _dim2) {
