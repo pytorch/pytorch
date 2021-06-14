@@ -212,7 +212,7 @@ def _check_attributes_equal(
         check_stride (bool): If ``True`` (default) and the tensors are strided, checks that both :attr:`actual` and
             :attr:`expected` have the same stride.
         check_is_coalesced (bool): If ``True`` (default) and the tensors are sparse COO, checks that both
-            :attr:`actual` and :attr:`expected` are either coalesced or not-coalesced.
+            :attr:`actual` and :attr:`expected` are either coalesced or uncoalesced.
 
     Returns:
         (Optional[AssertionError]): If checks did not pass.
@@ -825,7 +825,7 @@ def assert_close(
     If :attr:`actual` and :attr:`expected` are sparse (either having COO or CSR layout), their strided members are
     checked individually. Indices, namely ``indices`` for COO or ``crow_indices``  and ``col_indices`` for CSR layout,
     are always checked for equality whereas the values are checked for closeness according to the definition above.
-    Sparse COO tensors are only considered close if both are either coalesced or non-coalesced (if
+    Sparse COO tensors are only considered close if both are either coalesced or uncoalesced (if
     :attr:`check_is_coalesced` is ``True``).
 
     :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
@@ -852,7 +852,7 @@ def assert_close(
         check_stride (bool): If ``True`` (default) and corresponding tensors are strided, asserts that they have the
             same stride.
         check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
-            :attr:`actual` and :attr:`expected` are either coalesced or not-coalesced. If this check is disabled,
+            :attr:`actual` and :attr:`expected` are either coalesced or uncoalesced. If this check is disabled,
             tensors are :meth:`~torch.Tensor.coalesce`'ed before being compared.
         msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message to use if
             the values of corresponding tensors mismatch. Can be passed as callable in which case it will be called
@@ -872,7 +872,7 @@ def assert_close(
         AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
         AssertionError: If :attr:`check_stride`, but corresponding strided tensors do not have the same stride.
         AssertionError: If :attr:`check_is_coalesced`, but corresponding sparse COO tensors are not both either
-            coalesced or not-coalesced.
+            coalesced or uncoalesced.
         AssertionError: If the values of corresponding tensors are not close.
 
     The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. Note that the ``dtype``
