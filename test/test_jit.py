@@ -14179,7 +14179,7 @@ dedent """
             pass
 
         @torch.jit._overload
-        def null_overload(x: str) -> str:
+        def null_overload(x: str) -> str:  # noqa: F811
             pass
 
         def null_overload_driver():

@@ -17,7 +17,7 @@ from torch._C._jit_tree_views import (
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
     DictComp,
 )
-from torch._utils_internal import get_source_lines_and_file, parse_def, make_source_context
+from torch._sources import get_source_lines_and_file, parse_def, make_source_context
 from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
 from torch._jit_internal import should_drop, is_static_fn, FunctionModifiers  # noqa: F401
 import torch.jit.annotations

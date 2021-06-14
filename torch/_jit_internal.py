@@ -21,7 +21,7 @@ import pickle
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
-from torch._utils_internal import get_source_lines_and_file, parse_def
+from torch._sources import get_source_lines_and_file, parse_def, fake_range
 from torch.futures import Future
 import torch.package._mangling as package_mangling
 from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union  # noqa: F401
