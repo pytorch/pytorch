@@ -572,6 +572,18 @@ at::Tensor AtenXlaType::max_pool3d(const at::Tensor& self,
       self, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
+at::Tensor AtenXlaType::mm(const at::Tensor& self, const at::Tensor& mat2) {
+  LTC_FN_COUNTER("xla::");
+  // xla::dot doesn't support integer types.
+  if (!at::native::is_floating_point(self) ||
+      !at::native::is_floating_point(mat2)) {
+    return AtenXlaTypeDefault::mm(self, mat2);
+  }
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::mm(/*input=*/bridge::GetLtcTensor(self),
+                     /*weight=*/bridge::GetLtcTensor(mat2)));
+}
+
 at::Tensor AtenXlaType::mul(const at::Tensor& self, const at::Tensor& other) {
   LTC_FN_COUNTER("xla::");
   return DoBinaryOp(self, other,

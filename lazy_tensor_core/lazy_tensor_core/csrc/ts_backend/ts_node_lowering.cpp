@@ -60,6 +60,9 @@ class TSNodeLowering : public NodeLowering {
         // Only used from bmm currently.
         return InferBmm(node);
       }
+      case at::aten::mm: {
+        return InferMm(node);
+      }
       case at::aten::permute: {
         auto permute =
             ir::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute));
@@ -182,6 +185,20 @@ class TSNodeLowering : public NodeLowering {
     LTC_CHECK_EQ(tensor2_shape.dimensions(1), m1);
     lazy_tensors::int64 p = tensor2_shape.dimensions(2);
     return lazy_tensors::Shape(tensor1_shape.element_type(), {b, n, p});
+  }
+
+  static lazy_tensors::Shape InferMm(const ir::Node* node) {
+    const ir::Output& tensor1 = node->operand(0);
+    const ir::Output& tensor2 = node->operand(1);
+    const lazy_tensors::Shape& tensor1_shape = tensor1.shape();
+    const lazy_tensors::Shape& tensor2_shape = tensor2.shape();
+    LTC_CHECK_EQ(tensor1_shape.rank(), 2);
+    LTC_CHECK_EQ(tensor2_shape.rank(), 2);
+    lazy_tensors::int64 n = tensor1_shape.dimensions(0);
+    lazy_tensors::int64 m = tensor1_shape.dimensions(1);
+    LTC_CHECK_EQ(tensor2_shape.dimensions(0), m);
+    lazy_tensors::int64 p = tensor2_shape.dimensions(1);
+    return lazy_tensors::Shape(tensor1_shape.element_type(), {n, p});
   }
 
   TSOpVector LowerBuiltin(
