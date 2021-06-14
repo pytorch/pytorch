@@ -75,7 +75,6 @@ class TestMisc(PackageTestCase):
             he.save_pickle("obj", "obj.pkl", obj)
             he.save_text("main", "main", "my string")
 
-
         buffer.seek(0)
         hi = PackageImporter(buffer)
 
@@ -85,9 +84,7 @@ class TestMisc(PackageTestCase):
             dedent("\n".join(str(file_structure).split("\n")[1:])),
             export_plain,
         )
-        file_structure = hi.file_structure(
-            include=["**/subpackage.py", "**/*.pkl"]
-        )
+        file_structure = hi.file_structure(include=["**/subpackage.py", "**/*.pkl"])
         self.assertEqual(
             dedent("\n".join(str(file_structure).split("\n")[1:])),
             export_include,
@@ -177,9 +174,7 @@ class TestMisc(PackageTestCase):
 
         buffer.seek(0)
         pi = PackageImporter(buffer)
-        mod = pi.import_module(
-            "package_a.subpackage"
-        )
+        mod = pi.import_module("package_a.subpackage")
         self.assertTrue(hasattr(mod, "__torch_package__"))
 
     def test_dunder_package_works_from_package(self):
@@ -198,9 +193,7 @@ class TestMisc(PackageTestCase):
 
         buffer.seek(0)
         pi = PackageImporter(buffer)
-        imported_mod = pi.import_module(
-            mod.__name__
-        )
+        imported_mod = pi.import_module(mod.__name__)
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
 

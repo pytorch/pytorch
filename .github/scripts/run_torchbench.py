@@ -31,7 +31,7 @@ direction: decrease
 timeout: 720
 tests:"""
 
-def gen_abtest_config(control: str, treatment: str, models: List[str]):
+def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
     d = {}
     d["control"] = control
     d["treatment"] = treatment
@@ -43,7 +43,7 @@ def gen_abtest_config(control: str, treatment: str, models: List[str]):
     config = config + "\n"
     return config
 
-def deploy_torchbench_config(output_dir: str, config: str):
+def deploy_torchbench_config(output_dir: str, config: str) -> None:
     # Create test dir if needed
     pathlib.Path(output_dir).mkdir(exist_ok=True)
     # TorchBench config file name
@@ -71,7 +71,7 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
             return []
     return model_list
 
-def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str):
+def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str) -> None:
     # Copy system environment so that we will not override
     env = dict(os.environ)
     command = ["python", "bisection.py", "--work-dir", output_dir,

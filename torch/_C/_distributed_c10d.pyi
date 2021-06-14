@@ -45,7 +45,6 @@ class Reducer:
         find_unused_parameters: bool,
         gradient_as_bucket_view: bool,
     ): ...
-    def initialize_buckets(self, bucket_indices: List[List[int]]): ...
     ...
 
 class Logger:
@@ -278,6 +277,11 @@ class ProcessGroup:
         output_tensors: Tensor,
         input_tensor: List[Tensor],
     ) -> Work: ...
+    def _reduce_scatter_base(
+        self,
+        outputTensor: Tensor,
+        inputTensor: Tensor,
+    ) -> Work: ...
     @overload
     def alltoall_base(
         self,
@@ -345,6 +349,13 @@ class ProcessGroupGloo(ProcessGroup):
     @staticmethod
     def create_default_device() -> Device: ...
     ...
+
+class _ProcessGroupWrapper(ProcessGroup):
+    def __init__(
+        self,
+        pg: ProcessGroup,
+        gloo_pg: ProcessGroupGloo
+    ): ...
 
 class ProcessGroupNCCL(ProcessGroup):
     class Options: ...

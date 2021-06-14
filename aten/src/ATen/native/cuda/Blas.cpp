@@ -260,14 +260,8 @@ TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Te
   addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
 }
 
-Tensor& mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
-  result.resize_({ self.size(0), mat2.size(1) });
-  return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
-}
-
-Tensor mm_cuda(const Tensor& self, const Tensor& mat2) {
-  Tensor result = at::empty({ self.size(0), mat2.size(1) }, self.options());
-  return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
+TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
+  addmm_out_cuda_impl(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
 }
 
 Tensor& baddbmm_out_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
