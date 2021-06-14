@@ -276,6 +276,9 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0 # to allow tools/clang_tidy.py to do its thing
+      - name: Install dependencies
+        run: |
+          pip3 install setuptools -r requirements.txt
       - name: Prepare output dir with HEAD commit SHA
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
