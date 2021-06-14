@@ -237,17 +237,14 @@ class Vectorized<ComplexDbl> {
     // angle = atan2(b/a)
     // auto b_a = _mm256_permute_pd(values, 0x05);     // b        a
     // return Sleef_atan2d4_u10(values, b_a);          // 90-angle angle
-    auto ret = el_swapped();
-    for (int i = 0; i < 2; i++) {
-      ret._vec0[i] = std::atan2(_vec0[i], ret._vec0[i]);
-      ret._vec1[i] = std::atan2(_vec1[i], ret._vec0[i]);
-    }
+    Vectorized<ComplexDbl> ret;
+    ret._vec0[0] = std::atan2(_vec0[1], _vec0[0]);
+    ret._vec1[0] = std::atan2(_vec1[1], _vec1[0]);
     return ret;
   }
 
   Vectorized<ComplexDbl> angle() const {
-    auto a = angle_().el_swapped();
-    return a & vd_real_mask;
+    return angle_() & vd_real_mask;
   }
 
   Vectorized<ComplexDbl> real_() const {
