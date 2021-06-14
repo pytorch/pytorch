@@ -145,21 +145,6 @@ void Module::train(bool on) {
   set_train_recurse(object_, on);
 }
 
-// void Module::train(bool on) {
-////  if (auto slot = object_->type()->findAttributeSlot("training")) {
-////    object_->setSlot(*slot, on);
-////  } else {
-////    TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
-////  }
-//
-//  if (auto slot = _ivalue()->type()->findAttributeSlot("training")) {
-//    std::cout << "mobile: ivalue name: " << _ivalue()->name() << std::endl;
-//    _ivalue()->setSlot(*slot, on);
-//  } else {
-//    TORCH_INTERNAL_ASSERT("'training' attribute not found");
-//  }
-//}
-
 bool Module::is_training() const {
   if (auto slot = object_->type()->findAttributeSlot("training")) {
     return object_->getSlot(*slot).toBool();
