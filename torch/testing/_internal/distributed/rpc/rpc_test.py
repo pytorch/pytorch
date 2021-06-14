@@ -215,7 +215,7 @@ def sparse_rpc_format_to_tensor(sparse_rpc_format):
     ).coalesce()
 
 def build_sparse_tensor():
-    i = [[0, 1, 1],[2, 0, 2]]
+    i = [[0, 1, 1], [2, 0, 2]]
     v = [3, 4, 5]
     return torch.sparse_coo_tensor(i, v, (2, 3))
 
