@@ -90,25 +90,25 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
-  TORCH_CHECK(false, "ProcessGroupRoundRobin does not support send");
+  throw std::runtime_error("ProcessGroupRoundRobin does not support send");
 };
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::recv(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
-  TORCH_CHECK(false, "ProcessGroupRoundRobin does not support recv");
+  throw std::runtime_error("ProcessGroupRoundRobin does not support recv");
 };
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
-  TORCH_CHECK(false, "ProcessGroupRoundRobin does not support recv");
+  throw std::runtime_error("ProcessGroupRoundRobin does not support recv");
 };
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::barrier(
     const BarrierOptions& /* unused */) {
-  TORCH_CHECK(false, "ProcessGroupRoundRobin does not support barrier");
+  throw std::runtime_error("ProcessGroupRoundRobin does not support barrier");
 };
 
 const c10::intrusive_ptr<ProcessGroup>& ProcessGroupRoundRobin::next() {
@@ -124,7 +124,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
-  TORCH_CHECK(false,
+  throw std::runtime_error(
       "no support for _allgather_base in RoundRobin process group");
 }
 
