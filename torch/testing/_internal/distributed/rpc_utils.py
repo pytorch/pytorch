@@ -21,6 +21,7 @@ from torch.testing._internal.distributed.pipe_with_ddp_test import (
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
     CudaRemoteModuleTest,
     RemoteModuleTest,
+    ThreeWorkersRemoteModuleTest,
 )
 from torch.testing._internal.distributed.rpc.dist_autograd_test import (
     DistAutogradTest,
@@ -132,6 +133,7 @@ GENERIC_TESTS = [
     JitRpcTest,
     JitDistAutogradTest,
     RemoteModuleTest,
+    ThreeWorkersRemoteModuleTest,
     DdpUnderDistAutogradTest,
     DdpComparisonTest,
     ReinforcementLearningRpcTest,

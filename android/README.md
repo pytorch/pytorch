@@ -34,8 +34,8 @@ repositories {
 
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.9.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.9.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android:1.10.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.10.0-SNAPSHOT'
     ...
 }
 ```
@@ -95,13 +95,12 @@ dependencies {
     implementation(name:'pytorch_android', ext:'aar')
     implementation(name:'pytorch_android_torchvision', ext:'aar')
     ...
-    implementation 'com.android.support:appcompat-v7:28.0.0'
     implementation 'com.facebook.soloader:nativeloader:0.8.0'
     implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
 }
 ```
 We also have to add all transitive dependencies of our aars.
-As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L62-L63) on `'com.android.support:appcompat-v7:28.0.0'`, `'com.facebook.soloader:nativeloader:0.8.0'` and 'com.facebook.fbjni:fbjni-java-only:0.0.3', we need to add them.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.8.0'` and `'com.facebook.fbjni:fbjni-java-only:0.0.3'`, we need to add them.
 (In case of using maven dependencies they are added automatically from `pom.xml`).
 
 You can check out [test app example](https://github.com/pytorch/pytorch/blob/master/android/test_app/app/build.gradle) that uses aars directly.

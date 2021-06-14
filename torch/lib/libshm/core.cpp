@@ -39,7 +39,7 @@ void start_manager() {
     execl(manager_executable_path.c_str(), "torch_shm_manager", NULL);
 
     std::string msg("ERROR: execl failed: ");
-    msg += strerror(errno);
+    msg += std::strerror(errno);
     msg += '\n';
     write(1, msg.c_str(), msg.size());
 

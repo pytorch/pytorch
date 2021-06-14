@@ -250,9 +250,13 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
               "Expected condition, x and y to be on the same device, but condition is on ",
               condition.device(), " and x and y are on ", self.device(), " and ", other.device(),
               " respectively");
-  TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
-              "Expected condition to have ScalarType Byte, but got ScalarType ",
-              toString(condition.scalar_type()));
+
+  if (condition.scalar_type() == ScalarType::Byte) {
+  TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+} else {
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+}
+
   c10::MaybeOwned<Tensor> b_condition, b_self, b_other;
   std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
   return at::_s_where(*b_condition, *b_self, *b_other);
@@ -545,7 +549,7 @@ Tensor& clamp_max_out(const Tensor& self, const Scalar& max, Tensor& result) {
 Tensor& clamp_max_out(const Tensor& self, const Tensor& max, Tensor& result) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "torch.clamp only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::binary_op(result, self, max);
+  auto iter = TensorIterator::borrowing_binary_op(result, self, max);
   clamp_max_stub(iter.device_type(), iter);
   return result;
 }
@@ -577,7 +581,7 @@ Tensor& clamp_min_out(const Tensor& self, const Scalar& min, Tensor& result) {
 Tensor& clamp_min_out(const Tensor& self, const Tensor& min, Tensor& result) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "torch.clamp only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::binary_op(result, self, min);
+  auto iter = TensorIterator::borrowing_binary_op(result, self, min);
   clamp_min_stub(iter.device_type(), iter);
   return result;
 }
