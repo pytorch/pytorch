@@ -21,7 +21,7 @@ namespace jit {
 // deserialization to coordinate sharing of storages between
 // models. Creates mapping between a 'name', a unique numerical
 // ID for that name, and a c10::Storage reference. The add/has/get
-// methods operate with the name as keys and not with the unique 
+// methods operate with the name as keys and not with the unique
 // ids as keys. The unique ID is included to aid in creating
 // deterministic naming for storages during serialization.
 class TORCH_API StorageContext {
