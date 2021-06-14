@@ -305,32 +305,12 @@ static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
 
 namespace meta {
 
-static void check_reduction_shape(
-    impl::MetaBase& meta,
-    const char* name,
+static DimVector get_reduction_shape(
     const Tensor& self,
-    c10::optional<IntArrayRef> dim_opt,
-    bool keepdim,
-    ScalarType out_dtype) {
-  const auto& result = meta.maybe_get_output();
-  // check that result type and dtype match if provided
-  if (result.defined()) {
-    TORCH_CHECK(
-        result.scalar_type() == out_dtype,
-        name,
-        ": provided dtype must match dtype of result. Got ",
-        toString(result.scalar_type()),
-        " and ",
-        toString(out_dtype),
-        ".");
-  }
-  // dim={} performs an all-reduce, same as dim=None
-  IntArrayRef dim = dim_opt.value_or(IntArrayRef{});
-  int64_t ndim = self.dim();
-  auto mask = at::native::make_dim_mask(dim, ndim);
-  auto shape = at::native::shape_from_dim_mask(self, mask, keepdim);
-  meta.set_output(shape, self.options().dtype(out_dtype));
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
+    IntArrayRef dims,
+    bool keepdim) {
+  auto mask = native::make_dim_mask(dims, self.dim());
+  return native::shape_from_dim_mask(self, mask, keepdim);
 }
 
 static TensorIterator make_reduction(
