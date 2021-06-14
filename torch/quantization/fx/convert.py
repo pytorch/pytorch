@@ -23,6 +23,7 @@ from .graph_module import (
 from .quantization_patterns import (
     QuantizeHandler,
 )
+from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
     is_get_tensor_info_node,
     node_return_type_is_int,
@@ -178,6 +179,11 @@ def _convert(model: GraphModule, is_reference: bool = False,
         model.graph, modules, patterns,
         qconfig_map,
         custom_module_classes=custom_module_classes)
+
+    # Calculate the equalization scale, update the observers with the scaled
+    # inputs, and scale the weight
+    weight_eq_obs_dict = update_obs_for_equalization(model, modules)
+    convert_eq_obs(model, modules, weight_eq_obs_dict)
 
     quantized_graph = Graph()
     env: Dict[str, Tuple[Node, Optional[torch.dtype]]] = {}
