@@ -17,37 +17,45 @@ class ReadAdapterInterface;
 namespace torch {
 namespace jit {
 
-// used in torch.package deserialization
+// Used in torch.package and TorchScript serialization and
+// deserialization to coordinate sharing of storages between
+// models. Creates mapping between a 'name', a unique numerical
+// ID for that name, and a c10::Storage reference. The add/has/get
+// methods operate with the name as keys and not with the unique 
+// ids as keys. The unique ID is included to aid in creating
+// deterministic naming for storages during serialization.
 class TORCH_API StorageContext {
  public:
-  explicit StorageContext() : unique_id(0){}
+  explicit StorageContext() : unique_id(0) {}
 
   uint64_t addStorage(const std::string& name, c10::Storage storage) {
     TORCH_INTERNAL_ASSERT(!hasStorage(name));
     uint64_t id = unique_id++;
-    cdata_id_map_.insert({name, id});
+    name_id_map_.insert({name, id});
     id_storage_map_.insert({id, storage});
     return id;
   }
 
   bool hasStorage(const std::string& name) {
-    return cdata_id_map_.find(name) != cdata_id_map_.end();
+    return name_id_map_.find(name) != name_id_map_.end();
   }
 
   bool getStorageID(const std::string& name) {
     TORCH_INTERNAL_ASSERT(hasStorage(name));
-    return cdata_id_map_.find(name)->second;
+    return name_id_map_.find(name)->second;
   }
 
   c10::Storage getStorage(const std::string& name) {
     TORCH_INTERNAL_ASSERT(hasStorage(name));
-    return id_storage_map_.find(cdata_id_map_.find(name)->second)->second;
+    return id_storage_map_.find(name_id_map_.find(name)->second)->second;
   }
   ~StorageContext() = default;
 
  private:
   uint64_t unique_id;
-  std::map<std::string, uint64_t> cdata_id_map_;
+  // 'name' is storage's cptr during serialization and is a storage's
+  // filename during deserialzation.
+  std::map<std::string, uint64_t> name_id_map_;
   std::map<uint64_t, c10::Storage> id_storage_map_;
 };
 
