@@ -163,7 +163,7 @@ def get_signatures(path='build/aten/src/ATen/RegistrationDeclarations.h', includ
             continue
         if 'std::array' in line:
             continue
-        m = re.match(r'(.*) \w+\((.*)\); // {"schema": "aten::(.*)\(.*', line)
+        m = re.match(r'(.*) \w+\((.*)\); // {"schema": "aten::(\w+\.?\w*)\(.*', line)
         if m is None:
             continue
         return_t = m.group(1)
