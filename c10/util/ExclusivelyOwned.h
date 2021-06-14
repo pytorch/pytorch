@@ -4,14 +4,37 @@
 
 namespace c10 {
 
-// TODO: document ExclusivelyOwnedTraits and settle on names (and
-// signatures?) of operations. In the meantime, see examples in
-// TensorBody.h and intrusive_ptr.h.
-// REVIEW: would anyone like to argue that it doesn't make sense to
-// have this traits class, and instead we should just have two
-// explicit specializations of ExclusivelyOwned? There would be some
-// small amount of code duplication, but perhaps it would be easier to
-// understand?
+// See example implementations in TensorBody.h and intrusive_ptr.h.
+// Synopsis:
+//
+// repr_type -- type to use to store an owned T in ExclusivelyOwned.
+//
+// pointer_type -- pointer-esque type to return from
+// ExclusivelyOwned's get() and operator*() methods.
+//
+// const_pointer_type -- similar to pointer_type, used for the const methods.
+//
+// static repr_type nullRepr() -- return a null instance of repr_type.
+//
+// template <class... Args>
+// static repr_type createInPlace(Args&&... args) -- used by the in-place
+// ExclusivelyOwned constructor.
+//
+// static repr_type moveToRepr(T&& x) -- move the given x into an
+// instance of repr_type. used by the ExclusivelyOwned(T&&)
+// constructor.
+//
+// static void destroyOwned(repr_type x) -- free memory for a
+// known-exclusively-owned instance of x. Replaces calling repr_type's
+// destructor. Being able to implement this more efficiently than
+// repr_type's destructor is the main reason to use ExclusivelyOwned
+// for a type.
+//
+// static T take(repr_type&) -- move out of the given repr_type into an owned T.
+//
+// static pointer_type getImpl(const repr_type&) -- return a pointer
+// to the given repr_type. May take repr_type by value if that is more
+// efficient.
 template <typename T>
 struct ExclusivelyOwnedTraits;
 
@@ -53,6 +76,8 @@ class ExclusivelyOwned {
       : repr_(std::move(rhs.repr_)) {
     rhs.repr_ = EOT::nullRepr();
   }
+
+  ExclusivelyOwned& operator=(const ExclusivelyOwned&) = delete;
 
   ExclusivelyOwned& operator=(ExclusivelyOwned&& rhs) noexcept {
     EOT::destroyOwned(repr_);
