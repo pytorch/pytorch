@@ -62,7 +62,11 @@ class SGD(Optimizer):
         if weight_decay < 0.0:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+#        print(differentiable)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
+        defaults = dict(lr=lr, differentiable=differentiable,  momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
@@ -74,17 +78,36 @@ class SGD(Optimizer):
             group.setdefault('nesterov', False)
 
     @torch.no_grad()
-    def step(self, closure=None):
+    def step(self, closure=None, loss=None):
         """Performs a single optimization step.
 
         Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        loss = None
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+#        print(differentiable)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
+        loss1 = None
         if closure is not None:
             with torch.enable_grad():
-                loss = closure()
+                loss1 = closure()
+
+        if self.differentiable == True:
+            grad_targets = [
+                p if p.requires_grad else _torch.tensor([], requires_grad=True)
+                for p in self.fparams
+            ]
+
+            all_grads = _torch.autograd.grad(
+                loss,
+                grad_targets,
+                create_graph=self._track_higher_grads,
+                allow_unused=True  # boo
+            )
+            print(all_grads)
+            
 
         for group in self.param_groups:
             params_with_grad = []
@@ -110,6 +133,7 @@ class SGD(Optimizer):
             F.sgd(params_with_grad,
                   d_p_list,
                   momentum_buffer_list,
+                  self.differentiable,
                   weight_decay=weight_decay,
                   momentum=momentum,
                   lr=lr,
@@ -121,4 +145,4 @@ class SGD(Optimizer):
                 state = self.state[p]
                 state['momentum_buffer'] = momentum_buffer
 
-        return loss
+        return loss1

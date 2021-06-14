@@ -151,33 +151,56 @@ def sgd(params: List[Tensor],
         momentum: float,
         lr: float,
         dampening: float,
-        nesterov: bool):
+        nesterov: bool,
+        differentiable: bool):
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
     """
+    if differentiable == False:
+        with torch.no_grad:
+            for i, param in enumerate(params):
+                d_p = d_p_list[i]
+                if weight_decay != 0:
+                    d_p = d_p.add(param, alpha=weight_decay)
 
-    for i, param in enumerate(params):
+                if momentum != 0:
+                    buf = momentum_buffer_list[i]
 
-        d_p = d_p_list[i]
-        if weight_decay != 0:
-            d_p = d_p.add(param, alpha=weight_decay)
+                    if buf is None:
+                        buf = torch.clone(d_p).detach()
+                        momentum_buffer_list[i] = buf
+                    else:
+                        buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
 
-        if momentum != 0:
-            buf = momentum_buffer_list[i]
+                    if nesterov:
+                        d_p = d_p.add(buf, alpha=momentum)
+                    else:
+                        d_p = buf
 
-            if buf is None:
-                buf = torch.clone(d_p).detach()
-                momentum_buffer_list[i] = buf
-            else:
-                buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+                param.add_(d_p, alpha=-lr)
+    else:
+        for i in range(len(params)):
+            d_p = d_p_list[i]
+            if weight_decay != 0:
+                d_p = d_p.add(param, alpha=weight_decay)
 
-            if nesterov:
-                d_p = d_p.add(buf, alpha=momentum)
-            else:
-                d_p = buf
+            if momentum != 0:
+                buf = momentum_buffer_list[i]
 
-        param.add_(d_p, alpha=-lr)
+                if buf is None:
+                    buf = torch.clone(d_p).detach()
+                    momentum_buffer_list[i] = buf
+                else:
+                    buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+
+                if nesterov:
+                    d_p = d_p.add(buf, alpha=momentum)
+                else:
+                    d_p = buf
+
+            params[i] = params[i] -lr*d_p
+
 
 
 def adadelta(params: List[Tensor],
