@@ -712,6 +712,11 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
+def _reshape_helper(g, input, shape, allowzero=1):
+    if _export_onnx_opset_version <= 13:
+        return g.op("Reshape", input, shape)
+    else:
+        return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
 def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name):
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
