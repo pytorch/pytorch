@@ -498,12 +498,10 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float min, max;
   ist >> op_index >> op_type >> i >> tensor_name >> min >> max >> nbins;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (nwords_first_line != nbins + 7) {
     ist.str(first_line);
     ist.clear();
     ist >> op_index >> i >> tensor_name >> min >> max >> nbins;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (nwords_first_line == nbins + 6) {
       new_format = false;
     } else {

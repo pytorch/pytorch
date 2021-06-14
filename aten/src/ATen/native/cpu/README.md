@@ -56,9 +56,9 @@ flags to enable features such as AVX instructions, while using runtime
 dispatch, which makes sure only valid instructions will be used on any
 given platform.
 
-Vec256.h provides a generic implementation of a vec256 type that allows
+Vectorized.h provides a generic implementation of a vec type that allows
 the programmer to write code packing various primitives (such as floats)
-within 256bit registers. vec256 defines various operators such as + and *
+within 256bit registers. vec defines various operators such as + and *
 and provides functions to allow operations such as max, min, etc.
 
 As an example `ReduceOpsKernel.cpp` implements a generic `kernel_` that reduces

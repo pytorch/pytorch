@@ -35,7 +35,6 @@
 #include <TH/generic/THTensorMath.h>
 #include <TH/THGenerateBFloat16Type.h>
 
-/* lapack support */
-#include <TH/generic/THTensorLapack.h>
-#include <TH/THGenerateFloatTypes.h>
+#include <TH/generic/THTensorMath.h>
+#include <TH/THGenerateComplexTypes.h>
 #endif

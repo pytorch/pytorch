@@ -8,6 +8,7 @@
 #include <TH/THGeneral.h>
 
 #include <cusparse.h>
+#include <ATen/cuda/CUDASolver.h>
 
 // LIMITATION (cusparseSpMM):
 // The generic APIs are available on all platforms on CUDA 11.0
@@ -90,16 +91,15 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
 
 #if IS_SPMM_AVAILABLE()
 
+namespace {
 template<typename T>
-void csrmm2(
+void _csrmm2(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
-  T alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
-  T *b, int64_t ldb, T beta, T *c, int64_t ldc)
+  T *alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
+  T *b, int64_t ldb, T *beta, T *c, int64_t ldc,
+  cudaDataType cusparse_value_type)
 {
-  static_assert(std::is_same<float, T>::value || std::is_same<double, T>::value, "csrmm2 only supports float and double value types");
-  constexpr auto cusparse_value_type = std::is_same<float, T>::value ? CUDA_R_32F : CUDA_R_64F;
-
   if (csrvala == nullptr || b == nullptr || c == nullptr) return;
 
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -156,9 +156,9 @@ void csrmm2(
   size_t bufferSize;
   TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
     handle, opa, opb,
-    &alpha,
+    alpha,
     descA, descB,
-    &beta,
+    beta,
     descC,
     cusparse_value_type,  /* data type in which the computation is executed */
     CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
@@ -170,9 +170,9 @@ void csrmm2(
 
   TORCH_CUDASPARSE_CHECK(cusparseSpMM(
     handle, opa, opb,
-    &alpha,
+    alpha,
     descA, descB,
-    &beta,
+    beta,
     descC,
     cusparse_value_type,  /* data type in which the computation is executed */
     CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
@@ -185,16 +185,69 @@ void csrmm2(
 
   // TODO: Proper fix is to create real descriptor classes
 }
-template void csrmm2<float>(
+} // end anonymous namespace
+
+template<typename T>
+void csrmm2(
+  char transa, char transb,
+  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  T alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
+  T *b, int64_t ldb, T beta, T *c, int64_t ldc)
+{
+  TORCH_INTERNAL_ASSERT(false, "cusparse csr MM only supports data type of float, double, cfloat and cdouble.");
+}
+
+template<> void csrmm2<float>(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
   float alpha, float *csrvala, int *csrrowptra, int *csrcolinda,
-  float *b, int64_t ldb, float beta, float *c, int64_t ldc);
-template void csrmm2<double>(
+  float *b, int64_t ldb, float beta, float *c, int64_t ldc)
+{
+  _csrmm2(transa, transb, m, n, k, nnz, &alpha, csrvala, csrrowptra, csrcolinda, b, ldb, &beta, c, ldc, CUDA_R_32F);
+}
+
+template<> void csrmm2<double>(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
   double alpha, double *csrvala, int *csrrowptra, int *csrcolinda,
-  double *b, int64_t ldb, double beta, double *c, int64_t ldc);
+  double *b, int64_t ldb, double beta, double *c, int64_t ldc)
+{
+  _csrmm2(transa, transb, m, n, k, nnz, &alpha, csrvala, csrrowptra, csrcolinda, b, ldb, &beta, c, ldc, CUDA_R_64F);
+}
+
+template<> void csrmm2<c10::complex<float>>(
+  char transa, char transb,
+  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  c10::complex<float> alpha, c10::complex<float> *csrvala, int *csrrowptra, int *csrcolinda,
+  c10::complex<float> *b, int64_t ldb, c10::complex<float> beta, c10::complex<float> *c, int64_t ldc)
+{
+  _csrmm2(transa, transb, m, n, k, nnz,
+    reinterpret_cast<cuComplex*>(&alpha),
+    reinterpret_cast<cuComplex*>(csrvala),
+    csrrowptra,
+    csrcolinda,
+    reinterpret_cast<cuComplex*>(b),
+    ldb,
+    reinterpret_cast<cuComplex*>(&beta),
+    reinterpret_cast<cuComplex*>(c), ldc, CUDA_C_32F);
+}
+
+template<> void csrmm2<c10::complex<double>>(
+  char transa, char transb,
+  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  c10::complex<double> alpha, c10::complex<double> *csrvala, int *csrrowptra, int *csrcolinda,
+  c10::complex<double> *b, int64_t ldb, c10::complex<double> beta, c10::complex<double> *c, int64_t ldc)
+{
+  _csrmm2(transa, transb, m, n, k, nnz,
+    reinterpret_cast<cuDoubleComplex*>(&alpha),
+    reinterpret_cast<cuDoubleComplex*>(csrvala),
+    csrrowptra,
+    csrcolinda,
+    reinterpret_cast<cuDoubleComplex*>(b),
+    ldb,
+    reinterpret_cast<cuDoubleComplex*>(&beta),
+    reinterpret_cast<cuDoubleComplex*>(c), ldc, CUDA_C_64F);
+}
 
 #else
 
@@ -217,7 +270,7 @@ void adjustLd(char transb, int64_t m, int64_t n, int64_t k, int64_t *ldb, int64_
   }
 }
 
-void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
+void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const float *alpha, const float *csrvala, int *csrrowptra, int *csrcolinda, const float *b, int64_t ldb, const float *beta, float *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -235,11 +288,11 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
-void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
+void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const double *alpha, const double *csrvala, int *csrrowptra, int *csrcolinda, const double *b, int64_t ldb, const double *beta, double *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -258,9 +311,56 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
   // TODO: Proper fix is to create real descriptor classes
+}
+
+template<class complex_target_t>
+void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const complex_target_t *alpha, const complex_target_t *csrvala, int *csrrowptra, int *csrcolinda, const complex_target_t *b, int64_t ldb, const complex_target_t *beta, complex_target_t *c, int64_t ldc)
+{
+  adjustLd(transb, m, n, k, &ldb, &ldc);
+  cusparseOperation_t opa = convertTransToCusparseOperation(transa);
+  cusparseOperation_t opb = convertTransToCusparseOperation(transb);
+
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+    "cusparseCcsrmm2 only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX);
+  int i_m = (int)m;
+  int i_n = (int)n;
+  int i_k = (int)k;
+  int i_nnz = (int)nnz;
+  int i_ldb = (int)ldb;
+  int i_ldc = (int)ldc;
+
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
+  cusparseMatDescr_t desc;
+  cusparseCreateMatDescr(&desc);
+  TORCH_CUDASPARSE_CHECK(cusparseCcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
+}
+
+template<class complex_target_t>
+void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const complex_target_t *alpha, const complex_target_t *csrvala, int *csrrowptra, int *csrcolinda, const complex_target_t *b, int64_t ldb, const complex_target_t *beta, complex_target_t *c, int64_t ldc)
+{
+  adjustLd(transb, m, n, k, &ldb, &ldc);
+  cusparseOperation_t opa = convertTransToCusparseOperation(transa);
+  cusparseOperation_t opb = convertTransToCusparseOperation(transb);
+
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+    "cusparseZcsrmm2 only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX);
+  int i_m = (int)m;
+  int i_n = (int)n;
+  int i_k = (int)k;
+  int i_nnz = (int)nnz;
+  int i_ldb = (int)ldb;
+  int i_ldc = (int)ldc;
+
+
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
+  cusparseMatDescr_t desc;
+  cusparseCreateMatDescr(&desc);
+  TORCH_CUDASPARSE_CHECK(cusparseZcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
 // T can only be float or double
@@ -271,7 +371,7 @@ void csrmm2(
   T alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
   T *b, int64_t ldb, T beta, T *c, int64_t ldc)
 {
-  TORCH_INTERNAL_ASSERT(false, "cusparse csr MM only supports data type of float and double.");
+  TORCH_INTERNAL_ASSERT(false, "cusparse csr MM only supports data type of float, double, cfloat and cdouble.");
 }
 
 template<> void csrmm2<float>(
@@ -280,7 +380,7 @@ template<> void csrmm2<float>(
   float alpha, float *csrvala, int *csrrowptra, int *csrcolinda,
   float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
-  Scsrmm2(transa, transb, m, n, k, nnz, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc);
+  Scsrmm2(transa, transb, m, n, k, nnz, &alpha, csrvala, csrrowptra, csrcolinda, b, ldb, &beta, c, ldc);
 }
 
 template<> void csrmm2<double>(
@@ -289,8 +389,68 @@ template<> void csrmm2<double>(
   double alpha, double *csrvala, int *csrrowptra, int *csrcolinda,
   double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
-  Dcsrmm2(transa, transb, m, n, k, nnz, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc);
+  Dcsrmm2(transa, transb, m, n, k, nnz, &alpha, csrvala, csrrowptra, csrcolinda, b, ldb, &beta, c, ldc);
 }
+
+template<> void csrmm2<c10::complex<float>>(
+  char transa, char transb,
+  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  c10::complex<float> alpha, c10::complex<float> *csrvala, int *csrrowptra, int *csrcolinda,
+  c10::complex<float> *b, int64_t ldb, c10::complex<float> beta, c10::complex<float> *c, int64_t ldc)
+{
+
+  #ifdef USE_ROCM
+  Ccsrmm2(transa, transb, m, n, k, nnz,
+    reinterpret_cast<const hipComplex*>(&alpha),
+    reinterpret_cast<const hipComplex*>(csrvala),
+    csrrowptra,
+    csrcolinda,
+    reinterpret_cast<const hipComplex*>(b),
+    ldb,
+    reinterpret_cast<const hipComplex*>(&beta),
+    reinterpret_cast<hipComplex*>(c), ldc);
+  #else
+  Ccsrmm2(transa, transb, m, n, k, nnz,
+      reinterpret_cast<const cuComplex*>(&alpha),
+      reinterpret_cast<const cuComplex*>(csrvala),
+      csrrowptra,
+      csrcolinda,
+      reinterpret_cast<const cuComplex*>(b),
+      ldb,
+      reinterpret_cast<const cuComplex*>(&beta),
+      reinterpret_cast<cuComplex*>(c), ldc);
+  #endif
+}
+
+template<> void csrmm2<c10::complex<double>>(
+  char transa, char transb,
+  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  c10::complex<double> alpha, c10::complex<double> *csrvala, int *csrrowptra, int *csrcolinda,
+  c10::complex<double> *b, int64_t ldb, c10::complex<double> beta, c10::complex<double> *c, int64_t ldc)
+{
+  #ifdef USE_ROCM
+  Zcsrmm2(transa, transb, m, n, k, nnz,
+    reinterpret_cast<const hipDoubleComplex*>(&alpha),
+    reinterpret_cast<const hipDoubleComplex*>(csrvala),
+    csrrowptra,
+    csrcolinda,
+    reinterpret_cast<const hipDoubleComplex*>(b),
+    ldb,
+    reinterpret_cast<const hipDoubleComplex*>(&beta),
+    reinterpret_cast<hipDoubleComplex*>(c), ldc);
+  #else
+  Zcsrmm2(transa, transb, m, n, k, nnz,
+    reinterpret_cast<const cuDoubleComplex*>(&alpha),
+    reinterpret_cast<const cuDoubleComplex*>(csrvala),
+    csrrowptra,
+    csrcolinda,
+    reinterpret_cast<const cuDoubleComplex*>(b),
+    ldb,
+    reinterpret_cast<const cuDoubleComplex*>(&beta),
+    reinterpret_cast<cuDoubleComplex*>(c), ldc);
+  #endif
+}
+
 
 #endif
 
