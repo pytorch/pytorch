@@ -35,5 +35,5 @@ class LambdaSL(BaseScheduler):
         super(LambdaSL, self).__init__(sparsifier, last_epoch, verbose)
 
     def get_sl(self):
-        return [base_lr * lmbda(self.last_epoch)
-                for lmbda, base_lr in zip(self.sl_lambdas, self.base_sl)]
+        return [base_sl * lmbda(self.last_epoch)
+                for lmbda, base_sl in zip(self.sl_lambdas, self.base_sl)]

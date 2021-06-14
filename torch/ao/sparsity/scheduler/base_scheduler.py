@@ -91,7 +91,6 @@ class BaseScheduler(object):
                 print('Epoch {:5d}: adjusting sparsity level'
                       ' of group {} to {:.4e}.'.format(epoch, group, sl))
 
-
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
         format_string += '\n'
@@ -120,7 +119,6 @@ class BaseScheduler(object):
         with _enable_get_sl_call(self):
             self.last_epoch += 1
             values = self.get_sl()
-
 
         for i, data in enumerate(zip(self.sparsifier.module_groups, values)):
             param_group, sl = data
