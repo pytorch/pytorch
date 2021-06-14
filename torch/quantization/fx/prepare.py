@@ -52,7 +52,9 @@ from .utils import (
     assert_and_get_unique_device,
     node_bool_tensor_arg_indexes,
     get_new_attr_name_with_prefix,
+    NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
+    FUNCTIONAL_OPS_WITH_BIAS,
 )
 
 from ..quantization_mappings import (
@@ -88,6 +90,9 @@ def node_arg_is_weight(node: Node, arg: Any) -> bool:
             if arg is node_arg and i in \
                     WEIGHT_INDEX_DICT[node.target]:  # type: ignore[index]
                 return True
+        for kwarg_name, kwarg_value in node.kwargs.items():
+            if kwarg_name == 'weight' and arg is kwarg_value:
+                return True
     return False
 
 CONV_OPS_WITH_BIAS = {
@@ -103,7 +108,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
             for i, node_arg in enumerate(node.args):
                 if arg is node_arg and i == CONV_BIAS_ARG_INDEX:
                     return True
-        elif node.target is torch.nn.functional.linear:
+        elif node.target in FUNCTIONAL_OPS_WITH_BIAS:
             for kwarg_name, kwarg_value in node.kwargs.items():
                 if kwarg_name == 'bias' and arg is kwarg_value:
                     return True
@@ -277,7 +282,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             qconfig.activation
         is_bias = node_arg_is_bias(node, arg)
         is_activation = not (is_weight or is_bias)
-        weight_needs_obs = is_weight and weight_is_quantized(qconfig)
+        weight_needs_obs = is_weight and weight_is_quantized(qconfig) and node.target not in NON_QUANTIZABLE_WEIGHT_OPS
         bias_needs_obs = \
             (is_bias and activation_dtype(qconfig) == torch.float16) and \
             weight_dtype(qconfig) == torch.float16
