@@ -40,7 +40,7 @@ C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
 
 std::vector<at::Tensor> unpack_list(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
-  for (size_t i = 0; i < tl.size(); ++i) {
+  for (const auto i : c10::irange(tl.size())) {
     const auto &t = tl[i];
     if (!t.defined()) {
       continue;
@@ -210,59 +210,6 @@ Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
   return self;
 }
 
-at::Tensor _noop_unary_manual(c10::DispatchKeySet ks, const at::Tensor & self) {
-  UNPACK_TENSOR(self, 0); // auto& self_ = self;
-  auto const tls = c10::impl::_get_thread_local_state();
-  auto _any_requires_grad = compute_requires_grad_with_tls( tls, self );
-  (void)_any_requires_grad;
-
-  std::shared_ptr<NotImplemented> grad_fn;
-  if (_any_requires_grad) {
-    grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented("_noop_unary_manual"), deleteNode);
-    grad_fn->set_next_edges(collect_next_edges( self ));
-  }
-
-  auto _tmp = ([&]() {
-    at::AutoDispatchBelowADInplaceOrView guard { tls };
-    return at::redispatch::_noop_unary(ks & c10::after_autograd_keyset, self_);
-  })();
-  auto result = std::move(_tmp);
-
-  if (grad_fn) {
-      set_history(flatten_tensor_args( result ), grad_fn);
-  }
-
-  THROW_ERROR_FOR_COMPLEX_AUTOGRAD(result, "_noop_unary_manual");
-  TORCH_CHECK(!(generated::details::isFwGradDefined(self)), "Trying to use forward AD with _noop_unary_manual that does not support it.");
-  return result;
-}
-
-at::Tensor _noop_binary_manual(c10::DispatchKeySet ks, const at::Tensor & self, const at::Tensor & other) {
-  UNPACK_TENSOR(self, 0);  // auto& self_ = self;
-  UNPACK_TENSOR(other, 1); // auto& other_ = other;
-  auto const tls = c10::impl::_get_thread_local_state();
-  auto _any_requires_grad = compute_requires_grad_with_tls( tls, self, other );
-  (void)_any_requires_grad;
-  std::shared_ptr<NotImplemented> grad_fn;
-  if (_any_requires_grad) {
-    grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented("_noop_binary_manual"), deleteNode);
-    grad_fn->set_next_edges(collect_next_edges( self, other ));
-  }
-
-  auto _tmp = ([&]() {
-    at::AutoDispatchBelowADInplaceOrView guard { tls };
-    return at::redispatch::_noop_binary(ks & c10::after_autograd_keyset, self_, other_);
-  })();
-  auto result = std::move(_tmp);
-
-  if (grad_fn) {
-      set_history(flatten_tensor_args( result ), grad_fn);
-  }
-  THROW_ERROR_FOR_COMPLEX_AUTOGRAD(result, "_noop_binary_manual");
-  TORCH_CHECK(!(generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(other)), "Trying to use forward AD with _noop_binary_manual that does not support it.");
-  return result;
-}
-
 // Ops in the following registration list are registered as
 //   (1) CompositeImplicitAutograd kernels
 //   (2) Autograd kernels
@@ -282,8 +229,6 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("resize_as_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_as_)));
   m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
-  m.impl("_noop_unary_manual", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_noop_unary_manual)));
-  m.impl("_noop_binary_manual", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_noop_binary_manual)));
   m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
 }

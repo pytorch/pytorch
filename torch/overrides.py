@@ -231,9 +231,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj,
         Tensor._conj_physical,
         Tensor._noop_unary,
-        Tensor._noop_unary_manual,
         Tensor._noop_binary,
-        Tensor._noop_binary_manual,
     }
 
 
@@ -468,8 +466,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.geqrf: lambda input, out=None: -1,
         torch.i0: lambda input, out=None: -1,
         torch.inner: lambda input, other, out=None: -1,
-        torch.outer: lambda input, vec2, out=None: -1,  # alias for torch.ger
-        torch.ger: lambda input, vec2, out=None: -1,
+        torch.outer: lambda input, vec2, out=None: -1,
+        torch.ger: lambda input, vec2, out=None: -1,  # alias for torch.outer
         torch.gradient: lambda input, spacing=None, dim=None, edge_order=1: -1,
         torch.grid_sampler: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_2d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
@@ -877,6 +875,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.exp2: lambda input: -1,
         torch.special.expm1: lambda input: -1,
         torch.special.expit: lambda input: -1,
+        torch.special.digamma: lambda input: -1,
+        torch.special.psi: lambda input: -1,
         torch.special.gammaln: lambda input: -1,
         torch.special.i0: lambda input: -1,
         torch.special.i0e: lambda input: -1,
