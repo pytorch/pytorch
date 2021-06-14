@@ -4361,6 +4361,29 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(AllDynamicModel(), x, test_with_inputs=[another_x],
                       input_names=["input_1"], dynamic_axes={"input_1" : {0 : "h", 1 : "w"}})
 
+        class DynamicRepeatsModel(torch.nn.Module):
+            def forward(self, x, repeats):
+                return torch.repeat_interleave(x, repeats, dim=1)
+
+        x = torch.tensor([[1, 2, 4], [3, 4, 7]])
+        another_x = torch.tensor([[7, 8], [5, 6]])
+        repeats = torch.tensor([2])
+        another_repeats = torch.tensor([4])
+        self.run_test(DynamicRepeatsModel(), (x, repeats), test_with_inputs=[(another_x, another_repeats)],
+                      input_names=["input_1", "repeats_1"], 
+                      dynamic_axes={"input_1" : {1 : "w"}, "repeats_1" : {0 : "r"}})
+
+        class DynamicRepeatsModel2(torch.nn.Module):
+            def forward(self, x, repeats):
+                return torch.repeat_interleave(x, repeats, dim=1)
+
+        x = torch.tensor([[1, 2, 4], [3, 4, 7]])
+        repeats = torch.tensor([2])
+        another_repeats = torch.tensor([4])
+        self.run_test(DynamicRepeatsModel2(), (x, repeats), test_with_inputs=[(x, another_repeats)],
+                      input_names=["input_1", "repeats_1"], 
+                      dynamic_axes={"repeats_1" : {0 : "r"}})
+
     def test_view(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):

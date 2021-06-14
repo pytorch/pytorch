@@ -9,7 +9,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
-from torch.onnx.symbolic_opset9 import expand, unused, mul
+from torch.onnx.symbolic_opset9 import expand, unused, mul, where
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -929,13 +929,21 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
             output_sizes[idx], input_sizes[idx] = 0, -1
     perm_i[0], perm_i[dim] = perm_i[dim], perm_i[0]
 
-    # Cases when repeats is a single value tensor and dim has unknown input size
-    if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)) and output_sizes[dim] == 0:
-        if not sym_help._is_tensor(repeats):
-            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+    # If input size is dynamic or repeats vector is dynamic
+    if output_sizes[dim] == 0 or (repeats_dim == 1 and repeats_sizes[0] is None):
         reps = sym_help._size_helper(g, input, dim)
         reps = unsqueeze(g, reps, 0)
-        repeats = g.op("Expand", repeats, reps)
+        # Check if repeats vector is a single integer value
+        # or a single dimension tensor with non-dynamic values
+        if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
+            if not sym_help._is_tensor(repeats):
+                repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+            repeats = g.op("Expand", repeats, reps)
+        # Check if repeats is dynamic
+        elif repeats_dim == 1 and repeats_sizes[0] == None:
+            repeat_dim = sym_help._size_helper(g, repeats, g.op("Constant", value_t=torch.LongTensor([0])))
+            repeat_cond = g.op("Equal", repeat_dim, g.op("Constant", value_t=torch.LongTensor([1])))
+            repeats = where(g, repeat_cond, g.op("Expand", repeats, reps), repeats)
     # There are cases when the repeats are 1-d tensor with multiple repeats, but dim
     # provided along one of the dynamic axes provided. A simple example would be
     # input.shape -> [1, 1, *] where * represents the dynamic axes, and dim = 2
