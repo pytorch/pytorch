@@ -152,9 +152,9 @@ class AliasInfo(object):
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
 
-    def __init__(self, alias_name):
+    def __init__(self, alias_name, alias_op=None):
         self.name = alias_name
-        self.op = _getattr_qual(torch, alias_name)
+        self.op = alias_op if alias_op else _getattr_qual(torch, alias_name)
         self.method_variant = getattr(torch.Tensor, alias_name, None)
         self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
 
@@ -303,7 +303,7 @@ class OpInfo(object):
                 self.aliases_op = tuple(alias_op if alias_op else None for alias_op in aliases_op)
             else:
                 self.aliases_op = tuple(None for _ in range(len(aliases)))
-            self.aliases = tuple(AliasInfo(a) for a, a_op in zip(aliases, self.aliases_op))  # type: ignore[assignment]
+            self.aliases = tuple(AliasInfo(a, a_op) for a, a_op in zip(aliases, self.aliases_op))  # type: ignore[assignment]
 
         self.test_conjugated_samples = test_conjugated_samples
 
