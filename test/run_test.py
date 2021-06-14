@@ -390,17 +390,9 @@ JIT_EXECUTOR_TESTS = [
     'test_jit_fuser_legacy',
 ]
 
-# Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
-# options.run_specified_test_cases is enabled.
-# For example:
-# {
-#   "test_nn": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
-#   ...
-# }
-# then for test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
-SPECIFIED_TEST_CASES_DICT: Dict[str, List[str]] = {}
+SPECIFIED_TEST_MODULES: List[str] = []
 
-# The file from which the SPECIFIED_TEST_CASES_DICT will be filled, a CSV of test cases that would be run when
+# The default file from which the SPECIFIED_TEST_MODULES will be filled, a CSV of test cases that would be run when
 # options.run_specified_test_cases is enabled.
 SPECIFIED_TEST_CASES_FILE: str = '.pytorch_specified_test_cases.csv'
 
@@ -531,23 +523,6 @@ def get_slow_tests_based_on_S3() -> List[str]:
     return slow_tests
 
 
-def get_test_case_args(test_module, using_pytest) -> List[str]:
-    args = []
-    # if test_module not specified or specified with '__all__' then run all tests
-    if test_module not in SPECIFIED_TEST_CASES_DICT or '__all__' in SPECIFIED_TEST_CASES_DICT[test_module]:
-        return args
-
-    if using_pytest:
-        args.append('-k')
-        args.append(' or '.join(SPECIFIED_TEST_CASES_DICT[test_module]))
-    else:
-        for test in SPECIFIED_TEST_CASES_DICT[test_module]:
-            args.append('-k')
-            args.append(test)
-
-    return args
-
-
 def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ['coverage', 'run', '--parallel-mode', '--source=torch']
@@ -587,7 +562,7 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     # The following logic for running specified tests will only run for non-distributed tests, as those are dispatched
     # to test_distributed and not run_test (this function)
     if options.run_specified_test_cases:
-        unittest_args.extend(get_test_case_args(test_module, 'pytest' in executable))
+        unittest_args.extend(['--run-specified-test-cases', os.path.abspath(options.run_specified_test_cases)])
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -912,11 +887,11 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
-    if options.run_specified_test_cases:
-        if options.use_specified_test_cases_for == 'include':
-            options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
-        elif options.use_specified_test_cases_for == 'bring-to-front':
-            options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
+    if options.run_specified_test_cases and len(SPECIFIED_TEST_MODULES) > 0:
+        if options.use_specified_test_cases_by == 'include':
+            options.include = SPECIFIED_TEST_MODULES
+        elif options.use_specified_test_cases_by == 'bring-to-front':
+            options.bring_to_front = SPECIFIED_TEST_MODULES
 
     selected_tests = options.include
 
@@ -1132,7 +1107,7 @@ def load_specified_test_cases(filename: str) -> None:
     with open(filename, mode='r', encoding="utf-8-sig") as csv_file:
         csv_reader = csv.DictReader(csv_file)
         line_count = 0
-        global SPECIFIED_TEST_CASES_DICT
+        global SPECIFIED_TEST_MODULES
         for row in csv_reader:
             line_count += 1
             if line_count == 1:
@@ -1140,13 +1115,11 @@ def load_specified_test_cases(filename: str) -> None:
                     print('Data is missing necessary columns for test specification. Proceeding with default behavior.')
                     return
             test_filename = row['test_filename']
-            test_case_name = row['test_case_name']
             if test_filename not in TESTS:
                 print(f'Specified test_filename {test_filename} not found in TESTS. Skipping.')
                 continue
-            if test_filename not in SPECIFIED_TEST_CASES_DICT:
-                SPECIFIED_TEST_CASES_DICT[test_filename] = []
-            SPECIFIED_TEST_CASES_DICT[test_filename].append(test_case_name)
+            if test_filename not in SPECIFIED_TEST_MODULES:
+                SPECIFIED_TEST_MODULES.append(test_filename)
         print(f'Processed {line_count} test cases.')
 
 

@@ -5,6 +5,7 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
 
+import csv
 import sys
 import os
 import platform
@@ -40,7 +41,7 @@ import json
 from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional
+from typing import cast, Any, Dict, Iterable, Iterator, List, Optional
 
 import numpy as np
 
@@ -163,6 +164,7 @@ parser.add_argument('--save-xml', nargs='?', type=str,
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
+parser.add_argument('--run-specified-test-cases', type=str, default=None)
 
 args, remaining = parser.parse_known_args()
 if args.jit_executor == 'legacy':
@@ -182,6 +184,7 @@ TEST_BAILOUTS = args.test_bailouts
 TEST_DISCOVER = args.discover_tests
 TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
+TEST_SPECIFIED_TEST_CASES = args.run_specified_test_cases
 REPEAT_COUNT = args.repeat
 SEED = args.seed
 if not expecttest.ACCEPT:
@@ -238,10 +241,59 @@ def repeat_test_for_types(dtypes):
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 
+def parse_test_name_pattern(test_module_file):
+    test_name_patterns = []
+    if TEST_SPECIFIED_TEST_CASES and os.path.exists(TEST_SPECIFIED_TEST_CASES):
+        test_module = test_module_file[:-len(".py")]
+        # The below encoding is utf-8-sig because utf-8 doesn't properly handle the byte-order-mark character
+        with open(TEST_SPECIFIED_TEST_CASES, mode='r', encoding="utf-8-sig") as csv_file:
+            csv_reader = csv.DictReader(csv_file)
+            line_count = 0
+            global SPECIFIED_TEST_MODULES
+            for row in csv_reader:
+                line_count += 1
+                if line_count == 1:
+                    if 'test_filename' not in row or 'test_case_name' not in row:
+                        print('Data is missing necessary columns for test specification. Proceeding with default behavior.')
+                        return
+                test_filename = row['test_filename']
+                test_case_name = row['test_case_name']
+                # run all test if test_case_name has __all__.
+                if test_filename == test_module:
+                    if test_case_name == '__all__':
+                        return []
+                    else:
+                        test_name_patterns.extend(['-k', test_case_name])
+    return test_name_patterns
+
+specified_test_case_names: List[str] = []
+def parse_test_case_names(test_module_file):
+    if TEST_SPECIFIED_TEST_CASES and os.path.exists(TEST_SPECIFIED_TEST_CASES):
+        global specified_test_case_names
+        test_module = test_module_file[:-len(".py")]
+        # The below encoding is utf-8-sig because utf-8 doesn't properly handle the byte-order-mark character
+        with open(TEST_SPECIFIED_TEST_CASES, mode='r', encoding="utf-8-sig") as csv_file:
+            csv_reader = csv.DictReader(csv_file)
+            line_count = 0
+            global SPECIFIED_TEST_MODULES
+            for row in csv_reader:
+                line_count += 1
+                if line_count == 1:
+                    if 'test_filename' not in row or 'test_case_name' not in row:
+                        print('Data is missing necessary columns for test specification. Proceeding with default behavior.')
+                        return
+                test_filename = row['test_filename']
+                test_case_name = row['test_case_name']
+                if test_filename == test_module:
+                    specified_test_case_names.append(test_case_name)
+
 
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
-        return [suite_or_case]
+        if suite_or_case._testMethodName in specified_test_case_names or len(specified_test_case_names) == 0:
+            return [suite_or_case]
+        else:
+            return []
     rc = []
     for element in suite_or_case:
         rc.extend(discover_test_cases_recursively(element))
@@ -259,6 +311,8 @@ def sanitize_test_filename(filename):
     return re.sub('/', r'.', strip_py)
 
 def run_tests(argv=UNITTEST_ARGS):
+    if TEST_SPECIFIED_TEST_CASES:
+        parse_test_case_names(__main__.__file__)
     if TEST_DISCOVER:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
@@ -296,14 +350,17 @@ def run_tests(argv=UNITTEST_ARGS):
         test_report_path = os.path.join(test_report_path, test_filename)
         os.makedirs(test_report_path, exist_ok=True)
         verbose = '--verbose' in argv or '-v' in argv
+        argv.extend(parse_test_name_pattern(__main__.__file__))
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
         unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
     elif REPEAT_COUNT > 1:
+        argv.extend(parse_test_name_pattern(__main__.__file__))
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
                 sys.exit(-1)
     else:
+        argv.extend(parse_test_name_pattern(__main__.__file__))
         unittest.main(argv=argv)
 
 IS_WINDOWS = sys.platform == "win32"
