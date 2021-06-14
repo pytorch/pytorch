@@ -10,6 +10,7 @@ import tempfile
 import warnings
 import zipfile
 
+import unittest
 from unittest import skipIf
 from typing import (
     Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
@@ -356,6 +357,8 @@ class TestIterableDataPipeHttp(TestCase):
                 else:
                     self.assertEqual(len(data), test_file_size)
 
+    @unittest.skip("Stress test on large amount of files skipped\
+                    due to the CI timing constraint.")
     def test_stress_http_reader_iterable_datapipes(self):
         test_file_size = 10
         #   STATS: It takes about 5 hours to stress test 16 * 1024 * 1024
@@ -363,6 +366,8 @@ class TestIterableDataPipeHttp(TestCase):
         test_file_count = 1024
         self.http_test_base(test_file_size, test_file_count)
 
+    @unittest.skip("Test on the very large file skipped\
+                    due to the CI timing constraint.")
     def test_large_files_http_reader_iterable_datapipes(self):
         #   STATS: It takes about 11 mins to test a large file of 64GB locally
         test_file_size = 1024 * 1024 * 128
