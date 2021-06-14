@@ -59,7 +59,8 @@ ProcessGroup::Work::Work(
     OpType opType,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors)
-    : rank_(rank), opType_(opType) {
+    : rank_(rank), opType_(opType), future_(c10::make_intrusive<c10::ivalue::Future>(
+      c10::ListType::create(c10::TensorType::get()))) {
   if (profilingTitle != nullptr) {
     auto recordingFunction =
         std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);

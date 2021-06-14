@@ -464,13 +464,19 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
 }
 
 void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
-  future_->setError(eptr);
   finish(eptr);
 }
 
 void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
-  returnFutureWithOutput(future_, outputTensors_);
-  finish();
+  if (outputTensors_.size() == 0) {
+    finish(c10::IValue(std::vector<at::Tensor>()));
+    return;
+  }
+  if (outputTensors_.size() > 1) {
+    finish(c10::IValue(outputTensors_));
+    return;
+  }
+  finish(c10::IValue(outputTensors_[0]));
 }
 
 ProcessGroupGloo::SendWork::SendWork(

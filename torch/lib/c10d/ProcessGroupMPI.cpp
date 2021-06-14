@@ -102,13 +102,11 @@ std::vector<at::Tensor> ProcessGroupMPI::WorkMPI::result() {
 }
 
 void ProcessGroupMPI::WorkMPI::finishWorkMPIError(std::exception_ptr eptr) {
-  future_->setError(eptr);
   finish(eptr);
 }
 
 void ProcessGroupMPI::WorkMPI::finishWorkMPI() {
-  future_->markCompleted(at::IValue(outputTensors_));
-  finish();
+  finish(at::IValue(outputTensors_));
 }
 
 ProcessGroupMPI::AsyncWork::AsyncWork(
