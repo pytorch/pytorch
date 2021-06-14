@@ -190,6 +190,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("conv2d", conv2d_batching_rule);
   m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
-  m.impl("cudnn_convolution", cudnn_convolution_plumbing);
+  // m.impl("cudnn_convolution", cudnn_convolution_plumbing);
 }
 }}

@@ -40,7 +40,7 @@ std::tuple<Tensor,int64_t> max_pool2d_with_indices_backward_batch_rule(
       indices_);
 
   result = reshape_dim_outof(0, bdim_size, result);
-  return {result, 0};
+  return std::make_tuple(result, 0);
 }
 
 Tensor max_pool2d_with_indices_backward_plumbing(const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode, const Tensor & indices) {
