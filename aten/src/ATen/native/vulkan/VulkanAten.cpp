@@ -37,15 +37,7 @@ Tensor new_with_vtensor_vulkan(
       std::vector<int64_t>(strides.begin(), strides.end()));
 }
 
-const VulkanTensor& vtensor_from_vulkan(const Tensor& tensor) {
-  TORCH_INTERNAL_ASSERT(
-      tensor.is_vulkan(), "vtensor_from_vulkan expects Vulkan tensor input");
-  VulkanTensorImpl* const impl =
-      static_cast<VulkanTensorImpl*>(tensor.unsafeGetTensorImpl());
-  return impl->unsafe_opaque_handle();
-}
-
-VulkanTensor& vtensor_from_vulkan(Tensor& tensor) {
+VulkanTensor& vtensor_from_vulkan(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       tensor.is_vulkan(), "vtensor_from_vulkan expects Vulkan tensor input");
   VulkanTensorImpl* const impl =
