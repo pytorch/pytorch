@@ -1,6 +1,5 @@
 import collections.abc
 import functools
-import itertools
 import numbers
 import sys
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union, cast
@@ -189,6 +188,23 @@ def _check_supported_tensor(
     return None
 
 
+class _TensorFormat:
+    def __init__(self, t: torch.Tensor) -> None:
+        self.is_sparse, self.sparse_format = self._extract_format(t)
+
+    @staticmethod
+    def _extract_format(t: torch.Tensor) -> Tuple[bool, Optional[str]]:
+        if t.is_sparse:
+            return True, "COO"
+        elif t.is_sparse_csr:
+            return True, "CSR"
+        else:
+            return False, None
+
+    def __str__(self):
+        return f"sparse {self.sparse_format}" if self.is_sparse else "strided"
+
+
 def _check_attributes_equal(
     actual: Tensor,
     expected: Tensor,
@@ -201,7 +217,8 @@ def _check_attributes_equal(
     """Checks if the attributes of two tensors match.
 
     Always checks the :attr:`~torch.Tensor.shape`. Checks for :attr:`~torch.Tensor.device`,
-    :attr:`~torch.Tensor.dtype`, and :meth:`~torch.Tensor.stride` are optional and can be disabled.
+    :attr:`~torch.Tensor.dtype`, :meth:`~torch.Tensor.stride` if the tensors are strided, and
+    :meth:`~torch.tensor.is_coalesced` if the tensors are sparse COO are optional and can be disabled.
 
     Args:
         actual (Tensor): Actual tensor.
@@ -229,19 +246,26 @@ def _check_attributes_equal(
     if check_dtype and actual.dtype != expected.dtype:
         return AssertionError(msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
 
-    sparse_checks = any(
-        getattr(t, attr) for t, attr in itertools.product((actual, expected), ("is_sparse", "is_sparse_csr"))
-    )
-    if sparse_checks:
-        if actual.is_sparse != expected.is_sparse:
-            return AssertionError(msg_fmtstr.format("is_sparse", actual.is_sparse, expected.is_sparse))
-        elif actual.is_sparse and check_is_coalesced and actual.is_coalesced() != expected.is_coalesced():
+    actual_format = _TensorFormat(actual)
+    expected_format = _TensorFormat(expected)
+    if actual_format.is_sparse and expected_format.is_sparse:
+        if actual_format.sparse_format != expected_format.sparse_format:
+            return AssertionError(
+                f"Sparse format does not match: {actual_format.sparse_format} != {expected_format.sparse_format}"
+            )
+
+        if (
+            actual_format.sparse_format == "COO"
+            and check_is_coalesced
+            and actual.is_coalesced() != expected.is_coalesced()
+        ):
             return AssertionError(msg_fmtstr.format("is_coalesced()", actual.is_coalesced(), expected.is_coalesced()))
-        elif actual.is_sparse_csr != expected.is_sparse_csr:
-            return AssertionError(msg_fmtstr.format("is_sparse_csr", actual.is_sparse_csr, expected.is_sparse_csr))
-    else:
+    elif not actual_format.is_sparse and not expected_format.is_sparse:
         if check_stride and actual.stride() != expected.stride():
             return AssertionError(msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
+    else:
+
+        return AssertionError(f"Tensor format does not match: {actual_format} != {expected_format}")
 
     return None
 

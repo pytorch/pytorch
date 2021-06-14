@@ -1140,12 +1140,21 @@ instantiate_device_type_tests(TestAssertsMultiDevice, globals(), only_for="cuda"
 
 
 class TestAssertsSparseCOO(TestCase):
-    def test_mismatching_is_sparse(self):
+    def test_mismatching_tensor_format(self):
         actual = torch.empty(())
         expected = actual.to_sparse()
 
         for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "is_sparse"):
+            with self.assertRaisesRegex(AssertionError, "Tensor format"):
+                fn()
+
+    def test_mismatching_sparse_format(self):
+        t = torch.empty((2, 2))
+        actual = t.to_sparse()
+        expected = t.to_sparse_csr()
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "Sparse format"):
                 fn()
 
     def test_matching_coalesced(self):
@@ -1262,12 +1271,21 @@ class TestAssertsSparseCOO(TestCase):
 
 
 class TestAssertsSparseCSR(TestCase):
-    def test_mismatching_is_sparse_csr(self):
+    def test_mismatching_tensor_format(self):
         actual = torch.empty((2, 2))
         expected = actual.to_sparse_csr()
 
         for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "is_sparse_csr"):
+            with self.assertRaisesRegex(AssertionError, "Tensor format"):
+                fn()
+
+    def test_mismatching_sparse_format(self):
+        t = torch.empty((2, 2))
+        actual = t.to_sparse_csr()
+        expected = t.to_sparse()
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "Sparse format"):
                 fn()
 
     def test_matching(self):
