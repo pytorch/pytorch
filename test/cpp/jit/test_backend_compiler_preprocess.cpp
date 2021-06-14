@@ -1,5 +1,8 @@
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
+#include <torch/csrc/jit/backends/generate_debug_handles.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
 
 namespace torch {
 namespace jit {
@@ -15,23 +18,35 @@ c10::IValue preprocess(
   // Key: method name.
   // Val: compiled blob (represented by a string).
   c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
+
   for (const auto& method : mod.get_methods()) {
-    const auto graph = method.function().graph()->copy();
+    auto graph = method.function().graph()->copy();
+    // Must inline the graph for debug info map.
+    Inline(*graph);
+    // This is here because to test module hierarchy we will have
+    // getattr nodes which after inlining dont serve any purpose.
+    // Without removing them we will run into compilation errors.
+    // So eliminate deadcode just remove those getattr nodes.
+    EliminateDeadCode(graph);
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto key = method.name();
+    auto node_debug_handles = generate_debug_handles(graph);
     std::stringstream ss;
     for (const auto& node : graph->nodes()) {
       switch (node->kind()) {
         case prim::Constant:
           ss << node->kind().toDisplayString() << "#"
              << toIValue(node->output()).value();
+          ss << "<debug_handle>" << node_debug_handles[node];
           break;
         // NOLINTNEXTLINE(bugprone-branch-clone)
         case aten::add:
           ss << node->kind().toQualString();
+          ss << "<debug_handle>" << node_debug_handles[node];
           break;
         case aten::sub:
           ss << node->kind().toQualString();
+          ss << "<debug_handle>" << node_debug_handles[node];
           break;
         default:
           TORCH_CHECK(

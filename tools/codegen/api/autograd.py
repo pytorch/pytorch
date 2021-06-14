@@ -253,7 +253,7 @@ def match_differentiability_info(
                             f"in-place function is not supported: {f.func}")
 
         # For functions that have a single def for out-of-place and inplace (like abs())
-        if info and info.forward_derivatives and is_exact_match:
+        if info and info.forward_derivatives:
             forward_derivatives = info.forward_derivatives
 
             if f.func.kind() == SchemaKind.inplace:
@@ -268,9 +268,14 @@ def match_differentiability_info(
                 # replace "result" from the formula by self
                 def repl(m: Match[str]) -> str:
                     return f'{m.group(1)}self{m.group(2)}'
+                formula = re.sub(IDENT_REGEX.format("result"), repl, fw_info.formula)
+
+                if not is_exact_match:
+                    # Make sure that the forward grad is modified inplace
+                    formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
 
                 forward_derivatives = [ForwardDerivative(
-                    formula=re.sub(IDENT_REGEX.format("result"), repl, fw_info.formula),
+                    formula=formula,
                     var_name="self",
                     var_type=fw_info.var_type,
                     required_inputs_fw_grad=fw_info.required_inputs_fw_grad,

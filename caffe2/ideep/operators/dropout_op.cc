@@ -11,7 +11,6 @@ class IDEEPDropoutOp final : public IDEEPOperator {
 
   IDEEPDropoutOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
         is_test_(
             OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
@@ -53,7 +52,6 @@ class IDEEPDropoutGradientOp final : public IDEEPOperator {
 
   IDEEPDropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
         is_test_(
             OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {

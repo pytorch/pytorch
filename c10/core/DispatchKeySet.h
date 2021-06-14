@@ -214,6 +214,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradXLA,
     DispatchKey::AutogradNestedTensor,
     DispatchKey::AutogradMLC,
+    DispatchKey::AutogradHPU,
     DispatchKey::AutogradXPU,
     DispatchKey::AutogradPrivateUse1,
     DispatchKey::AutogradPrivateUse2,
@@ -222,7 +223,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 });
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
-    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
 });
 
@@ -233,7 +234,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 });
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
-    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
 });
 

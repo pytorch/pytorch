@@ -429,10 +429,8 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
       std::stringstream ss;
       auto k = unique_name_map.size() + 1;
       while (k) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto n = k % 26;
         ss << "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[n - 1];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         k /= 26;
       }
       auto name = ss.str();

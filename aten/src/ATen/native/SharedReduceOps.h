@@ -127,7 +127,7 @@ struct WelfordOps {
     const auto mean = static_cast<scalar_t>(acc.mean);
     const combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
     const auto var = acc.m2 / divisor;
-    detail::pair<scalar_t, scalar_t> results{take_sqrt ? device_sqrt(var) : var, mean};
+    res_t results(take_sqrt ? device_sqrt(var) : var, mean);
     return results;
   }
 

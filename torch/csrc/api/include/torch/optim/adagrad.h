@@ -20,14 +20,11 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API AdagradOptions : public OptimizerCloneableOptions<AdagradOptions> {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AdagradOptions(double lr = 1e-2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, lr) = 1e-2;
   TORCH_ARG(double, lr_decay) = 0;
   TORCH_ARG(double, weight_decay) = 0;
   TORCH_ARG(double, initial_accumulator_value) = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-10;
 public:
   void serialize(torch::serialize::InputArchive& archive) override;

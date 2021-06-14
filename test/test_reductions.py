@@ -2454,19 +2454,21 @@ class TestReductions(TestCase):
         test_functions = [
             ('argmax', torch.argmax, {'dtype': torch.int64}, np.argmax),
             ('argmin', torch.argmin, {'dtype': torch.int64}, np.argmin),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,
-             {}, lambda *args, **kwargs: np.partition(*args, 1, **kwargs))
+            ('kthvalue', lambda *args, k=1, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,
+             {}, lambda *args, k=1, axis=None, **kwargs: np.partition(*args, k, **kwargs).take(k - 1, axis=axis))
         ]
 
         for name, fn, dtype, np_function in test_functions:
             error_msg = f"test function: {name}"
             self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2), msg=error_msg)
-            self.assertEqual(np_function(np_input, axis=2),
-                             fn(master_input, dim=2).cpu().numpy(), msg=error_msg)
+            self.assertEqual(
+                np_function(np_input, axis=2), fn(master_input, dim=2).cpu().numpy(), msg=error_msg, exact_dtype=False
+            )
 
             self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=-1), msg=error_msg)
-            self.assertEqual(np_function(np_input, axis=-1),
-                             fn(master_input, dim=-1).cpu().numpy(), msg=error_msg)
+            self.assertEqual(
+                np_function(np_input, axis=-1), fn(master_input, dim=-1).cpu().numpy(), msg=error_msg, exact_dtype=False
+            )
 
             # keepdim variant does not exist for numpy
             self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True),
@@ -2493,8 +2495,8 @@ class TestReductions(TestCase):
             ('sum', torch.sum, 0., np.sum),
             ('norm', torch.norm, 0., np.linalg.norm),
             ('mean', torch.mean, nan, np.mean),
-            ('var', torch.var, nan, np.var),
-            ('std', torch.std, nan, np.std),
+            ('var', partial(torch.var, correction=1), nan, np.var),
+            ('std', partial(torch.std, correction=1), nan, np.std),
             ('logsumexp', torch.logsumexp, -inf, scipy.special.logsumexp),
         ]
 
