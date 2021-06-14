@@ -75,6 +75,7 @@ void check_allany_for_meta(
   auto out_dtype = check_allany_and_get_output_dtype(name, self, result, dim, keepdim);
   auto shape = get_reduction_shape(self, dim, keepdim);
   meta.set_output(shape, self.options().dtype(out_dtype));
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
 }
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
