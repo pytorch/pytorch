@@ -56,7 +56,7 @@ std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
   ss << "(";
-  for (size_t i = 0; i < l.size(); i++) {
+  for (const auto i : c10::irange(l.size())) {
     if (i > 0) {
       ss << ", ";
     }
@@ -75,7 +75,7 @@ inline std::string toString(const c10::Layout& layout) {
 inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     if (!tensors[i].options().type_equal(type.options())) {
       const std::string expected = type.toString();
       const std::string actual = tensors[i].toString();
@@ -110,7 +110,7 @@ inline bool parseEnvVarFlag(const char* envVarName) {
 inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     if (!tensors[i].sizes().equals(sizes)) {
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
@@ -129,7 +129,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure all tensors have identical type and shape
   auto options = tensors[0].options();
   auto sizes = tensors[0].sizes();
-  for (size_t i = 1; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     if (!tensors[i].options().type_equal(options)) {
       const auto expected = toString(options);
       const auto actual = toString(tensors[i].options());
@@ -196,7 +196,7 @@ inline void assertLayoutMatch(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
-  for (size_t i = 1; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     assertLayoutMatch(fn, layout, tensors, i);
   }
 }
@@ -276,7 +276,7 @@ inline void assertSameDevice(
     return;
   }
   const auto& device = tensors[0].device();
-  for (int i = 1; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     if (tensors[i].device() != device) {
       fn("tensors should be on the same device");
     }
@@ -288,7 +288,7 @@ inline void assertTypeAndSizesMatch(
     const at::ArrayRef<at::Tensor> tensors,
     const at::DeprecatedTypeProperties& type,
     const at::IntArrayRef& sizes) {
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     assertTypeMatch(fn, type, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);
   }
@@ -299,7 +299,7 @@ inline void assertTypeAndSizesMatch(
     const at::ArrayRef<at::Tensor> tensors,
     const at::TensorOptions& options,
     const at::IntArrayRef& sizes) {
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     assertTypeMatch(fn, options, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);
   }
@@ -375,7 +375,7 @@ inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
 inline std::vector<std::vector<int64_t>> getSizes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     sizes[i] = tensors[i].sizes().vec();
   }
   return sizes;
@@ -384,7 +384,7 @@ inline std::vector<std::vector<int64_t>> getSizes(
 inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].device().is_cuda()) {
-    for (size_t i = 0; i < tensors.size(); i++) {
+    for (const auto i : c10::irange(tensors.size())) {
       devices[i] = tensors[i].storage().device().index();
     }
   }
@@ -405,7 +405,7 @@ inline T* getDataPointer(const at::Tensor& tensor) {
 template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     ptrs[i] = getDataPointer<T>(tensors[i]);
   }
   return ptrs;
