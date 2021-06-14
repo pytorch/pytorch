@@ -281,9 +281,42 @@ class TestEqualizeFx(QuantizationTestCase):
                 x = self.linear2(x)
                 return x
 
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.rand(2, 2)
+                self.b = torch.zeros(2)
+
+            def forward(self, x):
+                return nn.functional.linear(x, self.w, self.b)
+
+        # Test where we have one functional linear layer
+        class FunctionalLinearModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = Linear()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                return x
+
+        # Test where we have two functional linear layers with fp32 operation between
+        class FunctionalLinear2FP32Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = Linear()
+                self.linear2 = Linear()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = torch.add(x, torch.tensor([1, 2]))
+                x = self.linear2(x)
+                return x
 
         tests = [(LinearModule, default_equalization_qconfig_dict),
-                 (Linear2FP32Module, fp32_equalization_qconfig_dict)]
+                 (Linear2FP32Module, fp32_equalization_qconfig_dict),
+                 (FunctionalLinearModule, default_equalization_qconfig_dict),
+                 (FunctionalLinear2FP32Module, fp32_equalization_qconfig_dict)]
 
         for (M, equalization_qconfig_dict) in tests:
             m = M().eval()
