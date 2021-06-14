@@ -122,6 +122,22 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
+c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
+  c10::optional<at::Device> device = c10::nullopt;
+  for (auto const& node : graph->nodes()) {
+    for (auto const& input : node->inputs()) {
+      if (auto tt = input->type()->cast<TensorType>()) {
+        if (auto inputDevice = tt->device()) {
+          TORCH_INTERNAL_ASSERT(!device || *device == *inputDevice);
+          device = inputDevice;
+        }
+      }
+    }
+  }
+  TORCH_INTERNAL_ASSERT(device);
+  return device;
+}
+
 // If v is a Tensor with concretely-known sizes and dtype, return them, else
 // nullopt.
 c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
@@ -179,41 +195,58 @@ bool conv2dIsSupported(
   if (input.dtype != c10::ScalarType::Float ||
       weight.dtype != c10::ScalarType::Float ||
       bias.dtype != c10::ScalarType::Float) {
-    GRAPH_DEBUG("only float32 allowed");
+    GRAPH_DEBUG("conv2dIsSupported: only float32 allowed");
     return false;
   }
   if (input.dims.size() != 4 || weight.dims.size() != 4 ||
       bias.dims.size() != 1) {
-    GRAPH_DEBUG("inputs are the wrong size");
+    GRAPH_DEBUG("conv2dIsSupported: inputs are the wrong size");
     return false;
   }
   auto Cin = input.dims[1];
   auto Cout = weight.dims[0];
   auto CperG = weight.dims[1];
   if (Cin != Cout || Cin != groups || CperG != 1) {
-    GRAPH_DEBUG("not depthwise");
+    GRAPH_DEBUG("conv2dIsSupported: not depthwise");
     return false;
   }
   auto KH = weight.dims[2];
   auto KW = weight.dims[3];
   if (KH != 3 || KW != 3) {
-    GRAPH_DEBUG("not 3x3");
+    GRAPH_DEBUG("conv2dIsSupported: not 3x3");
     return false;
   }
   if (stride.size() != 2 || stride[0] != stride[1]) {
-    GRAPH_DEBUG("unsupported stride");
+    GRAPH_DEBUG("conv2dIsSupported: unsupported stride");
     return false;
   }
   if (pad.size() != 2 || pad[0] != pad[1]) {
-    GRAPH_DEBUG("unsupported pad");
+    GRAPH_DEBUG("conv2dIsSupported: unsupported pad");
     return false;
   }
   if (dilation.size() != 2 || dilation[0] != 1 || dilation[1] != 1) {
-    GRAPH_DEBUG("unsupported dilation");
+    GRAPH_DEBUG("conv2dIsSupported: unsupported dilation");
     return false;
   }
   return true;
 }
+
+static bool isContiguous(const torch::jit::Value* v) {
+  auto const& tt = v->type()->cast<TensorType>();
+  if (!tt) {
+    return false;
+  }
+  if (!tt->isComplete()) {
+    return false;
+  }
+  auto const& sizes = tt->sizes().concrete_sizes();
+  auto const& strides = tt->strides().concrete_sizes();
+  if (!sizes || !strides) {
+    return false;
+  }
+  return *strides == TensorType::contiguousStridesOf(*sizes);
+}
+
 // The fuser only supports conv2d with very specific properties:
 // - Static shapes: 4-d input and filter, 1-d bias.
 // - Constant strides/padding/dilation/groups
@@ -234,6 +267,14 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
     GRAPH_DEBUG("some params aren't static");
     return false;
   }
+
+  // All inputs should be contiguous so no transposition is required.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1)) ||
+      !isContiguous(node->input(2))) {
+    GRAPH_DEBUG("conv2dIsSupported: some inputs are not contiguous");
+    return false;
+  }
+
   return conv2dIsSupported(
       *input,
       *weight,
@@ -258,6 +299,12 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   // Proper ndim for tensor inputs.
   if (input0->dims.size() != 2 || input1->dims.size() != 2) {
     GRAPH_DEBUG("matmulIsSupported: Unsupported input sizes");
+    return false;
+  }
+
+  // Inputs should be contiguous, or the TE will needlessly transpose them.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1))) {
+    GRAPH_DEBUG("matmulIsSupported: Input shapes are not contiguous");
     return false;
   }
 
@@ -704,7 +751,10 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     default: {
       GRAPH_DEBUG("Can't infer sizes for the node: ", *v->node());
       GRAPH_DEBUG("Full fusion group graph:\n", *v->node()->owningGraph());
-      throw std::runtime_error("Unhandled node kind");
+      std::string msg =
+          std::string("Unhandled node kind (in inferSizesForValue): ") +
+          v->node()->kind().toQualString();
+      throw malformed_input(msg);
     }
   }
 }
@@ -1391,30 +1441,39 @@ Tensor* computeSum(
   // aten::sum takes the input tensor named self.
   auto sizes = valueShape(inputs[0]);
 
-  int rank = sizes.size();
+  size_t rank = sizes.size();
   if (inputs.size() > 2) {
-    auto nodeAxes = c10::get<IntList>(inputs[1]);
-    // Canonicalize axes: wrap around, sort and make unique.
-    for (auto axis : nodeAxes) {
-      axes.push_back(at::maybe_wrap_dim(axis, rank));
+    if (auto emptyAxes = c10::get_if<BufList>(&inputs[1])) {
+      // If dim-array is an empty list, it will appear as BufList instead of
+      // IntList, and hence we need a special handling for it.
+      // In that case, we need to sum over all axes.
+      TORCH_INTERNAL_ASSERT(emptyAxes->empty());
+      axes.resize(rank);
+      std::iota(axes.begin(), axes.end(), 0);
+    } else if (rank > 0) {
+      auto nodeAxes = c10::get<IntList>(inputs[1]);
+      // Canonicalize axes: wrap around, sort and make unique.
+      for (auto axis : nodeAxes) {
+        axes.push_back(at::maybe_wrap_dim(axis, rank));
+      }
+      std::sort(axes.begin(), axes.end());
+      axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
     }
-    std::sort(axes.begin(), axes.end());
-    axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
     keepdim = c10::get<bool>(inputs[2]);
   } else {
-    axes.resize(sizes.size());
+    axes.resize(rank);
     std::iota(axes.begin(), axes.end(), 0);
   }
   // Axes go into reduction dimensions.
   std::vector<DimArg> reductionDims;
-  reductionDims.reserve(sizes.size());
+  reductionDims.reserve(rank);
   for (size_t axis : axes) {
     reductionDims.emplace_back(sizes[axis]);
   }
   std::vector<DimArg> outputDims;
   // Output dimensions are the complement of axes. When keepdim is set, a
   // one-sized dimension is inserted for each axis.
-  for (size_t dim = 0; dim < sizes.size(); ++dim) {
+  for (size_t dim = 0; dim < rank; ++dim) {
     if (!std::count(axes.begin(), axes.end(), dim)) {
       outputDims.emplace_back(sizes[dim]);
     } else if (keepdim) {
@@ -2494,9 +2553,6 @@ Tensor* tensorexpr::computeOperandValue(
     }
     case aten::t: {
       auto shape = valueShape(inputs[0]);
-      if (shape.size() == 1) {
-        return new Tensor(c10::get<BufHandle>(inputs[0]).node(), nullptr);
-      }
       return computeOperandValue(
           aten::transpose,
           {inputs[0], (int64_t)1, (int64_t)0},
@@ -2505,6 +2561,17 @@ Tensor* tensorexpr::computeOperandValue(
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
+      // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
+      if (A.ndim() < 1) {
+        return Compute(
+            "aten_transpose",
+            c10::fmap<DimArg>(outputShape),
+            [&](std::vector<VarHandle> axes) {
+              TORCH_INTERNAL_ASSERT(axes.size() <= 1);
+              return A.load(axes);
+            });
+      }
+      // Usual case where transpose actually swaps dimensions
       auto start_dim =
           at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
       auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
@@ -2518,6 +2585,16 @@ Tensor* tensorexpr::computeOperandValue(
     }
     case aten::permute: {
       auto A = c10::get<BufHandle>(inputs[0]);
+      // Trivial case of 0-dim tensors: just a copy of the input
+      if (A.ndim() == 0) {
+        return Compute(
+            "aten_permute",
+            c10::fmap<DimArg>(outputShape),
+            [&](const std::vector<VarHandle>& axes) {
+              std::vector<ExprHandle> empty_indices;
+              return A.load(empty_indices);
+            });
+      }
       auto permute_dims = c10::get<IntList>(inputs[1]);
       return Compute(
           "aten_permute",
@@ -2547,6 +2624,15 @@ Tensor* tensorexpr::computeOperandValue(
     case aten::reshape:
     case aten::view: {
       auto A = c10::get<BufHandle>(inputs[0]);
+      if (A.ndim() == 0) {
+        return Compute(
+            "aten_view",
+            c10::fmap<DimArg>(outputShape),
+            [&](const std::vector<VarHandle>& axes) {
+              std::vector<ExprHandle> empty_indices;
+              return A.load(empty_indices);
+            });
+      }
       auto view_dims = c10::get<IntList>(inputs[1]);
       return Compute(
           "aten_reshape",
@@ -2617,7 +2703,8 @@ Tensor* tensorexpr::computeOperandValue(
     } break;
     default: {
       std::string msg =
-          std::string("Unhandled node kind: ") + op.toQualString();
+          std::string("Unhandled node kind (in computeOperandValue): ") +
+          op.toQualString();
       throw malformed_input(msg);
     }
   }
@@ -2765,7 +2852,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     default: {
-      std::string msg = std::string("Unhandled node kind: ") +
+      std::string msg = std::string("Unhandled node kind (in computeValue): ") +
           v->node()->kind().toQualString();
       throw malformed_input(msg);
     }
@@ -2876,7 +2963,10 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   if (backendType == kCudaCodeGen) {
     for (auto buf : bufOutputs_) {
       std::vector<For*> loops = l.getLoopStmtsFor(buf);
-      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      if (loops.empty()) {
+        // This happens when Buf is 0-dim
+        continue;
+      }
       For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
       assert(flattened);
@@ -3034,6 +3124,16 @@ void TensorExprKernel::genInputDebugNames() {
   input_name_map_ = std::move(value_to_name);
 }
 
+template <typename T>
+static std::vector<ExprHandle> toExprHandles(const std::vector<T>& sizes) {
+  std::vector<ExprHandle> dims;
+  dims.reserve(sizes.size());
+  for (auto const& size : sizes) {
+    dims.emplace_back(IntImm::make(size));
+  }
+  return dims;
+}
+
 Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
   Tensor* result = nullptr;
@@ -3044,6 +3144,15 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
         std::string msg = std::string("Shapes for input '%") +
             input->debugName() + "' are unknown";
         throw malformed_input(msg);
+      }
+      if (isContiguous(input)) {
+        Placeholder inBuffer(
+            "t" + input_name_map_[input],
+            ToDtype(static_cast<ScalarType>(*tt->scalarType())),
+            toExprHandles(*tt->sizes().concrete_sizes()));
+        bufs_.emplace(input, inBuffer.data());
+        bufferArgs_.emplace_back(inBuffer);
+        break;
       }
       Placeholder inBuffer(
           "t" + input_name_map_[input],
@@ -3224,7 +3333,7 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
-  device_ = *pickDeviceType(graph_->inputs());
+  device_ = *pickDeviceType(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});
