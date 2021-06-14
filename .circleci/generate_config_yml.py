@@ -145,14 +145,17 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_post_upload_jobs,
         binary_build_definitions.get_binary_smoke_test_jobs,
     ]
+    build_jobs = [f() for f in build_workflows_functions]
+    master_build_jobs = filter_master_only_jobs(build_jobs)
 
     binary_build_functions = [
         binary_build_definitions.get_binary_build_jobs,
         binary_build_definitions.get_nightly_tests,
         binary_build_definitions.get_nightly_uploads,
     ]
-    build_jobs = [f() for f in build_workflows_functions]
-    master_build_jobs = filter_master_only_jobs(build_jobs)
+
+    slow_gradcheck_jobs = pytorch_build_definitions.get_workflow_jobs(only_slow_gradcheck=True)
+
     return {
         "workflows": {
             "binary_builds": {
@@ -166,6 +169,10 @@ def gen_build_workflows_tree():
             "master_build": {
                 "when": r"<< pipeline.parameters.run_master_build >>",
                 "jobs": master_build_jobs,
+            },
+            "slow_gradcheck_build": {
+                "when": r"<< pipeline.parameters.run_slow_gradcheck_build >>",
+                "jobs": slow_gradcheck_jobs,
             },
         }
     }
