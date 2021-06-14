@@ -161,8 +161,7 @@ class AliasInfo(object):
 
     def __init__(self, alias_name, alias_op=None):
         self.name = alias_name
-        self.op = alias_op if alias_op else _get_attr_qual(torch, alias_name)
-        # self.op = _getattr_qual(torch, alias_name)
+        self.op = alias_op if alias_op else _getattr_qual(torch, alias_name)
         self.method_variant = getattr(torch.Tensor, alias_name, None)
         self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
 
@@ -301,8 +300,12 @@ class OpInfo(object):
         self.supports_sparse = supports_sparse
 
         self.aliases = ()
+        self.aliases_op = ()
         if aliases is not None:
-            self.aliases_op = tuple(alias_op if alias_op else None for alias_op in aliases_op)
+            if aliases_op is not None:
+                self.aliases_op = tuple(alias_op if alias_op else None for alias_op in aliases_op)
+            else:
+                self.aliases_op = tuple(None for _ in range(len(aliases)))
             self.aliases = tuple(AliasInfo(a, a_op) for a, a_op in zip(aliases, self.aliases_op))  # type: ignore[assignment]
 
     def __call__(self, *args, **kwargs):
@@ -6006,8 +6009,8 @@ op_db: List[OpInfo] = [
                        #     return torch.polygamma(i0, 1)
                        #            ~~~~~~~~~~~~~~~ <--- HERE
                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-                       SkipInfo('TestCommon', 'test_jit_alias_remapping'),
-                       SkipInfo('TestCommon', 'test_variant_consistency_eager')),
+                       SkipInfo('TestCommon', 'test_jit_alias_remapping')),
+                       # SkipInfo('TestCommon', 'test_variant_consistency_eager')),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
                    aliases=("special.polygamma",),
