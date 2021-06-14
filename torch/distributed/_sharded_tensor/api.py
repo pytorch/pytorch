@@ -361,6 +361,7 @@ class ShardedTensor(object):
     def _register_remote_shards(self, remote_shards: List[rpc.RRef[Shard]], rpc_rank: int):
         self._remote_shards[rpc_rank] = remote_shards
 
+    @property
     def remote_shards(self) -> Dict[int, List[rpc.RRef[Shard]]]:
         """
         Returns a Dict[int, RRef] with keys being the RPC rank and values
