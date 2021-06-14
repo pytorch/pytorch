@@ -2754,6 +2754,15 @@ class TestTensorCreation(TestCase):
         # steps = 0
         self.assertEqual(torch.linspace(0, 1, 0, device=device, dtype=dtype).numel(), 0, atol=0, rtol=0)
 
+        if dtype == torch.float:
+            # passed dtype can't be safely casted to inferred dtype
+            with self.assertRaisesRegex(RuntimeError, r"torch.linspace\(\): inferred dtype"):
+                torch.linspace(0, 1j, 5, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch.linspace\(\): inferred dtype"):
+                torch.linspace(0j, 1, 5, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch.linspace\(\): inferred dtype"):
+                torch.linspace(0j, 1j, 5, device=device, dtype=dtype)
+
         # Check linspace for generating the correct output for each dtype.
         start = 0 if dtype == torch.uint8 else -100
         expected_lin = torch.tensor([start + .5 * i for i in range(401)], device=device, dtype=torch.double)
@@ -2797,14 +2806,7 @@ class TestTensorCreation(TestCase):
             if isinstance(start, complex) or isinstance(end, complex):
                 dtype = torch.cfloat
 
-            if dtype == torch.cfloat:
-                # TODO(kshitij12345): Fix unnecessary warning
-                # Reference: https://github.com/pytorch/pytorch/issues/53171
-                with self.assertWarnsRegex(UserWarning,
-                                           "As either `start` or `stop` is complex"):
-                    self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
-            else:
-                self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
+            self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
 
     def test_linspace_deduction(self, device):
         # Test deduction from input parameters.
@@ -2895,6 +2897,15 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1, device=device, dtype=dtype))
         self.assertEqual(torch.logspace(0, 1, 1, device=device, dtype=dtype),
                          torch.ones(1, device=device, dtype=dtype), atol=0, rtol=0)
+
+        if dtype == torch.float:
+            # passed dtype can't be safely casted to inferred dtype
+            with self.assertRaisesRegex(RuntimeError, r"torch.logspace\(\): inferred dtype"):
+                torch.logspace(0, 1j, 5, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch.logspace\(\): inferred dtype"):
+                torch.logspace(0j, 1, 5, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch.logspace\(\): inferred dtype"):
+                torch.logspace(0j, 1j, 5, device=device, dtype=dtype)
 
         # Check precision - start, stop and base are chosen to avoid overflow
         # steps is chosen so that step size is not subject to rounding error

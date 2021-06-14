@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -134,7 +136,7 @@ at::DimVector getPermutationPerSortedStride(const TensorTypePtr& type) {
   std::set<int> ordered_axes;
 
   // TODO: this does not support broadcast yet;
-  for (int i = 0; i < rank; i++) {
+  for (const auto i : c10::irange(rank)) {
     if ((*stride_properties)[i].has_value() &&
         (*stride_properties)[i]->stride_index_.has_value()) {
       ordered_axes.insert((*stride_properties)[i]->stride_index_.value());
@@ -190,13 +192,13 @@ at::DimVector inversePermutation(
     }
 
     at::DimVector permutation(red_rank, -1);
-    for (int i = 0; i < red_rank; i++) {
+    for (const auto i : c10::irange(red_rank)) {
       permutation[adjusted_permutation[i]] = i;
     }
     return permutation;
   } else {
     at::DimVector permutation(rank, -1);
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       permutation[permuted[i]] = i;
     }
     return permutation;
@@ -456,7 +458,7 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
 
       std::vector<c10::ShapeSymbol> permuted_vec_ss;
       std::vector<c10::optional<c10::Stride>> permuted_vec_optional_stride;
-      for (int i = 0; i < rank; i++) {
+      for (const auto i : c10::irange(rank)) {
         permuted_vec_ss.emplace_back(
             vec_shape_symbol[this->input_permutation_[i]]);
         // permutation doesn't change contiguity info, nor does it change
@@ -464,7 +466,7 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
         if (vec_optional_stride[i].has_value()) {
           c10::optional<size_t> index = vec_optional_stride[i]->stride_index_;
           if (index.has_value()) {
-            for (int j = 0; j < rank; j++) {
+            for (const auto j : c10::irange(rank)) {
               // follow the permutation to resolve the new stride_index;
               if (this->input_permutation_[j] == (long)index.value()) {
                 index = j;
