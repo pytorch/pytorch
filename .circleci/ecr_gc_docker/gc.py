@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
-import datetime
 import boto3
+import datetime
 import pytz
-import sys
 import re
+import sys
 
 
 def save_to_s3(project, data):
@@ -148,9 +148,12 @@ def chunks(chunkable, n):
     """ Yield successive n-sized chunks from l.
     """
     for i in range(0, len(chunkable), n):
-        yield chunkable[i : i + n]
+        yield chunkable[i: i + n]
+
 
 SHA_PATTERN = re.compile(r'^[0-9a-f]{40}$')
+
+
 def looks_like_git_sha(tag):
     """Returns a boolean to check if a tag looks like a git sha
 
@@ -158,6 +161,7 @@ def looks_like_git_sha(tag):
     "-" characters
     """
     return re.match(SHA_PATTERN, tag) is not None
+
 
 stable_window_tags = []
 for repo in repos(client):

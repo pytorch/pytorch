@@ -50,7 +50,6 @@ struct PeepholeOptimizeAliasSensitiveImpl {
         }
         auto kind = node->kind();
         int64_t output_size =
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             kind == aten::conv1d ? 3 : (kind == aten::conv2d ? 4 : 5);
         // this is to handle potential resize_ calls, however unlikely
         // if we add more checks related to resize_ in the graph,
