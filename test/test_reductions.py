@@ -2428,6 +2428,7 @@ class TestReductions(TestCase):
     def test_histogram(self, device, dtype):
         shapes = (
             (),
+            (0,),
             (1,),
             (1, 5),
             (3, 5),
