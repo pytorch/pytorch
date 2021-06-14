@@ -144,6 +144,7 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
   std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
 
   if (self_bdim.has_value() && self_value.dim() == 5 && first_dim_has_size_1(self_value, *self_bdim) && grad_output_bdim.has_value() && !weight_bdim.has_value()) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     auto result = cudnn_conv_per_sample_grad_rule(
         self_value, self_bdim, 
         grad_output_value, grad_output_bdim,
