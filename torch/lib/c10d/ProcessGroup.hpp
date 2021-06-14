@@ -264,7 +264,7 @@ class ProcessGroup : public torch::CustomClassHolder {
       at::Tensor&,
       at::Tensor&,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
-    TORCH_CHECK(false, "ProcessGroup does not support reduce_scatter_base");
+    throw std::runtime_error("ProcessGroup does not support reduce_scatter_base");
   }
 
 
@@ -274,20 +274,20 @@ class ProcessGroup : public torch::CustomClassHolder {
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    TORCH_CHECK(false, "ProcessGroup does not support alltoall");
+    throw std::runtime_error("ProcessGroup does not support alltoall");
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    TORCH_CHECK(false, "ProcessGroup does not support alltoall");
+    throw std::runtime_error("ProcessGroup does not support alltoall");
   }
 
   virtual void monitoredBarrier(
       const BarrierOptions& /* unused */, bool /* unused */ = false ) {
     auto backendName = getBackendName();
-    TORCH_CHECK(false,
+    throw std::runtime_error(
         c10::str("ProcessGroup ",
         backendName,
         " does not support monitoredBarrier, only GLOO supports monitored barrier.")
@@ -299,7 +299,7 @@ class ProcessGroup : public torch::CustomClassHolder {
   // for GLOO and NCCL backends currently.
   virtual void setSequenceNumberForGroup() {
     auto backendName = getBackendName();
-    TORCH_CHECK(false,
+    throw std::runtime_error(
         c10::str("ProcessGroup ",
         backendName,
         " does not yet support sequence numbers.")
@@ -311,7 +311,7 @@ class ProcessGroup : public torch::CustomClassHolder {
   // may indicate that there is some sort of collective desynchronization.
   virtual uint64_t getSequenceNumberForGroup() {
       auto backendName = getBackendName();
-    TORCH_CHECK(false,
+    throw std::runtime_error(
         c10::str("ProcessGroup ",
         backendName,
         " does not yet support sequence numbers.")
