@@ -4,6 +4,7 @@ supported:
   - add.Tensor
   - as_strided
   - as_strided_
+  - bmm
   - constant_pad_nd
   - convolution_overrideable
   - convolution_backward_overrideable
