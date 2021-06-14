@@ -2414,6 +2414,44 @@ class TestQuantizedOps(TestCase):
                         msg=(f"Error is too high: SNR(dB): {power}, "
                              f"Signal: {signal}, MSE: {mse}"))
 
+    @skipIfNoFBGEMM
+    def test_conv_reduce_range(self):
+        # This test requires both fbgemm and qnnpack to be available
+        supported_qengines = torch.backends.quantized.supported_engines
+        if not (('fbgemm' in supported_qengines) and ('qnnpack' in supported_qengines)):
+            return
+
+        # TODO(before land): test conv1d and conv3d, test functionals
+        # TODO(before land): test serialization
+        # TODO(before land): test backward compatibility
+
+        m = torch.nn.Sequential(
+            torch.quantization.QuantStub(),
+            torch.nn.Conv2d(1, 1, 1),
+        ).eval()
+
+        # test that a conv with qnnpack (reduce_range=False) throws an error on fbgemm
+        torch.backends.quantized.engine = 'fbgemm'
+        m_copy = copy.deepcopy(m)
+        m_copy.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        mp = torch.quantization.prepare(m_copy)
+        mc = torch.quantization.convert(mp)
+        with self.assertRaises(RuntimeError) as e:
+            mc(torch.randn(1, 1, 1, 1))
+        self.assertTrue("This module is not safe to run on fbgemm." == str(e.exception))
+
+        # test that a conv with fbgemm (reduce_range=True) does not throw an error on fbgemm
+        torch.backends.quantized.engine = 'fbgemm'
+        m_copy = copy.deepcopy(m)
+        m_copy.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        mp = torch.quantization.prepare(m_copy)
+        mc = torch.quantization.convert(mp)
+        mc(torch.randn(1, 1, 1, 1))
+
+        # TODO(before land): test the other two cases,
+        #   and better code reuse in this test
+
+
     @override_qengines
     def test_custom_module_multi_head_attention(self):
         class MultiheadAttentionModel(torch.nn.Module):

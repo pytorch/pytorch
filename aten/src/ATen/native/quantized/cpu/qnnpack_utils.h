@@ -96,6 +96,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       torch::List<int64_t> dilation,
       int64_t groups,
       bool transpose,
+      bool safe_on_fbgemm,
       c10::optional<double> input_scale,
       std::vector<int64_t> kernel,
       at::Tensor w_scale,
@@ -110,6 +111,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         dilation_(std::move(dilation)),
         groups_(groups),
         transpose_(transpose),
+        safe_on_fbgemm_(safe_on_fbgemm),
         input_scale(input_scale),
         kernel_(std::move(kernel)),
         w_scales(w_scale),
@@ -236,6 +238,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   torch::List<int64_t> dilation_;
   int64_t groups_;
   bool transpose_;
+  bool safe_on_fbgemm_;
   c10::optional<double> input_scale;
   std::vector<int64_t> kernel_;
   at::Tensor w_scales;
@@ -264,7 +267,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      bool transpose);
+      bool transpose,
+      bool safe_on_fbgemm);
 
   torch::List<int64_t> stride() const override {
     return stride_;
@@ -288,6 +292,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
 
   bool transpose() const override {
     return transpose_;
+  }
+
+  bool safe_on_fbgemm() const override {
+    return safe_on_fbgemm_;
   }
 
  private:

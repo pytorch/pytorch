@@ -37,6 +37,9 @@
  *  2. list of optional tensors
  *    0: bias
  *
+ *  // TODO(before land): implement BC serialization for version 3, which
+ *    will include the new flag, and default it to "safe" for previous versions
+ *
  *  Note: version is a string and conv params are packed into a Tensor
  *    to make ONNX happy (ints and containers of ints are not supported).
  */
@@ -233,6 +236,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       idx,
       " got ",
       conv_params_packed.numel());
+  // TODO: read safe_on_fbgemm from state instead of hardcoding
+  bool safe_on_fbgemm = true;
 
   auto& ctx = at::globalContext();
 
@@ -246,7 +251,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       output_padding,
       dilation,
       groups,
-      transpose
+      transpose,
+      safe_on_fbgemm
     );
   }
 #endif // USE_FBGEMM
@@ -264,7 +270,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       output_padding,
       dilation,
       groups,
-      transpose
+      transpose,
+      safe_on_fbgemm
     );
   }
 #endif // USE_PYTORCH_QNNPACK

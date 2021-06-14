@@ -204,7 +204,9 @@ class _ConvNd(nn.Module):
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
-        qconv.set_weight_bias(qweight, mod.bias)
+        # TODO(before land): also set this for all other conv modules and functionals
+        activation_safe_on_fbgemm = activation_post_process.reduce_range
+        qconv.set_weight_bias(qweight, mod.bias, activation_safe_on_fbgemm)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
         return qconv
@@ -298,6 +300,7 @@ class Conv1d(_ConvNd):
     def _get_name(self):
         return 'QuantizedConv1d'
 
+    # TODO(before land): also update all the other flavors of conv
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv1d_prepack(
@@ -397,13 +400,20 @@ class Conv2d(_ConvNd):
     def _get_name(self):
         return 'QuantizedConv2d'
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(
+        self,
+        w: torch.Tensor,
+        b: Optional[torch.Tensor],
+        safe_on_fbgemm: Optional[bool] = True,
+    ) -> None:
         if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv2d_prepack(
-                w, b, self.stride, self.padding, self.dilation, self.groups)
+                w, b, self.stride, self.padding, self.dilation, self.groups,
+                safe_on_fbgemm)
         else:
             self._packed_params = torch.ops.quantized.conv2d_prepack(
-                w, b, self.stride, _pair(0), self.dilation, self.groups)
+                w, b, self.stride, _pair(0), self.dilation, self.groups,
+                safe_on_fbgemm)
 
     def _weight_bias(self):
         return self._packed_params.unpack()
