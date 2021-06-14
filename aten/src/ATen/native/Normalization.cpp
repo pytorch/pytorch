@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/MetaFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/CPUApplyUtils.h>
@@ -9,15 +10,34 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/batch_norm.h>
+#include <ATen/native/Normalization.h>
 
 #include <vector>
 
 static const int MIOPEN_DIM_MAX = 5;
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
+  TORCH_CHECK(!p.isComplex(), "renorm: p must be real-valued");
+  TORCH_CHECK(p.toDouble() > 0.0, "renorm: non-positive-norm not supported");
+  TORCH_CHECK(!maxnorm.isComplex(), "renorm: maxnorm must be real-valued");
+  TORCH_CHECK(maxnorm.toDouble() >= 0.0,
+              "renorm: expected maxnorm to be >= 0 but got ", maxnorm.toDouble());
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim > 1, "renorm: input needs at least 2 dimensions, got ", ndim, "dimensions");
+  set_output(self.sizes(), self.options());
+}
+
+}  // namespace meta
+
+namespace native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(batch_norm_cpu_inference_contiguous_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
   void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
@@ -361,7 +381,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
             scalar_t grad_mean = sum_a[f] / n;
             {
-              auto iter = TensorIterator::binary_op(grad_in, grad_in, grad_out);
+              auto iter = TensorIterator::borrowing_binary_op(grad_in, grad_in, grad_out);
               cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
                 return (go - grad_mean - gi) * invstd * w;
               });
@@ -423,35 +443,35 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("bias", num_features, bias.numel());
   }
 
-  bool use_cudnn = false;
-  use_cudnn = (input.is_cuda()
-               && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-               && (input.scalar_type() != at::kHalf
-                 || weight.scalar_type() == at::kFloat)
-               && weight.defined() && bias.defined()
-               && ((running_mean.defined() && running_var.defined())
-                 || (!running_mean.defined() && !running_var.defined() && training))
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               && ((input.dim() == 2 && input.size(0) <= 131070 && training) // per-activation, training
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                 || (input.dim() == 2 && input.size(0) <= 262136 && !training) // per-activation, eval
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                 || (input.dim() >= 3 && input.size(0) <= 880801 && training) // spatial, training
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                 || (input.dim() >= 3 && input.size(0) <= 65535 && !training)) //spatial, eval
-               && detail::getCUDAHooks().compiledWithCuDNN()
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
+  const bool use_cudnn = (
+      input.is_cuda()
+      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
+      && (input.scalar_type() != at::kHalf
+        || weight.scalar_type() == at::kFloat)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && training))
+      && (input.dim() >= 3)
+      && ((input.size(0) <= 880801 && training) // spatial, training
+          ||(input.size(0) <= 65535 && !training)) //spatial, eval
+      && detail::getCUDAHooks().compiledWithCuDNN()
+      && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
-  if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
-    return std::tuple_cat(
-             at::cudnn_batch_norm(
-               input.contiguous(input.suggest_memory_format()), weight.contiguous(),
-               bias.contiguous(),
-               running_mean.defined() ? running_mean.contiguous() : running_mean,
-               running_var.defined() ? running_var.contiguous() : running_var,
-               training, momentum, eps),
-             std::make_tuple(1));
+  if (use_cudnn) {
+    auto input_c = input.contiguous(input.suggest_memory_format());
+    auto weight_c = weight.contiguous();
+    auto bias_c = bias.contiguous();
+    auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
+    auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
+
+    Tensor output, save_mean, save_var, reserve;
+    std::tie(output, save_mean, save_var, reserve) =
+        at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c,
+                             training, momentum, eps);
+
+    return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
+        output, save_mean, save_var, reserve, 1);
   }
 
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
@@ -613,6 +633,41 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_ou
   return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_backward_cpu", [&] {
       return batch_norm_backward_cpu_template<scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
     });
+}
+
+TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
+                            const Scalar& maxnorm, const Tensor& out) {
+  auto self_sizes = self.sizes();
+  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
+
+  DimVector reduce_dims(self_sizes.size());
+  std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
+  reduce_dims.erase(reduce_dims.begin() + dim);
+
+  // For cuda half, calculate norm in float precision then cast
+  // normalization factor to half
+  auto dtype = self.scalar_type();
+  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
+  Tensor norm;
+  if (acc_type != dtype) {
+    norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims,
+                                  /*keepdim=*/true, /*dtype=*/acc_type);
+  } else {
+    norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims,
+                                  /*keepdim=*/true);
+  }
+
+  auto factor = (acc_type == c10::toValueType(dtype)) ?
+      norm : at::empty(norm.sizes(), self.options());
+  auto iter = TensorIteratorConfig()
+      .add_output(factor)
+      .add_input(norm)
+      .set_check_mem_overlap(false)
+      .cast_common_dtype_to_outputs(true)
+      .build();
+
+  renorm_scale_factor_stub(iter.device_type(), iter, maxnorm.toDouble());
+  at::mul_outf(self, factor, const_cast<Tensor&>(out));
 }
 
 }} // at::native

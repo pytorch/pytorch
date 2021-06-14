@@ -35,7 +35,6 @@ static c10::optional<std::vector<int64_t>> getMapSize(
   // should be straightforward.
   // Note: left unitialized since empty shape is broadcastable to any shape
   std::vector<int64_t> map_size;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map_size.reserve(8);
   for (const auto arg_idx : arg_subset) {
     auto& arg = args.at(arg_idx);

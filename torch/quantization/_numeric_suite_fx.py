@@ -5,9 +5,11 @@ import torch.nn as nn
 import torch.quantization.quantize_fx as quantize_fx
 from torch.fx import GraphModule
 from torch.fx.graph import Node
+from torch.quantization.ns.mappings import (
+    get_base_name_to_sets_of_related_ops,
+)
 from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
-    get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
 )
 

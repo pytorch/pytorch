@@ -81,7 +81,6 @@ void PackedGemmMatrixFP16ShapeFunctions::SetupExternalTensorDescriptor(
       blob->template Get<unique_ptr<fbgemm::PackedGemmMatrixFP16>>().get();
 
   // setup data and type
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   desc->dataType = 10; // ONNXIFI_DATATYPE_FLOAT16
   desc->buffer = reinterpret_cast<uint64_t>(packed->pmat());
 

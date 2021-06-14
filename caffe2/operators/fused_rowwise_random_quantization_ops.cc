@@ -34,7 +34,6 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   // |    1B    |  1B  |  4B |  4B | ...output_data....|
   // In output_data: the b-th bucket of the i-th byte stores
   // the i-th data of the b-th segment of input row
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t data_per_byte = 8 / bitwidth_;
   // How many bytes in the output
   size_t segment_size = (input_columns + data_per_byte - 1) / data_per_byte;
@@ -134,13 +133,10 @@ OPERATOR_SCHEMA(FloatToFusedRandRowwiseQuantized)
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto bitwidth = helper.GetSingleArgument<int32_t>("bitwidth", 8);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       size_t data_per_byte = 8 / bitwidth;
       vector<TensorShape> out;
       TensorShape X = in[0];
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, 10 + (X.dims(1) + data_per_byte - 1) / data_per_byte);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);

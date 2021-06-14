@@ -79,7 +79,6 @@ bool BlobsQueue::blockingRead(
   // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CAFFE_EVENT(stats_, queue_balance, -1);
   if (timeout_secs > 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::chrono::milliseconds timeout_ms(int(timeout_secs * 1000));
     cv_.wait_for(
         g, timeout_ms, [this, canRead]() { return closing_ || canRead(); });
