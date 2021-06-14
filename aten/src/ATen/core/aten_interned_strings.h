@@ -238,6 +238,9 @@ _(aten, coalesce) \
 _(aten, combinations) \
 _(aten, _conj) \
 _(aten, conj) \
+_(aten, conj_physical) \
+_(aten, conj_physical_) \
+_(aten, resolve_conj) \
 _(aten, complex) \
 _(aten, copysign) \
 _(aten, polar) \
@@ -376,7 +379,6 @@ _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
 _(aten, hypot) \
-_(aten, i0) \
 _(aten, i0_) \
 _(aten, igamma) \
 _(aten, igamma_) \
@@ -401,6 +403,7 @@ _(aten, is_cuda) \
 _(aten, is_mlc) \
 _(aten, is_distributed) \
 _(aten, is_floating_point) \
+_(aten, is_inference) \
 _(aten, is_nonzero) \
 _(aten, is_same_size) \
 _(aten, is_set_to) \
@@ -764,6 +767,7 @@ _(aten, zeros_like) \
 _(aten, real) \
 _(aten, imag) \
 _(aten, view_as_real) \
+_(aten, _view_as_real_physical) \
 _(aten, view_as_complex) \
 /* nothing */
 

@@ -7,16 +7,13 @@ import torch.distributed as dist
 def _allreduce_fut(
     process_group: dist.ProcessGroup, tensor: torch.Tensor
 ) -> torch.futures.Future:
+    "Averages the input gradient tensor by allreduce and returns a future."
     group_to_use = process_group if process_group is not None else dist.group.WORLD
 
-    "Averages the input gradient tensor by allreduce and returns a future."
-    fut = dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
+    # Apply the division first to avoid overflow, especially for FP16.
+    tensor.div_(group_to_use.size())
 
-    def div_by_group_size(fut):
-        return [fut.value()[0].div_(group_to_use.size())]
-
-    return fut.then(div_by_group_size)
-
+    return dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
 
 def allreduce_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket

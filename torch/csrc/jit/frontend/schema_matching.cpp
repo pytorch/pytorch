@@ -50,8 +50,6 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   return false;
 }
 
-// Applies implicit conversion from value trying to turn it into type
-// concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
@@ -241,11 +239,6 @@ c10::optional<size_t> findInputWithName(
   return c10::nullopt;
 }
 
-/// Creates a list with the provided values if each value's type can be matched
-/// to an argument with type `elem_type`. If a type in `varargs` does not match
-/// `elem_type`, nullptr is returned. This is used for creating lists from
-/// varargs so that calls like torch.zeros(1, 2, 3) will be matched to
-/// aten::zeros(int[]).
 static Value* tryCreateList(
     const TypePtr& elem_type,
     Graph& graph,
