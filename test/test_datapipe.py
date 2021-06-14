@@ -331,8 +331,8 @@ class TestIterableDataPipeHttp(TestCase):
                            not tear down (clean up temp directory or terminate\
                            local server) due to {0}".format(str(e)))
 
-    def http_test_base(self, test_file_size, test_file_count, timeout=None,
-                       chunk=None):
+    def _http_test_base(self, test_file_size, test_file_count, timeout=None,
+                        chunk=None):
 
         def _get_data_from_tuple_fn(data, *args, **kwargs):
             return data[args[0]]
@@ -370,7 +370,7 @@ class TestIterableDataPipeHttp(TestCase):
         #   STATS: It takes about 5 hours to stress test 16 * 1024 * 1024
         #          files locally
         test_file_count = 1024
-        self.http_test_base(test_file_size, test_file_count)
+        self._http_test_base(test_file_size, test_file_count)
 
     @unittest.skip("Test on the very large file skipped\
                     due to the CI timing constraint.")
@@ -380,8 +380,8 @@ class TestIterableDataPipeHttp(TestCase):
         test_file_count = 1
         timeout = 30
         chunk = 1024 * 1024 * 8
-        self.http_test_base(test_file_size, test_file_count, timeout=timeout,
-                            chunk=chunk)
+        self._http_test_base(test_file_size, test_file_count, timeout=timeout,
+                             chunk=chunk)
 
 
 class IDP_NoLen(IterDataPipe):
