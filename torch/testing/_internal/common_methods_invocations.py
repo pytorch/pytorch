@@ -3488,6 +3488,18 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
                                     low=low,
                                     requires_grad=requires_grad)))
 
+
+def sample_inputs_zeta(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = (SampleInput(make_arg((S,), low=1, requires_grad=requires_grad),
+                           args=(make_arg((S,), low=2, requires_grad=False),)),
+               SampleInput(make_arg((S,), low=1, requires_grad=requires_grad),
+                           args=(3.,)),
+               )
+
+    return samples
+
+
 # TODO: Consolidate `i0e` with sample_inputs_unary when `make_tensor`,
 #       supports `exclude` argument.
 #       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
@@ -6977,6 +6989,19 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_binary_pwise),
+    # OpInfo entry to verify the gradient formula of `other`/`q`
+    OpInfo('special.zeta',
+           op=lambda q, x, **kwargs: torch.special.zeta(x, q, **kwargs),
+           aten_name='special_zeta',
+           variant_test_name='grad',
+           dtypes=all_types_and(torch.bool),
+           supports_autograd=True,
+           safe_casts_outputs=True,
+           skips=(
+               # Lambda doesn't work in JIT test
+               SkipInfo("TestCommon", "test_variant_consistency_jit"),
+           ),
+           sample_inputs_func=sample_inputs_zeta),
     OpInfo('logsumexp',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
