@@ -3875,14 +3875,18 @@ add_docstr(torch.histogram,
            r"""
 histogram(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor)
 
-Computes the histogram of the values in a tensor.
+Computes a histogram of the values in a tensor.
+
+:attr:`bins` can be an integer or a 1D tensor.
 
 If :attr:`bins` is an int, it specifies the number of equal-width bins.
-:attr:`range` may be used to specify the lower and upper range of the bins.
-If no range is specified, the minimum and maximum elements of the input
-tensor are used.
+By default, the lower and upper range of the bins is determined by the
+minimum and maximum elements of the input tensor. The :attr:`range`
+argument can be provided to specify a range for the bins.
 
-If :attr:`bins` is a tensor, it specifies the sequence of bin edges.
+If :attr:`bins` is a 1D tensor, it specifies the sequence of bin edges
+including the rightmost edge. It should contain at least 2 elements
+and its elements should be increasing.
 
 Args:
     {input}
