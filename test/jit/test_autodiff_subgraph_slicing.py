@@ -12,7 +12,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
 
-from typing import Optional
+from typing import List, Tuple, Optional
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -137,6 +137,26 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             scripted = self.checkScript(method1, (x, weight, bias))
             # check_types requires last_graph on scripted to be set, so we just skip it
             check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
+
+    def test_requires_grad_for_tensor_list(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+
+            # output & var_list[0] should have requires_grad set to True
+            def func(input0: torch.Tensor, input1: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+                var_list = [input0, input1]
+                var = torch.cat(var_list)
+                output = var + 1.0
+                return output, var_list
+            jit_f = torch.jit.script(func)
+            input0 = torch.randn((2,), requires_grad=True)
+            input1 = torch.randn((2,))
+            output_ref = func(input0, input1)
+            for i in range(2):
+                output = jit_f(input0, input1)
+                assert(output_ref[0].requires_grad == output[0].requires_grad)
+                assert(output_ref[1][0].requires_grad == output[1][0].requires_grad)
+                assert(output_ref[1][1].requires_grad == output[1][1].requires_grad)
 
     def test_simple_merge(self):
         # o --> o
