@@ -9,6 +9,20 @@ import torch
 import torch.nn as nn
 
 
+class _PartialWrapper(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, *args, **keywords):
+        return self.p(*args, **keywords)
+
+    def __repr__(self):
+        return self.p.__repr__()
+
+    def with_args(self, **kwargs):
+        return _with_args(self, **kwargs)
+
+
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
 
@@ -24,19 +38,6 @@ def _with_args(cls_or_self, **kwargs):
         >>> id(foo_instance1) == id(foo_instance2)
         False
     """
-
-    class _PartialWrapper(object):
-        def __init__(self, p):
-            self.p = p
-
-        def __call__(self, *args, **keywords):
-            return self.p(*args, **keywords)
-
-        def __repr__(self):
-            return self.p.__repr__()
-
-        with_args = _with_args
-
     r = _PartialWrapper(partial(cls_or_self, **kwargs))
     return r
 
