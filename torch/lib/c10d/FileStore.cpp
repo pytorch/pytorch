@@ -273,7 +273,7 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       cleanupKey_("cleanup/"),
       regularPrefix_("/") {
   if (numWorkers_ < 1) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Number of workers for FileStore should be greater than zero");
   }
 }
@@ -341,7 +341,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-        throw std::runtime_error("Timeout waiting for key: " + key);
+        TORCH_CHECK(false, "Timeout waiting for key: " + key);
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
@@ -424,7 +424,7 @@ void FileStore::wait(
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start);
     if (timeout != kNoTimeout && elapsed > timeout) {
-      throw std::runtime_error("Wait timeout");
+      TORCH_CHECK(false, "Wait timeout");
     }
 
     /* sleep override */

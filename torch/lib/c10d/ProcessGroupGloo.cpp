@@ -66,7 +66,7 @@
       func<int64_t>(__VA_ARGS__);                      \
       break;                                           \
     default:                                           \
-      throw std::runtime_error("Invalid scalar type"); \
+      TORCH_CHECK(false, "Invalid scalar type"); \
   }
 
 #define HOST_NAME_MAX 256
@@ -95,7 +95,7 @@
       func<int64_t>(args);                             \
       break;                                           \
     default:                                           \
-      throw std::runtime_error("Invalid scalar type"); \
+      TORCH_CHECK(false, "Invalid scalar type"); \
   }
 #endif
 
@@ -178,22 +178,22 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::MAX:
       return ReduceFunc(&::gloo::max<T>);
     case ReduceOp::BAND:
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Cannot use ReduceOp.BAND with non-integral dtype");
       break;
     case ReduceOp::BOR:
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Cannot use ReduceOp.BOR with non-integral dtype");
       break;
     case ReduceOp::BXOR:
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
     case ReduceOp::UNUSED:
       break;
   }
 
-  throw std::runtime_error("Unhandled ReduceOp");
+  TORCH_CHECK(false, "Unhandled ReduceOp");
 }
 
 // Bitwise AND with SFINAE guard for integral types.
@@ -258,7 +258,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
       break;
   }
 
-  throw std::runtime_error("Unhandled ReduceOp");
+  TORCH_CHECK(false, "Unhandled ReduceOp");
 }
 
 template <typename T, typename O>
@@ -368,7 +368,7 @@ void initializeStreamsEvents(
     const auto device_id = tensorgroup[0].device().index();
     for (const auto& tensor : tensorgroup) {
       if (tensor.device().index() != device_id) {
-        throw std::runtime_error(
+        TORCH_CHECK(false,
             "tensors in the nested tensor vectors need to "
             "be on the same device");
       }
@@ -683,7 +683,7 @@ ProcessGroupGloo::ProcessGroupGloo(
       collectiveCounter_(0) {
   auto& devices = options->devices;
   if (devices.empty()) {
-    throw std::runtime_error("No device(s) specified");
+    TORCH_CHECK(false, "No device(s) specified");
   }
 
   // Create and connect a context for every device.
@@ -915,7 +915,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     work = c10::make_intrusive<AsyncBroadcastCUDAWork>(
         std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
 
   enqueue(work);
@@ -1426,7 +1426,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
       invalidArgument("unsupported layout");
     }
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
 
   enqueue(work);
@@ -1487,7 +1487,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
       invalidArgument("unsupported layout");
     }
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1646,7 +1646,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
         opts.reduceOp,
         tag);
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1838,7 +1838,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
     work = c10::make_intrusive<AsyncAllgatherCUDAWork>(
         std::move(context), outputs, inputs, tag);
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1972,7 +1972,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "no support for _allgather_base in Gloo process group");
 }
 
@@ -2166,7 +2166,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     work = c10::make_intrusive<AsyncGatherCUDAWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -2349,7 +2349,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     work = c10::make_intrusive<AsyncScatterCUDAWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -2359,7 +2359,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
-  throw std::runtime_error("ProcessGroupGloo does not support reduce_scatter");
+  TORCH_CHECK(false, "ProcessGroupGloo does not support reduce_scatter");
 }
 
 namespace {
@@ -2531,14 +2531,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
 
 at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
-    throw std::runtime_error("ProcessGroupGloo::send takes a single tensor");
+    TORCH_CHECK(false, "ProcessGroupGloo::send takes a single tensor");
   }
   auto& tensor = tensors[0];
   if (!tensor.is_contiguous()) {
-    throw std::runtime_error("input tensor has to be contiguous");
+    TORCH_CHECK(false, "input tensor has to be contiguous");
   }
   if (tensor.is_sparse()) {
-    throw std::runtime_error("input tensor has to be dense");
+    TORCH_CHECK(false, "input tensor has to be dense");
   }
   return tensor;
 }

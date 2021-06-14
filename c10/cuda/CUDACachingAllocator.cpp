@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/irange.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -130,7 +131,7 @@ void update_stat_array(
     StatArray& stat_array,
     int64_t amount,
     const StatTypes& stat_types) {
-  for (size_t stat_type = 0; stat_type < stat_types.size(); ++stat_type) {
+  for (const auto stat_type : c10::irange(stat_types.size())) {
     if (stat_types[stat_type]) {
       update_stat(stat_array[stat_type], amount);
     }
@@ -614,9 +615,8 @@ class DeviceCachingAllocator {
   void resetAccumulatedStats() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    for (size_t statType = 0;
-         statType < static_cast<size_t>(StatType::NUM_TYPES);
-         ++statType) {
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
       reset_accumulated_stat(stats.allocation[statType]);
       reset_accumulated_stat(stats.segment[statType]);
       reset_accumulated_stat(stats.active[statType]);
@@ -635,9 +635,8 @@ class DeviceCachingAllocator {
   void resetPeakStats() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    for (size_t statType = 0;
-         statType < static_cast<size_t>(StatType::NUM_TYPES);
-         ++statType) {
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
       reset_peak_stat(stats.allocation[statType]);
       reset_peak_stat(stats.segment[statType]);
       reset_peak_stat(stats.active[statType]);
@@ -1090,11 +1089,11 @@ class DeviceCachingAllocator {
 
     stream_set streams(std::move(block->stream_uses));
     AT_ASSERT(block->stream_uses.empty());
-    for (auto it = streams.begin(); it != streams.end(); ++it) {
-      C10_CUDA_CHECK(cudaSetDevice(it->device_index()));
+    for (auto& stream : streams) {
+      C10_CUDA_CHECK(cudaSetDevice(stream.device_index()));
 
       cudaEvent_t event = create_event_internal();
-      C10_CUDA_CHECK(cudaEventRecord(event, it->stream()));
+      C10_CUDA_CHECK(cudaEventRecord(event, stream.stream()));
 
       block->event_count++;
       cuda_events.emplace_back(event, block);
@@ -1148,7 +1147,7 @@ class DeviceCachingAllocator {
   // Accumulates sizes of all memory blocks for given device in given pool
   void cache_info_aux(const BlockPool& pool, size_t* total, size_t* largest) {
     for (const auto& block : pool.blocks) {
-      size_t blocksize = block->size;
+      const auto blocksize = block->size;
       *total += blocksize;
       if (blocksize > *largest) {
         *largest = blocksize;
@@ -1193,10 +1192,10 @@ class THCCachingAllocator {
   }
 
   void init(int device_count) {
-    int size = device_allocator.size();
+    const auto size = static_cast<int64_t>(device_allocator.size());
     if (size < device_count) {
       device_allocator.resize(device_count);
-      for (int i = size; i < device_count; i++) {
+      for (const auto i : c10::irange(size, device_count)) {
         device_allocator[i] = std::unique_ptr<DeviceCachingAllocator>(
             new DeviceCachingAllocator());
       }
@@ -1206,7 +1205,7 @@ class THCCachingAllocator {
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
     TORCH_INTERNAL_ASSERT(
-        0 <= device && device < device_allocator.size(),
+        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
@@ -1228,7 +1227,7 @@ class THCCachingAllocator {
 
   void setMemoryFraction(double fraction, int device) {
     TORCH_INTERNAL_ASSERT(
-        0 <= device && device < device_allocator.size(),
+        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
@@ -1246,9 +1245,8 @@ class THCCachingAllocator {
   }
 
   void emptyCache() {
-    int count = device_allocator.size();
-    for (int i = 0; i < count; i++)
-      device_allocator[i]->emptyCache();
+    for (auto& da : device_allocator)
+      da->emptyCache();
   }
 
   void* getBaseAllocation(void* ptr, size_t* outSize) {
@@ -1282,9 +1280,8 @@ class THCCachingAllocator {
 
   std::vector<SegmentInfo> snapshot() {
     std::vector<SegmentInfo> result;
-    int count = device_allocator.size();
-    for (int i = 0; i < count; i++) {
-      auto snap = device_allocator[i]->snapshot();
+    for (auto& da : device_allocator) {
+      auto snap = da->snapshot();
       result.insert(result.end(), snap.begin(), snap.end());
     }
 
@@ -1377,8 +1374,10 @@ std::mutex* getFreeMutex() {
 }
 
 static inline void assertValidDevice(int device) {
-  int device_num = caching_allocator.device_allocator.size();
-  TORCH_CHECK(0 <= device && device < device_num, "Invalid device argument.");
+  const auto device_num = caching_allocator.device_allocator.size();
+  TORCH_CHECK(
+      0 <= device && device < static_cast<int64_t>(device_num),
+      "Invalid device argument.");
 }
 
 DeviceStats getDeviceStats(int device) {
