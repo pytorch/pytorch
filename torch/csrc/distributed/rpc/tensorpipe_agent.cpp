@@ -136,9 +136,9 @@ std::vector<c10::Device> getDevicesOfTensors(
   }
   std::vector<c10::Device> devices;
   devices.reserve(deviceCount);
-  for (c10::DeviceIndex idx = 0; idx < indexBitset.size(); idx++) {
+  for (const auto idx : c10::irange(indexBitset.size())) {
     if (indexBitset[idx]) {
-      devices.emplace_back(impl->type(), idx);
+      devices.emplace_back(impl->type(), static_cast<c10::DeviceIndex>(idx));
     }
   }
   return devices;
@@ -289,7 +289,7 @@ constexpr static int kNumUvThreads = 16;
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
-  for (const auto laneIdx : c10::irange(kNumUvThreads)) {
+  for (const auto laneIdx C10_UNUSED : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
     std::string address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
@@ -782,7 +782,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
         "tried to send() a message of type ",
         requestMessage->type(),
         " but RPC is no longer running on this node.");
-    throw std::runtime_error(err);
+    TORCH_CHECK(false, err);
   }
 
   const auto& url = findWorkerURL(toWorkerInfo);
