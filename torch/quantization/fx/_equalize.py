@@ -1,15 +1,17 @@
 import torch
 import torch.nn as nn
-
+from torch.fx import GraphModule
 from torch.fx.graph import Node
 
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
+    ObserverBase,
 )
 from ..utils import check_min_max_valid
 
 from collections import namedtuple
+from typing import Dict, Any
 import warnings
 
 
@@ -220,3 +222,215 @@ def node_supports_equalization(node: Node, modules) -> bool:
     elif node.op == 'call_function':
         return node.target == nn.functional.linear
     return False
+
+def get_weight_eq_obs(node: Node, model: GraphModule, modules: Dict[str, nn.Module]):
+    """ Gets the following weight equalization observer. There should always
+    exsist a weight equalization observer after an input equalization observer.
+
+    Returns the node containing the weight equalization observer, and the weight
+    equalization observer if it has been newly created
+    """
+
+    # Find the next node that is either a nn.Linear or a functional layer
+    while (node.op not in ('output', 'call_function') and not
+           (node.op == 'call_module' and isinstance(node.target, str) and
+            isinstance(modules[node.target], nn.Linear))):
+        node = node.next
+
+    if node.op == 'call_module':
+        # If the next node is a nn.Linear layer, then it must have a
+        # WeightEqualizationObserver configuration
+        equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
+        assert(equalization_qconfig_map.get(node.name, None) is not None)
+
+        weight_eq_obs = equalization_qconfig_map.get(node.name, None).weight()
+        assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
+        # TODO: Maybe we should check that this weight observer comes somewhat
+        # directly after the given InputEqualizationObserver node, but I'm not sure
+        # how to check that
+        return node, weight_eq_obs
+
+    elif node.op == 'call_function':
+        # TODO
+        return None, None
+
+    return None, None
+
+def get_next_input_obs(node: Node, modules: Dict[str, nn.Module]):
+    """ Gets the following input observer. We can use this function for both
+    obtaining the next input equalization observer and the next input
+    quantization observer
+
+    Returns the node containing the input observer, and the input observer
+    """
+    node = node.next
+    while node.op not in ('call_module', 'call_function', 'output'):
+        node = node.next
+    if node.op in ('output', 'call_function'):
+        return None, None
+
+    assert(isinstance(node.target, str))
+    input_obs = modules[node.target]
+    return node, input_obs
+
+def get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module]) -> torch.Tensor:
+    """ If the next next node is an InputEqualizationObserver then we want to
+    return its equalization scale, else we return 1
+
+    This is used in the case where there are two connecting linear layers:
+        linear1 -> LinearOutObs -> InputEqObs -> linear2
+    In this case, the node given is linear1 and we want to locate the InputEqObs.
+    """
+    # TODO: This code seems a little hacky/hard-coded, so any suggestions for
+    # how to improve it would be greatly appreciated!
+    next_node, _ = get_next_input_obs(node, modules)
+    _, next_next_obs = get_next_input_obs(next_node, modules)
+    if isinstance(next_next_obs, _InputEqualizationObserver):
+        return next_next_obs.equalization_scale
+    return torch.tensor(1)
+
+def scale_input_node(node: Node, modules: Dict[str, nn.Module]) -> None:
+    """ Scales the following input quantization observer's min/max values by
+    updating the values with the scaled min/max values calculated by the input
+    equalization observer
+    """
+    assert(isinstance(node.target, str))
+    input_eq_obs = modules[node.target]
+    assert(isinstance(input_eq_obs, _InputEqualizationObserver))
+    _, input_quant_obs = get_next_input_obs(node, modules)
+
+    if not isinstance(input_quant_obs, ObserverBase):
+        return
+
+    min_input_scaled, max_input_scaled = input_eq_obs.calculate_scaled_minmax()
+    input_quant_obs.min_val = min_input_scaled
+    input_quant_obs.max_val = max_input_scaled
+
+def scale_weight_node(
+    node: Node,
+    modules: Dict[str, nn.Module],
+    equalization_scale: torch.Tensor,
+    next_equalization_scale: torch.Tensor,
+) -> None:
+    """ Scale the weights for input-weight equalization by multiplying the
+    weight by 1/equalization_scale and next_equalization_scale
+
+    Args:
+        node: Current node whose weights we want to scale
+        equalization_scale: Current node's calculated equalization scale
+        next_equalization_scale: Next node's calculated equalization scale if
+           the following node needs to be equalized, 1 otherwise
+    """
+    assert(isinstance(node.target, str))
+
+    # Scale the weights for input-weight equalization
+    # If the following layer needs to be equalized then we will multiply its scale
+    weight = modules[node.target].weight
+    assert(isinstance(weight, torch.Tensor))
+
+    scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale))
+    scaled_weight = torch.mul(scaled_weight, next_equalization_scale)
+    modules[node.target].weight = nn.Parameter(scaled_weight)
+
+    # TODO: The bias may need to be scaled for connecting linear layers
+    bias = modules[node.target].bias
+    assert(isinstance(bias, torch.Tensor))
+
+    scaled_bias = torch.mul(bias, next_equalization_scale)
+    modules[node.target].bias = nn.Parameter(scaled_bias)
+
+def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module]) -> Dict[str, _WeightEqualizationObserver]:
+    """ Update all of the observer's equalization scale. For each
+    InputEqualizationObserver, we will find the location of the next
+    WeightEqualizationObserver, create it, and calculate the equalization scale
+    based on the two observers.
+
+    We will then return a dictionary mapping node names to the newly created
+    WeightEqualizationObserver.
+    """
+    weight_eq_obs_dict = {}
+    for node in model.graph.nodes:
+        if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
+            input_eq_obs = modules[node.target]
+            assert(isinstance(input_eq_obs, _InputEqualizationObserver))
+            next_node, weight_eq_obs = get_weight_eq_obs(node, model, modules)
+
+            weight_eq_obs(modules[next_node.target].weight)
+
+            # Calculate and set the equalization scale values
+            equalization_scale = calculate_equalization_scale(input_eq_obs, weight_eq_obs)
+            input_eq_obs.set_equalization_scale(equalization_scale)
+            weight_eq_obs.set_equalization_scale(equalization_scale)
+
+            weight_eq_obs_dict[next_node.name] = weight_eq_obs
+
+    return weight_eq_obs_dict
+
+def convert_eq_obs(
+    model: GraphModule, 
+    modules: Dict[str, nn.Module], 
+    weight_eq_obs_dict: Dict[str, _WeightEqualizationObserver],
+) -> None:
+    """ Removes the input equalization observers and replaces them with mul
+    operators whenever applicable. Updates the input quantization observers with
+    the scaled input min/max values. Scales the weights and runs the weight
+    quantization observers with the scaled weights.
+    """
+    for node in model.graph.nodes:
+        if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
+            prev_node = node.args[0]
+            # TODO: Possible special handling for connected linear layers
+            # Update the following input quantization observer's min/max values
+            scale_input_node(node, modules)
+
+            # Replace the InputEqualizationObserver with a mul operator to scale
+            # all input values
+
+            # Create a node containing the equalization scale
+            with model.graph.inserting_after(prev_node):
+                name = node.name + '_scale'
+                setattr(model, name, modules[node.target].equalization_scale)
+                eq_scale_node = model.graph.create_node('get_attr', name)
+
+            # Create a node multiplying the input with the equalization scale
+            with model.graph.inserting_after(eq_scale_node):
+                inputs = (prev_node, eq_scale_node)
+                mul_node = model.graph.create_node("call_function", torch.mul, inputs)
+
+            # Replace the current node with the new mul node
+            orig_users = list(node.users.keys())
+            for user_node in orig_users:
+                user_node.replace_input_with(node, mul_node)
+
+            # Erase the InputEqualizationObserver node
+            model.graph.erase_node(node)
+
+            # Alternatively, instead of lines 379-390, we could do the following:
+            # inputs = (prev_node, eq_scale_node)
+            # node.op = "call_function"
+            # node.target = torch.mul
+            # node.args = tuple(inputs)
+
+        elif weight_eq_obs_dict.get(node.name, None) is not None:
+            weight_eq_obs = weight_eq_obs_dict.get(node.name)
+            assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
+            assert(isinstance(node.target, str))
+
+            equalization_scale = weight_eq_obs.equalization_scale
+
+            # Scales the weights and runs the weight quantization observers
+            next_equalization_scale = get_next_equalization_scale(node, modules)
+            scale_weight_node(node, modules, equalization_scale, next_equalization_scale)
+
+def _convert_equalization_ref(model: GraphModule):
+    """ Reference function which applies changes needed for equalization, but
+    does not quantize the nodes
+    """
+    modules = dict(model.named_modules(remove_duplicate=False))
+
+    # Calculate the equalization scale, update the observers with the scaled
+    # inputs, and scale the weight
+    weight_eq_obs_dict = update_obs_for_equalization(model, modules)
+    convert_eq_obs(model, modules, weight_eq_obs_dict)
+
+    return GraphModule(model, model.graph)

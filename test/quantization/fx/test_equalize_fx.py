@@ -2,12 +2,13 @@ import torch
 import torch.nn as nn
 from torch.quantization import default_qconfig
 from torch.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
-from torch.quantization.quantize_fx import prepare_fx
+from torch.quantization.quantize_fx import prepare_fx, convert_fx
 from torch.quantization.fx._equalize import (
     _InputEqualizationObserver,
     _WeightEqualizationObserver,
     calculate_equalization_scale,
     default_equalization_qconfig,
+    _convert_equalization_ref
 )
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
@@ -238,3 +239,64 @@ class TestEqualizeFx(QuantizationTestCase):
             m = M().eval()
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+
+    def test_input_weight_equalization_convert(self):
+        """
+        """
+        qconfig_dict = {"": None,
+                        "object_type": [(nn.Linear, default_qconfig),
+                                        (nn.functional.linear, default_qconfig)]}
+
+        default_equalization_qconfig_dict = {
+            "": default_qconfig,
+            "object_type": [(nn.Linear, default_equalization_qconfig),
+                            (nn.functional.linear, default_equalization_qconfig)]
+        }
+
+        fp32_equalization_qconfig_dict = {
+            "": None,
+            "object_type": [(nn.Linear, default_equalization_qconfig),
+                            (nn.functional.linear, default_equalization_qconfig)]
+        }
+
+        # Basic test with one linear layer
+        class LinearModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        # Test with two linear layer with a fp32 operation between
+        class Linear2FP32Module(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(2, 2)
+                self.linear2 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = torch.add(x, torch.tensor([1, 2]))
+                x = self.linear2(x)
+                return x
+
+
+        tests = [(LinearModule, default_equalization_qconfig_dict),
+                 (Linear2FP32Module, fp32_equalization_qconfig_dict)]
+
+        for (M, equalization_qconfig_dict) in tests:
+            m = M().eval()
+            x = torch.tensor([[1.0, 2.0], [2.0, 2.5], [4.5, 6.0]])
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            output = prepared(x)
+
+            convert_ref = _convert_equalization_ref(prepared)
+            convert_ref_output = convert_ref(x)
+
+            m = M().eval()
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared(x)
+            convert_fx(prepared)  # Check if compile?
+
+            self.assertEqual(output, convert_ref_output)
