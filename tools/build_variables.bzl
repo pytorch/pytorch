@@ -146,7 +146,6 @@ core_sources_full_mobile = [
     "torch/csrc/jit/backends/backend_detail.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
     "torch/csrc/jit/backends/backend_resolver.cpp",
-    "torch/csrc/jit/backends/generate_debug_handles.cpp",
     "torch/csrc/jit/codegen/fuser/codegen.cpp",
     "torch/csrc/jit/codegen/fuser/compiler.cpp",
     "torch/csrc/jit/codegen/fuser/executor.cpp",
@@ -314,7 +313,8 @@ core_sources_full = core_sources_full_mobile + [
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
 
-libtorch_distributed_windows_sources = [
+# These files are the only ones that are supported on Windows.
+libtorch_distributed_base_sources = [
     "torch/lib/c10d/comm.cpp",
     "torch/lib/c10d/default_comm_hooks.cpp",
     "torch/lib/c10d/FileStore.cpp",
@@ -333,7 +333,8 @@ libtorch_distributed_windows_sources = [
     "torch/lib/c10d/Utils.cpp",
 ]
 
-libtorch_distributed_sources = libtorch_distributed_windows_sources + [
+# These files are only supported on Linux (and others) but not on Windows.
+libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/autograd/autograd.cpp",
     "torch/csrc/distributed/autograd/utils.cpp",
     "torch/csrc/distributed/autograd/context/container.cpp",
@@ -373,6 +374,8 @@ libtorch_distributed_sources = libtorch_distributed_windows_sources + [
     "torch/lib/c10d/HashStore.cpp",
     "torch/lib/c10d/ProcessGroupRoundRobin.cpp",
 ]
+
+libtorch_distributed_sources = libtorch_distributed_base_sources + libtorch_distributed_extra_sources
 
 jit_sources_full = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
@@ -512,14 +515,18 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
 
-libtorch_cuda_distributed_windows_sources = [
+# These files are the only ones that are supported on Windows.
+libtorch_cuda_distributed_base_sources = [
     "torch/lib/c10d/reducer_cuda.cpp",
 ]
 
-libtorch_cuda_distributed_sources = libtorch_cuda_distributed_windows_sources + [
+# These files are only supported on Linux (and others) but not on Windows.
+libtorch_cuda_distributed_extra_sources = [
     "torch/lib/c10d/NCCLUtils.cpp",
     "torch/lib/c10d/ProcessGroupNCCL.cpp",
 ]
+
+libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
     "torch/csrc/cuda/nccl.cpp",
