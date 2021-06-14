@@ -300,9 +300,9 @@ class OpInfo(object):
         self.aliases_op = ()
         if aliases is not None:
             if aliases_op is not None:
-                self.aliases_op = tuple(alias_op if alias_op else None for alias_op in aliases_op)
+                self.aliases_op = tuple(alias_op if alias_op else None for alias_op in aliases_op)  # type: ignore[assignment]
             else:
-                self.aliases_op = tuple(None for _ in range(len(aliases)))
+                self.aliases_op = tuple(None for _ in range(len(aliases)))  # type: ignore[assignment]
             self.aliases = tuple(AliasInfo(a, a_op) for a, a_op in zip(aliases, self.aliases_op))  # type: ignore[assignment]
 
         self.test_conjugated_samples = test_conjugated_samples
