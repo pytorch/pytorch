@@ -1029,8 +1029,6 @@ struct ExclusivelyOwnedTraits<at::Tensor> {
   using const_pointer_type = const at::Tensor*;
 
   static repr_type nullRepr() {
-    // REVIEW: do we need to be able to distinguish an empty
-    // ExclusivelyOwned<Tensor> from an undefined Tensor?
     return at::Tensor();
   }
 
