@@ -260,7 +260,6 @@ _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
 _(aten, count_nonzero) \
 _(aten, cross) \
-_(aten, cov) \
 _(aten, std_mean) \
 _(aten, var_mean) \
 _(aten, ctc_loss) \
@@ -297,7 +296,6 @@ _(aten, diagonal) \
 _(aten, fill_diagonal_) \
 _(aten, diff) \
 _(aten, frexp) \
-_(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
 _(aten, dot) \
