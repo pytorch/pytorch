@@ -826,6 +826,16 @@ class TestAsserts(TestCase):
             with self.assertRaisesRegex(AssertionError, "shape"):
                 fn()
 
+    def test_mismatching_layout(self):
+        strided = torch.empty((2, 2))
+        sparse_coo = strided.to_sparse()
+        sparse_csr = strided.to_sparse_csr()
+
+        for actual, expected in itertools.combinations((strided, sparse_coo, sparse_csr), 2):
+            for fn in assert_fns_with_inputs(actual, expected):
+                with self.assertRaisesRegex(AssertionError, "layout"):
+                    fn()
+
     def test_mismatching_dtype(self):
         actual = torch.empty((), dtype=torch.float)
         expected = actual.clone().to(torch.int)
@@ -1140,30 +1150,13 @@ instantiate_device_type_tests(TestAssertsMultiDevice, globals(), only_for="cuda"
 
 
 class TestAssertsSparseCOO(TestCase):
-    def test_mismatching_tensor_format(self):
-        actual = torch.empty(())
-        expected = actual.to_sparse()
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "Tensor format"):
-                fn()
-
-    def test_mismatching_sparse_format(self):
-        t = torch.empty((2, 2))
-        actual = t.to_sparse()
-        expected = t.to_sparse_csr()
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "Sparse format"):
-                fn()
-
     def test_matching_coalesced(self):
         indices = (
             (0, 1),
             (1, 0),
         )
         values = (1, 2)
-        actual = torch.sparse_coo_tensor(indices, values, (2, 2)).coalesce()
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2)).coalesce()
         expected = actual.clone()
 
         for fn in assert_fns_with_inputs(actual, expected):
@@ -1175,7 +1168,7 @@ class TestAssertsSparseCOO(TestCase):
             (1, 0),
         )
         values = (1, 2)
-        actual = torch.sparse_coo_tensor(indices, values, (2, 2))
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
         expected = actual.clone()
 
         for fn in assert_fns_with_inputs(actual, expected):
@@ -1187,7 +1180,7 @@ class TestAssertsSparseCOO(TestCase):
             (1, 0),
         )
         values = (1, 2)
-        actual = torch.sparse_coo_tensor(indices, values, (2, 2))
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
         expected = actual.clone().coalesce()
 
         for fn in assert_fns_with_inputs(actual, expected):
@@ -1200,14 +1193,14 @@ class TestAssertsSparseCOO(TestCase):
             (1, 0),
         )
         actual_values = (1, 2)
-        actual = torch.sparse_coo_tensor(actual_indices, actual_values, (2, 2)).coalesce()
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2)).coalesce()
 
         expected_indices = (
             (0, 1, 1,),
             (1, 0, 0,),
         )
         expected_values = (1, 1, 1)
-        expected = torch.sparse_coo_tensor(expected_indices, expected_values, (2, 2))
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_fns_with_inputs(actual, expected):
             fn(check_is_coalesced=False)
@@ -1218,14 +1211,14 @@ class TestAssertsSparseCOO(TestCase):
             (1, 0),
         )
         actual_values = (1, 2)
-        actual = torch.sparse_coo_tensor(actual_indices, actual_values, (2, 2))
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
 
         expected_indices = (
             (0, 1, 1,),
             (1, 0, 0,),
         )
         expected_values = (1, 1, 1)
-        expected = torch.sparse_coo_tensor(expected_indices, expected_values, (2, 2))
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("number of specified values")):
@@ -1237,14 +1230,14 @@ class TestAssertsSparseCOO(TestCase):
             (1, 0),
         )
         actual_values = (1, 2)
-        actual = torch.sparse_coo_tensor(actual_indices, actual_values, (2, 2))
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
 
         expected_indices = (
             (0, 1),
             (1, 1),
         )
         expected_values = (1, 2)
-        expected = torch.sparse_coo_tensor(expected_indices, expected_values, (2, 2))
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the indices")):
@@ -1256,14 +1249,14 @@ class TestAssertsSparseCOO(TestCase):
             (1, 0),
         )
         actual_values = (1, 2)
-        actual = torch.sparse_coo_tensor(actual_indices, actual_values, (2, 2))
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
 
         expected_indices = (
             (0, 1),
             (1, 0),
         )
         expected_values = (1, 3)
-        expected = torch.sparse_coo_tensor(expected_indices, expected_values, (2, 2))
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
@@ -1271,29 +1264,12 @@ class TestAssertsSparseCOO(TestCase):
 
 
 class TestAssertsSparseCSR(TestCase):
-    def test_mismatching_tensor_format(self):
-        actual = torch.empty((2, 2))
-        expected = actual.to_sparse_csr()
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "Tensor format"):
-                fn()
-
-    def test_mismatching_sparse_format(self):
-        t = torch.empty((2, 2))
-        actual = t.to_sparse_csr()
-        expected = t.to_sparse()
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "Sparse format"):
-                fn()
-
     def test_matching(self):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)
         values = (1, 2)
         actual = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
-        # TODO: replace this by .clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
+        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
         expected = torch.sparse_csr_tensor(
             actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
         )

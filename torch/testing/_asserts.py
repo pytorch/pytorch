@@ -172,12 +172,8 @@ def _check_sparse_csr_members_individually(
     return wrapper
 
 
-def _check_supported_tensor(
-    input: Tensor,
-) -> Optional[UsageError]:  # type: ignore[valid-type]
-    """Checks if the tensors are supported by the current infrastructure.
-
-    All checks are temporary and will be relaxed in the future.
+def _check_supported_tensor(input: Tensor) -> Optional[UsageError]:  # type: ignore[valid-type]
+    """Checks if the tensor is supported by the current infrastructure.
 
     Returns:
         (Optional[UsageError]): If check did not pass.
@@ -185,24 +181,10 @@ def _check_supported_tensor(
     if input.is_quantized:
         return UsageError("Comparison for quantized tensors is not supported yet.")
 
+    if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:
+        return UsageError(f"Unsupported tensor layout {input.layout}")
+
     return None
-
-
-class _TensorFormat:
-    def __init__(self, t: torch.Tensor) -> None:
-        self.is_sparse, self.sparse_format = self._extract_format(t)
-
-    @staticmethod
-    def _extract_format(t: torch.Tensor) -> Tuple[bool, Optional[str]]:
-        if t.is_sparse:
-            return True, "COO"
-        elif t.is_sparse_csr:
-            return True, "CSR"
-        else:
-            return False, None
-
-    def __str__(self):
-        return f"sparse {self.sparse_format}" if self.is_sparse else "strided"
 
 
 def _check_attributes_equal(
@@ -216,9 +198,9 @@ def _check_attributes_equal(
 ) -> Optional[AssertionError]:
     """Checks if the attributes of two tensors match.
 
-    Always checks the :attr:`~torch.Tensor.shape`. Checks for :attr:`~torch.Tensor.device`,
-    :attr:`~torch.Tensor.dtype`, :meth:`~torch.Tensor.stride` if the tensors are strided, and
-    :meth:`~torch.tensor.is_coalesced` if the tensors are sparse COO are optional and can be disabled.
+    Always checks the :attr:`~torch.Tensor.shape` and :attr:`~torch.Tensor.layout`. Checks for
+    :attr:`~torch.Tensor.device`, :attr:`~torch.Tensor.dtype`, :meth:`~torch.Tensor.stride` if the tensors are strided,
+    and :meth:`~torch.tensor.is_coalesced` if the tensors are sparse COO are optional and can be disabled.
 
     Args:
         actual (Tensor): Actual tensor.
@@ -240,32 +222,18 @@ def _check_attributes_equal(
     if actual.shape != expected.shape:
         return AssertionError(msg_fmtstr.format("shape", actual.shape, expected.shape))
 
+    if actual.layout != expected.layout:
+        return AssertionError(msg_fmtstr.format("layout", actual.layout, expected.layout))
+    elif actual.layout == torch.strided and check_stride and actual.stride() != expected.stride():
+        return AssertionError(msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
+    elif actual.layout == torch.sparse_coo and check_is_coalesced and actual.is_coalesced() != expected.is_coalesced():
+        return AssertionError(msg_fmtstr.format("is_coalesced()", actual.is_coalesced(), expected.is_coalesced()))
+
     if check_device and actual.device != expected.device:
         return AssertionError(msg_fmtstr.format("device", actual.device, expected.device))
 
     if check_dtype and actual.dtype != expected.dtype:
         return AssertionError(msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
-
-    actual_format = _TensorFormat(actual)
-    expected_format = _TensorFormat(expected)
-    if actual_format.is_sparse and expected_format.is_sparse:
-        if actual_format.sparse_format != expected_format.sparse_format:
-            return AssertionError(
-                f"Sparse format does not match: {actual_format.sparse_format} != {expected_format.sparse_format}"
-            )
-
-        if (
-            actual_format.sparse_format == "COO"
-            and check_is_coalesced
-            and actual.is_coalesced() != expected.is_coalesced()
-        ):
-            return AssertionError(msg_fmtstr.format("is_coalesced()", actual.is_coalesced(), expected.is_coalesced()))
-    elif not actual_format.is_sparse and not expected_format.is_sparse:
-        if check_stride and actual.stride() != expected.stride():
-            return AssertionError(msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
-    else:
-
-        return AssertionError(f"Tensor format does not match: {actual_format} != {expected_format}")
 
     return None
 
@@ -898,6 +866,7 @@ def assert_close(
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
+        AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.layout`.
         AssertionError: If :attr:`check_device`, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
         AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
