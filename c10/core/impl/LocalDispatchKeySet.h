@@ -2,8 +2,8 @@
 
 #include <type_traits>
 
-#include <c10/core/impl/ThreadLocalState.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/ThreadLocalState.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Flags.h>
 
@@ -62,7 +62,8 @@ struct C10_API LocalDispatchKeySet {
 };
 
 inline C10_API LocalDispatchKeySet snapshot_tls_keyset() {
-  return LocalDispatchKeySet(LocalDispatchKeySetWrapper(_get_thread_local_state()));
+  return LocalDispatchKeySet(
+      LocalDispatchKeySetWrapper(_get_thread_local_state()));
 }
 
 // Internal, use ThreadLocalStateGuard
@@ -98,18 +99,17 @@ class C10_API ExcludeDispatchKeyGuard {
   // declared so that changes to the default excluded set do not silently knock
   // us off the hot path.
   static_assert(
-    has_overlap == (bool)(exclude & c10::default_excluded_set.raw_repr()),
-    "Declared `has_overlap` does not match computed value."
-  );
+      has_overlap == (bool)(exclude & c10::default_excluded_set.raw_repr()),
+      "Declared `has_overlap` does not match computed value.");
 
   ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;
   ExcludeDispatchKeyGuard operator=(const ExcludeDispatchKeyGuard&) = delete;
   ExcludeDispatchKeyGuard(ExcludeDispatchKeyGuard&&) = delete;
   ExcludeDispatchKeyGuard operator=(ExcludeDispatchKeyGuard&&) = delete;
 
-  explicit ExcludeDispatchKeyGuard(PODLocalState* tls) : tls_(tls){
+  explicit ExcludeDispatchKeyGuard(PODLocalState* tls) : tls_(tls) {
     if (has_overlap) {
-      LocalDispatchKeySetWrapper wrapper { tls_ };
+      LocalDispatchKeySetWrapper wrapper{tls_};
       auto current_excluded = wrapper.excluded();
       auto exclude_set = DispatchKeySet(DispatchKeySet::RAW, exclude);
       delta_ = (exclude_set - current_excluded).raw_repr();
@@ -126,11 +126,11 @@ class C10_API ExcludeDispatchKeyGuard {
   // of the public API, so we have to allow instantiation without exposing
   // the implementation detail of `_get_thread_local_state()`.
   ExcludeDispatchKeyGuard()
-    : ExcludeDispatchKeyGuard(_get_thread_local_state()) {}
+      : ExcludeDispatchKeyGuard(_get_thread_local_state()) {}
 
   ~ExcludeDispatchKeyGuard() {
     if (has_overlap) {
-      LocalDispatchKeySetWrapper wrapper { tls_ };
+      LocalDispatchKeySetWrapper wrapper{tls_};
       auto current = wrapper.excluded();
       auto delta = DispatchKeySet(DispatchKeySet::RAW, delta_);
       wrapper.set_excluded(current - delta);
@@ -148,12 +148,11 @@ class C10_API ExcludeDispatchKeyGuard {
   uint64_t delta_;
 };
 
-template<DispatchKey k, bool has_overlap>
+template <DispatchKey k, bool has_overlap>
 class C10_API ExcludeSingleDispatchKeyGuard {
   static constexpr auto k_set = DispatchKeySet(k);
   ExcludeDispatchKeyGuard<k_set.raw_repr(), has_overlap> guard_;
 };
-
 
 // Non-RAII API for manipulating the thread-local dispatch state.
 // Please prefer the RAII API.  The non-RAII API may be useful when
