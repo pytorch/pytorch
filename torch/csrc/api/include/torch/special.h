@@ -33,7 +33,7 @@ inline Tensor polygamma(int64_t n, const Tensor& self) {
   return torch::special_polygamma(n, self);
 }
 
-inline Tensor& polygamma_out(int64_t n, Tensor& result, const Tensor& self) {
+inline Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
   return torch::special_polygamma_out(result, n, self);
 }
 
