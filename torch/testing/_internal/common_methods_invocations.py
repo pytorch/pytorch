@@ -159,9 +159,10 @@ class AliasInfo(object):
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
 
-    def __init__(self, alias_name):
+    def __init__(self, alias_name, alias_op=None):
         self.name = alias_name
-        self.op = _getattr_qual(torch, alias_name)
+        self.op = alias_op if alias_op else _get_attr_qual(torch, alias_name)
+        # self.op = _getattr_qual(torch, alias_name)
         self.method_variant = getattr(torch.Tensor, alias_name, None)
         self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
 
@@ -218,6 +219,7 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
+                 aliases_op=None,  # the function variant of the alias of the operation, populated as torch.<name> if None
                  variant_test_name='',  # additional string to include in the test name
                  supports_autograd=True,  # support for autograd
                  supports_gradgrad=True,  # support second order gradients (this value is ignored if supports_autograd=False)
@@ -300,7 +302,8 @@ class OpInfo(object):
 
         self.aliases = ()
         if aliases is not None:
-            self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+            self.aliases_op = tuple(alias_op if alias_op else None for alias_op in aliases_op)
+            self.aliases = tuple(AliasInfo(a, a_op) for a, a_op in zip(aliases, self.aliases_op))  # type: ignore[assignment]
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -5979,6 +5982,7 @@ op_db: List[OpInfo] = [
     # We run the op tests from test_ops.py only for `n=0` to avoid redundancy in testing.
     UnaryUfuncInfo('polygamma',
                    aliases=("special.polygamma", ),
+                   aliases_op=(lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),),
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
