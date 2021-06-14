@@ -126,12 +126,12 @@ class CollectiveTest {
       int num,
       bool delayed = false) {
     std::vector<CollectiveTest> tests;
-    for (auto i = 0; i < num; i++) {
+    for (const auto i : c10::irange(num)) {
       tests.push_back(CollectiveTest(path));
     }
 
     std::vector<std::thread> threads;
-    for (auto i = 0; i < num; i++) {
+    for (const auto i : c10::irange(num)) {
       threads.push_back(std::thread(
           [i, &tests, delayed] { tests[i].start(i, tests.size(), delayed); }));
     }
@@ -221,7 +221,7 @@ std::vector<std::vector<at::Tensor>> waitFuture(
     } else if (result.isTensorList()) {
       outputTensors.emplace_back(result.toTensorVector());
     } else {
-      throw std::runtime_error("future result should be tensor list or none");
+      TORCH_CHECK(false, "future result should be tensor list or none");
     }
   }
   return copyTensors(outputTensors);
@@ -257,7 +257,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   std::vector<std::vector<at::Tensor>> inputs(size);
   std::vector<std::vector<int64_t>> allShapes;
   std::vector<int64_t> shapes = {16, 16};
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     auto tensor = at::ones(shapes, b) * i;
     std::vector<int64_t> shapesVec = shapes;
     allShapes.emplace_back(std::move(shapesVec));
@@ -269,7 +269,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   const char* GLOO_ALLREDUCE_STR = "gloo:all_reduce";
   enableProfilerLegacy(ProfilerConfig(
       ProfilerState::CPU, /* report_input_shapes */ true, false));
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     work[i] = tests[i].getProcessGroup().allreduce(inputs[i]);
   }
   // Wait for work to complete
@@ -281,10 +281,10 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
 
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     auto& tensor = outputs[i][0];
     auto data = tensor.data_ptr<float>();
-    for (auto j = 0; j < tensor.numel(); j++) {
+    for (const auto j : c10::irange(tensor.numel())) {
       EXPECT_EQ(data[j], expected);
     }
   }
@@ -300,7 +300,7 @@ void testAllreduceUsingWorkAPI(const std::string& path, const at::DeviceType b) 
   std::vector<std::vector<at::Tensor>> inputs(size);
   std::vector<std::vector<int64_t>> allShapes;
   std::vector<int64_t> shapes = {16, 16};
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     auto tensor = at::ones(shapes, b) * i;
     std::vector<int64_t> shapesVec = shapes;
     allShapes.emplace_back(std::move(shapesVec));
@@ -312,7 +312,7 @@ void testAllreduceUsingWorkAPI(const std::string& path, const at::DeviceType b) 
   const char* GLOO_ALLREDUCE_STR = "gloo:all_reduce";
   enableProfilerLegacy(ProfilerConfig(
       ProfilerState::CPU, /* report_input_shapes */ true, false));
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     work[i] = tests[i].getProcessGroup().allreduce(inputs[i]);
   }
   // Wait for work to complete
@@ -324,10 +324,10 @@ void testAllreduceUsingWorkAPI(const std::string& path, const at::DeviceType b) 
 
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     auto& tensor = outputs[i][0];
     auto data = tensor.data_ptr<float>();
-    for (auto j = 0; j < tensor.numel(); j++) {
+    for (const auto j : c10::irange(tensor.numel())) {
       EXPECT_EQ(data[j], expected);
     }
   }
@@ -341,17 +341,17 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
   std::vector<std::vector<at::Tensor>> inputs(size);
   std::vector<int64_t> shapes = {16, 16};
   // Try every permutation of root rank and root tensor
-  for (auto i = 0; i < size; i++) {
-    for (auto j = 0; j < stride; j++) {
+  for (const auto i : c10::irange(size)) {
+    for (const auto j : c10::irange(stride)) {
       std::vector<std::vector<int64_t>> allShapes;
       // Initialize inputs
-      for (auto k = 0; k < size; k++) {
+      for (const auto k : c10::irange(size)) {
         std::vector<int64_t> shapesVec = shapes;
         allShapes.emplace_back(std::move(shapesVec));
         inputs[k].resize(stride);
         // This won't work if we ever support sparse CUDA
         at::OptionalDeviceGuard deviceGuard;
-        for (auto l = 0; l < stride; l++) {
+        for (const auto l : c10::irange(stride)) {
           if (b == at::DeviceType::CUDA) {
             deviceGuard.reset_device(at::Device(at::kCUDA, l));
           }
@@ -369,7 +369,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
           ProfilerState::CPU, /* report_input_shapes */ true, false));
       std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
 
-      for (auto i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         work[i] = tests[i].getProcessGroup().broadcast(inputs[i], options);
       }
 
@@ -382,11 +382,11 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
 
       // Verify outputs
       const auto expected = (i * stride + j);
-      for (auto k = 0; k < size; k++) {
-        for (auto l = 0; l < stride; l++) {
+      for (const auto k : c10::irange(size)) {
+        for (const auto l : c10::irange(stride)) {
           auto& tensor = outputs[k][l];
           auto data = tensor.data_ptr<float>();
-          for (auto n = 0; n < tensor.numel(); n++) {
+          for (const auto n : c10::irange(tensor.numel())) {
             EXPECT_EQ(data[n], expected);
           }
         }
@@ -407,7 +407,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
       {20, 21, 22, 23, 24},
       {30, 31, 32, 33, 34, 35, 36},
   };
-  for (auto rank = 0; rank < size; rank++) {
+  for (const auto rank : c10::irange(size)) {
     const std::vector<int32_t>& blob = blobs[rank];
     inputs[rank] = at::from_blob((int32_t*)(blob.data()), blob.size()).to(b);
   }
@@ -415,7 +415,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   // Allocate outputs
   std::vector<at::Tensor> outputs(size);
   std::vector<int> outputLengths = {9, 7, 6, 5};
-  for (auto rank = 0; rank < size; rank++) {
+  for (const auto rank : c10::irange(size)) {
     outputs[rank] =
         at::empty(outputLengths[rank], c10::TensorOptions(at::kInt).device(b));
   }
@@ -448,13 +448,13 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   }
   enableProfilerLegacy(ProfilerConfig(
           ProfilerState::CPU, /* report_input_shapes */ true, false));
-  for (auto rank = 0; rank < size; rank++) {
+  for (const auto rank : c10::irange(size)) {
     work[rank] = tests[rank].getProcessGroup().alltoall_base(
         outputs[rank], inputs[rank], outputSplits[rank], inputSplits[rank]);
   }
 
   // Wait for work to complete
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     work[i]->wait();
   }
 
@@ -468,11 +468,11 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
       {4, 15, 16, 23, 34, 35},
       {5, 17, 18, 24, 36},
   };
-  for (auto rank = 0; rank < size; rank++) {
+  for (const auto rank : c10::irange(size)) {
     at::Tensor tensor = outputs[rank].cpu();
     EXPECT_EQ(tensor.numel(), expected[rank].size());
     auto data = tensor.data_ptr<int32_t>();
-    for (auto j = 0; j < tensor.numel(); j++) {
+    for (const auto j : c10::irange(tensor.numel())) {
       EXPECT_EQ(data[j], expected[rank][j]);
     }
   }
@@ -486,7 +486,7 @@ void testBarrier(const std::string& path) {
   enableProfilerLegacy(ProfilerConfig(
           ProfilerState::CPU, /* report_input_shapes */ true, false));
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     work[i] = tests[i].getProcessGroup().barrier();
   }
 
@@ -542,12 +542,12 @@ void testMonitoredBarrier(const std::string& path) {
 void testSequenceNumInit(const std::string& path) {
   const auto size = 4;
   auto tests = CollectiveTest::initialize(path, size);
-  for (int i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     tests[i].getProcessGroup().setSequenceNumberForGroup();
   }
 
   std::unordered_set<uint64_t> nums;
-  for (int i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     auto seqNum = tests[i].getProcessGroup().getSequenceNumberForGroup();
     nums.insert(seqNum);
   }
@@ -827,7 +827,7 @@ TEST(ProcessGroupGlooTest, testBackendName) {
     const auto size = 2;
     auto tests = CollectiveTest::initialize(file.path, size);
 
-    for (auto i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       EXPECT_EQ(
           tests[i].getProcessGroup().getBackendName(),
           std::string(c10d::GLOO_BACKEND_NAME));
