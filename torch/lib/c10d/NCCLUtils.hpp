@@ -9,7 +9,6 @@
 #include <mutex>
 
 #include <nccl.h>
-#include <c10/util/Exception.h>
 
 namespace {
 // Provides additional detail into NCCL error codes based on when these are
@@ -58,7 +57,7 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error) {
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
           std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
           "\n" + getNcclErrorDetailStr(result);                               \
-      TORCH_CHECK(false, err);                                          \
+      throw std::runtime_error(err);                                          \
     }                                                                         \
   } while (0)
 
@@ -143,7 +142,7 @@ class NCCLComm {
   ncclComm_t getNcclComm() {
     std::unique_lock<std::mutex> lock(mutex_);
     if (aborted_) {
-      TORCH_CHECK(false,
+      throw std::runtime_error(
           "NCCL communicator was aborted on rank " + std::to_string(rank_) +
           ".");
     }
