@@ -425,9 +425,6 @@ class QLinearDynamicInt8 final {
       at::Tensor input,
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       bool reduce_range) {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    auto& ctx = at::globalContext();
-
     if (ReluFused) {
       return packed_weight->apply_dynamic_relu(std::move(input), reduce_range);
     } else {
