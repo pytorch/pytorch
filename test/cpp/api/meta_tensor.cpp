@@ -15,7 +15,7 @@ TEST(MetaTensorTest, MetaDeviceApi) {
   ASSERT_EQ(b.device(), c10::kCPU);
   ASSERT_EQ(out_meta.device(), c10::kMeta);
   c10::IntArrayRef sizes_actual = out_meta.sizes();
-  std::vector<long> sizes_expected = std::vector<long>{3, 4};
+  std::vector<int64_t> sizes_expected = std::vector<int64_t>{3, 4};
   ASSERT_EQ(sizes_actual, sizes_expected);
 }
 
@@ -30,6 +30,6 @@ TEST(MetaTensorTest, MetaNamespaceApi) {
   ASSERT_EQ(b.device(), c10::kCPU);
   ASSERT_EQ(out_meta.device(), c10::kMeta);
   c10::IntArrayRef sizes_actual = out_meta.sizes();
-  std::vector<long> sizes_expected = std::vector<long>{3, 4};
+  std::vector<int64_t> sizes_expected = std::vector<int64_t>{3, 4};
   ASSERT_EQ(sizes_actual, sizes_expected);
 }
