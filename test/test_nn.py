@@ -5762,7 +5762,6 @@ class TestNN(NNTestCase):
                      nn.GRUCell(*cell_shared_param)):
             self.assertRaises(Exception, lambda: cell(input, hx))
 
-
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
         losses = {
@@ -12548,6 +12547,36 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
+
+    @onlyOnCPUAndCUDA
+    def test_GroupNorm_numeric(self, device):
+        def group_norm_ref(X, gamma, beta, groups, channels, eps):
+            batch_size = X.size()[0]
+            X_view = X.view(batch_size, groups, -1)
+            mean = X_view.mean(dim=-1, keepdim=True)
+            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
+            Y = ((X_view - mean) / torch.sqrt(var + eps)).view(
+                batch_size, channels, -1)
+            Y = Y * gamma.view(channels, 1) + beta.view(channels, 1)
+            return Y.view(*X.size())
+
+        batch_size = 1
+        groups = 4
+        channels = 32
+        group_norm = nn.GroupNorm(groups, channels).float().to(device)
+        X = torch.rand(batch_size, channels, 256, 256, 72,
+                       dtype=torch.float32, device=device)
+
+        Y = group_norm(X)
+        Y_ref = group_norm_ref(
+            X, group_norm.weight.data, group_norm.bias.data, groups,
+            channels, group_norm.eps)
+        self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
+
+        if self.device_type == 'cuda':
+            group_norm.cpu()
+            Y_cpu = group_norm(X.cpu())
+            self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float64, torch.complex128)
