@@ -141,20 +141,27 @@ class BaseSparsifier(abc.ABC):
             group['module'] = layer
         self.__setstate__({'module_groups': module_groups})
 
-    def prepare(self, *args, **kwargs):
+    def prepare(self, use_path=False, *args, **kwargs):
         r"""Adds mask parametrization to the layer weight
         """
         for config in self.module_groups:
-            module = config['module']
-            if not getattr(module, 'mask', None):
+            if use_path:
+                module = _path_to_module(self.model, config['path'])
+            else:
+                module = config['module']
+
+            if getattr(module, 'mask', None) is None:
                 module.register_buffer('mask', torch.ones(module.weight.shape))
             param = config.get('parametrization', MulBy)
             parametrize.register_parametrization(module, 'weight',
                                                  param(module.mask))
 
-    def convert(self, *args, **kwargs):
+    def convert(self, use_path=False, *args, **kwargs):
         for config in self.module_groups:
-            module = config['module']
+            if use_path:
+                module = _path_to_module(self.model, config['path'])
+            else:
+                module = config['module']
             parametrize.remove_parametrizations(module, 'weight',
                                                 leave_parametrized=True)
             if getattr(module._parameters, 'mask', None):
@@ -163,13 +170,16 @@ class BaseSparsifier(abc.ABC):
                 del module._buffers['mask']
             delattr(module, 'mask')
 
-    def step(self):
+    def step(self, use_path=True):
         if not self.enable_mask_update:
             return
         with torch.no_grad():
             for config in self.module_groups:
-                layer = config['module']
-                self.update_mask(layer, **config)
+                if use_path:
+                    module = _path_to_module(self.model, config['path'])
+                else:
+                    module = config['module']
+                self.update_mask(module, **config)
 
     @abc.abstractmethod
     def update_mask(self, layer, **kwargs):
