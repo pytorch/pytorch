@@ -579,7 +579,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 #endif /* USE_VULKAN_API */
 
-Tensor& copy_from_vulkan_(Tensor& self, const Tensor& src) {
+const Tensor& copy_from_vulkan_(const Tensor& self, const Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::Vulkan,
       "copy_from_vulkan input tensor's device is not Vulkan");
@@ -602,7 +602,7 @@ Tensor& copy_from_vulkan_(Tensor& self, const Tensor& src) {
   return self;
 }
 
-Tensor& copy_to_vulkan_(Tensor& self, const Tensor& src) {
+const Tensor& copy_to_vulkan_(const Tensor& self, const Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       self.device().type() == DeviceType::Vulkan,
       "copy_to_vulkan output tensor's device is not Vulkan");
