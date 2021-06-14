@@ -214,6 +214,8 @@ inline at::Generator IValue::toGenerator() const& {
 
 namespace ivalue {
 
+constexpr auto kNoTimeout = std::chrono::milliseconds(0);
+
 void TORCH_API
 checkCustomClassType(const Type* expected_type, const Type* actual_type);
 
@@ -346,9 +348,20 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   /**
    * Wait on the future until it completes.
    */
-  void wait() {
+  void wait(std::chrono::milliseconds timeout = kNoTimeout) {
     std::unique_lock<std::mutex> lock(mutex_);
-    finished_cv_.wait(lock, [&]() -> bool { return completed_; });
+    if (timeout == kNoTimeout) {
+      // This waits without a timeout.
+      finished_cv_.wait(lock, [&]() -> bool { return completed_.load(); });
+    } else {
+      // Waits for the user-provided timeout.
+      finished_cv_.wait_for(lock, timeout, [&]() -> bool { return completed_.load(); });
+      if (!completed_) {
+        // Throw exception if the wait operation timed out and the work was not
+        // completed.
+        throw std::runtime_error("Future::wait() timed out!");
+      }
+    }
     synchronizeWithCurrentStreams();
   }
 
@@ -356,8 +369,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * Wait on the future until it completes and throw an
    * exception if an error exists.
    */
-  void waitAndThrow() {
-    wait();
+  void waitAndThrow(std::chrono::milliseconds timeout = kNoTimeout) {
+    wait(timeout);
 
     if (eptr_) {
       std::rethrow_exception(eptr_);
@@ -612,8 +625,16 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::ostream& out,
       const Future& v);
 
+  void setElementType(TypePtr type) {
+    type_ = type;
+  }
+
   TypePtr elementType() const {
     return type_;
+  }
+
+  void setDevices(std::vector<c10::Device> devices) {
+    devices_ = sortAndDeduplicateDevices(impl_, std::move(devices));
   }
 
   const std::vector<c10::Device>& devices() const {
@@ -851,7 +872,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // current when invoking a callback, thus allowing the callback to use devices
   // that the parent future didn't use. This field is set to the value provided
   // in the constructor and will be "inherited" by all child futures.
-  const std::vector<c10::Device> devices_;
+  std::vector<c10::Device> devices_;
 };
 
 // Input is a list of Futures with the same target type.
@@ -1031,12 +1052,12 @@ inline const ivalue::Object& IValue::toObjectRef() const {
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
 
-#define DEFINE_TO(T, method_name)          \
-  template <>                              \
-  inline T IValue::to<T>()&& {             \
-    return std::move(*this).method_name(); \
-  }                                        \
-  template <>                              \
+#define DEFINE_TO(T, method_name)                          \
+  template <>                                              \
+  inline T IValue::to<T>()&& {                             \
+    return static_cast<T>(std::move(*this).method_name()); \
+  }                                                        \
+  template <>                                              \
   inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
     return this->method_name();            \
   }

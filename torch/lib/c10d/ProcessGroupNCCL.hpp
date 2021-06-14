@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <chrono>
 #include <iostream>
 #include <list>
@@ -90,7 +92,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
+    bool wait(std::chrono::milliseconds timeout = c10::ivalue::kNoTimeout) override;
 
     void abort() override;
 
@@ -109,12 +111,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
-
-    // Get a Future object that will be marked as completed internally.
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
-
-    // Helper function that sets an exception_ptr on the WorkNCCL object.
-    void setException(std::exception_ptr exception_ptr);
 
     // Helper function that returns True if the WorkNCCL object has timed out
     // and False otherwise.
@@ -269,6 +265,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
@@ -552,3 +553,5 @@ class ProcessGroupNCCL : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL

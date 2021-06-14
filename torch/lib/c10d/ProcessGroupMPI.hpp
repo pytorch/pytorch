@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_MPI
+
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -92,8 +94,6 @@ class ProcessGroupMPI : public ProcessGroup {
 
     std::vector<at::Tensor> result() override;
 
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
-
    protected:
     friend class ProcessGroupMPI;
 
@@ -129,7 +129,7 @@ class ProcessGroupMPI : public ProcessGroup {
     std::vector<at::Tensor> result() override;
 
    protected:
-    void populateException();
+    std::exception_ptr getMPIException();
 
    private:
     const std::vector<at::Tensor> outputTensors_;
@@ -263,3 +263,5 @@ class ProcessGroupMPI : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_MPI

@@ -20,7 +20,6 @@
 // SEE RFC: https://github.com/pytorch/pytorch/issues/39662
 // *************************************************************************
 
-constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 constexpr auto kProcessGroupDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
 
@@ -45,6 +44,7 @@ enum class OpType : std::uint8_t {
   RECV = 13,
   RECVANYSOURCE = 14,
   BARRIER = 15,
+  _REDUCE_SCATTER_BASE = 16,
   UNKNOWN = 100,
 };
 
@@ -136,7 +136,7 @@ class ProcessGroup : public torch::CustomClassHolder {
     //   if (!success) { std::rethrow_exception(exception()); }
     //   return success;
     //
-    virtual bool wait(std::chrono::milliseconds timeout = kNoTimeout);
+    virtual bool wait(std::chrono::milliseconds timeout = c10::ivalue::kNoTimeout);
 
     virtual void abort();
 
@@ -147,6 +147,8 @@ class ProcessGroup : public torch::CustomClassHolder {
     OpType retrieveOpType();
 
    protected:
+    void setError(std::exception_ptr eptr);
+
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
     void finish(std::exception_ptr exception = nullptr);
@@ -168,10 +170,6 @@ class ProcessGroup : public torch::CustomClassHolder {
 
     std::vector<at::Tensor> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
-
-    // When profiling, the callback to record end of operation event. This
-    // callback needs to be called when collective operation is complete.
-    std::function<void()> recordFunctionEndCallback_;
   };
 
   // ProcessGroup Options is a base struct that defines the basic options
@@ -261,6 +259,14 @@ class ProcessGroup : public torch::CustomClassHolder {
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) = 0;
+
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+      at::Tensor&,
+      at::Tensor&,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    throw std::runtime_error("ProcessGroup does not support reduce_scatter_base");
+  }
+
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
