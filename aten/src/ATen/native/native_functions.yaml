@@ -2248,6 +2248,36 @@
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   variants: function, method
 
+- func: isin.Tensor_Tensor_out(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Tensor_Tensor_out
+
+- func: isin.Tensor_Tensor(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Tensor_Tensor_out
+
+- func: isin.Tensor_Scalar_out(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Tensor_Scalar_out
+
+- func: isin.Tensor_Scalar(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Tensor_Scalar_out
+
+- func: isin.Scalar_Tensor_out(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Scalar_Tensor_out
+
+- func: isin.Scalar_Tensor(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Scalar_Tensor_out
+
 - func: isnan(Tensor self) -> Tensor
   variants: function, method
   device_check: NoCheck
