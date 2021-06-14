@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from torch.fx.graph import Node
+
 from ..observer import (
     PerChannelMinMaxObserver, _with_args
 )
@@ -263,3 +265,13 @@ weight_equalization_observer = _WeightEqualizationObserver.with_args(
     dtype=torch.qint8, qscheme=torch.per_channel_symmetric)
 default_equalization_qconfig = EqualizationQConfig(input_activation=input_equalization_observer,
                                                    weight=weight_equalization_observer)
+
+def node_supports_equalization(node: Node, modules) -> bool:
+    """ Checks if the current node supports equalization
+    Currently we only support nn.Linear and F.Linear layers
+    """
+    if node.op == 'call_module':
+        return isinstance(modules[node.target], nn.Linear)
+    elif node.op == 'call_function':
+        return node.target == nn.functional.linear
+    return False

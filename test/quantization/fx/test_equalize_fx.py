@@ -126,7 +126,8 @@ class TestEqualizeFx(QuantizationTestCase):
     def test_input_weight_equalization_prepare(self):
         """ Tests that graphs created after prepare_fx is as expected
         """
-        qconfig_dict = {"": default_qconfig}
+        qconfig_dict = {"": None, 
+                        "object_type": [(nn.Linear, default_qconfig), (nn.functional.linear, default_qconfig)]}
 
         default_equalization_qconfig_dict = {
             "": default_qconfig,
@@ -203,7 +204,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
             def forward(self, x):
                 x = self.linear1(x)
-                x = self.conv(x)
+                x = torch.add(x, 5)
                 x = self.linear2(x)
                 return x
 
