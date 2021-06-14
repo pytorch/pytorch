@@ -18,7 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
     skipCUDAIfRocm, skipIf)
-from torch.testing import all_types_and_complex_and
+from torch.testing import all_types_and_complex_and, integral_types_and
 
 if TEST_SCIPY:
     import scipy.special
@@ -223,56 +223,53 @@ class TestBinaryUfuncs(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             self.assertTrue(ts2 != t2)
 
-    def test_bitwise_ops(self, device):
-        def check_op(x, y):
-            x_np = x.cpu().numpy() if isinstance(x, torch.Tensor) else x
-            y_np = y.cpu().numpy() if isinstance(y, torch.Tensor) else y
+    # Tests that the binary operators and, or, and xor (as well as their reflected and inplace versions)
+    # work properly (AKA &, ||, ^ and &=, |=, ^=)
+    @dtypes(*integral_types_and(torch.bool))
+    def test_bitwise_ops(self, device, dtype):
+        # Tensor x Tensor and Tensor x Scalar ops
+        ops = (operator.and_, operator.iand, operator.or_, operator.ior, operator.xor, operator.ixor)
+        inplace_ops = (operator.iand, operator.ior, operator.ixor)
+        shapes = ((5,), (15, 15), (500, 500))
 
-            and_result = x & y
-            and_expect = torch.tensor(x_np & y_np, device=device)
-            self.assertEqual(and_expect, and_result)
+        for op, shape in itertools.product(ops, shapes):
+            # Tests tensor x tensor case
+            a = make_tensor(shape, device=device, dtype=dtype)
+            b = make_tensor(shape, device=device, dtype=dtype)
+            a_np = a.cpu().clone().numpy()
+            b_np = b.cpu().clone().numpy()
+            self.assertEqual(op(a, b), op(a_np, b_np))
 
-            or_result = x | y
-            or_expect = torch.tensor(x_np | y_np, device=device)
-            self.assertEqual(or_expect, or_result)
+            # Tests tensor x scalar case
+            a = make_tensor(shape, device=device, dtype=dtype)
+            b_scalar = make_tensor((), device='cpu', dtype=dtype).item()
+            a_np = a.cpu().clone().numpy()
+            self.assertEqual(op(a, b_scalar), op(a_np, b_scalar))
 
-            xor_result = x ^ y
-            xor_expect = torch.tensor(x_np ^ y_np, device=device)
-            self.assertEqual(xor_expect, xor_result)
+            # Tests scalar x tensor case
+            a_scalar = make_tensor((), device='cpu', dtype=dtype).item()
+            b = make_tensor(shape, device=device, dtype=dtype)
+            b_np = b.cpu().clone().numpy()
+            self.assertEqual(op(a_scalar, b), op(a_scalar, b_np))
 
-        def check_iop(x, y):
-            and_result = x & y
-            or_result = x | y
-            xor_result = x ^ y
+            # Tests scalar x tensor case (for ops which aren't inplace)
+            if op in inplace_ops:
+                # Tests tensor x tensor case
+                a = make_tensor(shape, device=device, dtype=dtype)
+                b = make_tensor(shape, device=device, dtype=dtype)
+                a_np = a.cpu().clone().numpy()
+                b_np = b.cpu().clone().numpy()
+                op(a, b)
+                op(a_np, b_np)
+                self.assertEqual(a, a_np)
 
-            x_clone = x.clone()
-            x_clone &= y
-            self.assertEqual(x_clone, and_result)
-
-            x_clone = x.clone()
-            x_clone |= y
-            self.assertEqual(x_clone, or_result)
-
-            x_clone = x.clone()
-            x_clone ^= y
-            self.assertEqual(x_clone, xor_result)
-
-        x = torch.randn(5, 5).gt(0)
-        y = torch.randn(5, 5).gt(0)
-
-        # Tensor x Tensor
-        check_op(x, y)
-        check_iop(x, y)
-
-        # Tensor x Scalar
-        check_op(x, True)
-        check_op(x, False)
-        check_iop(x, True)
-        check_iop(x, False)
-
-        # Scalar x Tensor
-        check_op(True, y)
-        check_op(False, y)
+                # Tests tensor x scalar case
+                a = make_tensor(shape, device=device, dtype=dtype)
+                b_scalar = make_tensor((), device='cpu', dtype=dtype).item()
+                a_np = a.cpu().clone().numpy()
+                op(a, b_scalar)
+                op(a_np, b_scalar)
+                self.assertEqual(a, a_np)
 
     def test_inplace_division(self, device):
         t = torch.rand(5, 5, device=device)
