@@ -15,7 +15,7 @@ static void vectorize(te::LoopNest* ln, te::Tensor* target, int width) {
   auto loops = ln->getLoopStmtsFor(target);
   te::For *inner, *tail;
   ln->splitWithTail(loops[0], width, &inner, &tail);
-  ln->vectorize(inner);
+  ASSERT_TRUE(te::LoopNest::vectorize(inner));
 }
 
 std::string diffs(const at::Tensor& a, const at::Tensor& b) {
