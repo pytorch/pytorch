@@ -29,6 +29,11 @@ TORCH_API std::pair<size_t, MatchedSchema> matchSchemas(
     const c10::optional<NamedValue>& self = c10::nullopt,
     bool render_errors = false);
 
+// Creates a list with the provided values if each value's type can be matched
+// to an argument with type `elem_type`. If a type in `varargs` does not match
+// `elem_type`, nullptr is returned. This is used for creating lists from
+// varargs so that calls like torch.zeros(1, 2, 3) will be matched to
+// aten::zeros(int[]).
 TORCH_API bool convertibleToList(
     const TypePtr& type,
     const TypePtr& list_type_);
@@ -37,8 +42,6 @@ TORCH_API c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs);
 
-// applies implicit conversion from value trying to turn it into type
-// concrete_type it succeeds if the return_value->isSubtypeOf(concrete_type)
 // Applies implicit conversion from value trying to turn it into type
 // concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 TORCH_API Value* tryConvertToType(

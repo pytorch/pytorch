@@ -67,6 +67,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -418,6 +419,16 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) {
             RemoveListMutation(g);
             return RemoveTensorMutation(g);
+          })
+      .def(
+          "_jit_pass_functional_to_inplace_activation",
+          [](std::shared_ptr<Graph>& g) {
+            return FunctionalToInplaceActivation(g);
+          })
+      .def(
+          "_jit_pass_inplace_to_functional_activation",
+          [](std::shared_ptr<Graph>& g) {
+            return InplaceToFunctionalActivation(g);
           })
       .def(
           "_jit_pass_inline_functional_graphs",
