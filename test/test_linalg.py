@@ -5447,6 +5447,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
 
+
                 P, L, U = torch.lu_unpack(a_LU, pivots)
                 P_ = P.cpu().numpy()
                 L_ = L.cpu().numpy()
