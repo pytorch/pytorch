@@ -62,15 +62,7 @@ void selective_copy(
     // constants.pkl
     // bytecode.pkl
     // version
-    bool skip = false;
-
-    // Skip files (exact path)
-    for (const auto& excluded_file : excluded_files) {
-      if (record == excluded_file) {
-        skip = true;
-        break;
-      }
-    }
+    bool skip = excluded_files.count(record) > 0;
 
     // Skip dirs, find the last '/' and compare it with record
     for (const auto& excluded_dir : excluded_dirs) {
@@ -236,7 +228,7 @@ void writeArchiveV5(
         if (tensor_cdata_naming_scheme) {
           std::string string_id =
               std::to_string(reinterpret_cast<std::intptr_t>(
-                                 tensor.storage().unsafeGetStorageImpl()));
+                  tensor.storage().unsafeGetStorageImpl()));
           tensor_names.push_back(string_id + ".storage");
           storage_context.addStorage(string_id, tensor.storage());
         } else {
