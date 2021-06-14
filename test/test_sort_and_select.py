@@ -636,7 +636,10 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
     @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=True)))
+    @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_complex=False,
+                                                 include_bool=False,
+                                                 include_half=False,
+                                                 include_bfloat16=True)))
     @dtypes(*(torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
     def test_topk_zero(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/49205
