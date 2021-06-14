@@ -4646,6 +4646,20 @@ masked_fill(mask, value) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
 """)
 
+add_docstr_all('retain_grad',
+               r"""
+retain_grad() -> None
+
+Enables this Tensor to have their :attr:`grad` populated during
+:func:`backward`. This is a no-op for leaf tensors.
+""")
+
+add_docstr_all('retains_grad',
+               r"""
+Is ``True`` if this Tensor is non-leaf and its :attr:`grad` is enabled to be
+populated during :func:`backward`, ``False`` otherwise.
+""")
+
 add_docstr_all('requires_grad',
                r"""
 Is ``True`` if gradients need to be computed for this Tensor, ``False`` otherwise.
