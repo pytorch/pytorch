@@ -220,7 +220,8 @@ class Vectorized<int32_t> {
   int32_t& operator[](int idx) = delete;
 
   Vectorized<int32_t> angle() const {
-    return Vectorized<int32_t>{0};
+    return blendv(
+      Vectorized<int32_t>(0), Vectorized<int32_t>(c10::pi<int32_t>), *this < Vectorized<int32_t>(0));
   }
   Vectorized<int32_t> real() const {
     return *this;

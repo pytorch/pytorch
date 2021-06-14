@@ -472,9 +472,7 @@ void EncoderBase::EncodeBlock(
     EncodeValueInfo(graph_proto, v, output, dynamic_axes);
   }
   for (auto node : block->nodes()) {
-    bool is_raw_export =
-        operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->mustBeNone() && !is_raw_export) {
+    if (node->mustBeNone()) {
       // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
@@ -485,7 +483,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_doc_string(node->sourceRange().str());
     }
     for (auto input : node->inputs()) {
-      if (input->node()->mustBeNone() && !is_raw_export) {
+      if (input->node()->mustBeNone()) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->debugName());
@@ -505,9 +503,7 @@ void EncoderBase::EncodeBlock(
       domains_.insert(domain);
       p_n->set_domain(domain);
     }
-    if (is_raw_export) {
-      AT_ASSERT(!node->kind().is_onnx());
-    } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
+    if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
       AT_ASSERT(
           !node->kind().is_aten() && !node->kind().is_prim() &&
           !node->kind().is_attr());
@@ -520,15 +516,6 @@ void EncoderBase::EncodeBlock(
     for (auto attr_name : node->attributeNames()) {
       AddAttribute(
           p_n, node, attr_name, use_external_data_format, onnx_file_path);
-    }
-    if (is_raw_export && node->blocks().size() > 0) {
-      auto blocks = p_n->add_attribute();
-      blocks->set_name("_blocks");
-      blocks->set_type(onnx::AttributeProto_AttributeType_GRAPHS);
-      for (auto block : node->blocks()) {
-        auto graph = blocks->add_graphs();
-        EncodeBlock(graph, block, initializers);
-      }
     }
     if (node->kind() == ::c10::onnx::Loop) {
       AT_ASSERT(node->blocks().size() == 1);
@@ -765,9 +752,7 @@ GraphEncoder::GraphEncoder(
     const std::string& onnx_file_path)
     : EncoderBase(operator_export_type, strip_doc),
       defer_weight_export_(defer_weight_export) {
-  if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
-    validateGraph(graph, operator_export_type);
-  }
+  validateGraph(graph, operator_export_type);
 
   if (use_external_data_format) {
     TORCH_CHECK(
