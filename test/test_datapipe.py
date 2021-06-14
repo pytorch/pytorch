@@ -354,8 +354,8 @@ class TestIterableDataPipeHttp(TestCase):
 
             datapipe_dir_f = dp.iter.ListDirFiles(tmpdir, '*_list')
             datapipe_f_lines = dp.iter.ReadLinesFromFile(datapipe_dir_f)
-            datapipe_line_url = dp.iter.Map(datapipe_f_lines,
-                                            _get_data_from_tuple_fn, [1])
+            datapipe_line_url: IterDataPipe[str] = \
+                dp.iter.Map(datapipe_f_lines, _get_data_from_tuple_fn, (1,))
             datapipe_http = dp.iter.HttpReader(datapipe_line_url,
                                                timeout=timeout)
             datapipe_tob = dp.iter.ToBytes(datapipe_http, chunk=chunk)
@@ -378,7 +378,7 @@ class TestIterableDataPipeHttp(TestCase):
         self._http_test_base(test_file_size, test_file_count)
 
     @unittest.skip("Test on the very large file skipped\
-                    due to the CI timing constraint.")
+                due to the CI timing constraint.")
     def test_large_files_http_reader_iterable_datapipes(self):
         #   STATS: It takes about 11 mins to test a large file of 64GB locally
         test_file_size = 1024 * 1024 * 128
