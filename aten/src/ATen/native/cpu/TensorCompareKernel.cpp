@@ -318,6 +318,7 @@ static void isin_default_kernel_cpu(
     .add_input(promoted_elements)
     .check_all_same_dtype(false)
     .build();
+  // Dispatch based on promoted type.
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
       const auto* test_element_data = reinterpret_cast<scalar_t*>(test_elements_flat.data_ptr());
