@@ -37,3 +37,6 @@ class CyclicLR(_LRScheduler):
 
 class CosineAnnealingWarmRestarts(_LRScheduler):
     def __init__(self, optimizer: Optimizer, T_0: int=..., T_mult: int=..., eta_min: int=..., last_epoch: int=...) -> None: ...
+    
+class OneCycleLR(_LRScheduler):
+    def __init__(self,optimizer: Optimizer, max_lr: float=..., total_steps: int=..., epochs: int=..., steps_per_epoch: int=..., pct_start: float=..., anneal_strategy: str=..., cycle_momentum: bool=..., base_momentum: float=..., max_momentum: float=..., div_factor: float=..., final_div_factor: float=..., last_epoch: int=..., verbose :bool=...) -> None: ...
