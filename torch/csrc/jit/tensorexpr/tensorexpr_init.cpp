@@ -47,6 +47,7 @@ ArgValue convertPyToArgValue(py::handle inp) {
     throw std::runtime_error("nyi");
   }
 }
+
 void initTensorExprBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -223,6 +224,19 @@ void initTensorExprBindings(PyObject* module) {
         }
       },
       py::return_value_policy::reference);
+
+  te.def(
+      "Compute2",
+      [](const std::string& func_name,
+         const std::vector<DimArg>& dim_args,
+         py::function func) {
+        return Compute(
+            func_name, dim_args, [&func](const std::vector<VarHandle>& dims) {
+              return py::cast<ExprHandle>(func(dims));
+            });
+      },
+      py::return_value_policy::reference);
+
   py::class_<Reducer>(te, "Reducer")
       .def(py::init<
            ExprHandle,
@@ -364,8 +378,8 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_loop_body_for",
-          [](const LoopNest& self, BufHandle* b) {
-            return self.getLoopBodyFor(b->node());
+          [](const LoopNest& self, BufHandle& b) {
+            return self.getLoopBodyFor(b.node());
           },
           py::return_value_policy::reference)
       .def(
@@ -376,8 +390,8 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_all_loopnests_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllLoopNestsWritingToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllLoopNestsWritingToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
@@ -388,14 +402,14 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_innermost_loops_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllInnermostLoopsWritingToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllInnermostLoopsWritingToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
           "get_writes_for",
-          [](const LoopNest& self, const BufHandle* b) {
-            return self.getAllWritesToBuf(b->node());
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllWritesToBuf(b.node());
           },
           py::return_value_policy::reference)
       .def(
@@ -466,8 +480,7 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "fuse_loops",
           [](const std::vector<For*>& loops) {
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            For* fused_loop;
+            For* fused_loop = nullptr;
             LoopNest::fuseLoops(loops, &fused_loop);
             return fused_loop;
           },
@@ -490,6 +503,12 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "vectorize",
           [](const LoopNest& self, For* f) { self.vectorize(f); },
+          py::return_value_policy::reference)
+      .def_static(
+          "compress_buffer",
+          [](BufHandle& buf, Stmt* stmt) {
+            return LoopNest::compressBuffer(buf.node(), stmt);
+          },
           py::return_value_policy::reference)
       .def(
           "cache_accesses",
@@ -635,13 +654,29 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<CodeGen>(te, "CodeGen")
       .def(
           "call",
-          [](CodeGen& self, const std::vector<at::Tensor>& values) {
+          [](CodeGen& self, const py::sequence& values) {
             std::vector<CodeGen::CallArg> value_ptrs;
-            value_ptrs.reserve(values.size());
+            value_ptrs.reserve(py::len(values));
             for (const auto& value : values) {
-              value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
+              if (py::isinstance<py::int_>(value)) {
+                value_ptrs.emplace_back(value.cast<int64_t>());
+              } else {
+                value_ptrs.emplace_back(value.cast<at::Tensor>().data_ptr());
+              }
             }
             self.call(value_ptrs);
+          })
+      .def(
+          "call_raw",
+          [](CodeGen& self, const py::sequence& values) {
+            std::vector<void*> value_ptrs;
+            value_ptrs.reserve(py::len(values));
+            for (const auto& value : values) {
+              // Tensor.data_ptr() returns an int in python
+              value_ptrs.emplace_back(
+                  reinterpret_cast<void*>(value.cast<intptr_t>()));
+            }
+            self.call_raw(value_ptrs);
           })
       .def(
           "get_code_text",
@@ -659,6 +694,11 @@ void initTensorExprBindings(PyObject* module) {
       .def(py::init<Tensor*>())
       .def(py::init<const VarHandle&>())
       .def(py::init<const BufHandle&>());
+
+  py::implicitly_convertible<Placeholder, CodeGen::BufferArg>();
+  py::implicitly_convertible<Tensor*, CodeGen::BufferArg>();
+  py::implicitly_convertible<VarHandle, CodeGen::BufferArg>();
+  py::implicitly_convertible<BufHandle, CodeGen::BufferArg>();
 
   te.def(
       "construct_codegen",
@@ -678,8 +718,11 @@ void initTensorExprBindings(PyObject* module) {
 #else
           throw std::runtime_error("PyTorch not compiled with CUDA support!");
 #endif
-        } else {
+        } else if (name == "ir_eval") {
           cg = new SimpleIREvaluator(stmt, args);
+        } else {
+          throw std::runtime_error(
+              "construct_codegen() expects 'llvm', 'cuda', or 'ir_eval'");
         }
         return cg;
       });
