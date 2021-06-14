@@ -1927,7 +1927,7 @@ TEST(Reductions, ReductionVectorize) {
   SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
   cg_before.call({in_, out_before});
 
-  l.vectorize(l.getLoopStmtsFor(tensor)[0]);
+  ASSERT_TRUE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[0]));
 
   Stmt* s = l.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1962,8 +1962,7 @@ TEST(Reductions, ReductionVectorizeInner) {
   Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
 
-  ASSERT_THROWS_WITH(
-      l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
+  ASSERT_FALSE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[1]));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1989,8 +1988,7 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
   cg_before.call({in_, out_before});
 
-  ASSERT_THROWS_WITH(
-      l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
+  ASSERT_FALSE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[1]));
 
   // But if we rfactor this so it's not a reduce axis we can vectorize that
   // loop.
@@ -2005,7 +2003,7 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   l.distributeLoop(loops.at(0));
   auto rfac_loops = l.getAllLoopNestsWritingToBuf(rfac_buf);
 
-  l.vectorize(rfac_loops[1][0]);
+  ASSERT_TRUE(LoopNest::vectorize(rfac_loops[1][0]));
   l.simplify();
 
   Stmt* s = l.root_stmt();
