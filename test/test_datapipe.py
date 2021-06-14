@@ -271,6 +271,11 @@ class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                        format % args))
         return
 
+    def finish(self):
+        if self.__loggerHandle is not None:
+            self.__loggerHandle.close()
+        super().finish()
+
 
 def setUpLocalServerInThread():
     try:
