@@ -40,11 +40,13 @@ class WindowsJob:
 
         target_arch = self.cuda_version.render_dots() if self.cuda_version else "cpu"
 
+        python_version = "3.8"
+
         base_name_parts = [
             "pytorch",
             "windows",
             self.vscode_spec.render(),
-            "py36",
+            "py" + python_version.replace(".", ""),
             target_arch,
         ]
 
@@ -65,7 +67,7 @@ class WindowsJob:
             ["pytorch", "win"]
             + self.vscode_spec.get_elements()
             + arch_env_elements
-            + ["py3"]
+            + ["py" + python_version.split(".")[0]]
         )
 
         is_running_on_cuda = bool(self.cuda_version) and not self.force_on_cpu
@@ -75,7 +77,7 @@ class WindowsJob:
         else:
             props_dict = {
                 "build_environment": build_environment_string,
-                "python_version": miniutils.quote("3.6"),
+                "python_version": miniutils.quote(python_version),
                 "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
                 "vc_year": miniutils.quote(str(self.vscode_spec.year)),
                 "vc_product": self.vscode_spec.get_product(),
