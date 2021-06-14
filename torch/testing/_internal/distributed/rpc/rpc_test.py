@@ -4767,7 +4767,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         try:
             opts = rpc.TensorPipeRpcBackendOptions(init_method=self.init_method)
             if self.rank == 1:
-                opts.set_device_map("server", {self.rank: 0})
                 rpc.init_rpc(
                     "master",
                     rank=self.rank,
