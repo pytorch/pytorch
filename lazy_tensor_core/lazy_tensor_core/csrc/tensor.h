@@ -856,6 +856,11 @@ class LazyTensor {
       LazyTensor& running_mean, LazyTensor& running_var, bool training,
       double momentum, double eps);
 
+  static std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm(
+      const LazyTensor& input, const LazyTensor& weight, const LazyTensor& bias,
+      LazyTensor& running_mean, LazyTensor& running_var, bool training,
+      double momentum, double eps);
+
   // Returns the input, weight and bias gradients.
   static std::tuple<LazyTensor, LazyTensor, LazyTensor>
   native_batch_norm_backward(const LazyTensor& grad_out,

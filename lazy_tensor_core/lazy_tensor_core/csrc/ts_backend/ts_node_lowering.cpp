@@ -17,6 +17,7 @@
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/softmax.h"
+#include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
@@ -62,6 +63,9 @@ class TSNodeLowering : public NodeLowering {
       }
       case at::aten::mm: {
         return InferMm(node);
+      }
+      case at::aten::native_batch_norm: {
+        return InferBatchNorm(node);
       }
       case at::aten::permute: {
         auto permute =
@@ -121,6 +125,10 @@ class TSNodeLowering : public NodeLowering {
       return LowerConstant(ir::NodeCast<ir::ops::Constant>(
           node, ir::OpKind(at::prim::Constant)));
     }
+    if (node->op().op == at::aten::native_batch_norm) {
+      return LowerBatchNorm(ir::NodeCast<ir::ops::TSNativeBatchNormForward>(
+          node, ir::OpKind(at::aten::native_batch_norm)));
+    }
     if (node->op().op == at::aten::constant_pad_nd) {
       return LowerConstantPad(ir::NodeCast<ir::ops::ConstantPadNd>(
           node, ir::OpKind(at::aten::constant_pad_nd)));
@@ -171,6 +179,14 @@ class TSNodeLowering : public NodeLowering {
                                   rhs.shape().dimensions()));
   }
 
+  static lazy_tensors::Shape InferBatchNorm(const ir::Node* node) {
+    const ir::Output& input = node->operand(0);
+    const ir::Output& running_mean = node->operand(3);
+    const ir::Output& running_var = node->operand(4);
+    return lazy_tensors::ShapeUtil::MakeTupleShape(
+        {input.shape(), running_mean.shape(), running_var.shape()});
+  }
+
   static lazy_tensors::Shape InferBmm(const ir::Node* node) {
     const ir::Output& tensor1 = node->operand(0);
     const ir::Output& tensor2 = node->operand(1);
@@ -215,6 +231,16 @@ class TSNodeLowering : public NodeLowering {
     auto ret = magic_method->call({}, *function_, arguments, {}, 0);
     auto sv = dynamic_cast<torch::jit::SimpleValue*>(ret.get());
     LTC_CHECK(sv);
+    if (sv->getValue()->type()->kind() == c10::TypeKind::TupleType) {
+      const auto tuple_call_result = sv->asTuple({}, *function_);
+      TSOpVector tuple_result;
+      for (const auto& tuple_component : tuple_call_result) {
+        auto tuple_component_sv =
+            dynamic_cast<torch::jit::SimpleValue*>(tuple_component.get());
+        tuple_result.push_back(tuple_component_sv->getValue());
+      }
+      return tuple_result;
+    }
     return {sv->getValue()};
   }
 
@@ -256,6 +282,17 @@ class TSNodeLowering : public NodeLowering {
     copy_from_arguments.emplace_back(loctx()->GetOutputOp(input_op));
     LowerBuiltin(at::aten::copy_, copy_from_arguments);
     return {destination};
+  }
+
+  TSOpVector LowerBatchNorm(const ir::ops::TSNativeBatchNormForward* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    for (size_t i = 0; i < 5; ++i) {
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(i)));
+    }
+    arguments.emplace_back(node->training());
+    arguments.emplace_back(node->momentum());
+    arguments.emplace_back(node->eps());
+    return LowerBuiltin(node, arguments);
   }
 
   TSOpVector LowerCast(const ir::ops::Cast* node) {
