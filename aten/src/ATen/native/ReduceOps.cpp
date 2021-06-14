@@ -63,7 +63,9 @@ void check_all_any(
     }
   }
 
-  check_reduction_shape(meta, name, self, dim, keepdim, out_dtype);
+  auto shape = get_reduction_shape(self, dim, keepdim);
+  meta.set_output(shape, self.options().dtype(out_dtype));
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
 }
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
