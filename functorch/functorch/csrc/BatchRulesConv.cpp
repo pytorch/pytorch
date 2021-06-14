@@ -86,6 +86,31 @@ Tensor mkldnn_convolution_decomp(const Tensor &self, const Tensor &weight, const
   return at::convolution(self, weight, bias, stride, padding, dilation, false, out_padding, groups);
 }
 
+Tensor cudnn_convolution_plumbing(
+    const Tensor & self, const Tensor & weight, IntArrayRef padding,
+    IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32) {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor weight_value;
+  optional<int64_t> weight_bdim;
+  std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
+
+  // conv2d that we have a batch rule for
+  if (self.dim() == 4) {
+    return at::conv2d(self, weight, nullopt, stride, padding, dilation, groups);
+  }
+
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::cudnn_convolution", "");
+  return slow_fallback<Tensor>(op, { self, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32 });
+}
+
 bool first_dim_has_size_1(const Tensor& value, int64_t bdim) {
   if (bdim == 0) {
     return value.size(1) == 1;
@@ -165,5 +190,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("conv2d", conv2d_batching_rule);
   m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
+  m.impl("cudnn_convolution", cudnn_convolution_plumbing);
 }
 }}
