@@ -874,6 +874,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.expm1: lambda input: -1,
         torch.special.expit: lambda input: -1,
         torch.special.polygamma: lambda input, n, out=None: -1,
+        torch.special.digamma: lambda input: -1,
+        torch.special.psi: lambda input: -1,
         torch.special.gammaln: lambda input: -1,
         torch.special.i0: lambda input: -1,
         torch.special.i0e: lambda input: -1,

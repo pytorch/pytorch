@@ -27,6 +27,8 @@ Functions
 .. autofunction:: exp2
 .. autofunction:: gammaln
 .. autofunction:: polygamma
+.. autofunction:: digamma
+.. autofunction:: psi
 .. autofunction:: i0
 .. autofunction:: i0e
 .. autofunction:: i1
