@@ -333,7 +333,7 @@ class DeviceTypeTestBase(TestCase):
     def _get_tolerance_override(self, test, dtype):
         if not hasattr(test, 'tolerance_overrides'):
             return self.precision, self.rel_tol
-        return test.tolerance_overrides.get(dtype, (self.precision, self.rel_tol))
+        return test.tolerance_overrides.get(dtype, tol(self.precision, self.rel_tol))
 
     # Creates device-specific tests.
     @classmethod

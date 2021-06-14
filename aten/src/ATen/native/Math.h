@@ -1600,6 +1600,8 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
     x = -x;
   }
   return x;
+}
+
 /* The next function is taken from http://ab-initio.mit.edu/Faddeev */
 
 /* Copyright (c) 2012 Massachusetts Institute of Technology
@@ -2095,7 +2097,14 @@ calc_erfcx(T x)
     return erfcx_y100(400/(4+x));
   }
   else {
-    return x < -26.7 ? std::numeric_limits<T>::infinity() : (x < -6.1 ? 2*exp(x*x)
-                                   : 2*exp(x*x) - erfcx_y100(400/(4-x)));
+    if (x < -26.7) {
+      return std::numeric_limits<T>::infinity();
+    }
+    else if (x < -6.1) {
+      return 2*exp(x*x);
+    }
+    else {
+      return 2*exp(x*x) - erfcx_y100(400/(4-x));
+    }
   }
 }
