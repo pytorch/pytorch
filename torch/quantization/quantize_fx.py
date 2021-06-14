@@ -289,7 +289,19 @@ def prepare_fx(
         ("foo.*bar.*conv[0-9]+", qconfig?)
         ...,
       ],
-      # priority (in increasing order): global, object_type, module_name_regex, module_name
+
+      # optional, used for matching object type invocations in a submodule by
+      # order
+      # TODO(future PR): potentially support multiple indices ('0,1') and/or
+      #   ranges ('0:3').
+      "module_name_object_type_order": [
+        # fully_qualified_name, object_type, index, qconfig
+        ("foo.bar", torch.nn.functional.linear, 0, qconfig?),
+      ],
+
+      # priority (in increasing order):
+      #   global, object_type, module_name_regex, module_name,
+      #   module_name_object_type_order
       # qconfig == None means fusion and quantization should be skipped for anything
       # matching the rule
       }
