@@ -1,7 +1,6 @@
 from typing import Optional
 
 import torch
-from torch import nn
 import torch.nn.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 from torch.ao.nn.sparse.quantized import linear
@@ -13,7 +12,7 @@ class Linear(torch.nn.Module):
     """
     _version = 1
     _op_type = "sparse_dynamic"
-    _FLOAT_MODULE = nn.Linear
+    _FLOAT_MODULE = torch.nn.Linear
 
     def __init__(self, in_features, out_features, row_block_size, col_block_size, bias=True, dtype=torch.qint8):
         super().__init__()
