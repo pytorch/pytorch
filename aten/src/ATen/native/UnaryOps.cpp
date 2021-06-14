@@ -645,9 +645,10 @@ static inline void mvlgamma_check(const Tensor& self, int64_t p) {
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
-  auto dtype = c10::get_default_dtype();
-  if (!at::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
-    dtype = c10::scalarTypeToTypeMeta(self.scalar_type());
+  auto dtype = c10::scalarTypeToTypeMeta(self.scalar_type());
+  if (at::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    // int -> float promotion
+    dtype = c10::get_default_dtype();
   }
   Tensor args = native::arange(
       -p * HALF + HALF,
