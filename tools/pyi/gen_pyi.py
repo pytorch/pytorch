@@ -6,7 +6,7 @@ import argparse
 from tools.codegen.model import Variant
 from tools.codegen.api.python import (PythonSignatureGroup,
                                       PythonSignatureNativeFunctionPair)
-from tools.codegen.gen import FileManager
+from tools.codegen.gen import FileManager, parse_native_yaml
 from typing import Sequence, List, Dict
 
 from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
@@ -314,6 +314,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                    .format(FACTORY_PARAMS),
                    'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS)],
+        'linspace': ['def linspace(start: Number, end: Number, steps: Optional[_int]=None, *,'
+                     ' out: Optional[Tensor]=None, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
+        'logspace': ['def logspace(start: Number, end: Number, steps: Optional[_int]=None, base: _float=10.0, *,'
+                     ' out: Optional[Tensor]=None, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
         'randint': ['def randint(low: _int, high: _int, size: _size, *,'
                     ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
@@ -372,7 +376,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
             ' other: Union[Tensor, Number],'
             ' *, alpha: Optional[Number]=1, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
 
-    function_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=False, pyi=True)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
+
+    function_signatures = load_signatures(native_functions, deprecated_yaml_path, method=False, pyi=True)
     sig_groups = get_py_torch_functions(function_signatures)
     for group in sorted(sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
@@ -497,7 +504,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
     # TODO: we should probably add them in
-    tensor_method_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
+    tensor_method_signatures = load_signatures(native_functions, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
     tensor_method_sig_groups = get_py_torch_functions(tensor_method_signatures, method=True)
 
     for group in sorted(tensor_method_sig_groups, key=lambda g: g.signature.name):

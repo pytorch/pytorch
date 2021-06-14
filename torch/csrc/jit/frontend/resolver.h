@@ -10,9 +10,6 @@ namespace jit {
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
 
-// struct BuiltinModule;
-// struct FunctionValue;
-
 /**
  * class Resolver
  *

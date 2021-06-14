@@ -4,6 +4,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>

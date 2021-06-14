@@ -49,6 +49,7 @@ Global Hooks For Module
     register_module_forward_pre_hook
     register_module_forward_hook
     register_module_backward_hook
+    register_module_full_backward_hook
 
 .. currentmodule:: torch
 

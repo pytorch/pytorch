@@ -57,7 +57,7 @@ Value* tryConvertToTypeAndPrepareGraph(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
-  auto tmp = std::make_shared<Graph>(new Graph());
+  auto tmp = std::make_shared<Graph>();
   Value* res = tryConvertToType(
       loc, graph, tmp, concrete_type, value, allow_conversions);
   insertGraph(graph, *tmp, tmp->inputs());
