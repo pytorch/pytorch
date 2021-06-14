@@ -122,6 +122,22 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
+c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
+  c10::optional<at::Device> device = c10::nullopt;
+  for (auto const& node : graph->nodes()) {
+    for (auto const& input : node->inputs()) {
+      if (auto tt = input->type()->cast<TensorType>()) {
+        if (auto inputDevice = tt->device()) {
+          TORCH_INTERNAL_ASSERT(!device || *device == *inputDevice);
+          device = inputDevice;
+        }
+      }
+    }
+  }
+  TORCH_INTERNAL_ASSERT(device);
+  return device;
+}
+
 // If v is a Tensor with concretely-known sizes and dtype, return them, else
 // nullopt.
 c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
@@ -214,6 +230,23 @@ bool conv2dIsSupported(
   }
   return true;
 }
+
+static bool isContiguous(const torch::jit::Value* v) {
+  auto const& tt = v->type()->cast<TensorType>();
+  if (!tt) {
+    return false;
+  }
+  if (!tt->isComplete()) {
+    return false;
+  }
+  auto const& sizes = tt->sizes().concrete_sizes();
+  auto const& strides = tt->strides().concrete_sizes();
+  if (!sizes || !strides) {
+    return false;
+  }
+  return *strides == TensorType::contiguousStridesOf(*sizes);
+}
+
 // The fuser only supports conv2d with very specific properties:
 // - Static shapes: 4-d input and filter, 1-d bias.
 // - Constant strides/padding/dilation/groups
@@ -234,6 +267,14 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
     GRAPH_DEBUG("some params aren't static");
     return false;
   }
+
+  // All inputs should be contiguous so no transposition is required.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1)) ||
+      !isContiguous(node->input(2))) {
+    GRAPH_DEBUG("conv2dIsSupported: some inputs are not contiguous");
+    return false;
+  }
+
   return conv2dIsSupported(
       *input,
       *weight,
@@ -258,6 +299,12 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   // Proper ndim for tensor inputs.
   if (input0->dims.size() != 2 || input1->dims.size() != 2) {
     GRAPH_DEBUG("matmulIsSupported: Unsupported input sizes");
+    return false;
+  }
+
+  // Inputs should be contiguous, or the TE will needlessly transpose them.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1))) {
+    GRAPH_DEBUG("matmulIsSupported: Input shapes are not contiguous");
     return false;
   }
 
@@ -2916,7 +2963,10 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   if (backendType == kCudaCodeGen) {
     for (auto buf : bufOutputs_) {
       std::vector<For*> loops = l.getLoopStmtsFor(buf);
-      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      if (loops.empty()) {
+        // This happens when Buf is 0-dim
+        continue;
+      }
       For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
       assert(flattened);
@@ -3074,6 +3124,16 @@ void TensorExprKernel::genInputDebugNames() {
   input_name_map_ = std::move(value_to_name);
 }
 
+template <typename T>
+static std::vector<ExprHandle> toExprHandles(const std::vector<T>& sizes) {
+  std::vector<ExprHandle> dims;
+  dims.reserve(sizes.size());
+  for (auto const& size : sizes) {
+    dims.emplace_back(IntImm::make(size));
+  }
+  return dims;
+}
+
 Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
   Tensor* result = nullptr;
@@ -3084,6 +3144,15 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
         std::string msg = std::string("Shapes for input '%") +
             input->debugName() + "' are unknown";
         throw malformed_input(msg);
+      }
+      if (isContiguous(input)) {
+        Placeholder inBuffer(
+            "t" + input_name_map_[input],
+            ToDtype(static_cast<ScalarType>(*tt->scalarType())),
+            toExprHandles(*tt->sizes().concrete_sizes()));
+        bufs_.emplace(input, inBuffer.data());
+        bufferArgs_.emplace_back(inBuffer);
+        break;
       }
       Placeholder inBuffer(
           "t" + input_name_map_[input],
@@ -3264,7 +3333,7 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
-  device_ = *pickDeviceType(graph_->inputs());
+  device_ = *pickDeviceType(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});

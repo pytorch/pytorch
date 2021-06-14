@@ -9,9 +9,9 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests)
+    (op_db,)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
@@ -19,11 +19,8 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 from collections.abc import Sequence
 
-# Get names of all the operators which have entry in `method_tests` (legacy testing infra)
-method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
 
 # Tests that apply to all operators
-
 class TestOpInfo(TestCase):
     exact_dtype = True
 
@@ -38,12 +35,8 @@ class TestOpInfo(TestCase):
         # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
             samples = op.sample_inputs(device, dtype)
-            if len(samples) == 0:
-                self.skipTest("Skipped! No sample inputs!")
-
-            # NOTE: only tests on first sample
-            sample = samples[0]
-            op(sample.input, *sample.args, **sample.kwargs)
+            for sample in samples:
+                op(sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
@@ -59,6 +52,32 @@ class TestOpInfo(TestCase):
             self.assertTrue(sample_input.dtype == dtype)
             self.assertTrue(sample_input.device.type == self.device_type)
 
+    # Verifies that backward for each unsupported floating or complex dtype
+    #   throw a runtime error.
+    @onlyOnCPUAndCUDA
+    @ops(op_db, dtypes=OpDTypes.unsupported_backward,
+         allowed_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16))
+    def test_unsupported_backward(self, device, dtype, op):
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+
+        try:
+            samples = op.sample_inputs(device, dtype, requires_grad=True)
+        except RuntimeError as e:
+            self.skipTest(f"Skipped! unable to generate sample. {e}")
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        # NOTE: assert exception raised on ANY sample input
+        with self.assertRaises(RuntimeError):
+            for sample in op.sample_inputs(device, dtype, requires_grad=True):
+                result = op(sample.input, *sample.args, **sample.kwargs)
+                # TODO: handle non-tensor outputs
+                if not isinstance(result, torch.Tensor):
+                    self.skipTest("Skipped! Test does not handle non-tensor outputs")
+                result.sum().backward()
+
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.
     # TODO: support multi-tensor outputs
@@ -73,14 +92,10 @@ class TestOpInfo(TestCase):
             result = op(sample.input, *sample.args, **sample.kwargs)
             if not isinstance(result, torch.Tensor):
                 continue
+            if sample.output_process_fn_grad is not None:
+                result = sample.output_process_fn_grad(result)
             result.sum().backward()
 
-    # Verifies that ops do not have an entry in
-    # `method_tests` (legacy testing infra).
-    @onlyCPU
-    @ops(op_db, allowed_dtypes=[torch.float32])
-    def test_duplicate_method_tests(self, device, dtype, op):
-        self.assertFalse(op.name in method_tested_operators)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
@@ -235,7 +250,7 @@ class TestGradients(TestCase):
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
-            with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
+            with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
 
 
@@ -295,6 +310,9 @@ class TestCommon(JitCommonTestCase):
                 expected_forward = op(sample.input, *sample.args, **sample.kwargs)
                 expected_grad = None
 
+                output_process_fn_grad = sample.output_process_fn_grad if sample.output_process_fn_grad \
+                    else lambda x: x
+
                 # Skips inplace variants if the output dtype is not the same as
                 #   the input dtype
                 skip_inplace = False
@@ -309,7 +327,7 @@ class TestCommon(JitCommonTestCase):
                 #   derived from each tensor output
                 if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
                         and (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type))):
-                    expected_forward.sum().backward()
+                    output_process_fn_grad(expected_forward).sum().backward()
                     expected_grad = tensor.grad
 
                 # Test eager consistency
@@ -341,7 +359,7 @@ class TestCommon(JitCommonTestCase):
                     # Compares variant's backward
                     if expected_grad is not None and \
                             (variant not in inplace_ops or op.supports_inplace_autograd):
-                        variant_forward.sum().backward()
+                        output_process_fn_grad(variant_forward).sum().backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
         _test_consistency_helper(samples, variants)

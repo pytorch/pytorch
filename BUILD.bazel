@@ -328,10 +328,8 @@ filegroup(
         "aten/src/TH/THAllocator.cpp",
         "aten/src/TH/THBlas.cpp",
         "aten/src/TH/THGeneral.cpp",
-        "aten/src/TH/THLapack.cpp",
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
-        "aten/src/TH/THTensorLapack.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
     ],
 )
@@ -1877,8 +1875,6 @@ cc_library(
             "torch/lib/c10d/*.hpp",
         ],
         exclude = [
-            "torch/lib/c10d/ProcessGroupMPI.hpp",
-            "torch/lib/c10d/ProcessGroupNCCL.hpp",
             "torch/csrc/autograd/generated/VariableType.h",
             "torch/csrc/autograd/generated/RegistrationDeclarations.h",
             "torch/csrc/autograd/generated/variable_factories.h",
