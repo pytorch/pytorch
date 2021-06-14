@@ -1561,9 +1561,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool comput
   auto req_size = self.sizes().vec();
   req_size.pop_back();
   req_size.back() = std::min(m, n);
-  auto k = std::min(m, n);
-  // use arange since cuSOLVER does not return the correct values for ill-conditioned matrices.
-  auto pivots_tensor = at::arange(1, k+1, self.options().dtype(kInt)).expand(req_size).contiguous();
+  auto pivots_tensor = at::empty(req_size, self.options().dtype(kInt));
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
 

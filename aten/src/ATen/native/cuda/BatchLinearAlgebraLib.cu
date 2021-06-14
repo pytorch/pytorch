@@ -1227,6 +1227,12 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
 void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+  // Fill the pivots tensor with indices using 1-based (Fortran) indexing. This
+  // is needed for maintaining the same results with MAGMA.
+  auto k = std::min(self.size(-2), self.size(-1));
+  Tensor pivots_tmp = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand_as(pivots);
+  pivots.copy_(pivots_tmp);
+
   AT_DISPATCH_FLOATING_TYPES(
     self.scalar_type(),
     "lu_cusolver",
@@ -1242,8 +1248,8 @@ void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& 
     scalar_t* self_data = self.data_ptr<scalar_t>();
     int* infos_data = infos.data_ptr<int>();
 
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
-      auto handle = at::cuda::getCurrentCUDASolverDnHandle();
       if (get_pivots) {
         auto pivots_data = pivots.data_ptr<int>();
         auto pivots_stride = pivots.size(-1);
@@ -1272,13 +1278,6 @@ void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& 
   if (!get_pivots) {
     at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
       -std::numeric_limits<double>::infinity());
-
-    // Fill the pivots tensor with indices using 1-based (Fortran) indexing
-    auto m = self.size(-2);
-    auto n = self.size(-1);
-    auto k = std::min(m, n);
-    Tensor pivots_tmp = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand_as(pivots);
-    pivots.copy_(pivots_tmp);
   }
 }
 #endif  // USE_CUSOLVER
