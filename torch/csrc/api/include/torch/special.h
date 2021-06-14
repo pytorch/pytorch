@@ -35,6 +35,7 @@ inline Tensor polygamma(int64_t n, const Tensor& self) {
 
 inline Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
   return torch::special_polygamma_out(result, n, self);
+}
 
 /// Computes the logarithmic derivative of the gamma function on input
 /// See https://pytorch.org/docs/master/special.html#torch.special.psi
