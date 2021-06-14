@@ -436,7 +436,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*tensor_cdata_naming_scheme=*/false);
+        /*tensor_cdata_naming_scheme=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -475,10 +475,11 @@ void ScriptModuleSerializer::writeArchive(
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
         if (tensor_cdata_naming_scheme) {
-          tensor_names.push_back(
+          std::string string_id =
               std::to_string(reinterpret_cast<std::intptr_t>(
-                  tensor.storage().unsafeGetStorageImpl())) +
-              ".storage");
+                  tensor.storage().unsafeGetStorageImpl()));
+          tensor_names.push_back(string_id + ".storage");
+          storage_context_.addStorage(string_id, tensor.storage());
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }
@@ -643,8 +644,8 @@ void ScriptModuleSerializer::writeByteCode(
       telements,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
-      /*tensor_dir=*/"bytecode/",
-      /*tensor_cdata_naming_scheme=*/false);
+      /*tensor_dir=*/"constants/",
+      /*tensor_cdata_naming_scheme=*/true);
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
