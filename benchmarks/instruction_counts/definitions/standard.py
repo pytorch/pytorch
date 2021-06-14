@@ -61,17 +61,9 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
         torch._noop_unary(x)                     | torch::_noop_unary(x);
         torch._noop_binary(x, y)                 | torch::_noop_binary(x, y);
                                                  |
-        # @function (manual)                     | // @function (manual)
-        torch._noop_unary_manual(x)              | torch::_noop_unary_manual(x);
-        torch._noop_binary_manual(x, y)          | torch::_noop_binary_manual(x, y);
-                                                 |
         # @method                                | // @method
         x._noop_unary()                          | x._noop_unary();
         x._noop_binary(y)                        | x._noop_binary(y);
-                                                 |
-        # @method (manual)                       | // @method (manual)
-        x._noop_unary_manual()                   | x._noop_unary_manual();
-        x._noop_binary_manual(y)                 | x._noop_binary_manual(y);
     """)),
 
     "Pointwise": {
