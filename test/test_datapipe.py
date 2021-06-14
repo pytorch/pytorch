@@ -333,6 +333,10 @@ class TestIterableDataPipeHttp(TestCase):
 
     def http_test_base(self, test_file_size, test_file_count, timeout=None,
                        chunk=None):
+
+        def _get_data_from_tuple_fn(data, *args, **kwargs):
+            return data[args[0]]
+
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as tmpdir:
             # create tmp dir and files for test
             base_tmp_dir = os.path.basename(os.path.normpath(tmpdir))
@@ -343,10 +347,12 @@ class TestIterableDataPipeHttp(TestCase):
             create_temp_files_for_serving(tmpdir, test_file_count,
                                           test_file_size, file_url_template)
 
-            datapipe_dirf = dp.iter.ListDirFiles(tmpdir, '*_list')
-            datapipe_rf = dp.iter.ReadLinesFromFile(datapipe_dirf)
-            datapipe_tup = TupleToElementIDP(datapipe_rf, 1)
-            datapipe_http = dp.iter.HttpReader(datapipe_tup, timeout=timeout)
+            datapipe_dir_f = dp.iter.ListDirFiles(tmpdir, '*_list')
+            datapipe_f_lines = dp.iter.ReadLinesFromFile(datapipe_dir_f)
+            datapipe_line_url = dp.iter.Map(datapipe_f_lines,
+                                            _get_data_from_tuple_fn, [1])
+            datapipe_http = dp.iter.HttpReader(datapipe_line_url,
+                                               timeout=timeout)
             datapipe_tob = dp.iter.ToBytes(datapipe_http, chunk=chunk)
 
             for (url, data) in datapipe_tob:
@@ -367,7 +373,7 @@ class TestIterableDataPipeHttp(TestCase):
         self.http_test_base(test_file_size, test_file_count)
 
     @unittest.skip("Test on the very large file skipped\
-                    due to the CI timing constraint.")
+                    due to the CI timing constraint.")    
     def test_large_files_http_reader_iterable_datapipes(self):
         #   STATS: It takes about 11 mins to test a large file of 64GB locally
         test_file_size = 1024 * 1024 * 128
@@ -413,16 +419,6 @@ class MDP(MapDataPipe):
 
     def __len__(self) -> int:
         return self.length
-
-
-class TupleToElementIDP(IterDataPipe):
-    def __init__(self, source_datapipe, ind):
-        self.source_datapipe = source_datapipe
-        self.ind = ind
-
-    def __iter__(self):
-        for tup in self.source_datapipe:
-            yield tup[self.ind]
 
 
 def _fake_fn(data, *args, **kwargs):
