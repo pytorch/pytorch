@@ -1,7 +1,7 @@
 SET(BLIS_INCLUDE_SEARCH_PATHS
  /usr/include
  /usr/include/blis
- /usr/local/include 
+ /usr/local/include
  /usr/local/include/blis
  /usr/local/opt/blis/include
  /opt/blis/include

@@ -27,7 +27,7 @@ jobs:
           git config user.email github-actions@github.com
           git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream master
-          git merge upstream/master 
+          git merge upstream/master
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v3
         with:

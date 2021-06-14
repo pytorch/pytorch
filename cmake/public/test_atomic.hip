@@ -19,7 +19,7 @@ __global__ void sum(float *a, int n)
 
     // Get our global thread ID
     int id = blockIdx.x*blockDim.x+threadIdx.x;
- 
+
     // Make sure we do not go out of bounds
     if (id < n) atomicAddNoReturn(&v[threadIdx.x], a[id]);
 }
