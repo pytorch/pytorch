@@ -41,14 +41,6 @@ class Exponential(ExponentialFamily):
         batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
         super(Exponential, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(Exponential, _instance)
-        batch_shape = torch.Size(batch_shape)
-        new.rate = self.rate.expand(batch_shape)
-        super(Exponential, new).__init__(batch_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
-
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         if torch._C._get_tracing_state():

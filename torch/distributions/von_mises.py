@@ -89,13 +89,14 @@ class VonMises(Distribution):
         self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape
         event_shape = torch.Size()
+        super(VonMises, self).__init__(batch_shape, event_shape, validate_args)
 
+    @lazy_property
+    def _proposal_r(self):
         # Parameters for sampling
         tau = 1 + (1 + 4 * self.concentration ** 2).sqrt()
         rho = (tau - (2 * tau).sqrt()) / (2 * self.concentration)
-        self._proposal_r = (1 + rho ** 2) / (2 * rho)
-
-        super(VonMises, self).__init__(batch_shape, event_shape, validate_args)
+        return (1 + rho ** 2) / (2 * rho)
 
     def log_prob(self, value):
         log_prob = self.concentration * torch.cos(value - self.loc)
@@ -112,15 +113,6 @@ class VonMises(Distribution):
         shape = self._extended_shape(sample_shape)
         x = torch.empty(shape, dtype=self.loc.dtype, device=self.loc.device)
         return _rejection_sample(self.loc, self.concentration, self._proposal_r, x)
-
-    def expand(self, batch_shape):
-        try:
-            return super(VonMises, self).expand(batch_shape)
-        except NotImplementedError:
-            validate_args = self.__dict__.get('_validate_args')
-            loc = self.loc.expand(batch_shape)
-            concentration = self.concentration.expand(batch_shape)
-            return type(self)(loc, concentration, validate_args=validate_args)
 
     @property
     def mean(self):

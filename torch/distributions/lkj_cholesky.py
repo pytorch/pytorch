@@ -69,6 +69,7 @@ class LKJCholesky(Distribution):
         super(LKJCholesky, self).__init__(batch_shape, event_shape, validate_args)
 
     def expand(self, batch_shape, _instance=None):
+        # This needs a custom .expand() because the dim arg is not in arg_constraints.
         new = self._get_checked_instance(LKJCholesky, _instance)
         batch_shape = torch.Size(batch_shape)
         new.dim = self.dim

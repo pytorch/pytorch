@@ -63,6 +63,11 @@ class Distribution(object):
         this does not repeat any args checking or parameter broadcasting in
         `__init__.py`, when an instance is first created.
 
+        ..warning:: The default implementation assumes all distribution
+            information is stored in attributes described
+            :meth:`arg_constraints`. Implementations storing information in
+            other attributes should implement a custom :meth:`expand` method.
+
         Args:
             batch_shape (torch.Size): the desired expanded size.
             _instance: new instance provided by subclasses that
@@ -72,7 +77,18 @@ class Distribution(object):
             New distribution instance with batch dimensions expanded to
             `batch_size`.
         """
-        raise NotImplementedError
+        new = self._get_checked_instance(type(self), _instance)
+        batch_shape = torch.Size(batch_shape)
+        for name, constraint in self.arg_constraints.items():
+            old_param = getattr(self, name, None)
+            if old_param is not None:
+                event_shape = old_param.shape[:old_param.dim() - constraint.event_dim]
+                new_param = old_param.expand(batch_shape + event_shape)
+                setattr(new, name, new_param)
+        Distribution.__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
 
     @property
     def batch_shape(self):

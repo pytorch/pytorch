@@ -30,10 +30,6 @@ class LogNormal(TransformedDistribution):
         base_dist = Normal(loc, scale, validate_args=validate_args)
         super(LogNormal, self).__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(LogNormal, _instance)
-        return super(LogNormal, self).expand(batch_shape, _instance=new)
-
     @property
     def loc(self):
         return self.base_dist.loc

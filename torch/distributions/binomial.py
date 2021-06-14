@@ -50,19 +50,9 @@ class Binomial(Distribution):
         batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(Binomial, _instance)
-        batch_shape = torch.Size(batch_shape)
-        new.total_count = self.total_count.expand(batch_shape)
-        if 'probs' in self.__dict__:
-            new.probs = self.probs.expand(batch_shape)
-            new._param = new.probs
-        if 'logits' in self.__dict__:
-            new.logits = self.logits.expand(batch_shape)
-            new._param = new.logits
-        super(Binomial, new).__init__(batch_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+    @property
+    def _param(self):
+        return self.__dict__.get("probs", self.__dict__.get("logits"))
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)

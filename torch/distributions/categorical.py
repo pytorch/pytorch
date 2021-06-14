@@ -59,24 +59,16 @@ class Categorical(Distribution):
             # Normalize
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
-        self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
         super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(Categorical, _instance)
-        batch_shape = torch.Size(batch_shape)
-        param_shape = batch_shape + torch.Size((self._num_events,))
-        if 'probs' in self.__dict__:
-            new.probs = self.probs.expand(param_shape)
-            new._param = new.probs
-        if 'logits' in self.__dict__:
-            new.logits = self.logits.expand(param_shape)
-            new._param = new.logits
-        new._num_events = self._num_events
-        super(Categorical, new).__init__(batch_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+    @property
+    def _param(self):
+        return self._dict__.get("probs", self.__dict__.get("logits"))
+
+    @property
+    def _num_events(self):
+        return self._param.size(-1)
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)

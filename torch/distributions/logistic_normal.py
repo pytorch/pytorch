@@ -38,10 +38,6 @@ class LogisticNormal(TransformedDistribution):
                                              StickBreakingTransform(),
                                              validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(LogisticNormal, _instance)
-        return super(LogisticNormal, self).expand(batch_shape, _instance=new)
-
     @property
     def loc(self):
         return self.base_dist.base_dist.loc

@@ -47,19 +47,9 @@ class LogitRelaxedBernoulli(Distribution):
             batch_shape = self._param.size()
         super(LogitRelaxedBernoulli, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(LogitRelaxedBernoulli, _instance)
-        batch_shape = torch.Size(batch_shape)
-        new.temperature = self.temperature
-        if 'probs' in self.__dict__:
-            new.probs = self.probs.expand(batch_shape)
-            new._param = new.probs
-        if 'logits' in self.__dict__:
-            new.logits = self.logits.expand(batch_shape)
-            new._param = new.logits
-        super(LogitRelaxedBernoulli, new).__init__(batch_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+    @property
+    def _param(self):
+        return self.__dict__.get("probs", self.__dict__.get("logits"))
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
@@ -119,10 +109,6 @@ class RelaxedBernoulli(TransformedDistribution):
         super(RelaxedBernoulli, self).__init__(base_dist,
                                                SigmoidTransform(),
                                                validate_args=validate_args)
-
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(RelaxedBernoulli, _instance)
-        return super(RelaxedBernoulli, self).expand(batch_shape, _instance=new)
 
     @property
     def temperature(self):

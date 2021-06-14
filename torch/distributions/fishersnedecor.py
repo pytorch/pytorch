@@ -1,10 +1,9 @@
-from numbers import Number
 import torch
 from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, lazy_property
 
 
 class FisherSnedecor(Distribution):
@@ -27,25 +26,16 @@ class FisherSnedecor(Distribution):
 
     def __init__(self, df1, df2, validate_args=None):
         self.df1, self.df2 = broadcast_all(df1, df2)
-        self._gamma1 = Gamma(self.df1 * 0.5, self.df1)
-        self._gamma2 = Gamma(self.df2 * 0.5, self.df2)
-
-        if isinstance(df1, Number) and isinstance(df2, Number):
-            batch_shape = torch.Size()
-        else:
-            batch_shape = self.df1.size()
+        batch_shape = self.df1.size()
         super(FisherSnedecor, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(FisherSnedecor, _instance)
-        batch_shape = torch.Size(batch_shape)
-        new.df1 = self.df1.expand(batch_shape)
-        new.df2 = self.df2.expand(batch_shape)
-        new._gamma1 = self._gamma1.expand(batch_shape)
-        new._gamma2 = self._gamma2.expand(batch_shape)
-        super(FisherSnedecor, new).__init__(batch_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+    @lazy_property
+    def _gamma1(self):
+        return Gamma(self.df1 * 0.5, self.df1, validate_args=False)
+
+    @lazy_property
+    def _gamma2(self):
+        return Gamma(self.df2 * 0.5, self.df2, validate_args=False)
 
     @property
     def mean(self):
