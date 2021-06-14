@@ -373,7 +373,7 @@ class TestIterableDataPipeHttp(TestCase):
         self.http_test_base(test_file_size, test_file_count)
 
     @unittest.skip("Test on the very large file skipped\
-                    due to the CI timing constraint.")    
+                    due to the CI timing constraint.")
     def test_large_files_http_reader_iterable_datapipes(self):
         #   STATS: It takes about 11 mins to test a large file of 64GB locally
         test_file_size = 1024 * 1024 * 128
