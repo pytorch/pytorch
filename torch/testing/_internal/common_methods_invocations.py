@@ -6567,7 +6567,7 @@ op_db: List[OpInfo] = [
     # We run the op tests from test_ops.py only for `n=0` to avoid redundancy in testing.
     UnaryUfuncInfo('polygamma',
                    aliases=("special.polygamma", ),
-                   aliases_op(lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),),
+                   aliases_op=(lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),),
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
