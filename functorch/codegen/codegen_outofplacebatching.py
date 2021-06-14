@@ -4,16 +4,23 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import argparse
 from typing import Tuple, List
 import re
 
 def num_leading_spaces(line: str) -> int:
     return len(line) - len(line.lstrip())
 
+def min_leading_spaces(lines):
+    num_spaces = [num_leading_spaces(line) for line in lines if len(line) > 0]
+    if len(num_spaces) == 0:
+        return None
+    return min(num_spaces)
+
 def deindent(code: str) -> str:
     lines = code.split('\n')
-    min_leading_spaces = min(map(num_leading_spaces, lines))
-    lines = [line[min_leading_spaces:] for line in lines]
+    mls = min_leading_spaces(lines)
+    lines = [line[mls:] for line in lines]
     return '\n'.join(lines)
 
 def indent(code: str, num) -> str:
@@ -21,7 +28,6 @@ def indent(code: str, num) -> str:
     indented_lines = [' ' * num + line for line in lines]
     indented_lines[0] = lines[0]
     return '\n'.join(indented_lines)
-
 
 def is_tensor(typ: str) -> bool:
     if typ == 'Tensor':
@@ -72,14 +78,7 @@ def unwrap_optional_tensor(name: str) -> List[str]:
     }}"""
     return deindent(result).split('\n')
 
-def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -> str:
-    arg_types, arg_names = zip(*args)
-    batch_rule_typedef, batch_rule_t = batch_rule_type(returns, arg_types, unique_count)
-
-    return_t = returns[0] if len(returns) == 1 else f'std::tuple<{",".join(returns)}>'
-    args_t = ', '.join(arg_types)
-    arg_list = ', '.join([f'{arg[0]} {arg[1]}' for arg in args])
-
+def gen_unwraps(arg_types, arg_names):
     tensors = [name for typ, name in zip(arg_types, arg_names) if is_tensor(typ)]
     optional_tensors = [name for typ, name in zip(arg_types, arg_names) if is_optional_tensor(typ)]
 
@@ -97,6 +96,17 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -
             unwrapped_arg_list += [f'{arg}_value', f'{arg}_bdim']
         else:
             unwrapped_arg_list.append(arg)
+    return unwraps, unwrapped_arg_list
+
+def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -> str:
+    arg_types, arg_names = zip(*args)
+    batch_rule_typedef, batch_rule_t = batch_rule_type(returns, arg_types, unique_count)
+
+    return_t = returns[0] if len(returns) == 1 else f'std::tuple<{",".join(returns)}>'
+    args_t = ', '.join(arg_types)
+    arg_list = ', '.join([f'{arg[0]} {arg[1]}' for arg in args])
+
+    unwraps, unwrapped_arg_list = gen_unwraps(arg_types, arg_names)
 
     idx = 0
     wrapped_returns = []
@@ -143,7 +153,7 @@ def parse_args(args_t):
         result.append((arg[:split_idx].strip(), arg[split_idx:].strip()))
     return tuple(result)
 
-def get_signatures(path='build/aten/src/ATen/RegistrationDeclarations.h'):
+def get_signatures(path='build/aten/src/ATen/RegistrationDeclarations.h', include_op=False):
     with open(path, 'r') as f:
         txt = f.read()
     lines = txt.split('\n')
@@ -153,12 +163,18 @@ def get_signatures(path='build/aten/src/ATen/RegistrationDeclarations.h'):
             continue
         if 'std::array' in line:
             continue
-        m = re.match(r'(.*) \w+\((.*)\);.*', line)
+        m = re.match(r'(.*) \w+\((.*)\); // {"schema": "aten::(.*)\(.*', line)
         if m is None:
             continue
         return_t = m.group(1)
         args_t = m.group(2)
-        schemas.append((parse_return(return_t), parse_args(args_t)))
+        op = m.group(3)
+        # TODO: some namedtuple return. Also, testing for codegen
+        if include_op:
+            result = (op, parse_return(return_t), parse_args(args_t))
+        else:
+            result = (parse_return(return_t), parse_args(args_t))
+        schemas.append(result)
     return tuple(schemas)
 
 def is_schema_outplace(schema):
@@ -183,7 +199,13 @@ def get_hash(schema):
 
 
 if __name__ == '__main__':
-    schemas = get_signatures()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('path',
+                        default='build/aten/src/ATen/RegistrationDeclarations.h',
+                        help='link to RegistrationDeclarations.h')
+    args = parser.parse_args()
+
+    schemas = get_signatures(args.path)
     schemas = [schema for schema in schemas if is_schema_outplace(schema)]
     unique_schemas = {}
     for schema in schemas:
