@@ -33,8 +33,39 @@ inline Tensor polygamma(int64_t n, const Tensor& self) {
   return torch::special_polygamma(n, self);
 }
 
-inline Tensor& polygamma_out(int64_t n, Tensor& result, const Tensor& self) {
+inline Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
   return torch::special_polygamma_out(result, n, self);
+
+/// Computes the logarithmic derivative of the gamma function on input
+/// See https://pytorch.org/docs/master/special.html#torch.special.psi
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::psi(t);
+/// ```
+inline Tensor psi(const Tensor& self) {
+  return torch::special_psi(self);
+}
+
+inline Tensor& psi_out(Tensor& result, const Tensor& self) {
+  return torch::special_psi_out(result, self);
+}
+
+/// Computes the logarithmic derivative of the gamma function on input
+/// See https://pytorch.org/docs/master/special.html#torch.special.digamma
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::digamma(t);
+/// ```
+inline Tensor digamma(const Tensor& self) {
+  return torch::special_digamma(self);
+}
+
+inline Tensor& digamma_out(Tensor& result, const Tensor& self) {
+  return torch::special_digamma_out(result, self);
 }
 
 /// Computes entropy of input, elementwise
