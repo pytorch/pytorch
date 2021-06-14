@@ -99,6 +99,12 @@
 #   BUILD_BINARY
 #     enables the additional binaries/ build
 #
+#   ATEN_AVX512=TRUE
+#     enables AVX512 ATen kernels if AVX512 is supported.
+#     ATen AVX512VL kernels with vector-width 256 would be compiled
+#     if supported by the machine, regardless of whether this environment
+#     variable is TRUE. 
+#
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
 #     specify the version of PyTorch, rather than the hard-coded version

@@ -5,7 +5,7 @@
 
 #include <ATen/cpu/vec/vec256/intrinsics.h>
 #include <ATen/cpu/vec/vec256/vec256_base.h>
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -14,7 +14,7 @@ namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
 
 static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   __m128i lo = _mm256_extractf128_si256(a, 0);
@@ -713,7 +713,7 @@ inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, c
  return cvtfp32_bf16(__m256(a), __m256(b));
 }
 
-#else //defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#else // (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
   constexpr int64_t K = Vectorized<BFloat16>::size();
@@ -736,6 +736,6 @@ inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, c
   return Vectorized<BFloat16>::loadu(arr2);
 }
 
-#endif
+#endif // (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
 
 }}}

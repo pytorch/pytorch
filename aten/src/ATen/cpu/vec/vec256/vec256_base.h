@@ -668,7 +668,7 @@ Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_
 
 struct Vectorizedi;
 
-#ifdef CPU_CAPABILITY_AVX2
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256))
 
 template <class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {

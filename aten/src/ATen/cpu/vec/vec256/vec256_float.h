@@ -5,7 +5,7 @@
 
 #include <ATen/cpu/vec/vec256/intrinsics.h>
 #include <ATen/cpu/vec/vec256/vec256_base.h>
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -14,7 +14,7 @@ namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
 
 template <> class Vectorized<float> {
 private:
@@ -412,12 +412,11 @@ inline void convert(const float* src, float* dst, int64_t n) {
   }
 }
 
-#ifdef CPU_CAPABILITY_AVX2
+
 template <>
 Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
   return _mm256_fmadd_ps(a, b, c);
 }
-#endif
 
 #endif
 

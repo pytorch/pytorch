@@ -16,6 +16,9 @@ static CPUCapability compute_cpu_capability() {
       return CPUCapability::VSX;
     }
 #else
+    if (strcmp(envar, "avx512_256") == 0) {
+      return CPUCapability::AVX512_256;
+    }    
     if (strcmp(envar, "avx512") == 0) {
       return CPUCapability::AVX512;
     }
@@ -31,7 +34,10 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
-    if (cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_fma3()) {
+    if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_fma3()) {
+      return CPUCapability::AVX512_256;
+    }
+    if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX512;
     }
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
@@ -57,6 +63,9 @@ void* DispatchStubImpl::get_call_ptr(
 #ifdef HAVE_AVX512_CPU_DEFINITION
   , void *AVX512
 #endif
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+  , void *AVX512_256
+#endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   , void *AVX2
 #endif
@@ -74,6 +83,9 @@ void* DispatchStubImpl::get_call_ptr(
           DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
           , AVX512
+#endif
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+          , AVX512_256
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
           , AVX2
@@ -105,6 +117,9 @@ void* DispatchStubImpl::choose_cpu_impl(
 #ifdef HAVE_AVX512_CPU_DEFINITION
   , void *AVX512
 #endif
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+  , void *AVX512_256
+#endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   , void *AVX2
 #endif
@@ -118,6 +133,12 @@ void* DispatchStubImpl::choose_cpu_impl(
   if (capability >= static_cast<int>(CPUCapability::AVX512)) {
     TORCH_INTERNAL_ASSERT(AVX512, "DispatchStub: missing AVX512 kernel");
     return AVX512;
+  }
+#endif
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::AVX512_256)) {
+    TORCH_INTERNAL_ASSERT(AVX512_256, "DispatchStub: missing AVX512_256 kernel");
+    return AVX512_256;
   }
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION

@@ -9,8 +9,8 @@
 
 // Implements instruction set specific function dispatch.
 //
-// Kernels that may make use of specialized instruction sets (e.g. AVX) are
-// compiled multiple times with different compiler flags (e.g. -mavx). A
+// Kernels that may make use of specialized instruction sets (e.g. AVX2) are
+// compiled multiple times with different compiler flags (e.g. -mavx2). A
 // DispatchStub contains a table of function pointers for a kernel. At runtime,
 // the fastest available kernel is chosen based on the features reported by
 // cpuinfo.
@@ -52,6 +52,7 @@ enum class CPUCapability {
 #else
   AVX2 = 1,
   AVX512 = 2,
+  AVX512_256 = 3,
 #endif
   NUM_OPTIONS
 };
@@ -74,6 +75,9 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_AVX512_CPU_DEFINITION
       , void *AVX512
 #endif
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+      , void *AVX512_256
+#endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
       , void *AVX2
 #endif
@@ -91,6 +95,9 @@ struct TORCH_API DispatchStubImpl {
     void *DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
     , void *AVX512
+#endif
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+      , void *AVX512_256
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
     , void *AVX2
@@ -129,6 +136,9 @@ private:
 #ifdef HAVE_AVX512_CPU_DEFINITION
       , reinterpret_cast<void*>(AVX512)
 #endif
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX512_256)
+#endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
       , reinterpret_cast<void*>(AVX2)
 #endif
@@ -157,6 +167,9 @@ public:
   static FnPtr DEFAULT;
 #ifdef HAVE_AVX512_CPU_DEFINITION
   static FnPtr AVX512;
+#endif
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+  static FnPtr AVX512_256;
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   static FnPtr AVX2;
@@ -210,6 +223,12 @@ struct RegisterHIPDispatch {
 #define REGISTER_AVX512_DISPATCH(name, fn)
 #endif
 
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+#define REGISTER_AVX512_256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512_256, fn)
+#else
+#define REGISTER_AVX512_256_DISPATCH(name, fn)
+#endif
+
 #ifdef HAVE_AVX2_CPU_DEFINITION
 #define REGISTER_AVX2_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX2, fn)
 #else
@@ -225,6 +244,7 @@ struct RegisterHIPDispatch {
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
   REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
   REGISTER_AVX512_DISPATCH(name, static_cast<fn_type>(nullptr))                \
+  REGISTER_AVX512_256_DISPATCH(name, static_cast<fn_type>(nullptr))           \
   REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))                  \
   REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
 

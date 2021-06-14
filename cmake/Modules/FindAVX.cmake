@@ -17,19 +17,28 @@ SET(AVX512_CODE "
 
   int main()
   {
-    __m512i a;
-    a = _mm512_set_epi8(0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 0, 0,
-                        0, 0, 0, 0, 0, 0, 0, 0);
+    __m512i a = _mm512_set_epi8(0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0);
     return 0;
   }
 ")
 
+SET(AVX512VL_CODE "
+  #include <immintrin.h>
+
+  int main()
+  {
+    __m256i a = {0};
+    a = _mm256_abs_epi64(a);
+    return 0;
+  }
+")
 
 SET(AVX2_CODE "
   #include <immintrin.h>
@@ -76,7 +85,9 @@ ENDMACRO()
 CHECK_SSE(C "AVX" " ;-mavx;/arch:AVX")
 CHECK_SSE(C "AVX2" " ;-mavx2 -mfma;/arch:AVX2")
 CHECK_SSE(C "AVX512" " ;-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma;/arch:AVX512")
+CHECK_SSE(C "AVX512VL" " ;-mavx512f -mavx512vl -mavx512bw -mfma;/arch:AVX512")
 
 CHECK_SSE(CXX "AVX" " ;-mavx;/arch:AVX")
 CHECK_SSE(CXX "AVX2" " ;-mavx2 -mfma;/arch:AVX2")
 CHECK_SSE(CXX "AVX512" " ;-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma;/arch:AVX512")
+CHECK_SSE(CXX "AVX512VL" " ;-mavx512f -mavx512vl -mavx512bw -mfma;/arch:AVX512")

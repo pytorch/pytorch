@@ -68,7 +68,7 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 }
 
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -81,8 +81,6 @@ template<>
 inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm256_castps_pd(src);
 }
-
-#if defined(CPU_CAPABILITY_AVX2)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -243,8 +241,6 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
                         _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
 }
 
-#endif  // defined(CPU_CAPABILITY_AVX2)
-
-#endif // (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#endif // ((defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
 
 }}}
