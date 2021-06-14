@@ -114,6 +114,7 @@
 #include "lazy_tensor_core/csrc/ops/triangular_solve.h"
 #include "lazy_tensor_core/csrc/ops/tril.h"
 #include "lazy_tensor_core/csrc/ops/triu.h"
+#include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/uniform.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 #include "lazy_tensor_core/csrc/ops/upsample_bilinear2d.h"
@@ -2047,6 +2048,29 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> LazyTensor::native_batch_norm(
   }
   return std::make_tuple(std::move(output), std::move(mean),
                          std::move(variance_inverse));
+}
+
+std::tuple<LazyTensor, LazyTensor, LazyTensor> LazyTensor::ts_native_batch_norm(
+    const LazyTensor& input, const LazyTensor& weight, const LazyTensor& bias,
+    LazyTensor& running_mean, LazyTensor& running_var, bool training,
+    double momentum, double eps) {
+  lazy_tensors::Shape features_shape = BatchNormFeaturesShape(input);
+  ir::Value weight_value =
+      GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
+  ir::Value bias_value =
+      GetIrValueOrDefault(bias, 0, features_shape, input.GetDevice());
+  ir::Value running_mean_value =
+      GetIrValueOrDefault(running_mean, 0, features_shape, input.GetDevice());
+  ir::Value running_var_value =
+      GetIrValueOrDefault(running_var, 0, features_shape, input.GetDevice());
+  ir::NodePtr node = ir::MakeNode<ir::ops::TSNativeBatchNormForward>(
+      input.GetIrValue(), weight_value, bias_value, running_mean_value,
+      running_var_value, training, momentum, eps);
+  LazyTensor output = input.CreateFrom(ir::Value(node, 0));
+  LazyTensor running_mean_output = input.CreateFrom(ir::Value(node, 1));
+  LazyTensor running_var_output = input.CreateFrom(ir::Value(node, 2));
+  return std::make_tuple(std::move(output), std::move(running_mean_output),
+                         std::move(running_var_output));
 }
 
 std::tuple<LazyTensor, LazyTensor, LazyTensor>
