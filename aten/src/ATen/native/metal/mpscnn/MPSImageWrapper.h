@@ -13,29 +13,26 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
  public:
   MPSImageWrapper(IntArrayRef sizes);
   ~MPSImageWrapper();
-  operator bool() const {
-    return _image;
-  }
   void copyDataFromHost(const float* inputData);
   void copyDataToHost(float* hostData);
-  void allocateTextureStorage(IntArrayRef sizes);
-  void allocateTemporaryTextureStorage(
+  void allocateStorage(IntArrayRef sizes);
+  void allocateTemporaryStorage(
       IntArrayRef sizes,
       MetalCommandBuffer* commandBuffer);
-  void copyFromTexture(MPSImage* image);
   void setCommandBuffer(MetalCommandBuffer* buffer);
   MetalCommandBuffer* commandBuffer() const;
-  IntArrayRef textureSizes() const;
-  void setTexture(MPSImage* image);
+  void setImage(MPSImage* image);
   MPSImage* image() const;
+  id<MTLBuffer> buffer() const;
   void synchronize();
   void prepare();
   void release();
 
  private:
-  std::vector<int64_t> _textureSizes;
+  std::vector<int64_t> _imageSizes;
   MPSImage* _image = nullptr;
-  __weak MetalCommandBuffer* _commandBuffer;
+  id<MTLBuffer> _buffer = nil;
+  MetalCommandBuffer* _commandBuffer;
   id<PTMetalCommandBuffer> _delegate;
 };
 

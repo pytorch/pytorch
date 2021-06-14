@@ -1,6 +1,5 @@
-import pickle
-
 import _compat_pickle
+import pickle
 
 from .importer import Importer
 

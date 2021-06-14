@@ -21,6 +21,24 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestTypesAndAnnotation(JitTestCase):
+    def test_pep585_type(self):
+        # TODO add test to use PEP585 type annotation for return type after py3.9
+        # see: https://www.python.org/dev/peps/pep-0585/#id5
+        def fn(x: torch.Tensor) -> Tuple[Tuple[torch.Tensor], Dict[str, int]]:
+            xl: list[tuple[torch.Tensor]] = []
+            xd: dict[str, int] = {}
+            xl.append((x,))
+            xd['foo'] = 1
+            return xl.pop(), xd
+
+        self.checkScript(fn, [torch.randn(2, 2)])
+
+        x = torch.randn(2, 2)
+        expected = fn(x)
+        scripted = torch.jit.script(fn)(x)
+
+        self.assertEquals(expected, scripted)
+
     def test_types_as_values(self):
         def fn(m: torch.Tensor) -> torch.device:
             return m.device

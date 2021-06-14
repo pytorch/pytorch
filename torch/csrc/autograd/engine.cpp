@@ -15,7 +15,9 @@
 #include <c10/core/Stream.h>
 #include <c10/core/Event.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
+#include <c10/util/ThreadLocal.h>
 #include <c10/core/StreamGuard.h>
 
 #include <atomic>
@@ -86,7 +88,8 @@ static thread_local int total_depth = 0;
 // The current GraphTask being executed by this thread. This helps
 // queue_callback() to find the target GraphTask to append final callbacks.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
+C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
+#define current_graph_task (tls_current_graph_task.get())
 
 // Every autograd worker thread is associated with a ready queue, which specifies
 // the stream of work of this thread to do. This shared_ptr is a thread_local
@@ -103,7 +106,8 @@ static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 // ReadyQueue with the parent thread for performance improvement.
 // see Note [Reentrant backwards] for more details.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
+C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
+#define local_ready_queue (tls_local_ready_queue.get())
 
 // Note [Reentrant backwards]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -263,7 +267,6 @@ void Engine::stop() {
 
     using namespace std::chrono_literals;
     // Set a deadline for how long it is OK to wait device threads to shutdown
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto wait_deadline = std::chrono::steady_clock::now() + wait_duration * 1.0s;
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
@@ -533,7 +536,7 @@ void GraphTask::exec_post_processing() {
   // WARNING: Don't use a range-for loop here because more callbacks may be
   // added in between callback calls, so iterators may become invalidated.
   // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < final_callbacks_.size(); ++i) {
+  for (const auto i : c10::irange(final_callbacks_.size())) {
     cb_lock.unlock();
     final_callbacks_[i]();
     cb_lock.lock();
@@ -600,7 +603,7 @@ void set_device(int device) {
   // Don't use DeviceGuard here because its destructor may be called before the
   // device is reset. This is fine because the device is thread local.
   if (device != CPU_DEVICE) {
-    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+    for(const auto i : c10::irange(static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
         impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
@@ -620,7 +623,7 @@ void validate_outputs(
     ss << edges.size() << ", but got " << grads.size();
     AT_ERROR(format_error(ss.str()));
   }
-  for (size_t i = 0; i < grads.size(); i++) {
+  for(const auto i : c10::irange(grads.size())) {
     const auto& edge = edges[i];
     if (!edge.is_valid()) continue;
 
@@ -779,7 +782,7 @@ void Engine::evaluate_function(
 
   if (AnomalyMode::is_enabled()) {
     AutoGradMode grad_mode(false);
-    for (int i = 0; i < num_outputs; ++i) {
+    for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
       if (output.defined() && isnan(output).any().item<uint8_t>()) {
@@ -792,7 +795,7 @@ void Engine::evaluate_function(
 
   // Lock mutex for the accesses to GraphTask dependencies_, not_ready_ and cpu_ready_queue_ below
   std::lock_guard<std::mutex> lock(graph_task->mutex_);
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     auto& output = outputs[i];
     const auto& next = fn.next_edge(i);
 
@@ -904,7 +907,14 @@ auto Engine::execute(const edge_list& roots,
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
-
+  if (accumulate_grad && create_graph) {
+    TORCH_WARN_ONCE(
+      "Using backward() with create_graph=True will create a reference cycle "
+      "between the parameter and its gradient which can cause a memory leak. "
+      "We recommend using autograd.grad when creating the graph to avoid this. "
+      "If you have to use this function, make sure to reset the .grad fields of "
+      "your parameters to None after use to break the cycle and avoid the leak.");
+  }
   // A fresh first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
   // allocated already, i.e. consecutive backward calls, re-entrant backward calls),
@@ -964,7 +974,7 @@ void Engine::initialize_device_threads_pool() {
   std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 
-std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
+c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
@@ -1138,7 +1148,7 @@ auto Engine::start_device_threads() -> void {
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
-  for (int i = 0; i < num_devices; ++i) {
+  for (const auto i : c10::irange(num_devices)) {
     std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
     t.detach();
   }

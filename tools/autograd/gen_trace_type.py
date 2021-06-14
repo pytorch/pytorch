@@ -416,7 +416,8 @@ def gen_trace_type(out: str, native_yaml_path: str, template_path: str) -> None:
     shards: List[List[NativeFunction]] = [[] for _ in range(num_shards)]
 
     # functions are assigned arbitrarily but stably to a file based on hash
-    native_functions = list(sorted(parse_native_yaml(native_yaml_path), key=lambda f: cpp.name(f.func)))
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(sorted(native_functions, key=lambda f: cpp.name(f.func)))
     for f in native_functions:
         x = sum(ord(c) for c in cpp.name(f.func)) % num_shards
         shards[x].append(f)

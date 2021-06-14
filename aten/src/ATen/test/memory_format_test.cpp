@@ -29,18 +29,15 @@ TEST(MemoryFormatTest, SetMemoryFormat) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryFormatTest, TransposeMemoryFormat) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor t = at::rand({2, 3, 4, 5});
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::Contiguous);
   t.transpose_(1, 3);
   EXPECT_TRUE(t.suggest_memory_format() != at::MemoryFormat::ChannelsLast);
   t.transpose_(2, 3);
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   t = at::rand({2, 3, 4, 5});
   t.transpose_(1, 2);
   EXPECT_TRUE(t.suggest_memory_format() != at::MemoryFormat::ChannelsLast);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   t = at::rand({2, 3, 4, 5});
   t.transpose_(2, 3);
   EXPECT_TRUE(t.suggest_memory_format() != at::MemoryFormat::ChannelsLast);

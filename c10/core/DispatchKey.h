@@ -66,6 +66,7 @@ enum class DispatchKey : uint8_t {
   Vulkan,
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
+  HPU, // For out of tree & closed source integration of HPU / Habana
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -141,6 +142,11 @@ enum class DispatchKey : uint8_t {
   // constituent parts.
   Named,
 
+  // The Conjugate dispatch key is set for any tensors that need to perform
+  // conjugation
+  // This is implemented at a dispatch level right before any backends run
+  Conjugate,
+
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
   // be directly after ADInplaceOrView and all of the autograd keys.
@@ -214,6 +220,7 @@ enum class DispatchKey : uint8_t {
   AutogradXLA,
   AutogradXPU,
   AutogradMLC,
+  AutogradHPU,
   AutogradNestedTensor, // lives out of tree at
   // https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
@@ -226,7 +233,7 @@ enum class DispatchKey : uint8_t {
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
-  // AutocastCPU,
+  AutocastCPU,
   AutocastCUDA,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
