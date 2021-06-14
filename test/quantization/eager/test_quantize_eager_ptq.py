@@ -654,18 +654,26 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
                 return quantized
 
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.custom = CustomModule()
+
+            def forward(self, x):
+                return self.custom(x)
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.quant = QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.custom = CustomModule()
+                self.sub = Sub()
                 self.dequant = DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
                 x = self.conv(x)
-                x = self.custom(x)
+                x = self.sub(x)
                 x = self.dequant(x)
                 return x
 
@@ -690,8 +698,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
         original_ref_m = RefM()
         original_ref_m.conv1.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv1.bias = torch.nn.Parameter(original_m.conv.bias.detach())
-        original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
-        original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
+        original_ref_m.conv2.weight = torch.nn.Parameter(original_m.sub.custom.conv.weight.detach())
+        original_ref_m.conv2.bias = torch.nn.Parameter(original_m.sub.custom.conv.bias.detach())
 
         original_m.qconfig = default_qconfig
         prepare_custom_config_dict = {
@@ -719,7 +727,9 @@ class TestPostTrainingStatic(QuantizationTestCase):
         # check if the module is properly quantized
         self.assertEqual(type(m.quant), nnq.Quantize)
         self.assertEqual(type(m.conv), nnq.Conv2d)
-        self.assertEqual(type(m.custom.conv), nnq.Conv2d)
+        self.assertEqual(type(m.sub), Sub)
+        self.assertEqual(type(m.sub.custom), QuantizedCustomModule)
+        self.assertEqual(type(m.sub.custom.conv), nnq.Conv2d)
         self.assertEqual(type(m.dequant), nnq.DeQuantize)
         res = m(data)
 
