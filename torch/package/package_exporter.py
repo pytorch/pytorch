@@ -200,7 +200,6 @@ class PackageExporter:
         # - Each directed edge (u, v) means u depends on v.
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
-        self.provided: Dict[str, bool] = {}
         self.verbose = verbose
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
@@ -244,32 +243,28 @@ class PackageExporter:
             for filename in path.glob("**/*.py"):
                 relative_path = filename.relative_to(path).as_posix()
                 archivename = module_path + "/" + relative_path
-                if filename.is_dir():
-                    self.provided[archivename] = True
-                else:
-                    submodule_name = None
-                    if filename.name == "__init__.py":
-                        submodule_name = archivename[: -len("/__init__.py")].replace(
-                            "/", "."
-                        )
-                        is_package = True
-                    else:
-                        submodule_name = archivename[: -len(".py")].replace("/", ".")
-                        is_package = False
-
-                    self.provided[submodule_name] = True
-                    # we delay the call to save_source_string so that we record all the source files
-                    # being provided by this directory structure _before_ attempting to resolve the dependencies
-                    # on the source. This makes sure we don't try to copy over modules that will just get
-                    # overwritten by this directory blob
-                    to_save.append(
-                        (
-                            submodule_name,
-                            _read_file(str(filename)),
-                            is_package,
-                            dependencies,
-                        )
+                submodule_name = None
+                if filename.name == "__init__.py":
+                    submodule_name = archivename[: -len("/__init__.py")].replace(
+                        "/", "."
                     )
+                    is_package = True
+                else:
+                    submodule_name = archivename[: -len(".py")].replace("/", ".")
+                    is_package = False
+
+                # we delay the call to save_source_string so that we record all the source files
+                # being provided by this directory structure _before_ attempting to resolve the dependencies
+                # on the source. This makes sure we don't try to copy over modules that will just get
+                # overwritten by this directory blob
+                to_save.append(
+                    (
+                        submodule_name,
+                        _read_file(str(filename)),
+                        is_package,
+                        dependencies,
+                    )
+                )
 
             for item in to_save:
                 self.save_source_string(*item)
