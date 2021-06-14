@@ -18,6 +18,7 @@ supported:
   - empty.memory_format
   - empty_strided
   - expand
+  - mm
   - mul.Tensor
   - mul_.Tensor
   - mul.Scalar
