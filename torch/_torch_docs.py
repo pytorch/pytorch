@@ -1638,6 +1638,75 @@ Example::
     False
 """)
 
+add_docstr(torch.cov, r"""
+cov(input, *, correction=1, fweights=None, aweights=None) -> Tensor
+
+Estimates the covariance matrix of the variables given by the :attr:`input` matrix, where rows are
+the variables and columns are the observations.
+
+A covariance matrix is a square matrix giving the covariance of each pair of variables. The diagonal contains
+the variance of each variable (covariance of a variable with itself). By definition, if :attr:`input` represents
+a single variable (Scalar or 1D) then its variance is returned.
+
+The unbiased sample covariance of the variables :math:`x` and :math:`y` is given by:
+
+.. math::
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{N~-~1}
+
+where :math:`\bar{x}` and :math:`\bar{y}` are the simple means of the :math:`x` and :math:`y` respectively.
+
+If :attr:`fweights` and/or :attr:`aweights` are provided, the unbiased weighted covariance
+is calculated, which is given by:
+
+.. math::
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}{\sum^{N}_{i = 1}w_i~-~1}
+
+where :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided, or
+:math:`w = fweights \times aweights` if both are provided, and
+:math:`\mu_x^* = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` is the weighted mean of the variable.
+
+Args:
+    input (Tensor): A 2D matrix containing multiple variables and observations, or a
+        Scalar or 1D vector representing a single variable.
+
+Keyword Args:
+    correction (int, optional): difference between the sample size and sample degrees of freedom.
+        Defaults to Bessel's correction, ``correction = 1`` which returns the unbiased estimate,
+        even if both :attr:`fweights` and :attr:`aweights` are specified. ``correction = 0``
+        will return the simple average. Defaults to ``1``.
+    fweights (tensor, optional): A Scalar or 1D tensor of observation vector frequencies representing the number of
+        times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
+        Must have integral dtype. Ignored if ``None``. `Defaults to ``None``.
+    aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
+        These relative weights are typically large for observations considered “important” and smaller for
+        observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
+        Must have floating point dtype. Ignored if ``None``. `Defaults to ``None``.
+
+Returns:
+    (Tensor) The covariance matrix of the variables.
+
+Example::
+    >>> x = torch.tensor([[0, 2], [1, 1], [2, 0]]).T
+    >>> x
+    tensor([[0, 1, 2],
+            [2, 1, 0]])
+    >>> torch.cov(x)
+    tensor([[ 1., -1.],
+            [-1.,  1.]])
+    >>> torch.cov(x, correction=0)
+    tensor([[ 0.6667, -0.6667],
+            [-0.6667,  0.6667]])
+    >>> fw = torch.randint(1, 10, (3,))
+    >>> fw
+    tensor([1, 6, 9])
+    >>> aw = torch.rand(3)
+    >>> aw
+    tensor([0.4282, 0.0255, 0.4144])
+    >>> torch.cov(x, fweights=fw, aweights=aw)
+    tensor([[ 0.4169, -0.4169],
+            [-0.4169,  0.4169]])
+""")
+
 add_docstr(torch.cat,
            r"""
 cat(tensors, dim=0, *, out=None) -> Tensor
@@ -2181,15 +2250,18 @@ Example::
     tensor([(0.0000+1.0000j), (-1.4142-1.4142j)], dtype=torch.complex128)
 """)
 
-add_docstr(torch.conj,
+add_docstr(torch.conj_physical,
            r"""
-conj(input, *, out=None) -> Tensor
+conj_physical(input, *, out=None) -> Tensor
 
-Computes the element-wise conjugate of the given :attr:`input` tensor. If :attr:`input` has a non-complex dtype,
-this function just returns :attr:`input`.
+Computes the element-wise conjugate of the given :attr:`input` tensor.
+If :attr:`input` has a non-complex dtype, this function just returns :attr:`input`.
 
-.. warning:: In the future, :func:`torch.conj` may return a non-writeable view for an :attr:`input` of
-             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj`
+.. note::
+   This performs the conjugate operation regardless of the fact conjugate bit is set or not.
+
+.. warning:: In the future, :func:`torch.conj_physical` may return a non-writeable view for an :attr:`input` of
+             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj_physical`
              when :attr:`input` is of non-complex dtype to be compatible with this change.
 
 .. math::
@@ -2203,9 +2275,62 @@ Keyword args:
 
 Example::
 
-    >>> torch.conj(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    >>> torch.conj_physical(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args))
+
+add_docstr(torch.conj,
+           r"""
+conj(input) -> Tensor
+
+Returns a view of :attr:`input` with a flipped conjugate bit. If :attr:`input` has a non-complex dtype,
+this function just returns :attr:`input`.
+
+.. note::
+    :func:`torch.conj` performs a lazy conjugation, but the actual conjugated tensor can be materialized
+    at any time using :func:`torch.resolve_conj`.
+
+.. warning:: In the future, :func:`torch.conj` may return a non-writeable view for an :attr:`input` of
+             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj_physical`
+             when :attr:`input` is of non-complex dtype to be compatible with this change.
+
+Args:
+    {input}
+
+Example::
+
+    >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+    >>> x.is_conj()
+    False
+    >>> y = torch.conj(x)
+    >>> y.is_conj()
+    True
+
+""")
+
+add_docstr(torch.resolve_conj,
+           r"""
+resolve_conj(input) -> Tensor
+
+Returns a new tensor with materialized conjugation if :attr:`input`'s conjugate bit is set to `True`,
+else returns :attr:`input`. The output tensor will always have its conjugate bit set to `False`.
+
+Args:
+    {input}
+
+Example::
+
+    >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+    >>> y = x.conj()
+    >>> y.is_conj()
+    True
+    >>> z = y.resolve_conj()
+    >>> z
+    tensor([-1 - 1j, -2 - 2j, 3 + 3j])
+    >>> z.is_conj()
+    False
+
+""")
 
 add_docstr(torch.copysign,
            r"""
@@ -4183,6 +4308,31 @@ add_docstr(torch.is_inference_mode_enabled, r"""
 is_inference_mode_enabled() -> (bool)
 
 Returns True if inference mode is currently enabled.
+""".format(**common_args))
+
+add_docstr(torch.is_inference, r"""
+is_inference(input) -> (bool)
+
+Returns True if :attr:`input` is an inference tensor.
+
+A non-view tensor is an inference tensor if and only if it was
+allocated during inference mode. A view tensor is an inference
+tensor if and only if the tensor it is a view of is an inference tensor.
+
+For details on inference mode please see
+`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+
+Args:
+    {input}
+""".format(**common_args))
+
+add_docstr(torch.is_conj, r"""
+is_conj(input) -> (bool)
+
+Returns True if the :attr:`input` is a conjugated tensor, i.e. its conjugate bit is set to `True`.
+
+Args:
+    {input}
 """.format(**common_args))
 
 add_docstr(torch.is_nonzero, r"""
@@ -7647,7 +7797,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     See :func:`torch.fmod` for how division by zero is handled.
 
 Args:
-    input (Tensor): the dividend
+    input (Tensor or Scalar): the dividend
     other (Tensor or Scalar): the divisor
 
 Keyword args:
@@ -10463,21 +10613,21 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 """.format(**common_args))
 
 add_docstr(torch.tile, r"""
-tile(input, reps) -> Tensor
+tile(input, dims) -> Tensor
 
 Constructs a tensor by repeating the elements of :attr:`input`.
-The :attr:`reps` argument specifies the number of repetitions
+The :attr:`dims` argument specifies the number of repetitions
 in each dimension.
 
-If :attr:`reps` specifies fewer dimensions than :attr:`input` has, then
-ones are prepended to :attr:`reps` until all dimensions are specified.
-For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`reps`
-is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2).
+If :attr:`dims` specifies fewer dimensions than :attr:`input` has, then
+ones are prepended to :attr:`dims` until all dimensions are specified.
+For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`dims`
+is (2, 2), then :attr:`dims` is treated as (1, 1, 2, 2).
 
-Analogously, if :attr:`input` has fewer dimensions than :attr:`reps`
+Analogously, if :attr:`input` has fewer dimensions than :attr:`dims`
 specifies, then :attr:`input` is treated as if it were unsqueezed at
-dimension zero until it has as many dimensions as :attr:`reps` specifies.
-For example, if :attr:`input` has shape (4, 2) and :attr:`reps`
+dimension zero until it has as many dimensions as :attr:`dims` specifies.
+For example, if :attr:`input` has shape (4, 2) and :attr:`dims`
 is (3, 3, 2, 2), then :attr:`input` is treated as if it had the
 shape (1, 1, 4, 2).
 
@@ -10487,7 +10637,7 @@ shape (1, 1, 4, 2).
 
 Args:
     input (Tensor): the tensor whose elements to repeat.
-    reps (tuple): the number of repetitions per dimension.
+    dims (tuple): the number of repetitions per dimension.
 
 Example::
 

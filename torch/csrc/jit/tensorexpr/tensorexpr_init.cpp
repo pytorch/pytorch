@@ -479,8 +479,7 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "fuse_loops",
           [](const std::vector<For*>& loops) {
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            For* fused_loop;
+            For* fused_loop = nullptr;
             LoopNest::fuseLoops(loops, &fused_loop);
             return fused_loop;
           },
@@ -503,6 +502,12 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "vectorize",
           [](const LoopNest& self, For* f) { self.vectorize(f); },
+          py::return_value_policy::reference)
+      .def_static(
+          "compress_buffer",
+          [](BufHandle& buf, Stmt* stmt) {
+            return LoopNest::compressBuffer(buf.node(), stmt);
+          },
           py::return_value_policy::reference)
       .def(
           "cache_accesses",
