@@ -31,7 +31,7 @@ from .quantization_patterns import (
 from .quantization_types import Pattern
 
 from ._equalize import (
-    _InputEqualizationObserver, 
+    _InputEqualizationObserver,
     _WeightEqualizationObserver,
     node_supports_equalization,
 )
