@@ -61,7 +61,6 @@ class ExclusivelyOwned {
     return *this;
   }
 
-  // XXX: add test
   ExclusivelyOwned& operator=(T&& rhs) noexcept {
     EOT::destroyOwned(repr_);
     repr_ = EOT::moveToRepr(std::move(rhs));
@@ -70,10 +69,9 @@ class ExclusivelyOwned {
 
   ~ExclusivelyOwned() {
     EOT::destroyOwned(repr_);
-    // End the lifetime of repr_ without executing its dtor, since we
-    // already did specialized destruction for the exclusively-owned
-    // case in destroyOwned!
-    dummy_ = '\0';
+    // Don't bother to call the destructor of repr_, since we already
+    // did specialized destruction for the exclusively-owned case in
+    // destroyOwned!
   }
 
   // We don't provide this because it would require us to be able to
