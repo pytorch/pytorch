@@ -113,6 +113,12 @@ at::Tensor infinitely_differentiable_silu_backward(const at::Tensor& grad_output
 at::Tensor infinitely_differentiable_mish_backward(const at::Tensor& grad_output, const at::Tensor& input);
 Tensor infinitely_differentiable_logit_backward(const Tensor& grad, const Tensor& self, c10::optional<double> eps);
 at::Tensor kl_div_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction, bool log_target);
+Tensor binary_cross_entropy_target_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& target,
+  const c10::optional<Tensor>& weight,
+  int64_t reduction);
 at::Tensor binary_cross_entropy_with_logits_target_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& pos_weight, int64_t reduction);
 at::Tensor log_sigmoid_double_backward(const at::Tensor & grad, const at::Tensor & input);
 at::Tensor softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
@@ -246,6 +252,11 @@ Tensor lu_unpack_backward(
   const Tensor& LU_data,
   bool unpack_data
 );
+
+Tensor cat_jvp(at::TensorList tensors, int64_t dim);
+Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
+Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
+Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
 
 } // namespace details
 } // namespace generated
