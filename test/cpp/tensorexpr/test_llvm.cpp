@@ -599,7 +599,8 @@ TEST(LLVM, VectorizerLoadStoreTest) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
+  ASSERT_TRUE(LoopNest::vectorize(
+      dynamic_cast<For*>(dynamic_cast<Block*>(s)->front())));
 
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
@@ -623,7 +624,8 @@ TEST(LLVM, VectorizeBitCast) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
+  ASSERT_TRUE(LoopNest::vectorize(
+      dynamic_cast<For*>(dynamic_cast<Block*>(s)->front())));
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
@@ -1550,9 +1552,9 @@ TEST(LLVM, RFactorVectorizedReduction) {
   auto distributed_loops = loopnest.distributeLoop(all_loops[1][1]);
 
   // Vectorize initializer of rfac_buf
-  loopnest.vectorize(distributed_loops[0]);
+  ASSERT_TRUE(LoopNest::vectorize(distributed_loops[0]));
   // Vectorize producer of rfac_buf
-  loopnest.vectorize(distributed_loops[1]);
+  ASSERT_TRUE(LoopNest::vectorize(distributed_loops[1]));
   loopnest.simplify();
 
   loopnest.prepareForCodegen();
@@ -1755,8 +1757,8 @@ TEST(LLVM, VectorizedGEMM) {
   }
   {
     auto loops = NodeFinder<For>::find(loop.root_stmt());
-    loop.vectorize(loops[3]);
-    loop.vectorize(loops.back());
+    ASSERT_TRUE(LoopNest::vectorize(loops[3]));
+    ASSERT_TRUE(LoopNest::vectorize(loops.back()));
   }
 
   loop.prepareForCodegen();
