@@ -937,7 +937,6 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   std::string unqualName;
   std::vector<std::string> field_names;
   std::vector<TypePtr> field_types;
-  std::vector<IValue> field_defaults;
   std::vector<py::object> objects;
 
   std::tie(unqualName, field_names, field_types, objects) = py::cast<std::tuple<
@@ -946,25 +945,18 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
       std::vector<TypePtr>,
       std::vector<py::object>>>(props);
 
-  // In `_get_named_tuple_properties`, we add a dummy value to represent
-  // a missing default parameter. This provides a guarantee that the
-  // two vectors will be the same size, even if the NamedTuple doesn't
-  // have default values for all its fields
-  TORCH_INTERNAL_ASSERT(field_names.size() == objects.size());
-
-  for (size_t i = 0; i < field_names.size(); ++i) {
-    auto ival = IValue();
-    if (!objects[i].is_none()) {
-      auto type = tryToInferType(objects[i]);
-      ival = toIValue(objects[i], type.type());
-      TORCH_CHECK(
-          ival.tagKind() != "Tensor",
-          "Tensors are"
-          " not supported as default NamedTuple fields. Their "
-          "mutability could lead to potential memory aliasing "
-          "problems");
-      field_defaults.emplace_back(ival);
-    }
+  std::vector<IValue> field_defaults;
+  auto min_default_idx = field_names.size() - objects.size();
+  for (size_t i = min_default_idx; i < field_names.size(); ++i) {
+    auto type = tryToInferType(objects[i]);
+    IValue ival = toIValue(objects[i], type.type());
+    TORCH_CHECK(
+        ival.tagKind() != "Tensor",
+        "Tensors are"
+        " not supported as default NamedTuple fields. Their "
+        "mutability could lead to potential memory aliasing "
+        "problems");
+    field_defaults.emplace_back(ival);
   }
 
   auto tt = TupleType::createNamed(

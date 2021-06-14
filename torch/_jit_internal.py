@@ -997,10 +997,12 @@ def _try_get_dispatched_fn(fn):
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
-    defaults = [obj._field_defaults.get(field)
-                if hasattr(obj, "_field_defaults")
-                else None
-                for field in obj._fields]
+    if hasattr(obj, "_field_defaults"):
+        defaults = [obj._field_defaults[field]
+                    for field in obj._fields
+                    if field in obj._field_defaults]
+    else:
+        defaults = []
     annotations = []
     has_annotations = hasattr(obj, '__annotations__')
     for field in obj._fields:
