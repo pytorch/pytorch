@@ -142,6 +142,17 @@ const at::Tensor& AtenXlaType::as_strided_(
   return self;
 }
 
+at::Tensor AtenXlaType::bmm(const at::Tensor& self, const at::Tensor& mat2) {
+  LTC_FN_COUNTER("xla::");
+  // xla::dot doesn't support integer types.
+  if (!at::native::is_floating_point(self) ||
+      !at::native::is_floating_point(mat2)) {
+    return AtenXlaTypeDefault::bmm(self, mat2);
+  }
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::bmm(bridge::GetLtcTensor(self), bridge::GetLtcTensor(mat2)));
+}
+
 at::Tensor AtenXlaType::constant_pad_nd(const at::Tensor& self,
                                         at::IntArrayRef pad,
                                         const at::Scalar& value) {

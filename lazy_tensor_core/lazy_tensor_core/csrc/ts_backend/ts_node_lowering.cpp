@@ -56,6 +56,10 @@ class TSNodeLowering : public NodeLowering {
         return lazy_tensors::Shape(argument.shape().element_type(),
                                    expand->size());
       }
+      case at::aten::matmul: {
+        // Only used from bmm currently.
+        return InferBmm(node);
+      }
       case at::aten::permute: {
         auto permute =
             ir::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute));
@@ -155,13 +159,29 @@ class TSNodeLowering : public NodeLowering {
   }
 
  private:
-  lazy_tensors::Shape InferComparison(const ir::Node* node) {
+  static lazy_tensors::Shape InferComparison(const ir::Node* node) {
     const ir::Output& lhs = node->operand(0);
     const ir::Output& rhs = node->operand(1);
     return lazy_tensors::Shape(
         lazy_tensors::PrimitiveType::PRED,
         Helpers::GetPromotedShape(lhs.shape().dimensions(),
                                   rhs.shape().dimensions()));
+  }
+
+  static lazy_tensors::Shape InferBmm(const ir::Node* node) {
+    const ir::Output& tensor1 = node->operand(0);
+    const ir::Output& tensor2 = node->operand(1);
+    const lazy_tensors::Shape& tensor1_shape = tensor1.shape();
+    const lazy_tensors::Shape& tensor2_shape = tensor2.shape();
+    LTC_CHECK_EQ(tensor1_shape.rank(), 3);
+    LTC_CHECK_EQ(tensor2_shape.rank(), 3);
+    lazy_tensors::int64 b = tensor1_shape.dimensions(0);
+    lazy_tensors::int64 n = tensor1_shape.dimensions(1);
+    lazy_tensors::int64 m1 = tensor1_shape.dimensions(2);
+    LTC_CHECK_EQ(tensor2_shape.dimensions(0), b);
+    LTC_CHECK_EQ(tensor2_shape.dimensions(1), m1);
+    lazy_tensors::int64 p = tensor2_shape.dimensions(2);
+    return lazy_tensors::Shape(tensor1_shape.element_type(), {b, n, p});
   }
 
   TSOpVector LowerBuiltin(
