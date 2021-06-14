@@ -15,6 +15,7 @@ import platform
 import textwrap
 import ctypes
 import warnings
+import math
 
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -28,9 +29,7 @@ if sys.executable == 'torch_deploy':
 else:
     from .version import __version__ as __version__
 from ._six import string_classes as _string_classes
-
 from typing import Set, Type, TYPE_CHECKING
-from math import e , nan , inf , pi
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -43,7 +42,8 @@ __all__ = [
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
     'are_deterministic_algorithms_enabled', 'is_deterministic',
-    'set_warn_always', 'is_warn_always_enabled',
+    'set_warn_always', 'is_warn_always_enabled','math.e','math.pi',
+    'math.nan','math.inf',
 ]
 
 ################################################################################
