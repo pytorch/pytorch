@@ -408,14 +408,14 @@ void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
   try {
     work->run();
   } catch (...) {
-    work->finishWorkGlooError(std::current_exception());
+    work->finish(std::current_exception());
     return;
   }
 
   // FIXME: We need to call it here since Future completion requires all
   // the work to be synchronized to CUDA.
   work->synchronize();
-  work->finishWorkGloo();
+  work->finishWithValue();
 }
 
 std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
@@ -463,11 +463,7 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
   future_->setElementType(futureTypeAsOutput(outputTensors_));
 }
 
-void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
-  finish(eptr);
-}
-
-void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
+void ProcessGroupGloo::AsyncWork::finishWithValue() {
   if (outputTensors_.size() == 0) {
     finish(c10::IValue(std::vector<at::Tensor>()));
     return;

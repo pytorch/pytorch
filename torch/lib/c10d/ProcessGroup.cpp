@@ -132,7 +132,11 @@ void ProcessGroup::Work::synchronize() {}
 
 bool ProcessGroup::Work::wait(std::chrono::milliseconds timeout) {
   future_->wait(timeout);
+
+  // FIXME: Future already sycnronizes relevant cuda streams, we
+  // can remove respective methods and remove the call here.
   synchronize();
+
   // Always return true, because abort API is not implemented.
   return true;
 }

@@ -249,6 +249,11 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
       workStartTime_(w.workStartTime_) {
+  // Note: These copies are not intended to be used as WorkNCCL object, but
+  // mere information containers for postprocessing of WorkNCCL objects: error
+  // handling and cleanup work.
+  // FIXME: Maybe create a separate field/class for handling exceptions instead of
+  // propagating them via future_ field.
   if (w.exception()) {
     setError(w.exception());
   }

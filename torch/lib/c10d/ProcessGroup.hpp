@@ -158,11 +158,6 @@ class ProcessGroup : public torch::CustomClassHolder {
     // provided by the user.
     void finishAndThrow(std::exception_ptr exception);
 
-    // mutable std::mutex mutex_;
-    // std::condition_variable cv_;
-    // bool completed_ = false;
-    // std::exception_ptr exception_;
-
     // Current rank of the node.
     const int rank_;
 
