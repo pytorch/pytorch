@@ -108,6 +108,13 @@ def plural(n: int) -> str:
     return '' if n == 1 else 's'
 
 
+def get_base_commit(sha1: str) -> str:
+    return subprocess.check_output(
+        ["git", "merge-base", sha1, "origin/master"],
+        encoding="ascii",
+    ).strip()
+
+
 def display_stat(
     x: Stat,
     format: Tuple[Tuple[int, int], Tuple[int, int]],
@@ -675,16 +682,22 @@ def build_info() -> ReportMetaMeta:
         "build_pr": os.environ.get("CIRCLE_PR_NUMBER", ""),
         "build_tag": os.environ.get("CIRCLE_TAG", ""),
         "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
+        "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
         "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
         "build_job": os.environ.get("CIRCLE_JOB", ""),
         "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
     }
 
 
-def build_message(test_file: TestFile, test_suite: TestSuite, test_case: TestCase) -> Dict[str, Dict[str, Any]]:
+def build_message(
+    test_file: TestFile,
+    test_suite: TestSuite,
+    test_case: TestCase,
+    meta_info: ReportMetaMeta
+) -> Dict[str, Dict[str, Any]]:
     return {
         "normal": {
-            **build_info(),
+            **meta_info,
             "test_filename": test_file.name,
             "test_suite_name": test_suite.name,
             "test_case_name": test_case.name,
@@ -708,6 +721,7 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
         return
     print("Scribe access token provided, sending report...")
     url = "https://graph.facebook.com/scribe_logs"
+    meta_info = build_info()
     r = requests.post(
         url,
         data={
@@ -716,7 +730,7 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
                 [
                     {
                         "category": "perfpipe_pytorch_test_times",
-                        "message": json.dumps(build_message(test_file, test_suite, test_case)),
+                        "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
                         "line_escape": False,
                     }
                     for test_file in reports.values()
@@ -784,10 +798,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
 def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
     sha1 = os.environ.get("CIRCLE_SHA1", "HEAD")
 
-    base = subprocess.check_output(
-        ["git", "merge-base", sha1, "origin/master"],
-        encoding="ascii",
-    ).strip()
+    base = get_base_commit(sha1)
 
     count_spec = f"{base}..{sha1}"
     intermediate_commits = int(subprocess.check_output(
