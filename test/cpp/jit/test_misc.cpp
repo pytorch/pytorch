@@ -38,6 +38,7 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
@@ -2591,6 +2592,40 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check("aten::add_")->run(*graph);
   RemoveTensorMutation(graph, [](Node*) { return true; });
   testing::FileCheck().check_not("aten::add_")->run(*graph);
+}
+
+TEST(TestInplaceToFunctionalActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu_(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  InplaceToFunctionalActivation(graph);
+  testing::FileCheck().check("aten::relu")->run(*graph);
+  testing::FileCheck().check_not("aten::relu_")->run(*graph);
+}
+
+TEST(TestFunctionalToInplaceActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  FunctionalToInplaceActivation(graph);
+  testing::FileCheck().check("aten::relu_")->run(*graph);
+  testing::FileCheck().check_not("aten::relu(")->run(*graph);
 }
 
 } // namespace jit
