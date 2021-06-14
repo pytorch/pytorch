@@ -270,7 +270,7 @@ jobs:
     runs-on: ubuntu-18.04
     container:
       # ubuntu18.04-cuda10.2-py3.6-tidy11
-      image: ghcr.io/pytorch/cilint-clang-tidy:d9af8326dbbdd3aa05db7e7ffe174df3058153d7
+      image: ghcr.io/pytorch/cilint-clang-tidy:63613951b506a55b21167261fc4bf0bcd78e40c2
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
