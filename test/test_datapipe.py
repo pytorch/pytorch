@@ -358,12 +358,14 @@ class TestIterableDataPipeHttp(TestCase):
 
     def test_stress_http_reader_iterable_datapipes(self):
         test_file_size = 10
-        #   STATS: It takes about 5 hours to stress test 16 * 1024 * 1024 files locally
-        test_file_count = 1024 * 16
+        #   STATS: It takes about 5 hours to stress test 16 * 1024 * 1024
+        #          files locally
+        test_file_count = 1024
         self.http_test_base(test_file_size, test_file_count)
 
     def test_large_files_http_reader_iterable_datapipes(self):
-        test_file_size = 1024 * 1024 * 1024
+        #   STATS: It takes about 11 mins to test a large file of 64GB locally
+        test_file_size = 1024 * 1024 * 128
         test_file_count = 1
         timeout = 30
         chunk = 1024 * 1024 * 8
