@@ -26,6 +26,9 @@ Functions
 .. autofunction:: expm1
 .. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: digamma
+.. autofunction:: psi
+.. autofunction:: i0
 .. autofunction:: i0e
 .. autofunction:: i1
 .. autofunction:: i1e

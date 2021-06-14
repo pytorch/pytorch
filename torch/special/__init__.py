@@ -35,6 +35,41 @@ Example::
     tensor([  -inf, 0.0000, 0.3466])
 """)
 
+psi = _add_docstr(_special.special_psi,
+                  r"""
+psi(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.special.digamma`.
+""")
+
+digamma = _add_docstr(_special.special_digamma,
+                      r"""
+digamma(input, *, out=None) -> Tensor
+
+Computes the logarithmic derivative of the gamma function on `input`.
+
+.. math::
+    \digamma(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
+""" + r"""
+Args:
+    input (Tensor): the tensor to compute the digamma function on
+
+Keyword args:
+    {out}
+
+.. note::  This function is similar to SciPy's `scipy.special.digamma`.
+
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`.
+           Previously it returned `NaN` for `0`.
+
+Example::
+
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.special.digamma(a)
+    tensor([-0.5772, -1.9635])
+
+""".format(**common_args))
+
 gammaln = _add_docstr(_special.special_gammaln,
                       r"""
 gammaln(input, *, out=None) -> Tensor
@@ -270,6 +305,29 @@ Example::
     tensor([1.6094, 3.2189, 4.8283])
     >>> torch.special.xlog1py(2, y)
     tensor([2.7726, 2.1972, 1.3863])
+""".format(**common_args))
+
+i0 = _add_docstr(_special.special_i0,
+                 r"""
+i0(input, *, out=None) -> Tensor
+
+Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = I_0(\text{input}_{i}) = \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.i0(torch.arange(5, dtype=torch.float32))
+    tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
+
 """.format(**common_args))
 
 i0e = _add_docstr(_special.special_i0e,
