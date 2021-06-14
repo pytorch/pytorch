@@ -211,6 +211,7 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
+                 aliases_op=None,  # the function variant of the alias of the operation, populated as torch.<alias> if None
                  variant_test_name='',  # additional string to include in the test name
                  supports_autograd=True,  # support for autograd
                  supports_gradgrad=True,  # support second order gradients (this value is ignored if supports_autograd=False)
@@ -296,8 +297,13 @@ class OpInfo(object):
         self.supports_sparse = supports_sparse
 
         self.aliases = ()
+        self.aliases_op = ()
         if aliases is not None:
-            self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+            if aliases_op is not None:
+                self.aliases_op = tuple(alias_op if alias_op else None for alias_op in aliases_op)
+            else:
+                self.aliases_op = tuple(None for _ in range(len(aliases)))
+            self.aliases = tuple(AliasInfo(a) for a, a_op in zip(aliases, self.aliases_op))  # type: ignore[assignment]
 
         self.test_conjugated_samples = test_conjugated_samples
 
@@ -6561,6 +6567,7 @@ op_db: List[OpInfo] = [
     # We run the op tests from test_ops.py only for `n=0` to avoid redundancy in testing.
     UnaryUfuncInfo('polygamma',
                    aliases=("special.polygamma", ),
+                   aliases_op(lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),),
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
