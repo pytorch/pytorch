@@ -415,8 +415,8 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
     return weight_eq_obs_dict
 
 def convert_eq_obs(
-    model: GraphModule, 
-    modules: Dict[str, nn.Module], 
+    model: GraphModule,
+    modules: Dict[str, nn.Module],
     weight_eq_obs_dict: Dict[str, _WeightEqualizationObserver],
 ) -> None:
     """ Removes the input equalization observers and replaces them with mul

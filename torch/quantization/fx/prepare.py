@@ -169,7 +169,10 @@ def insert_observer(
     if isinstance(observer, _InputEqualizationObserver) or isinstance(observer, _WeightEqualizationObserver):
         prefix = node.name + '_equalization_process_'
     else:
-        prefix = node.name + '_activation_post_process_'
+        if 'equalization' in node.name:
+            prefix = node.name.replace('equalization', 'activation_post')
+        else:
+            prefix = node.name + '_activation_post_process_'
     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
     observer_name = get_new_observer_name(model)
     setattr(model, observer_name, observer)
