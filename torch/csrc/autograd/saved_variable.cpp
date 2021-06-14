@@ -37,7 +37,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
       "you can make a clone to get a normal tensor and use it in autograd.")
 
     was_default_constructed_ = false;
-    auto& version_counter = impl::version_counter(variable);
+    const auto& version_counter = impl::version_counter(variable);
     saved_version_ = version_counter.current_version();
 
     // If the variable is a leaf or is not an output, we can safely save the
@@ -89,8 +89,9 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // We want grad_fn here to provide the most helpful debug message to the user
   // if versions don't match
   auto grad_fn = saved_original_ ? data_.grad_fn()
-                                : is_inplace_on_view_ ? weak_grad_fn_.lock()
-                                                      : nullptr;
+                                 : is_inplace_on_view_ ? weak_grad_fn_.lock()
+                                                       : nullptr;
+
   if (!saved_original_ && !grad_fn) {
     TORCH_CHECK(saved_for,"No grad_fn for non-leaf saved variable");
     grad_fn = std::move(saved_for);
@@ -130,6 +131,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   // From now on, we can assume the variable is not a leaf and is an output.
+  // Additionnally, because the variable is not a leaf, we have its grad_fn
+  // (computed above) and need to attach it to the returned tensor.
 
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
