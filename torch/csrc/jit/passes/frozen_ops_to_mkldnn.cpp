@@ -236,7 +236,10 @@ Operation createUnaryOp(
     bool inplace = false) {
   return [aten_op, inplace](Stack* stack) {
     auto a = pop(stack).toTensor();
-    c10::impl::ExcludeDispatchKeyGuard<c10::autograd_dispatch_keyset.raw_repr(), /*has_overlap=*/false> edkg;
+    c10::impl::ExcludeDispatchKeyGuard<
+        c10::autograd_dispatch_keyset.raw_repr(),
+        /*has_overlap=*/false>
+        edkg;
     // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
     // which we then use to set up `out` tensor w/ the same props as a
     auto a_it = at::native::itensor_from_mkldnn(a);
@@ -321,7 +324,10 @@ Operation BroadOp(const Node* node) {
         // these broadcasts and it could be up to ~100x slower.
         // We use a very simple heuristic to convert an arg in nchw
         // to the blocked format of the other argument.
-        c10::impl::ExcludeDispatchKeyGuard<c10::autograd_dispatch_keyset.raw_repr(), /*has_overlap=*/false> edkg;
+        c10::impl::ExcludeDispatchKeyGuard<
+            c10::autograd_dispatch_keyset.raw_repr(),
+            /*has_overlap=*/false>
+            edkg;
         auto a_it = at::native::itensor_from_mkldnn(exp_a);
         auto b_it = at::native::itensor_from_mkldnn(exp_b);
 
