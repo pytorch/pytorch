@@ -5,7 +5,7 @@ torch.package
 
 .. warning::
 
-    This module is experimental and has not yet been publicly released.
+    This module depends on the ``pickle`` module which is is not secure. Only unpackage data you trust.
 
 ``torch.package`` adds support for creating hermetic packages containing arbitrary
 PyTorch code. These packages can be saved, shared, used to load and execute models
