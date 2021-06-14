@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_MPI
+
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -263,3 +265,5 @@ class ProcessGroupMPI : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_MPI
