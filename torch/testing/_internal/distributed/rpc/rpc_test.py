@@ -197,32 +197,6 @@ class MyClass:
         time.sleep(5)
         return torch.add(self.a, my_tensor_arg)
 
-class Server:
-    @staticmethod
-    @rpc.functions.async_execution
-    def identity(tensor):
-        fut = torch.futures.Future()
-        fut.set_result(tensor)
-        return fut
-
-def sparse_tensor_to_rpc_format(sparse_tensor):
-    sparse_tensor = sparse_tensor.coalesce()
-    return [sparse_tensor.indices(), sparse_tensor.values(), sparse_tensor.size()]
-
-def sparse_rpc_format_to_tensor(sparse_rpc_format):
-    return torch.sparse_coo_tensor(
-        sparse_rpc_format[0], sparse_rpc_format[1], sparse_rpc_format[2]
-    ).coalesce()
-
-def build_sparse_tensor():
-    i = [[0, 1, 1], [2, 0, 2]]
-    v = [3, 4, 5]
-    return torch.sparse_coo_tensor(i, v, (2, 3))
-
-def sparse_callback(fut):
-    tensor = fut.wait()
-    tensor = sparse_rpc_format_to_tensor(tensor)
-    return [tensor]
 
 def _call_method_on_rref(method, rref, *args, **kwargs):
     return method(rref.local_value(), *args, **kwargs)
@@ -239,6 +213,10 @@ def add_rref_to_value(rref, value):
 def run_nested_pickle(pickle_cls_instance, tensor):
     return pickle_cls_instance.t + tensor
 
+def build_sparse_tensor():
+    i = [[0, 1, 1], [2, 0, 2]]
+    v = [3, 4, 5]
+    return torch.sparse_coo_tensor(i, v, (2, 3))
 
 def build_complex_tensors():
     a = torch.ones(3, 3)
@@ -4762,33 +4740,6 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
 
 class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
-    @skip_if_lt_x_gpu(2)
-    def test_future_extraction_sparse_tensor(self):
-        try:
-            opts = rpc.TensorPipeRpcBackendOptions(init_method=self.init_method)
-            if self.rank == 1:
-                rpc.init_rpc(
-                    "master",
-                    rank=self.rank,
-                    world_size=2,
-                    rpc_backend_options=opts
-                )
-                rref = rpc.remote("server", Server)
-                tensor = build_sparse_tensor()
-                tensor = sparse_tensor_to_rpc_format(tensor)
-                fut = rref.rpc_async().identity(tensor).then(sparse_callback)
-                fut.wait()
-            elif self.rank == 0:
-                rpc.init_rpc(
-                    "server",
-                    rank=self.rank,
-                    world_size=2,
-                    rpc_backend_options=opts
-                )
-        finally:
-            if self.rank < 2:
-                rpc.shutdown()
-
     def test_mismatched_type_for_options(self):
         # An exception should be raised if the options are not an instance of
         # TensorPipeRpcBackendOptions.
@@ -4976,34 +4927,6 @@ class MyConvNetForMNIST(nn.Module):
 
 
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
-
-    @skip_if_lt_x_gpu(2)
-    def test_cuda_future_extraction_sparse_tensor(self):
-        try:
-            opts = rpc.TensorPipeRpcBackendOptions(init_method=self.init_method)
-            if self.rank == 1:
-                opts.set_device_map("server", {self.rank: 0})
-                rpc.init_rpc(
-                    "master",
-                    rank=self.rank,
-                    world_size=2,
-                    rpc_backend_options=opts
-                )
-                rref = rpc.remote("server", Server)
-                tensor = build_sparse_tensor()
-                tensor = sparse_tensor_to_rpc_format(tensor)
-                fut = rref.rpc_async().identity(tensor).then(sparse_callback)
-                fut.wait()
-            elif self.rank == 0:
-                rpc.init_rpc(
-                    "server",
-                    rank=self.rank,
-                    world_size=2,
-                    rpc_backend_options=opts
-                )
-        finally:
-            if self.rank < 2:
-                rpc.shutdown()
 
     def _test_device_maps(self, options, errMsg):
         with self.assertRaisesRegex(ValueError, errMsg):
@@ -6119,37 +6042,70 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         ):
             fut = Future(devices=["cpu"])
 
-    def _test_cuda_future_extraction(self, wrapper, unwrapper):
-        # We check proper CUDA stream synchronization by filling the tensor with
-        # the expected value in one stream, and reading it from another stream.
-        tensor = torch.zeros((100,), device="cuda:0")
+    def _test_cuda_future_extraction(self, wrapper, unwrapper, sparse_tensor):
+        # We check proper CUDA stream synchronization by adding to the tensor
+        # in one stream to get the expected value, and reading it from another stream.
+        if sparse_tensor:
+            tensor = build_sparse_tensor().to("cuda:0")
+            add_tensor = build_sparse_tensor().to("cuda:0")
+            expected_tensor = (tensor + add_tensor).coalesce()
+        else:
+            tensor = torch.zeros((100,), device="cuda:0")
+            add_tensor = torch.ones((100,), device="cuda:0")
+            expected_tensor = tensor + add_tensor
         future = Future(devices=["cuda:0"])
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
                 torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
-                tensor.fill_(1)
+                tensor += add_tensor
+                if sparse_tensor:
+                    tensor = tensor.coalesce()
                 future.set_result(wrapper(tensor))
             with torch.cuda.stream(another_stream):
-                self.assertTrue(torch.eq(unwrapper(future.wait()), 1).all().item())
+                tensor = unwrapper(future.wait())
+                if sparse_tensor:
+                    self.assertTrue(torch.eq(tensor.indices(), expected_tensor.indices()).all().item())
+                    self.assertTrue(torch.eq(tensor.values(), expected_tensor.values()).all().item())
+                    self.assertTrue(torch.eq(torch.tensor(tensor.size()), torch.tensor(expected_tensor.size())).all().item())
+                else:
+                    self.assertTrue(torch.eq(tensor, expected_tensor).all().item())
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: t, unwrapper=lambda v: v
+            wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_list_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: [t], unwrapper=lambda v: v[0]
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_custom_class_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=False
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=True
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_list_with_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=True
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_custom_class_with_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(2)
