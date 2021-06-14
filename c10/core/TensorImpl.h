@@ -673,6 +673,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * Return the underlying storage, unsafely assuming this is a basic strided
+   * tensor. In cases where `storage` access would throw, this returns a
+   * default-constructed Storage.
+   */
+  inline const Storage& unsafe_storage() const {
+    return storage_;
+  }
+
+  /**
    * The number of elements in a tensor.
    *
    * WARNING: Previously, if you were using the Caffe2 API, you could
