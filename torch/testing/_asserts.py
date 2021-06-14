@@ -181,7 +181,7 @@ def _check_supported_tensor(input: Tensor) -> Optional[UsageError]:  # type: ign
     if input.is_quantized:
         return UsageError("Comparison for quantized tensors is not supported yet.")
 
-    if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:
+    if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
         return UsageError(f"Unsupported tensor layout {input.layout}")
 
     return None
