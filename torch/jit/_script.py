@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Tuple, Union, Callable
 import torch
 import torch._jit_internal as _jit_internal
 from torch.utils import set_module
+from torch._utils_internal import get_source_lines_and_file
 from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile
 from torch.nn import Module
 from torch.jit._state import _enabled
@@ -1220,6 +1221,14 @@ def _get_overloads(obj):
     uncompiled_overloads = _jit_internal._get_fn_overloads(qual_name)
     if uncompiled_overloads is None:
         return existing_compiled_fns
+
+    if obj in uncompiled_overloads:
+        sourcelines, file_lineno, filename = get_source_lines_and_file(obj)
+        raise RuntimeError(
+            f'Implementation for the function "{qual_name}" is missing. Please make sure a ' +
+            "definition is provided and defined after all overload declarations.\n" +
+            f'File "{filename}", line {file_lineno}:' + "\n" + ''.join(sourcelines)
+        )
 
     compiled_fns = []
     for overload_fn in uncompiled_overloads:

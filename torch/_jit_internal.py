@@ -17,12 +17,11 @@ import sys
 import builtins
 import io
 import pickle
-import functools
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
-from torch._utils_internal import get_source_lines_and_file
+from torch._utils_internal import get_source_lines_and_file, parse_def
 from torch.futures import Future
 import torch.package._mangling as package_mangling
 from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union  # noqa: F401
@@ -704,7 +703,17 @@ def copy_torchscript_modifier(orig, new) -> None:
 # qualified_name => list[overload_functions]
 _overloaded_fns : Dict[str, List[Callable]] = {}  # noqa: T484
 
+def _check_overload_body(func):
+    parsed_def = parse_def(func)
+    body = parsed_def.ast.body[0].body
+    if len(body) != 1 or not isinstance(body[0], ast.Pass):
+        msg = "Only `pass` statement can be the body of overload declaration:\n"
+        msg += '\n'.join(parsed_def.source.split("\n")[:3])
+        msg += " <- Expecting `pass` here! "
+        raise RuntimeError(msg)
+
 def _overload(func):
+    _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_fns
     fn_overload_list = _overloaded_fns.get(qual_name)
@@ -971,22 +980,6 @@ def _qualified_name(obj) -> str:
                            f"'{name}' is not a valid identifier")
 
     return module_name + "." + name
-
-
-# Thin wrapper around SourceRangeFactory to store extra metadata
-# about the function-to-be-compiled.
-class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
-        self.uses_true_division = uses_true_division
-        self.filename = filename
-
-@functools.lru_cache(maxsize=None)
-def make_source_context(*args):
-    return SourceContext(*args)
-
-def fake_range():
-    return SourceContext('', None, 0, 0).make_raw_range(0, 1)
 
 
 def _try_get_dispatched_fn(fn):

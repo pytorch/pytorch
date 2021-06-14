@@ -14168,6 +14168,26 @@ dedent """
         with self.assertRaisesRegex(Exception, "Parameters not specified"):
             torch.jit.script(test)
 
+        def wrong_decl_body(x: str) -> str:
+            return x + "0"
+
+        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement can be the body"):
+            torch.jit._overload(wrong_decl_body)
+
+        @torch.jit._overload
+        def null_overload(x: int) -> int:
+            pass
+
+        @torch.jit._overload
+        def null_overload(x: str) -> str:
+            pass
+
+        def null_overload_driver():
+            return null_overload(0)
+
+        with self.assertRaisesRegex(RuntimeError, 'Implementation for the function ".+" is missing.'):
+            torch.jit.script(null_overload_driver)
+
     def test_script_method_torch_function_overload(self):
         class MyCustomTensor(torch.Tensor):
             pass
