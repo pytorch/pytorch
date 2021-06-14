@@ -598,7 +598,7 @@ class TestSortAndSelect(TestCase):
         small = 10
         large = 4096
         for curr_size in (small, large):
-            self._test_topk_dtype(device, dtype, True, curr_size) 
+            self._test_topk_dtype(device, dtype, True, curr_size)
 
     @onlyCUDA
     @dtypes(torch.bfloat16)
