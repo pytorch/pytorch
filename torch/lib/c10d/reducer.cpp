@@ -1499,7 +1499,9 @@ void Reducer::finalize_backward() {
   // each bucket in the next backwards.
   reset_bucket_counting();
   // If we populated rebuilt params list in this backward call, avoid
-  // repopulating in subsequent backward calls.
+  // repopulating in subsequent backward calls. In particular this is needed to
+  // avoid re-pushing parameters when calling multiple backwards with
+  // retain_graph=True.
   all_rebuilt_params_pushed_ = !rebuilt_params_.empty();
 
   if (should_collect_runtime_stats()) {
