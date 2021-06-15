@@ -954,6 +954,17 @@ class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesCo
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
+
+@contextmanager
+def set_warn_always_context(new_val: bool):
+    old_val = torch.is_warn_always_enabled()
+    torch.set_warn_always(new_val)
+    try:
+        yield
+    finally:
+        torch.set_warn_always(old_val)
+
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors. Used by @precisionOverride, for
@@ -1495,7 +1506,8 @@ class TestCase(expecttest.TestCase):
         """
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
+            with set_warn_always_context(True):
+                callable()
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
@@ -1509,12 +1521,8 @@ class TestCase(expecttest.TestCase):
         pattern = re.compile(regex)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            prev = torch.is_warn_always_enabled()
-            torch.set_warn_always(True)
-            try:
+            with set_warn_always_context(True):
                 yield
-            finally:
-                torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
             self.assertTrue(any([type(w.message) is category for w in ws]))
