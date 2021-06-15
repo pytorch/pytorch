@@ -71,8 +71,6 @@ class TORCH_API SavedVariable {
   uint32_t saved_version_ = 0;
   uint32_t output_nr_ = 0;
   bool was_default_constructed_ = true;
-  bool requires_grad_ = false;
-  bool has_grad_fn_ = false;
   bool is_inplace_on_view_ = false;
   bool saved_original_ = false;
 };
