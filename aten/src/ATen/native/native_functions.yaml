@@ -6782,11 +6782,11 @@
   dispatch:
     CPU: histogram_cpu
 
-- func: histogram.bin_ct_out(Tensor self, int bins=100, *, float[]? range=None, float? min=None, float? max=None, Tensor? weight=None, bool density=False, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
+- func: histogram.bin_ct_out(Tensor self, int bins=100, *, float[]? range=None, Tensor? weight=None, bool density=False, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
   dispatch:
     CPU: histogram_out_cpu
 
-- func: histogram.bin_ct(Tensor self, int bins=100, *, float[]? range=None, float? min=None, float? max=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
+- func: histogram.bin_ct(Tensor self, int bins=100, *, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
   variants: method, function
   dispatch:
     CPU: histogram_cpu

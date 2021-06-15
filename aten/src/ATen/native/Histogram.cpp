@@ -17,8 +17,6 @@
  *   bins      - int or 1D tensor. If int, defines the number of equal-width bins. If tensor, defines the
  *               sequence of bin edges including the rightmost edge.
  *   range     - (float, float), optional. Defines the range of the bins.
- *   min       - float, optional. Defines the lower range of the bins.
- *   max       - float, optional. Defines the upper range of the bins.
  *   weight    - tensor, optional. If provided, weight should have the same shape as input. Each value
  *               in input contributes its associated weight towards its bin's result (instead of 1).
  *   density   - bool, optional. If False, the result will contain the number of samples (or total weight)
@@ -89,16 +87,9 @@ void histogram_prepare_out(const Tensor& input, int64_t bin_ct,
 
 /* Determines the outermost bin edges.
  */
-std::pair<double, double> select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>> range,
-        const c10::optional<double>& min, const c10::optional<double>& max) {
+std::pair<double, double> select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>> range) {
     TORCH_CHECK(!range.has_value() || range.value().size() == 2, "torch.histogram: range should have 2 elements",
             " if specified, but got ", range.value().size());
-
-    TORCH_CHECK(min.has_value() == max.has_value(), "torch.histogram: min and max should be specified",
-            " together, but got min ", min.has_value(), " and max ", max.has_value());
-
-    TORCH_CHECK(!range.has_value() || !min.has_value(), "torch.histogram: range and min/max arguments",
-            " should not both be specified");
 
     // Default range for empty input matching numpy.histogram's default
     double leftmost_edge = 0., rightmost_edge = 1.;
@@ -107,10 +98,6 @@ std::pair<double, double> select_outer_bin_edges(const Tensor& input, c10::optio
         // range is specified
         leftmost_edge = range.value()[0];
         rightmost_edge = range.value()[1];
-    } else if (min.has_value()) {
-        // min and max are specified
-        leftmost_edge = min.value();
-        rightmost_edge = max.value();
     } else if (input.numel() > 0) {
         // non-empty input
         auto extrema = _aminmax(input);
@@ -188,11 +175,10 @@ histogram_cpu(const Tensor& self, const Tensor& bins,
  */
 std::tuple<Tensor&, Tensor&>
 histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRef<double>> range,
-        const c10::optional<double> min, const c10::optional<double> max,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, Tensor& bin_edges) {
     histogram_prepare_out(self, bin_ct, hist, bin_edges);
-    auto outer_bin_edges = select_outer_bin_edges(self, range, min, max);
+    auto outer_bin_edges = select_outer_bin_edges(self, range);
     linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
     histogram_check_inputs(self, bin_edges, weight);
 
@@ -201,11 +187,10 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRe
 }
 std::tuple<Tensor, Tensor>
 histogram_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRef<double>> range,
-        const c10::optional<double> min, const c10::optional<double> max,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     Tensor bin_edges_out = at::empty({0}, self.options());
-    return histogram_out_cpu(self, bin_ct, range, min, max, weight, density, hist, bin_edges_out);
+    return histogram_out_cpu(self, bin_ct, range, weight, density, hist, bin_edges_out);
 }
 
 /* Narrowed interface for the legacy torch.histc function.

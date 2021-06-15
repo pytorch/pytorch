@@ -2388,25 +2388,18 @@ class TestReductions(TestCase):
                 return t.cpu().numpy()
 
         # Wrapper around numpy.histogram performing conversions between torch tensors and numpy arrays.
-        def reference_histogram(self, t, bins, bin_range, weights, density):
+        def reference_histogram(self, t, bins, bin_range, weights, density, dtype):
             (np_t, np_bins, np_weights) = map(to_np, [t, bins, weights])
             (np_hist, np_bin_edges) = np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density)
-            return (torch.from_numpy(np_hist).to(actual_dtype), torch.from_numpy(np_bin_edges).to(actual_dtype))
+            return (torch.from_numpy(np_hist).to(dtype), torch.from_numpy(np_bin_edges).to(dtype))
 
+        # Doesn't pass a 'range' kwarg unless necessary because the override of histogram with Tensor bins doesn't accept one
         if bin_range:
-            (minv, maxv) = bin_range
-            (actual_hist, actual_bin_edges) = torch.histogram(t, bins, min=minv, max=maxv, weight=weights, density=density)
-
-            # Tests that passing min and max as 'range' tuple produces the same result
-            (range_hist, range_bin_edges) = torch.histogram(t, bins, range=bin_range, weight=weights, density=density)
-            self.assertEqual(range_hist, actual_hist)
-            self.assertEqual(range_bin_edges, actual_bin_edges)
+            (actual_hist, actual_bin_edges) = torch.histogram(t, bins, range=bin_range, weight=weights, density=density)
         else:
             (actual_hist, actual_bin_edges) = torch.histogram(t, bins, weight=weights, density=density)
 
-        actual_dtype = actual_hist.dtype
-
-        (expected_hist, expected_bin_edges) = reference_histogram(self, t, bins, bin_range, weights, density)
+        (expected_hist, expected_bin_edges) = reference_histogram(self, t, bins, bin_range, weights, density, actual_hist.dtype)
 
         """
         Works around linspace discrepancies by passing torch's constructed bin_edges to numpy.
@@ -2418,7 +2411,8 @@ class TestReductions(TestCase):
         if not torch.is_tensor(bins):
             self.assertEqual(actual_bin_edges, expected_bin_edges, atol=1e-5, rtol=1e-5)
             # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins argument
-            (expected_hist, expected_bin_edges) = reference_histogram(self, t, actual_bin_edges, bin_range, weights, density)
+            (expected_hist, expected_bin_edges) = reference_histogram(
+                self, t, actual_bin_edges, bin_range, weights, density, actual_hist.dtype)
 
         self.assertEqual(actual_hist, expected_hist)
         self.assertEqual(actual_bin_edges, expected_bin_edges)
@@ -2447,7 +2441,7 @@ class TestReductions(TestCase):
             bin_range = sorted((random.uniform(-9, 9), random.uniform(-9, 9)))
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
 
-            # Tests with min=max
+            # Tests with range min=max
             bin_range[1] = bin_range[0]
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
 
@@ -2476,7 +2470,7 @@ class TestReductions(TestCase):
             values = make_tensor(shape, device, dtype, low=-9, high=9)
             (actual_hist, actual_bin_edges) = torch.histogram(values, bin_ct)
             (expected_hist, expected_bin_edges) = torch.histogram(
-                values, bin_ct, min=None, max=None, weight=None, density=False)
+                values, bin_ct, range=None, weight=None, density=False)
             self.assertEqual(actual_hist, expected_hist)
             self.assertEqual(actual_bin_edges, expected_bin_edges)
 
@@ -2534,26 +2528,10 @@ class TestReductions(TestCase):
             bin_edges = make_tensor((), device, dtype=dtype)
             torch.histogram(values, 2, out=(hist, bin_edges))
 
-        with self.assertRaisesRegex(RuntimeError, 'min and max should be specified together'):
-            values = make_tensor((), device, dtype=dtype)
-            torch.histogram(values, 2, min=0.)
-
-        with self.assertRaisesRegex(RuntimeError, 'min and max should be specified together'):
-            values = make_tensor((), device, dtype=dtype)
-            torch.histogram(values, 2, max=0.)
-
-        with self.assertRaisesRegex(RuntimeError, 'range and min/max arguments should not both be specified'):
-            values = make_tensor((), device, dtype=dtype)
-            torch.histogram(values, 2, min=0., max=1., range=(0, 1))
-
         with self.assertRaisesRegex(TypeError, 'received an invalid combination of arguments'):
             values = make_tensor((), device, dtype=dtype)
             bin_edges = make_tensor((), device, dtype=dtype)
             torch.histogram(values, bin_edges, range=(0, 1))
-
-        with self.assertRaisesRegex(RuntimeError, 'min should not exceed max'):
-            values = make_tensor((), device, dtype=dtype)
-            torch.histogram(values, 2, min=1., max=0.)
 
         with self.assertRaisesRegex(RuntimeError, 'min should not exceed max'):
             values = make_tensor((), device, dtype=dtype)
