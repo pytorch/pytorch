@@ -112,6 +112,14 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   std::unordered_set<c10::Stream> leaf_streams;
 
+  // Per-device current and default streams of the execute() that called this GraphTask.
+  // These will be synced with leaf_streams in exec_post_processing.
+  std::vector<c10::optional<c10::Stream>> caller_current_streams_;
+  std::vector<c10::optional<c10::Stream>> caller_default_streams_;
+
+  // Collects caller_current_streams_ and caller_default_streams_
+  void stash_current_streams();
+
   void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_topo_nr);
 
   // The value of worker_device in the thread that created this task.

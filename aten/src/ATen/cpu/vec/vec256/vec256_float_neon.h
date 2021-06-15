@@ -469,8 +469,8 @@ public:
     return map(std::tanh);
   }
   Vectorized<float> trunc() const {
-    float32x4_t r0 = vcvtq_f32_s32(vcvtq_s32_f32(values.val[0]));
-    float32x4_t r1 = vcvtq_f32_s32(vcvtq_s32_f32(values.val[1]));
+    float32x4_t r0 = vrndq_f32(values.val[0]);
+    float32x4_t r1 = vrndq_f32(values.val[1]);
     return Vectorized<float>(r0, r1);
   }
   Vectorized<float> lgamma() const {
