@@ -317,6 +317,8 @@ __global__ void avg_pool3d_cuda_update_grad_input(
   }
 }
 
+} // anonymous namespace
+
 #define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:      \
   avg_pool3d_cuda_update_output<KW, scalar_t, accscalar_t>  \
     <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>( \
@@ -330,49 +332,39 @@ __global__ void avg_pool3d_cuda_update_grad_input(
   C10_CUDA_KERNEL_LAUNCH_CHECK();                           \
   break
 
-void avg_pool3d_out_cuda_template(
-  Tensor& output,
+
+TORCH_IMPL_FUNC(avg_pool3d_out_cuda) (
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
-{
+  c10::optional<int64_t> divisor_override,
+  const Tensor& output
+) {
   TensorArg output_arg{ output, "output", 1 };
   TensorArg input_arg{ input, "input", 2 };
 
   checkAllSameGPU(__func__, {output_arg, input_arg});
 
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
-    "avg_pool3d: kernel_size must be a single int, or a tuple of three ints");
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
   const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
-  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
-    "avg_pool3d: stride must be omitted, a single int, or a tuple of three ints");
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH :
                  stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
   const int dW = stride.empty() ? kW :
                  stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
-    "avg_pool3d: padding must be a single int, or a tuple of three ints");
   const int padT = safe_downcast<int, int64_t>(padding[0]);
   const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
   const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
 
-  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
-
   // if divisor==0 then we will ignore it
   int64_t divisor = 0;
   if (divisor_override.has_value()) {
-    TORCH_CHECK(divisor_override.value() != 0, "divisor must be not zero");
     divisor = divisor_override.value();
   }
 
@@ -385,24 +377,6 @@ void avg_pool3d_out_cuda_template(
   const int64_t otime = pooling_output_shape<int64_t>(itime, kT, padT, dT, 1, ceil_mode);
   const int64_t oheight = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
   const int64_t owidth = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
-
-  pool3d_shape_check(
-    input,
-    nslices,
-    kT, kH, kW,
-    dT, dH, dW,
-    padT, padH, padW,
-    1, 1, 1,
-    itime, iheight, iwidth,
-    otime, oheight, owidth,
-    /*check_input_size=*/ true);
-
-  if (input.ndimension() == 4) {
-    output.resize_({ nslices, otime, oheight, owidth});
-  }
-  else {
-    output.resize_({nbatch, nslices, otime, oheight, owidth});
-  }
 
   Tensor work_input = input.contiguous();
   Tensor work_output = output;
@@ -456,6 +430,8 @@ void avg_pool3d_out_cuda_template(
 }
 
 #undef LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH
+
+namespace {
 
 void avg_pool3d_backward_out_cuda_template(
   Tensor& gradInput,
@@ -637,49 +613,6 @@ void avg_pool3d_backward_out_cuda_template(
 }
 
 } // namespace
-
-Tensor& avg_pool3d_out_cuda(const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
-  Tensor& output)
-{
-  avg_pool3d_out_cuda_template(
-    output,
-    input,
-    kernel_size,
-    stride,
-    padding,
-    ceil_mode,
-    count_include_pad,
-    divisor_override);
-  return output;
-}
-
-Tensor avg_pool3d_cuda(
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
-{
-  Tensor output = at::empty({0}, input.options());
-  avg_pool3d_out_cuda_template(
-    output,
-    input,
-    kernel_size,
-    stride,
-    padding,
-    ceil_mode,
-    count_include_pad,
-    divisor_override);
-  return output;
-}
 
 Tensor& avg_pool3d_backward_out_cuda(const Tensor& gradOutput_,
   const Tensor& input,
