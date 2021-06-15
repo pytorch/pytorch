@@ -35,9 +35,9 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
       // This code is kind of weirdly asymmetric.
       const bool copy = (grad->is_cuda() && grad->device() != src_device);
       grad_inputs[1] = grad->to(
-        src_options,
-        /*non_blocking=*/false,
-        /*copy=*/copy);
+          src_options,
+          /*non_blocking=*/false,
+          /*copy=*/copy);
     }
   }
   return grad_inputs;
