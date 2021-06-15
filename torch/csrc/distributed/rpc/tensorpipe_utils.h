@@ -5,10 +5,6 @@
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#ifdef USE_CUDA_NOT_ROCM
-#include <c10/cuda/CUDAStream.h>
-#endif
-
 namespace tensorpipe {
 class Message;
 class Allocation;
