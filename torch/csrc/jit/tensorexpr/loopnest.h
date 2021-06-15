@@ -264,7 +264,7 @@ class TORCH_API LoopNest {
   //  * Fusing the loops does not violate or add any dependencies.
   static bool fuseLoops(const std::vector<For*>& loops, For** fused);
 
-  void reorderAxis(For* a, For* b);
+  static void reorderAxis(For* a, For* b);
 
   // Reorder the given list of loops according to the permutation specified.
   // Here permutation[i] represents the location of the loop i in the result.
@@ -333,11 +333,11 @@ class TORCH_API LoopNest {
   static std::vector<For*> getLoopStmtsInLoopNest(For* f, size_t num);
 
   // LoopOptions are propagated to tail.
-  void sliceHead(For* f, int factor, For** head, For** tail);
-  void sliceHead(For* f, int factor);
+  static void sliceHead(For* f, int factor, For** head, For** tail);
+  static void sliceHead(For* f, int factor);
   // LoopOptions are propagated to head.
-  void sliceTail(For* f, int factor, For** head, For** tail);
-  void sliceTail(For* f, int factor);
+  static void sliceTail(For* f, int factor, For** head, For** tail);
+  static void sliceTail(For* f, int factor);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
@@ -346,7 +346,7 @@ class TORCH_API LoopNest {
   // Insert a cache for the consumer's usages of the buffer produced in
   // consumer, and redirect reads and writes in the consumer to that cache.
   // Returns a pair of the new cache buffer, and the new rewritten consumer.
-  AccessResult cacheAccesses(
+  static AccessResult cacheAccesses(
       const Buf* producer,
       const std::string& name,
       Stmt* consumer);
@@ -355,7 +355,7 @@ class TORCH_API LoopNest {
   // S is assumed to be a Store or a Block containing a Store. Along with the
   // computation itself, this transformation inserts Alloc/Free statements for
   // the temporary buffer used in the computation.
-  void computeAt(Stmt* s, For* at);
+  static void computeAt(Stmt* s, For* at);
 
   // Rfactor a reduction axis into a normal axis.
   //
@@ -399,8 +399,8 @@ class TORCH_API LoopNest {
   // S4:     for k           # reduction axis
   //           X_rfac[i,j] = ReduceOp(X_rfac[i,j] + Y[i,j,k], reduce_axis={k})
   //         X[i] = ReduceOp(X[i] + X_rfac[i,j], reduce_axis={j})
-  bool rfactor(Stmt* s, For* outer_reduction_for);
-  bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
+  static bool rfactor(Stmt* s, For* outer_reduction_for);
+  static bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
 
   // Vectorize the given loop. This method requires that the given loop
   // does not perform a reduction.
