@@ -869,6 +869,14 @@ class LazyTensor {
                              const LazyTensor& save_invstd, bool training,
                              double eps);
 
+  static std::tuple<LazyTensor, LazyTensor, LazyTensor>
+  ts_native_batch_norm_backward(
+      const LazyTensor& grad_out, const LazyTensor& input,
+      const LazyTensor& weight, const LazyTensor& running_mean,
+      const LazyTensor& running_var, const LazyTensor& save_mean,
+      const LazyTensor& save_invstd, bool training, double eps,
+      lazy_tensors::Span<const bool> output_mask);
+
   static LazyTensor ne(const LazyTensor& input, const at::Scalar& other);
   static void ne_(LazyTensor& input, const at::Scalar& other);
 

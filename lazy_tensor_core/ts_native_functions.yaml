@@ -24,6 +24,7 @@ supported:
   - mul.Scalar
   - mul_.Scalar
   - native_batch_norm
+  - native_batch_norm_backward
   - gelu
   - gelu_backward
   - max_pool2d_with_indices
