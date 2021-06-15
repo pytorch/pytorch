@@ -1277,9 +1277,6 @@
   dispatch:
     CompositeExplicitAutograd: count_nonzero
 
-- func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
-  variants: function, method
-
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
@@ -2250,6 +2247,36 @@
 
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   variants: function, method
+
+- func: isin.Tensor_Tensor_out(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Tensor_Tensor_out
+
+- func: isin.Tensor_Tensor(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Tensor_Tensor_out
+
+- func: isin.Tensor_Scalar_out(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Tensor_Scalar_out
+
+- func: isin.Tensor_Scalar(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Tensor_Scalar_out
+
+- func: isin.Scalar_Tensor_out(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Scalar_Tensor_out
+
+- func: isin.Scalar_Tensor(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Scalar_Tensor_out
 
 - func: isnan(Tensor self) -> Tensor
   variants: function, method
@@ -9426,6 +9453,22 @@
   variants: function
 
 - func: special_exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_psi(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_psi.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_digamma(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   variants: function
 

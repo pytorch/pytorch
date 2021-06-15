@@ -336,6 +336,13 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
+test_xla() {
+  # shellcheck disable=SC1091
+  source "./xla/.circleci/common.sh"
+  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
+  assert_git_not_dirty
+}
+
 # Do NOT run this test before any other tests, like test_python_shard1, etc.
 # Because this function uninstalls the torch built from branch, and install
 # nightly version.
@@ -422,10 +429,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
-  # shellcheck disable=SC1091
-  source "./xla/.circleci/common.sh"
-  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
-  assert_git_not_dirty
+  test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then

@@ -201,6 +201,7 @@ fi
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   clone_pytorch_xla
+  # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
   apply_patches
 fi
