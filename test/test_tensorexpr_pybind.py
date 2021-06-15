@@ -352,6 +352,9 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
         np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
         np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
+    def test_forgot_kernel_arena(self):
+        self.assertRaises(RuntimeError, lambda: torch._C._te.VarHandle("n", torch._C._te.Dtype.Int))
+
 
 if __name__ == '__main__':
     run_tests()
