@@ -2732,7 +2732,6 @@ Tensor _det_lu_based_helper_backward(
   );
   lu_diag.copy_(lu_diag_conditioned);
 
-
   // create a matrix d := (det_grad * det.conj()) I
   // NOTE: we do not use the shorter version
   // auto d = at::zeros_like(self);
