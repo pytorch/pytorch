@@ -3613,7 +3613,7 @@ Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& 
   Tensor LU_data_working_copy = is_LU_data_batched_column_major ? LU_data_broadcasted : cloneBatchedColumnMajor(LU_data_broadcasted);
   Tensor LU_pivots_working_copy = LU_pivots_broadcasted.is_contiguous() ? LU_pivots_broadcasted : LU_pivots_broadcasted.contiguous();
 
-  lu_solve_trans_stub(self.device().type(), result, LU_data_working_copy, LU_pivots_working_copy, /*trans=*/'N');
+  lu_solve_trans_stub(self.device().type(), result, LU_data_working_copy, LU_pivots_working_copy, trans);
   return result;
 }
 
