@@ -126,11 +126,23 @@ Tensor linear_decomp(
   return result;
 }
 
+std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> linalg_eigh_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, c10::string_view UPLO) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto result = at::linalg_eigh(self_, UPLO);
+  optional<int64_t> result_bdim;
+  if (self_bdim) {
+    result_bdim = 0;
+  }
+  return std::make_tuple(std::get<0>(result), result_bdim, std::get<1>(result), result_bdim);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("slogdet", slogdet_batch_rule);
   VMAP_SUPPORT("dot", dot_batch_rule);
   VMAP_SUPPORT("mv", mv_batch_rule);
   VMAP_SUPPORT("mm", mm_batch_rule);
+  VMAP_SUPPORT("linalg_eigh", linalg_eigh_batch_rule);
 
   m.impl("linear", linear_decomp);
 }
