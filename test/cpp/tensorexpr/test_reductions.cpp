@@ -642,7 +642,7 @@ TEST(Reductions, SplitReduceAxis) {
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[1], 2);
+  LoopNest::splitWithTail(loops[1], 2);
 
   l.prepareForCodegen();
 
@@ -673,8 +673,8 @@ TEST(Reductions, SplitNonReduceAxis) {
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[0], 2);
-  l.splitWithTail(loops[0], 2);
+  LoopNest::splitWithTail(loops[0], 2);
+  LoopNest::splitWithTail(loops[0], 2);
 
   l.prepareForCodegen();
 
@@ -716,7 +716,7 @@ TEST(Reductions, ReorderedReductionInitializer) {
   l.setGPUBlockIndex(loops[0], 0);
   l.setGPUThreadIndex(loops[1], 0);
 
-  l.reorderAxis(loops[1], loops[2]);
+  LoopNest::reorderAxis(loops[1], loops[2]);
 
   Stmt* s = l.root_stmt();
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -918,7 +918,7 @@ TEST(Reductions, ReduceSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    loop.splitWithTail(loops[i], 8);
+    LoopNest::splitWithTail(loops[i], 8);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -951,7 +951,7 @@ TEST(Reductions, ReduceSplitNoTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    loop.splitWithTail(loops[i], 5);
+    LoopNest::splitWithTail(loops[i], 5);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -986,7 +986,7 @@ TEST(Reductions, ReduceOverSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    loop.splitWithTail(loops[i], 16);
+    LoopNest::splitWithTail(loops[i], 16);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1020,7 +1020,7 @@ TEST(Reductions, ReduceSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    loop.splitWithMask(loops[i], 8);
+    LoopNest::splitWithMask(loops[i], 8);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1053,7 +1053,7 @@ TEST(Reductions, ReduceSplitNoMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    loop.splitWithMask(loops[i], 5);
+    LoopNest::splitWithMask(loops[i], 5);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1087,7 +1087,7 @@ TEST(Reductions, ReduceOverSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    loop.splitWithMask(loops[i], 16);
+    LoopNest::splitWithMask(loops[i], 16);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1124,13 +1124,13 @@ TEST(Reductions, ReduceSplitRfactor) {
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  loop.splitWithTail(loops[2], SPLIT_FACTOR);
+  LoopNest::splitWithTail(loops[2], SPLIT_FACTOR);
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[2]);
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(2).size() == 3);
-  loop.reorderAxis(all_loops[2][1], all_loops[2][2]);
+  LoopNest::reorderAxis(all_loops[2][1], all_loops[2][2]);
   all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(2).size() == 3);
   ASSERT_TRUE(loop.rfactor(c_body, all_loops[2][1]));
@@ -1169,15 +1169,15 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *i, *t;
-  loop.splitWithTail(loops[1], SPLIT_FACTOR, &i, &t);
-  loop.reorderAxis(loops[0], i);
+  LoopNest::splitWithTail(loops[1], SPLIT_FACTOR, &i, &t);
+  LoopNest::reorderAxis(loops[0], i);
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(1).size() == 3);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
   ASSERT_TRUE(loop.rfactor(c_body, all_loops[1][0]));
-  loop.reorderAxis(all_loops[1][0], all_loops[1][2]);
+  LoopNest::reorderAxis(all_loops[1][0], all_loops[1][2]);
 
   loop.prepareForCodegen();
   loop.simplify();
@@ -1648,7 +1648,7 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
 
   LoopNest l({e}, {c, d, e});
 
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4);
+  LoopNest::splitWithMask(l.getLoopStmtsFor(e)[0], 4);
 
   Stmt* e_loop = l.getLoopStmtsFor(e)[1];
   l.cacheAccesses(d->buf(), "sum_local", e_loop);
@@ -1694,10 +1694,10 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   For* inner;
 
   // Split outer reduction axis.
-  l.splitWithMask(l.getLoopStmtsFor(d)[0], 4, &inner);
+  LoopNest::splitWithMask(l.getLoopStmtsFor(d)[0], 4, &inner);
 
   // Split reduction consumer.
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
+  LoopNest::splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
 
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
@@ -1744,10 +1744,10 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
 
   // reorder outer reduction axes.
   auto loops = l.getLoopStmtsFor(d);
-  l.reorderAxis(loops[0], loops[1]);
+  LoopNest::reorderAxis(loops[0], loops[1]);
 
   // Split reduction consumer.
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
+  LoopNest::splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
 
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
@@ -1791,7 +1791,7 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   LoopNest loop({c});
 
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  loop.reorderAxis(loops.at(0), loops.at(1));
+  LoopNest::reorderAxis(loops.at(0), loops.at(1));
   loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
@@ -1802,10 +1802,10 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
   ASSERT_TRUE(all_loops.size() == 2 && all_loops.at(1).size() == 3);
-  loop.reorderAxis(all_loops[1][0], all_loops[1][1]);
+  LoopNest::reorderAxis(all_loops[1][0], all_loops[1][1]);
 
   all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
-  loop.cacheAccesses(rfac_buf, "tmp", all_loops[1][1]);
+  LoopNest::cacheAccesses(rfac_buf, "tmp", all_loops[1][1]);
   loop.simplify();
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
@@ -1864,7 +1864,7 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
 
-  loop.reorderAxis(loops.at(0), loops.at(1));
+  LoopNest::reorderAxis(loops.at(0), loops.at(1));
   loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Buf* rfac_buf;
@@ -1872,11 +1872,11 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   loop.distributeLoop(loops.at(0));
   auto all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
   ASSERT_TRUE(all_loops.size() == 2 && all_loops.at(1).size() == 3);
-  loop.reorderAxis(all_loops[1][0], all_loops[1][1]);
+  LoopNest::reorderAxis(all_loops[1][0], all_loops[1][1]);
 
   all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
   ASSERT_TRUE(all_loops.size() == 2 && all_loops.at(1).size() == 3);
-  loop.cacheAccesses(rfac_buf, "tmp", all_loops[1][2]);
+  LoopNest::cacheAccesses(rfac_buf, "tmp", all_loops[1][2]);
   loop.prepareForCodegen();
   loop.simplify();
   Stmt* s = loop.root_stmt();
@@ -1993,14 +1993,14 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   // But if we rfactor this so it's not a reduce axis we can vectorize that
   // loop.
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(loops[0], loops[1]);
+  LoopNest::reorderAxis(loops[0], loops[1]);
   loops = l.getLoopStmtsFor(tensor);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto tensor_body = const_cast<Stmt*>(l.getAllWritesToBuf(tensor->buf())[1]);
   Buf* rfac_buf = nullptr;
-  ASSERT_TRUE(l.rfactor(tensor_body, loops.at(0), &rfac_buf));
+  ASSERT_TRUE(LoopNest::rfactor(tensor_body, loops.at(0), &rfac_buf));
 
-  l.distributeLoop(loops.at(0));
+  LoopNest::distributeLoop(loops.at(0));
   auto rfac_loops = l.getAllLoopNestsWritingToBuf(rfac_buf);
 
   ASSERT_TRUE(LoopNest::vectorize(rfac_loops[1][0]));
