@@ -3283,6 +3283,13 @@ def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(lhs, args=(3.14,)),
     ]
 
+def sample_inputs_isin(op_info, device, dtype, requires_grad):
+    element = make_tensor((L,), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    indices = torch.randint(0, L, size=[S])
+    test_elements = element[indices].clone()
+    return [
+        SampleInput(element, args=(test_elements,))
+    ]
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -5336,6 +5343,11 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('isin',
+           dtypesIfCPU=all_types(),
+           dtypesIfCUDA=all_types_and(torch.half),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.float16),
@@ -7071,6 +7083,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True),
     UnaryUfuncInfo('digamma',
                    ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,
+                   aliases=('special.psi', 'special.digamma',),
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),

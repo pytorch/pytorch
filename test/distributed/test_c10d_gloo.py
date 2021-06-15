@@ -29,7 +29,6 @@ from torch.testing._internal.common_distributed import (
     simple_sparse_reduce_tests,
     skip_if_win32,
     create_device,
-    with_dist_debug_levels,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
@@ -45,7 +44,6 @@ from test_c10d_common import (
     Task,
     ModuleForDdpCommHook,
     SparseGradientModule,
-    AbstractProcessGroupWrapperTest,
 )
 
 
@@ -202,92 +200,6 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     @retry_on_connect_failures
     def test_default_store_timeout_gloo(self):
         self._test_default_store_timeout("gloo")
-
-@requires_gloo()
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
-class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
-    def setUp(self):
-        super(ProcessGroupGlooWrapperTest, self).setUp()
-
-    def opts(self, threads=2, timeout=10.0):
-        opts = c10d.ProcessGroupGloo._Options()
-        opts._timeout = timeout
-        opts._devices = [create_device(interface=LOOPBACK)]
-        opts._threads = threads
-        return opts
-
-    def _create_wrapper_pg(self, with_new_group=False, timeout=10.0):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-        if with_new_group:
-            pg = c10d.new_group(backend="gloo")
-        else:
-            _pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(timeout=timeout))
-            pg = c10d._create_process_group_wrapper(
-                _pg,
-                "unused",
-                store,
-                self.rank,
-                self.world_size,
-                timeout=timeout,
-            )
-        return pg
-
-    def test_collective_hang(self):
-        pg = self._create_wrapper_pg(timeout=2.0)
-        self._test_collective_hang(pg)
-
-    # NOTE: these tests are separated by debug level instead of combined into
-    # one due to https://github.com/pytorch/pytorch/issues/55967, they can be
-    # combined after that is resolved.
-    @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collectives_op_mismatch_debug_mode(self):
-        pg = self._create_wrapper_pg(with_new_group=True)
-        self._test_collectives_op_mismatch(pg)
-
-    @with_dist_debug_levels(levels=["OFF"])
-    def test_collectives_op_mismatch(self):
-        pg = self._create_wrapper_pg(with_new_group=False)
-        self._test_collectives_op_mismatch(pg)
-
-    @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collective_shape_mismatch_debug_mode(self):
-        pg = self._create_wrapper_pg(with_new_group=True)
-        self._test_collective_shape_mismatch(pg)
-
-    @with_dist_debug_levels(levels=["OFF"])
-    def test_collective_shape_mismatch(self):
-        pg = self._create_wrapper_pg(with_new_group=False)
-        self._test_collective_shape_mismatch(pg)
-
-    @skip_if_lt_x_gpu(4)
-    @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collectives_op_mismatch_cuda_debug_mode(self):
-        pg = self._create_wrapper_pg(with_new_group=True)
-        self._test_collectives_op_mismatch(pg, use_cuda=True)
-
-    @skip_if_lt_x_gpu(4)
-    @with_dist_debug_levels(levels=["OFF"])
-    def test_collectives_op_mismatch_cuda(self):
-        pg = self._create_wrapper_pg(with_new_group=False)
-        self._test_collectives_op_mismatch(pg, use_cuda=True)
-
-    @skip_if_lt_x_gpu(4)
-    @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collective_shape_mismatch_cuda_debug_mode(self):
-        pg = self._create_wrapper_pg(with_new_group=True)
-        self._test_collective_shape_mismatch(pg, use_cuda=True)
-
-    @skip_if_lt_x_gpu(4)
-    @with_dist_debug_levels(levels=["OFF"])
-    def test_collective_shape_mismatch_cuda(self):
-        pg = self._create_wrapper_pg(with_new_group=False)
-        self._test_collective_shape_mismatch(pg, use_cuda=True)
 
 @requires_gloo()
 @unittest.skipIf(
