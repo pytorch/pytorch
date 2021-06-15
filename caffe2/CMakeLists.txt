@@ -145,7 +145,6 @@ if(BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
     add_subdirectory(operators)
     add_subdirectory(operators/rnn)
     if(USE_FBGEMM)
-      add_subdirectory(quantization)
       add_subdirectory(quantization/server)
     endif()
     if(USE_QNNPACK)
@@ -358,8 +357,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h"
       )
-      target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
-      add_dependencies(process_group_agent torch c10d)
+      target_link_libraries(process_group_agent PRIVATE torch fmt::fmt-header-only)
+      add_dependencies(process_group_agent torch)
 
       if(USE_TENSORPIPE)
         add_library(tensorpipe_agent
@@ -368,11 +367,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_cuda.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
           )
-        target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
-        add_dependencies(tensorpipe_agent torch c10d)
+        target_link_libraries(tensorpipe_agent PRIVATE torch tensorpipe fmt::fmt-header-only)
+        add_dependencies(tensorpipe_agent torch)
         if(USE_CUDA)
           target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
         endif()
@@ -622,8 +622,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
       )
     endif()
-    if(USE_DISTRIBUTED AND NOT WIN32)
-      append_filelist("libtorch_distributed_sources" TORCH_SRCS)
+    if(USE_DISTRIBUTED)
+      append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
+      if(NOT WIN32)
+        append_filelist("libtorch_distributed_extra_sources" TORCH_SRCS)
+      endif()
     endif()
   endif()
 
@@ -654,6 +657,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       list(APPEND Caffe2_GPU_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
     endif()
+    if(USE_DISTRIBUTED)
+      if(BUILD_SPLIT_CUDA)
+        set(_target "Caffe2_GPU_SRCS_CPP")
+      else()
+        set(_target "Caffe2_GPU_SRCS")
+      endif()
+      append_filelist("libtorch_cuda_distributed_base_sources" ${_target})
+      if(NOT WIN32)
+        append_filelist("libtorch_cuda_distributed_extra_sources" ${_target})
+      endif()
+    endif()
     set_source_files_properties(
       ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
@@ -670,6 +684,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     if(USE_NCCL)
       list(APPEND Caffe2_HIP_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+    endif()
+    if(USE_DISTRIBUTED)
+      append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_HIP_SRCS)
+      if(NOT WIN32)
+        append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_HIP_SRCS)
+      endif()
     endif()
     # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
     # See NOTE [ ATen NVRTC Stub and HIP ]
@@ -1048,6 +1068,9 @@ endif()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
+  install(DIRECTORY "${TORCH_SRC_DIR}/lib/c10d"
+    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
+    FILES_MATCHING PATTERN "*.hpp")
   install(FILES
     "${TORCH_SRC_DIR}/script.h"
     "${TORCH_SRC_DIR}/extension.h"
@@ -1211,9 +1234,31 @@ endif()
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
 # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
 if(USE_DISTRIBUTED)
-  target_compile_definitions(torch_cpu PRIVATE
-    USE_DISTRIBUTED
-  )
+  # Needed to support the inclusion of c10d/Foo.hpp headers.
+  target_include_directories(torch_cpu PUBLIC ${TORCH_SRC_DIR}/lib)
+  target_compile_definitions(torch_cpu PRIVATE USE_DISTRIBUTED)
+  if(USE_GLOO AND USE_C10D_GLOO)
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
+  endif()
+  if(USE_NCCL AND USE_C10D_NCCL)
+    if(USE_ROCM)
+      target_compile_definitions(torch_hip PUBLIC USE_C10D_NCCL)
+    else()
+      if(BUILD_SPLIT_CUDA)
+        target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_NCCL)
+      else()
+        target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+      endif()
+    endif()
+  endif()
+  if(USE_MPI AND USE_C10D_MPI)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      set_source_files_properties(
+        "${TORCH_SRC_DIR}/lib/c10d/ProcessGroupMPI.cpp"
+        PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    endif()
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
+  endif()
   # Pass USE_RPC in order to reduce use of
   # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
   # need to be removed when RPC is supported
@@ -1477,6 +1522,10 @@ if(BUILD_SPLIT_CUDA)
   target_link_libraries(
       torch_cuda_cpp PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
   target_link_libraries(torch_cuda_cu PRIVATE torch_cuda_cpp)
+  if(USE_CUDNN)
+    target_link_libraries(
+        torch_cuda_cpp PRIVATE  caffe2::cudnn-private)
+  endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
@@ -1493,6 +1542,10 @@ elseif(USE_CUDA)
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+  if(USE_CUDNN)
+    target_link_libraries(
+        torch_cuda PRIVATE  caffe2::cudnn-private)
+  endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
@@ -1657,6 +1710,11 @@ if(BUILD_TEST)
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     target_link_libraries(${test_name} torch_library gtest_main)
+    if(USE_OPENMP)
+      # -fopenmp is a compile time flag and as result not guaranteed
+      # to link executable against OpenMP runtime library
+      target_link_libraries(${test_name} ${OpenMP_CXX_LIBRARIES})
+    endif()
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
