@@ -245,9 +245,6 @@ def get_weight_eq_obs(node: Node, model: GraphModule, modules: Dict[str, nn.Modu
 
         weight_eq_obs = equalization_qconfig_map.get(node.name, None).weight()
         assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
-        # TODO: Maybe we should check that this weight observer comes somewhat
-        # directly after the given InputEqualizationObserver node, but I'm not sure
-        # how to check that
         return node, weight_eq_obs
 
     elif node.op == 'call_function':
