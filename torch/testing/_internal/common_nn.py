@@ -4958,23 +4958,31 @@ class ModuleTest(object):
             test_name += '_' + self.desc
         return test_name
 
-    def _unpack(self, value):
-        if isinstance(value, torch.Tensor):
-            return value
-        elif is_iterable(value):
-            return type(value)(self._unpack(v) for v in value)
-        else:
-            return value
-
     @property
     def constructor_args(self):
-        return self._get_arg('constructor_args', False)
+        return self._get_arg('constructor_args')
 
     @property
     def extra_args(self):
-        return self._get_arg('extra_args', False)
+        return self._get_arg('extra_args')
 
-    def _get_arg(self, name, unpack):
+    def _get_input(self):
+        input = self._get_arg('input')  # type: ignore[arg-type]
+
+        def map_variables(i):
+            if isinstance(i, torch.Tensor):
+                if i.is_floating_point() or i.is_complex():
+                    i.requires_grad = True
+                return i
+            else:
+                return type(i)(map_variables(elem) for elem in i)
+
+        return map_variables(input)
+
+    def _get_target(self):
+        return self._get_arg('target')
+
+    def _get_arg(self, name):
         assert name in self._required_arg_names
 
         if name not in self._arg_cache:
@@ -4999,20 +5007,7 @@ class ModuleTest(object):
 
                 self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
 
-        return self._unpack(self._arg_cache[name]) if unpack else self._arg_cache[name]
-
-    def _get_input(self):
-        input = self._get_arg('input', False)  # type: ignore[arg-type]
-
-        def map_variables(i):
-            if isinstance(i, torch.Tensor):
-                if i.is_floating_point() or i.is_complex():
-                    i.requires_grad = True
-                return i
-            else:
-                return type(i)(map_variables(elem) for elem in i)
-
-        return map_variables(input)
+        return self._arg_cache[name]
 
     def __call__(self, test_case):
         # === Instantiate the module. ===
@@ -5409,6 +5404,3 @@ class ModuleTest(object):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
-
-    def _get_target(self):
-        return self._get_arg('target', False)
