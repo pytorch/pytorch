@@ -2,7 +2,6 @@
 
 #ifdef USE_TENSORPIPE
 
-#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace tensorpipe {
