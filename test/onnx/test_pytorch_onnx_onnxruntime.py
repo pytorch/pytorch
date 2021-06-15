@@ -2400,6 +2400,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(RandLike(), x)
 
+    def test_bernoulli(self):
+        class Bernoulli(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.bernoulli(x).size(0))
+
+        x = torch.empty(3, 3).uniform_(0, 1)
+        self.run_test(Bernoulli(), x)
+
+        x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
+        self.run_test(Bernoulli(), x)
+
     def test_reshape_different_rank(self):
         class ReshapeModel(torch.nn.Module):
             def forward(self, x):
@@ -5542,6 +5553,21 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"x": [1, 2]},
                       test_with_inputs=[y])
 
+    def test_relu6(self):
+        class Relu6Model(torch.nn.Module):
+            def __init__(self):
+                super(Relu6Model, self).__init__()
+                self.relu6 = torch.nn.ReLU6()
+
+            def forward(self, x):
+                return self.relu6(x)
+
+        x = torch.randn(2, 3, 4) * 100.0
+        y = torch.randn(2, 4, 5) * 100.0
+        self.run_test(Relu6Model(), x, input_names=['x'],
+                      dynamic_axes={'x': [1, 2]},
+                      test_with_inputs=[y])
+
     def test_silu(self):
         class SiLUModel(torch.nn.Module):
             def __init__(self):
@@ -5875,6 +5901,21 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.zeros([2, 3, 4], dtype=torch.bool)
         model = MyModule()
         self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_type_as(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([1.0])
+                return x.type_as(y)
+
+        a = torch.tensor([True, False], dtype=torch.bool)
+        b = torch.randn(3, 4, dtype=torch.double)
+        c = torch.ones((2, 2), dtype=torch.int64)
+        model = MyModule()
+        self.run_test(model, a)
+        self.run_test(model, b)
+        self.run_test(model, c)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_ones_bool(self):
@@ -9009,6 +9050,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M([0, 1, 2], [1, 0, 2]), (x,))
         self.run_test(M(2, 1), (x,))
         self.run_test(M([-1, 3], [-2, -1]), (x,))
+
+    def test_sum_empty_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x[0:0].sum()
+
+        x = torch.ones(12)
+        self.run_test(M(), (x,))
+
+        x = torch.ones(2, 0, 3)
+        self.run_test(M(), (x,))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
