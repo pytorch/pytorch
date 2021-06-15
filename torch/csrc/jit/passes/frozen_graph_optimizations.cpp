@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
@@ -15,7 +16,7 @@ void OptimizeFrozenGraph(
   removeDropout(graph);
   // run a couple times to capture Conv -> Mul -> Add etc
   if (optimize_numerics) {
-    for (size_t i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       FoldFrozenConvBatchnorm(graph);
       FoldFrozenConvAddOrSub(graph);
       FoldFrozenConvMulOrDiv(graph);
