@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/CUDATest.hpp>

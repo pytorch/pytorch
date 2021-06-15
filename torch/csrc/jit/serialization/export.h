@@ -193,5 +193,25 @@ TORCH_API void SetExportModuleMobileInfoConverter(
  */
 TORCH_API std::vector<std::string> export_opnames(const Module& m);
 
+struct TORCH_API BytecodeEmitDefaultValueForUnspecifiedArgMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
+// RAII guard to switch the way JIT emits the bytecode for inputs.
+// true: instruction of default argument values (like LOADC) is emitted.
+// false: instruction of default argument values are not emitted. Instead
+// they are fetched from operator schema.
+struct TORCH_API BytecodeEmitDefaultInputsGuard {
+  BytecodeEmitDefaultInputsGuard(bool enable)
+      : prev_mode(BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
+    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(enable);
+  }
+  ~BytecodeEmitDefaultInputsGuard() {
+    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(prev_mode);
+  }
+  bool prev_mode;
+};
+
 } // namespace jit
 } // namespace torch
