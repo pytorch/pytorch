@@ -17,12 +17,6 @@
 
 namespace tensorpipe {
 
-struct CpuBuffer;
-
-#ifdef USE_CUDA_NOT_ROCM
-struct CudaBuffer;
-#endif
-
 class Context;
 class Error;
 class Listener;
@@ -42,6 +36,28 @@ class Context;
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+// These priorities instruct TensorPipe on which transport/channel to pick
+// during handshake. Higher priorities will take precedence over lower ones.
+// The transport with lowest priority will be the one used to bootstrap pipes.
+
+constexpr int64_t kShmTransportPriority = 200;
+constexpr int64_t kIbvTransportPriority = 100;
+// The UV transport just uses TCP and should work everywhere, thus keep it last.
+constexpr int64_t kUvTransportPriority = 0;
+
+constexpr int64_t kCmaChannelPriority = 1200;
+constexpr int64_t kMultiplexedUvChannelPriority = 1100;
+// The basic channel reuses a transport as a channel, and is thus our fallback.
+constexpr int64_t kBasicChannelPriority = 1000;
+
+// CPU channel have higher priority than CUDA channels, since the latter might
+// handle CPU-to-CPU transfers, but will always be less efficient than their
+// CPU-only counterparts.
+constexpr int64_t kCudaIpcChannelPriority = 300;
+constexpr int64_t kCudaGdrChannelPriority = 200;
+constexpr int64_t kCudaXthChannelPriority = 400;
+constexpr int64_t kCudaBasicChannelPriority = 0;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
