@@ -176,7 +176,7 @@ int64_t hsum(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
   __m256i one_epi8_v = _mm256_set1_epi8(1);
@@ -233,7 +233,7 @@ int64_t hsum(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
   __m256i one_epi8_v = _mm256_set1_epi8(1);
@@ -290,7 +290,7 @@ int64_t hsum(const int32_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   __m256i sum_epi64 = _mm256_setzero_si256();
   // vectorized
   for (; i < len / 8 * 8; i += 8) {
@@ -346,7 +346,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   // vectorized
   __m256i sum_v_epu32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
@@ -421,7 +421,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   // vectorized
   __m256i sum_v_epi32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
@@ -504,7 +504,7 @@ float hsum_sq(const int32_t* A, int len) {
   float row_sum = 0;
   int i = 0;
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   __m256 sum_ps = _mm256_setzero_ps();
   // vectorized
   for (; i < len / 8 * 8; i += 8) {
@@ -1405,11 +1405,12 @@ void do_avg_pool_nhwc_on_AVX_n(
     int hsize,
     int wsize,
     int csize) {
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || \
+     defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
   // buffer for channel accumulator, used to interchange channel-loop
   // to inner-most, so that memory access of the input tensor data is
   // continuous.
-#ifdef CPU_CAPABILITY_AVX2
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   constexpr int cb_size = 16;
 #else
   constexpr int cb_size = 8;
@@ -1419,11 +1420,11 @@ void do_avg_pool_nhwc_on_AVX_n(
   Vectorized<int32_t> acc_buffer[cb_size];
   Vectorized<float> acc_buffer_fp[cb_size];
 
-#ifdef CPU_CAPABILITY_AVX2
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   if (vec_width == 8) {
 #else
   if (vec_width == 16) {
-#endif 
+#endif
     for (int c = c_start; c < csize; c += cb_step) {
       int cend = std::min(cb_size, (csize - c) / vec_width);
       // initialize loop
@@ -1451,7 +1452,7 @@ void do_avg_pool_nhwc_on_AVX_n(
 
       // first quantize using AVX2 or AVX512 using 32 lanes, then 8, finally falls
       // back to single
-#if defined(CPU_CAPABILITY_AVX2)
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
       QuantizeAvx2<T>(
           (float*)acc_buffer_fp,
           o_p + c,
@@ -1492,13 +1493,14 @@ void do_avg_pool_on_AVX_n(
     int64_t stride_D,
     int64_t stride_H,
     int64_t stride_W) {
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256) || \
+     defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
   constexpr int vec_width = Vectorized<T>::size() / 4;
-#ifdef CPU_CAPABILITY_AVX2
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256))
   if (vec_width == 8) {
 #else
   if (vec_width == 16) {
-#endif   
+#endif
     for (; c + vec_width <= channel_size; c += vec_width) {
       int64_t tcntr = 0;
 
@@ -1931,9 +1933,10 @@ int64_t do_quantized_bilinear_on_AVX_n(
     const int64_t h1p,
     const int64_t w1p) {
   int64_t c = 0;
-#if (defined(CPU_CAPABILITY_AVX2) || defined(AVX512)) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || \
+     defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
   constexpr auto vec_width = Vectorized<T>::size() / 4;
-#if defined(CPU_CAPABILITY_AVX2)
+#if (defined(CPU_CAPABILITY_AVX512_256) || defined(CPU_CAPABILITY_AVX2))
   if (vec_width == 8) {
 #else
   if (vec_width == 16) {

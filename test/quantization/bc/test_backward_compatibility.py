@@ -2,7 +2,7 @@
 
 import sys
 import os
-import unittest 
+import unittest
 # torch
 import torch
 import torch.nn as nn

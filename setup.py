@@ -103,7 +103,7 @@
 #     enables AVX512 ATen kernels if AVX512 is supported.
 #     ATen AVX512VL kernels with vector-width 256 would be compiled
 #     if supported by the machine, regardless of whether this environment
-#     variable is TRUE. 
+#     variable is TRUE.
 #
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
