@@ -1,15 +1,13 @@
 from functools import partial, wraps
 import warnings
-from numbers import Number
 
 import torch
-import numpy as np
 
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
     (TestCase, compare_with_reference, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck, suppress_warnings, torch_to_numpy_dtype_dict)
+     gradcheck, gradgradcheck, suppress_warnings)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING)
 from torch.testing._internal.common_device_type import \
