@@ -171,7 +171,7 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
         return run_shell_command(['ninja', '-f', f.name])
 
 
-def run_clang_tidy(options: Any, line_filters: Dict[str, List[Tuple[int, int]]], files: Iterable[str]) -> str:
+def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iterable[str]) -> str:
     """Executes the actual clang-tidy command in the shell."""
     command = [options.clang_tidy_exe, "-p", options.compile_commands_dir]
     if not options.config_file and os.path.exists(".clang-tidy"):
@@ -332,6 +332,7 @@ def main() -> None:
             ]
             files = list(changed_files.keys())
     else:
+        line_filters = []
         files = get_all_files(paths)
     file_patterns = get_file_patterns(options.glob, options.regex)
     files = list(filter_files(files, file_patterns))
