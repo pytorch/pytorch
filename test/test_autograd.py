@@ -8354,6 +8354,18 @@ class TestAutogradDeviceType(TestCase):
         _tensor_tensor_helper(x, x)
         _tensor_tensor_helper(y, y)
 
+    def test_copy_r_to_c(self, device):
+        out_c = torch.empty(3, 2, dtype=torch.cdouble, device=device)
+        inp_r = torch.randn(3, 2, dtype=torch.double, device=device,
+                            requires_grad=True)
+
+        def do_test():
+            out_c.copy_(inp_r)
+            out_c.sum().backward()
+            self.assertEqual(inp_r.grad, torch.ones_like(inp_r))
+
+        self.assertNotWarn(do_test)
+
 
 class TestAutogradInferenceMode(TestCase):
     def _is_inference_tensor(self, tensor):
