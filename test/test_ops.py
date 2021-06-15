@@ -76,6 +76,8 @@ class TestOpInfo(TestCase):
                 # TODO: handle non-tensor outputs
                 if not isinstance(result, torch.Tensor):
                     self.skipTest("Skipped! Test does not handle non-tensor outputs")
+                if sample.output_process_fn_grad is not None:
+                    result = sample.output_process_fn_grad(result)
                 result.sum().backward()
 
     # Verifies that backward for each supported floating or complex dtype

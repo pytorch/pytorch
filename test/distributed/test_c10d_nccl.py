@@ -30,7 +30,6 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_gloo,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
@@ -46,7 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
 )
 import test_c10d_common
-from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook, AbstractProcessGroupWrapperTest
+from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook
 
 
 class RendezvousEnvTest(TestCase):
@@ -158,88 +157,6 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
         if torch.cuda.device_count() == 0:
             raise unittest.SkipTest("No GPUs available, skipping test")
         self._test_default_store_timeout("nccl")
-
-@requires_gloo()
-@requires_nccl()
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
-class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
-    def setUp(self):
-        self.num_gpus = torch.cuda.device_count()
-        if self.num_gpus < 2:
-            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
-        super(AbstractProcessGroupWrapperTest, self).setUp()
-        self._spawn_processes()
-        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
-
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    def _create_wrapper_pg(self, with_new_group=False, timeout=10.0):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store,
-            timeout=timedelta(seconds=timeout)
-        )
-        if with_new_group:
-            pg = c10d.new_group(backend="nccl", timeout=timedelta(seconds=timeout))
-        else:
-            _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
-            pg = c10d._create_process_group_wrapper(
-                _pg,
-                "unused",
-                store,
-                self.rank,
-                self.world_size,
-                timeout=timeout,
-            )
-        return pg
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_collective_hang(self):
-        pg = self._create_wrapper_pg(timeout=2.0)
-        self._test_collective_hang(pg)
-
-    # NOTE: these tests are separated by debug level instead of combined into
-    # one due to https://github.com/pytorch/pytorch/issues/55967, they can be
-    # combined after that is resolved.
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collectives_op_mismatch_debug_mode(self):
-        pg = self._create_wrapper_pg(with_new_group=True)
-        self._test_collectives_op_mismatch(pg, use_cuda=True)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @with_dist_debug_levels(levels=["OFF"])
-    def test_collectives_op_mismatch(self):
-        pg = self._create_wrapper_pg(with_new_group=False)
-        self._test_collectives_op_mismatch(pg, use_cuda=True)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collective_shape_mismatch_debug_mode(self):
-        pg = self._create_wrapper_pg(with_new_group=True)
-        self._test_collective_shape_mismatch(pg, use_cuda=True)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @with_dist_debug_levels(levels=["OFF"])
-    def test_collective_shape_mismatch(self):
-        pg = self._create_wrapper_pg(with_new_group=False)
-        self._test_collective_shape_mismatch(pg, use_cuda=True)
-
 
 class ProcessGroupNCCLNoGPUTest(TestCase):
     MAIN_PROCESS_RANK = 0
