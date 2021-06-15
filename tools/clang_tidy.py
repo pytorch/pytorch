@@ -31,7 +31,7 @@ try:
 except ImportError:
     from pipes import quote
 
-from typing import Any, Dict, Iterable, List, Set, IO, Tuple
+from typing import Any, Dict, Iterable, List, Set, Tuple
 
 Patterns = collections.namedtuple("Patterns", "positive, negative")
 
@@ -41,9 +41,13 @@ Patterns = collections.namedtuple("Patterns", "positive, negative")
 # (c/cc/cpp) file.
 DEFAULT_FILE_PATTERN = re.compile(r".*\.c(c|pp)?")
 
-# @@ -start,count +start,count @@
-CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
+# Search for:
+#    diff --git ...
+#    index ...
+#    --- ...
+#    +++ ...
 CHUNK_HEADER_RE = r"diff --git .*?\nindex.*?\n---.*?\n\+\+\+ b/(.*?)\n@@ -(\d+,\d+) \+(\d+,\d+) @@"
+
 CLANG_WARNING_PATTERN = re.compile(r"([^:]+):(\d+):\d+:\s+warning:.*\[([^\]]+)\]")
 
 
@@ -131,11 +135,10 @@ def get_all_files(paths: List[str]) -> List[str]:
     return output.split("\n")
 
 
-def find_changed_lines_from_diff(f: IO[str]) -> Dict[str, List[Tuple[int, int]]]:
-    content = f.read()
+def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
     files = collections.defaultdict(list)
 
-    matches = re.findall(CHUNK_HEADER_RE, content, re.MULTILINE)
+    matches = re.findall(CHUNK_HEADER_RE, diff, re.MULTILINE)
     for file, start, end in matches:
         start_line, _ = start.split(",")
         end_line, _ = end.split(",")
@@ -326,7 +329,7 @@ def main() -> None:
     paths = [path.rstrip("/") for path in options.paths]
     if options.diff_file:
         with open(options.diff_file, "r") as f:
-            changed_files = find_changed_lines_from_diff(f)
+            changed_files = find_changed_lines(f.read())
             line_filters = [
                 {"name": name, "lines": lines} for name, lines, in changed_files.items()
             ]
