@@ -12,7 +12,7 @@ namespace c10 {
 /// numbering system which is not visible to the user.  HOWEVER, we
 /// guarantee that StreamId 0 is always a valid stream, and corresponds
 /// to some sort of "default" stream.
-using StreamId = int32_t;
+using StreamId = int64_t;
 
 // NB: I decided not to call the above StreamIndex to avoid confusion with
 // DeviceIndex.  This way, you access device index with index(), and stream id
@@ -127,21 +127,38 @@ class C10_API Stream final {
     // that the bitmasking code below is updated accordingly!
     static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
     static_assert(sizeof(DeviceIndex) == 1, "DeviceIndex is not 8-bit");
-    static_assert(sizeof(StreamId) == 4, "DeviceIndex is not 32-bit");
+    static_assert(sizeof(StreamId) == 8, "StreamId is not 64-bit");
     // Concat these together into a 64-bit integer
     // See Note [Hazard when concatenating signed integers]
     uint64_t bits = static_cast<uint64_t>(static_cast<uint8_t>(device_type()))
-            << 48 |
-        static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 32 |
-        static_cast<uint64_t>(static_cast<uint32_t>(id()));
+            << 56 |
+        static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 48 |
+        // Remove the sign extension part of the 64-bit address because
+        // the id might be used to hold a pointer.
+        (static_cast<uint64_t>(id()) & ((1ull << 48) - 1));
+    TORCH_INTERNAL_ASSERT(
+        static_cast<DeviceIndex>((bits >> 48) & 0xFFull) == device_index(),
+        "DeviceIndex is not correctly packed");
+    TORCH_INTERNAL_ASSERT(
+        static_cast<DeviceType>((bits >> 56)) == device_type(),
+        "DeviceType is not correctly packed");
+    // Re-extend the sign of stream_id for checking
+    uint64_t mask = (1ull << 47);
+    TORCH_INTERNAL_ASSERT(
+        static_cast<StreamId>(((bits & 0xFFFFFFFFFFFFull) ^ mask) - mask) ==
+            id(),
+        "DeviceType is not correctly packed");
     return bits;
   }
 
   static Stream unpack(uint64_t bits) {
-    const auto stream_id = static_cast<StreamId>(bits & 0xFFFFFFFFull);
-    bits >>= 32;
-    const auto device_index = static_cast<DeviceIndex>(bits & 0xFFFFull);
-    bits >>= 16;
+    // Re-extend the sign of stream_id
+    uint64_t mask = (1ull << 47);
+    const auto stream_id =
+        (static_cast<StreamId>(bits & 0xFFFFFFFFFFFFull) ^ mask) - mask;
+    bits >>= 48;
+    const auto device_index = static_cast<DeviceIndex>(bits & 0xFFull);
+    bits >>= 8;
     const auto device_type = static_cast<DeviceType>(bits);
     TORCH_CHECK(isValidDeviceType(device_type));
     // Unfortunately, we can't check if the StreamId is valid here; it
