@@ -83,8 +83,6 @@ class DistributedSampler(Sampler[T_co]):
             # This is to ensure each rank receives the same amount of data when
             # using this Sampler.
             self.num_samples = math.ceil(
-                # `type:ignore` is required because Dataset cannot provide a default __len__
-                # see NOTE in pytorch/torch/utils/data/sampler.py
                 (len(self.dataset) - self.num_replicas) / self.num_replicas
             )
         else:

@@ -265,8 +265,6 @@ class DataLoader(Generic[T_co]):
                 sampler = _InfiniteConstantSampler()
             else:  # map-style
                 if shuffle:
-                    # Cannot statically verify that dataset is Sized
-                    # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
                     sampler = RandomSampler(dataset, generator=generator)
                 else:
                     sampler = SequentialSampler(dataset)

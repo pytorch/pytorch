@@ -295,7 +295,6 @@ class ChainDataset(IterableDataset):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            # Cannot verify that all self.datasets are Sized
             total += len(d)
         return total
 
