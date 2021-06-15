@@ -4914,6 +4914,8 @@ class ModuleTest(object):
         self.reference_fn = reference_fn
         self.is_criterion_test = is_criterion_test(kwargs)
         self._required_arg_names = {'constructor_args', 'input', 'extra_args'}
+        if self.is_criterion_test:
+            self._required_arg_names.add('target')
         for name in self._required_arg_names:
             if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
                 if name in {'constructor_args', 'extra_args'}:
@@ -4931,12 +4933,11 @@ class ModuleTest(object):
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
+        self.with_tf32 = kwargs.get('with_tf32', self.is_criterion_test)
         if self.is_criterion_test:
-            self._required_arg_names.add('target')
             self.check_half = kwargs.get('check_half', True)
             self.check_bfloat16 = kwargs.get('check_bfloat16', False)
             self.check_complex = kwargs.get('check_complex', False)
-            self.with_tf32 = kwargs.get('with_tf32', True)
         else:
             self.should_test_pickle = kwargs.get('pickle', True)
             self.FIXME_no_cuda_gradgrad_comparison = \
@@ -4946,7 +4947,6 @@ class ModuleTest(object):
             self.check_inplace = kwargs.get('check_inplace', False)
             self.skip_double = kwargs.get('skip_double', False)
             self.skip_half = kwargs.get('skip_half', False)
-            self.with_tf32 = kwargs.get('with_tf32', False)
 
     def get_name(self):
         if self.fullname is not None:
