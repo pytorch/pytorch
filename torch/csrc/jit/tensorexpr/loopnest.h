@@ -408,10 +408,6 @@ class TORCH_API LoopNest {
   // for the LLVM backend, when no reductions are involved.
   void vectorizeInnerLoops();
 
-  void setBufferMap(
-      For* f,
-      const std::unordered_map<std::string, const Buf*>& map);
-
   void eliminateDeadStores();
   void prepareForCodegen();
 
