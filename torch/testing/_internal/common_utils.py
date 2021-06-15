@@ -940,7 +940,7 @@ def compare_with_reference(torch_fn, ref_fn, sample_input):
     t_kwargs, n_kwargs = torch_fn.sample_kwargs(t_inp.device, None, t_inp)
     actual = torch_fn(t_inp, *t_args, **t_kwargs)
     expected = ref_fn(n_inp, *n_args, **n_kwargs)
- 
+
     # Crafts a custom error message for smaller, printable tensors
     if t_inp.numel() < 10:
         msg = ("Failed to produce expected results! Input tensor was"
@@ -948,7 +948,7 @@ def compare_with_reference(torch_fn, ref_fn, sample_input):
                 " {2}.").format(t_inp, actual, expected)
     else:
         msg = None
- 
+
     if isinstance(actual, torch.Tensor):
         torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype), msg = msg)
     else:
