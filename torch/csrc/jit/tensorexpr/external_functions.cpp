@@ -158,11 +158,7 @@ void nnc_aten_addmm(
   const at::Tensor& y = tensors[2];
   const at::Tensor& z = tensors[3];
   // TODO: handle other alpha and beta dtypes, e.g. alpha=0.6, beta=0.2
-  int64_t alpha = 1, beta = 1;
-  if (args_num >= 2) {
-    alpha = extra_args[0];
-    beta = extra_args[1];
-  }
+  int64_t alpha = extra_args[0], beta = extra_args[1];
 
   try {
     at::addmm_out(r, x, y, z, alpha, beta);
