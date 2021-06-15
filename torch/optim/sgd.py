@@ -53,7 +53,7 @@ class SGD(Optimizer):
         The Nesterov version is analogously modified.
     """
 
-    def __init__(self, params, lr=required, momentum=0, dampening=0,
+    def __init__(self, params, differentiable=False, lr=required, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -62,11 +62,7 @@ class SGD(Optimizer):
         if weight_decay < 0.0:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-#        print(differentiable)
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-
-        defaults = dict(lr=lr, differentiable=differentiable,  momentum=momentum, dampening=dampening,
+        defaults = dict(differentiable=differentiable, lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
@@ -77,37 +73,17 @@ class SGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
-    @torch.no_grad()
-    def step(self, closure=None, loss=None):
+    def step(self, closure=None):
         """Performs a single optimization step.
 
         Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-#        print(differentiable)
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-
-        loss1 = None
+        loss = None
         if closure is not None:
             with torch.enable_grad():
-                loss1 = closure()
-
-        if self.differentiable == True:
-            grad_targets = [
-                p if p.requires_grad else _torch.tensor([], requires_grad=True)
-                for p in self.fparams
-            ]
-
-            all_grads = _torch.autograd.grad(
-                loss,
-                grad_targets,
-                create_graph=self._track_higher_grads,
-                allow_unused=True  # boo
-            )
-            print(all_grads)
-            
+                loss = closure()
 
         for group in self.param_groups:
             params_with_grad = []
@@ -118,6 +94,7 @@ class SGD(Optimizer):
             dampening = group['dampening']
             nesterov = group['nesterov']
             lr = group['lr']
+            differentiable = group['differentiable']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -133,16 +110,16 @@ class SGD(Optimizer):
             F.sgd(params_with_grad,
                   d_p_list,
                   momentum_buffer_list,
-                  self.differentiable,
                   weight_decay=weight_decay,
                   momentum=momentum,
                   lr=lr,
                   dampening=dampening,
-                  nesterov=nesterov)
+                  nesterov=nesterov,
+                  differentiable=differentiable)
 
             # update momentum_buffers in state
             for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
                 state = self.state[p]
                 state['momentum_buffer'] = momentum_buffer
 
-        return loss1
+        return loss

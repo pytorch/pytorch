@@ -43,9 +43,6 @@ class Optimizer(object):
 
         self.state = defaultdict(dict)
         self.param_groups = []
-#        self.differentiable = differentiable
-#        if differentiable == True:
-#            self.fparams = deepcopy(params)
 
         param_groups = list(params)
         if len(param_groups) == 0:

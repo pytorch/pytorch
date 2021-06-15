@@ -157,30 +157,9 @@ def sgd(params: List[Tensor],
 
     See :class:`~torch.optim.SGD` for details.
     """
-    if differentiable == False:
-        with torch.no_grad:
-            for i, param in enumerate(params):
-                d_p = d_p_list[i]
-                if weight_decay != 0:
-                    d_p = d_p.add(param, alpha=weight_decay)
 
-                if momentum != 0:
-                    buf = momentum_buffer_list[i]
-
-                    if buf is None:
-                        buf = torch.clone(d_p).detach()
-                        momentum_buffer_list[i] = buf
-                    else:
-                        buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
-
-                    if nesterov:
-                        d_p = d_p.add(buf, alpha=momentum)
-                    else:
-                        d_p = buf
-
-                param.add_(d_p, alpha=-lr)
-    else:
-        for i in range(len(params)):
+    for i, param in enumerate(params):
+        with torch.set_grad_enabled(differentiable):
             d_p = d_p_list[i]
             if weight_decay != 0:
                 d_p = d_p.add(param, alpha=weight_decay)
@@ -191,6 +170,8 @@ def sgd(params: List[Tensor],
                 if buf is None:
                     buf = torch.clone(d_p).detach()
                     momentum_buffer_list[i] = buf
+                elif differentiable:
+                    buf = buf.mul(momentum).add(d_p, alpha=1 - dampening)
                 else:
                     buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
 
@@ -199,8 +180,10 @@ def sgd(params: List[Tensor],
                 else:
                     d_p = buf
 
-            params[i] = params[i] -lr*d_p
-
+            if differentiable: 
+                param.add_(d_p, alpha=-lr)
+            else:
+                param = param.add_(d_p, alpha=-lr)
 
 
 def adadelta(params: List[Tensor],
