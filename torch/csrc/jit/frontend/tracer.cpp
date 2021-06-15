@@ -467,6 +467,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     // if we are a module, then make sure the modules parameters are in the map
     // and mapped to accesses to the self object
     if (self) {
+      std::cout << "TRACING: " << self->type()->repr_str() << std::endl;
       Value* self_value = state->graph->insertInput(0, "self")->setType(
           self->_ivalue()->type());
       gatherParametersAndBuffers(state, self_value, *self, {"__module"});

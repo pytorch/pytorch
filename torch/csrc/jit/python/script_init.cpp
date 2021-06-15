@@ -783,6 +783,12 @@ void initJitScriptBindings(PyObject* module) {
               },
               py::keep_alive<0, 1>())
           .def(
+              "_get_old_method",
+              [](Object& self, const std::string& name) -> Method {
+                return self.get_old_method(name);
+              },
+              py::keep_alive<0, 1>())
+          .def(
               "setattr",
               [](Object& self, const std::string& name, py::object value) {
                 if (self.type()->hasConstant(name)) {
@@ -1106,19 +1112,7 @@ void initJitScriptBindings(PyObject* module) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
             auto typed_inputs = toTraceableStack(input_tuple);
-
-            std::shared_ptr<Graph> graph =
-                std::get<0>(tracer::createGraphByTracing(
-                    func,
-                    typed_inputs,
-                    var_name_lookup_fn,
-                    strict,
-                    force_outplace,
-                    &self,
-                    argument_names));
-
             const auto method_name = QualifiedName(*self.type()->name(), name);
-
             auto prev_fn =
                 self._ivalue()->compilation_unit()->find_function(method_name);
             if (prev_fn) {
@@ -1129,13 +1123,51 @@ void initJitScriptBindings(PyObject* module) {
                   break;
                 }
               }
+              self.type()->moveMethod(i);
+              auto modules = self.modules();
+              for (auto module: modules) {
+
+                auto methods = module.type()->methods();
+                std::cout << "F" << module.type()->repr_str() << std::endl;
+                size_t j = 0;
+                for (j = 0; j < methods.size(); j++) {
+                  if (methods[j]->name() == method_name.name()) {
+                    break;
+                  }
+                }
+                if (j < methods.size()) {
+                  module.type()->moveMethod(j);
+                  //module._ivalue()->compilation_unit()->unsafeRemoveMethod(method_name);
+                }
+              }
+              std::shared_ptr<Graph> graph =
+                std::get<0>(tracer::createGraphByTracing(
+                    func,
+                    typed_inputs,
+                    var_name_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self,
+                    argument_names));
+
               auto new_fn =
-                  self._ivalue()->compilation_unit()->replace_function(
-                      method_name, graph);
-              self.type()->replaceMethod(new_fn, i);
+                  self._ivalue()->compilation_unit()->make_function(
+                      method_name, std::move(graph));
+              self.type()->replaceMethod(new_fn.get());
+              self._ivalue()->compilation_unit()->replace_function(
+                      method_name, std::move(new_fn));
             } else {
+              std::shared_ptr<Graph> graph =
+                std::get<0>(tracer::createGraphByTracing(
+                    func,
+                    typed_inputs,
+                    var_name_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self,
+                    argument_names));
               auto fn = self._ivalue()->compilation_unit()->create_function(
-                  method_name, graph);
+                  method_name, std::move(graph));
               self.type()->addMethod(fn);
             }
             didFinishEmitModule(self);

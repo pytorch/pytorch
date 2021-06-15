@@ -103,6 +103,13 @@ struct TORCH_API Object {
     AT_ERROR("Method '", name, "' is not defined.");
   }
 
+  Method get_old_method(const std::string& name) const {
+    if (auto method = find_old_method(name)) {
+      return *method;
+    }
+    AT_ERROR("Method '", name, "' is not defined.");
+  }
+
   const std::vector<Method> get_methods() const {
     return c10::fmap(type()->methods(), [&](Function* func) {
       return Method(_ivalue(), func);
@@ -132,6 +139,7 @@ struct TORCH_API Object {
   }
 
   c10::optional<Method> find_method(const std::string& basename) const;
+  c10::optional<Method> find_old_method(const std::string& basename) const;
 
   /// Run a method from this module.
   ///

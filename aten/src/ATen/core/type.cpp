@@ -1069,8 +1069,16 @@ InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_modu
       new InterfaceType(std::move(qualifiedName), is_module));
 }
 
-void ClassType::replaceMethod(torch::jit::Function* new_method, size_t index) {
-  methods_[index] = new_method;
+void ClassType::replaceMethod(torch::jit::Function* new_method) {
+  methods_.push_back(new_method);
+}
+
+void ClassType::moveMethod(size_t index) {
+  unused_methods_.push_back(methods_[index]);
+  auto lastMethod = methods_[methods_.size()-1];
+  methods_[index] = lastMethod;
+  methods_[methods_.size()-1] = nullptr;
+  methods_.pop_back();
 }
 
 void ClassType::addMethod(torch::jit::Function* method) {
@@ -1620,6 +1628,10 @@ ClassType::ClassType(
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
+}
+
+const std::vector<torch::jit::Function*>& ClassType::old_methods() const {
+  return unused_methods_;
 }
 
 void ClassType::checkNotExist(const std::string& name, const std::string& what) const {

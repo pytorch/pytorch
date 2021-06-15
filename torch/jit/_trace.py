@@ -316,7 +316,8 @@ def _check_trace(
     force_outplace,
     is_trace_module,
     _module_class,
-    module,
+    module_copy,
+    trace_name="",
 ):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -336,8 +337,10 @@ def _check_trace(
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
-                _module=module,
+                module_copy=module_copy,
             )
+            if trace_name != "":
+                traced_func = check_mod._c._get_old_method(trace_name)
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
             if isinstance(inputs, (torch.Tensor, dict)):
@@ -526,7 +529,7 @@ def _check_trace(
 class TracerWarning(Warning):
     @staticmethod
     def ignore_lib_warnings():
-        # We ignore warnings from all submodules excluding the JIT, because we need them e.g. for _check_trace
+        # We ignore warnings from all submodules excluding the JIT, because we need them e.g. for fvuccvdcbte
         warnings.filterwarnings(
             "ignore", category=TracerWarning, module="torch.(?!jit)"
         )
@@ -833,7 +836,7 @@ def trace_module(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
-    _module=None,
+    module_copy=None,
 ):
     """
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
@@ -938,10 +941,10 @@ def trace_module(
         torch.jit._trace._trace_module_map = trace_module_map
         register_submods(mod, "__module")
 
-        if not _module:
+        if not module_copy:
             module = make_module(mod, _module_class, _compilation_unit)
         else:
-            module = _module
+            module = module_copy
 
         for method_name, example_inputs in inputs.items():
             if method_name == "forward":
@@ -956,7 +959,6 @@ def trace_module(
                 argument_names = get_callable_argument_names(func)
 
             example_inputs = make_tuple(example_inputs)
-
             module._c._create_method_from_trace(
                 method_name,
                 func,
@@ -967,7 +969,6 @@ def trace_module(
                 argument_names,
             )
             check_trace_method = module._c._get_method(method_name)
-
             # Check the trace against new traces created from user-specified inputs
             if check_trace:
                 if check_inputs is not None:
@@ -981,6 +982,7 @@ def trace_module(
                         True,
                         _module_class,
                         module,
+                        method_name,
                     )
                 else:
                     _check_trace(
@@ -993,6 +995,7 @@ def trace_module(
                         True,
                         _module_class,
                         module,
+                        method_name,
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map

@@ -1900,6 +1900,7 @@ struct TORCH_API ClassType : public NamedType {
   }
 
   const std::vector<torch::jit::Function*>& methods() const;
+  const std::vector<torch::jit::Function*>& old_methods() const;
 
   TypePtr findAttribute(const std::string& name) const {
     size_t pos = 0;
@@ -2161,7 +2162,8 @@ struct TORCH_API ClassType : public NamedType {
       const FunctionSchema& hook_schema) const;
 
   void addMethod(torch::jit::Function* method);
-  void replaceMethod(torch::jit::Function* method, size_t index);
+  void replaceMethod(torch::jit::Function* method);
+  void moveMethod(size_t index);
   torch::jit::Function* findMethod(const std::string& name) const;
   torch::jit::Function& getMethod(const std::string& name) const;
   torch::jit::Function* findHook(const std::string& name) const;
@@ -2234,6 +2236,7 @@ struct TORCH_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
+  std::vector<torch::jit::Function*> unused_methods_;
   std::vector<torch::jit::Function*> staticmethods_;
 
   // List of hooks to be run before/after forward.

@@ -29,6 +29,15 @@ c10::optional<Method> Object::find_method(const std::string& basename) const {
   return c10::nullopt;
 }
 
+c10::optional<Method> Object::find_old_method(const std::string& basename) const {
+  for (Function* fn : type()->old_methods()) {
+    if (fn->name() == basename) {
+      return Method(_ivalue(), fn);
+    }
+  }
+  return c10::nullopt;
+}
+
 void Object::define(const std::string& src, const ResolverPtr& resolver) {
   const auto self = SimpleSelf(type());
   _ivalue()->compilation_unit()->define(

@@ -389,7 +389,9 @@ std::string mangleMethodName(
       mangled += c10::to_string(method_idx);
     }
     bool found = false;
+    std::cout << "HE: " << mod_type->methods().size() << std::endl;
     for (Function* fn : mod_type->methods()) {
+      std::cout << "X: " << mod_type->repr_str() << " " << fn->name() << std::endl;
       if (fn->name() == mangled) {
         found = true;
         break;
@@ -415,6 +417,7 @@ void createMethodCalls(const std::shared_ptr<Graph>& g) {
       WithInsertPoint ip(n);
 
       ClassTypePtr callee_mod_type = n->input(0)->type()->expect<ClassType>();
+      std::cout << "WHAT IS IT: " << callee_mod_type->repr_str() << std::endl;
 
       createMethodCalls(n->g(attr::Subgraph));
 
