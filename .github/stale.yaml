@@ -33,7 +33,7 @@ staleLabel: Stale
 markComment: >
   This issue has been automatically marked as stale because it has not had
   recent activity. It will be closed if no further activity occurs. Thank you
-  for your contributions. If you feel this issue needs further assistance, 
+  for your contributions. If you feel this issue needs further assistance,
   please tag the appropriate owners on the issue.
 
 # Comment to post when removing the stale label.
