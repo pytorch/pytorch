@@ -49,8 +49,8 @@ Tensor lab_diagonal(const Tensor& self, int64_t offset, int64_t _dim1, int64_t _
       + std::abs(offset) * self.stride(offset < 0 ? dim1 : dim2);
 
     const int64_t diag_sz = std::min<int64_t>(
-        sizes[dim1] - std::max<int64_t>(static_cast<int64_t>(0), -offset),
-        sizes[dim2] - std::max<int64_t>(static_cast<int64_t>(0), offset)
+        sizes[dim1] - std::max<int64_t>(0, -offset),
+        sizes[dim2] - std::max<int64_t>(0, offset)
     );
 
     /* Construct adjusted dim sizes and strides, erasing dim1 and dim2
