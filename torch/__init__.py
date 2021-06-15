@@ -29,7 +29,6 @@ else:
     from .version import __version__ as __version__
 from ._six import string_classes as _string_classes
 from typing import Set, Type, TYPE_CHECKING
-from math import e , pi , nan , inf  
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
@@ -41,7 +40,7 @@ __all__ = [
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
     'are_deterministic_algorithms_enabled', 'is_deterministic',
-    'set_warn_always', 'is_warn_always_enabled','e','pi','nan','inf',
+    'set_warn_always', 'is_warn_always_enabled',
 ]
 
 ################################################################################
@@ -509,6 +508,13 @@ def is_warn_always_enabled():
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
+
+################################################################################
+# Define numeric constants
+################################################################################
+
+from math import e , nan , inf , pi
+__all__.extend(['e', 'pi', 'nan', 'inf'])
 
 ################################################################################
 # Define Storage and Tensor classes
