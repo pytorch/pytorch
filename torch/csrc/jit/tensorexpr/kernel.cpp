@@ -2985,8 +2985,8 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
           blockSize = kDefaultBlockSize;
         }
         LoopNest::splitWithMask(flattened, blockSize, &inner);
-        l.setGPUBlockIndex(flattened, 0);
-        l.setGPUThreadIndex(inner, 0);
+        flattened->set_gpu_block_index(0);
+        inner->set_gpu_thread_index(0);
       } else if (loopLevels == 3) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
@@ -2999,8 +2999,8 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
         LoopNest::splitWithMask(flattened, blockCount * blockSize, &inner);
         LoopNest::splitWithMask(inner, blockSize, &inner1);
-        l.setGPUBlockIndex(inner, 0);
-        l.setGPUThreadIndex(inner1, 0);
+        inner->set_gpu_block_index(0);
+        inner1->set_gpu_thread_index(0);
       } else {
         throw std::runtime_error(
             "Invalid loop-level: " + c10::to_string(loopLevels));
@@ -3025,8 +3025,8 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
 
       For* inner = nullptr;
       LoopNest::splitWithMask(flattened, blockSize, &inner);
-      l.setGPUBlockIndex(flattened, 0);
-      l.setGPUThreadIndex(inner, 0);
+      flattened->set_gpu_block_index(0);
+      inner->set_gpu_thread_index(0);
       l.setBufferMap(flattened, block_analysis->getBufferMap());
     }
   }

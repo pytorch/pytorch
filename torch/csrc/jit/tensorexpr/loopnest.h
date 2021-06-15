@@ -339,9 +339,6 @@ class TORCH_API LoopNest {
   static void sliceTail(For* f, int factor, For** head, For** tail);
   static void sliceTail(For* f, int factor);
 
-  void setGPUBlockIndex(For* f, int idx);
-  void setGPUThreadIndex(For* f, int idx);
-
   using AccessResult = std::pair<const Buf*, Stmt*>;
   // Insert a cache for the consumer's usages of the buffer produced in
   // consumer, and redirect reads and writes in the consumer to that cache.
