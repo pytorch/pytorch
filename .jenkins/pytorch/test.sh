@@ -435,6 +435,14 @@ test_torch_deploy() {
   assert_git_not_dirty
 }
 
+
+# TODO: download S3 stats based on BUILD_ENVIRONMENT
+# TODO: download github stats based on BUILD_ENVIRONMENT
+# TODO invoke tools/stats/stats_downloader
+
+
+# Launching different test entrypoints or python test/run_test.py with different arguments
+# based on BUILD_ENVIRONMENT
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")

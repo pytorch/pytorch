@@ -1,3 +1,5 @@
+# TODO: move to tools/ folder
+
 import glob
 import json
 import logging

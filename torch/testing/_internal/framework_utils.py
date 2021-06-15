@@ -1,3 +1,4 @@
+# TODO move this to tools/
 from typing import Dict, Tuple, List
 
 def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, float]) -> List[Tuple[float, List[str]]]:

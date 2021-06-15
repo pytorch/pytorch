@@ -867,6 +867,7 @@ def fetch_and_cache(name: str, url: str):
 
 
 slow_tests_dict: Optional[Dict[str, float]] = None
+# TODO: the following should move to tools/stats_downloader
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
@@ -883,7 +884,7 @@ def check_slow_test_from_stats(test):
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
 
-
+# TODO: the following should move to tools/stats_downloader
 disabled_test_from_issues: Optional[Dict[str, Any]] = None
 def check_disabled(test_name):
     global disabled_test_from_issues
@@ -891,6 +892,7 @@ def check_disabled(test_name):
         _disabled_test_from_issues: Dict = {}
 
         def read_and_process():
+            # TODO: the following should move to tools/github_stats_parser.py
             url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
             contents = urlopen(url, timeout=1).read().decode('utf-8')
             the_response = fetch_and_cache(".pytorch-disabled-tests", url)

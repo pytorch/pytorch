@@ -153,6 +153,8 @@ def _parse_s3_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Repor
             summary_dict[summary_job].append(json.loads(string))
     return summary_dict
 
+# TODO: the following 2 functions should be move to stats_downloader.py as they are entrypoint currently called by run_test.py
+
 # Collect and decompress S3 test stats summaries into JSON.
 # data stored on S3 buckets are pathed by {sha}/{job} so we also allow
 # optional jobs filter

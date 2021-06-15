@@ -1124,7 +1124,6 @@ def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float])
         json.dump(job_times_json, file, indent='    ', separators=(',', ': '))
         file.write('\n')
 
-
 def load_specified_test_cases(filename: str) -> None:
     if not os.path.exists(filename):
         print(f'Could not find specified tests file: {filename}. Proceeding with default behavior.')
@@ -1203,6 +1202,7 @@ def main():
         export_S3_test_times(test_times_filename, pull_job_times_from_S3())
         return
 
+    # TODO: Downloading of this file should move to tools/stats_downloader.py
     specified_test_cases_filename = options.run_specified_test_cases
     if specified_test_cases_filename:
         print(f'Loading specified test cases to run from {specified_test_cases_filename}.')
