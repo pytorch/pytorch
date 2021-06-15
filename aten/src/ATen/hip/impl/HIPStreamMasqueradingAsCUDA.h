@@ -90,6 +90,11 @@ inline getStreamFromPoolMasqueradingAsCUDA(const bool isHighPriority = false, De
   return HIPStreamMasqueradingAsCUDA(getStreamFromPool(isHighPriority, device));
 }
 
+HIPStreamMasqueradingAsCUDA
+inline getStreamFromExternalMasqueradingAsCUDA(hipStream_t ext_stream, DeviceIndex device) {
+  return HIPStreamMasqueradingAsCUDA(getStreamFromExternal(ext_stream, device));
+}
+
 inline HIPStreamMasqueradingAsCUDA getDefaultHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {
   return HIPStreamMasqueradingAsCUDA(getDefaultHIPStream(device_index));
 }
