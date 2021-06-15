@@ -110,7 +110,7 @@ void RRefContext::handleException(const JitFuture& jitFuture) {
   if (jitFuture.hasError()) {
     auto errMsg = jitFuture.tryRetrieveErrorMessage();
     VLOG(1) << "Got exception: " << errMsg;
-    throw std::runtime_error(errMsg);
+    TORCH_CHECK(false, errMsg);
   }
 }
 
