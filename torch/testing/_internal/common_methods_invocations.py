@@ -4787,8 +4787,6 @@ op_db: List[OpInfo] = [
                    dtypes=integral_types_and(torch.bool),
                    supports_autograd=False),
     OpInfo('cdist',
-           ref=scipy.spatial.distance.cdist if TEST_SCIPY else None,
-           variant_test_name='test_cdist',
            dtypes=floating_types(),
            supports_out=False,
            supports_gradgrad=False,
