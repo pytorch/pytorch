@@ -434,7 +434,6 @@ Module Module::clone_impl(
 }
 
 void Module::train(bool on) {
-  int i = 0;
   for (Module m : modules()) {
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
       m._ivalue()->setSlot(*slot, on);
