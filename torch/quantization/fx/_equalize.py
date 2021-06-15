@@ -396,7 +396,10 @@ def scale_weight_functional(node: Node, model: GraphModule, equalization_scale: 
             # scaled_weight = torch.mul(scaled_weight, next_equalization_scale)
 
             # Set the weight with the newly scaled weight in the original model
-            setattr(getattr(model, weight_node.target[:-2]), "w", scaled_weight)
+            # weight_node.target looks something like "linear1.w", so we want to
+            # get rid of the last two characters to retrieve the path to the
+            # submodule containing the weight
+            model.get_submodule(weight_node.target[:-2]).w = scaled_weight
 
 def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module]) -> Dict[str, _WeightEqualizationObserver]:
     """ Update all of the observer's equalization scale. For each
