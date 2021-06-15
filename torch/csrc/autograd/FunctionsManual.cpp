@@ -2697,9 +2697,8 @@ Tensor _det_lu_based_helper_backward(
   const Tensor& det_grad,
   const Tensor& det,
   const Tensor& self,
-  const Tensor& p,
-  const Tensor& l,
-  const Tensor& u
+  const Tensor& lu,
+  const Tensor& pivs
 ) {
   if (!self.numel()) {
     return at::zeros_like(self, at::MemoryFormat::Contiguous);
@@ -2725,16 +2724,14 @@ Tensor _det_lu_based_helper_backward(
   auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
   auto n = self.size(-1);
 
-  auto u_h = u.transpose(-2, -1).conj();
-  auto u_h_diag = u_h.diagonal(0, -2, -1);
-  auto u_h_diag_conditioned = at::where(
-    u_h_diag == 0.0,
+  auto lu_diag = lu.diagonal(0, -2, -1);
+  auto lu_diag_conditioned = at::where(
+    lu_diag == 0.0,
     at::tensor(eps, self.options()),
-    u_h_diag
+    lu_diag
   );
-  u_h_diag.copy_(u_h_diag_conditioned);
+  lu_diag.copy_(lu_diag_conditioned);
 
-  auto l_h = l.transpose(-2, -1).conj();
 
   // create a matrix d := (det_grad * det.conj()) I
   // NOTE: we do not use the shorter version
@@ -2745,19 +2742,9 @@ Tensor _det_lu_based_helper_backward(
   det_expanded_sizes.push_back(n);
   auto d = at::diag_embed((det_grad * det.conj()).unsqueeze(-1).expand(det_expanded_sizes));
 
-  // permuted_grad := l_h^{-1} d u_h^{-1}, similar to lu.backward
-  auto permuted_grad = std::get<0>(
-    at::triangular_solve(
-      // note that d = c I for some scalar c, hence
-      // d u_h^{-1} = c I u_h^{-1} = u_h^{-1} c I = u_h^{-1} d,
-      // so, there is no need to explicitly transpose the solution below
-      std::get<0>(at::triangular_solve(d, u_h, /*upper=*/false)),
-      l_h
-    )
-  );
+  auto trans = self.is_complex() ? "C" : "T";
 
-  // multiply by p to restore the row order
-  return at::matmul(p, permuted_grad);
+  return at::_lu_solve_trans(d, lu, pivs, trans);
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {

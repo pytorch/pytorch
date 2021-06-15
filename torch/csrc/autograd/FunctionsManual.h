@@ -256,9 +256,8 @@ Tensor _det_lu_based_helper_backward(
   const Tensor& det_grad,
   const Tensor& det,
   const Tensor& self,
-  const Tensor& p,
-  const Tensor& l,
-  const Tensor& u
+  const Tensor& lu,
+  const Tensor& pivs
 );
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);

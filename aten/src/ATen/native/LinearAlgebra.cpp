@@ -80,13 +80,10 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
 // det(A) = det(P) * det(L) * det(U).
 // Since det(P) = +- 1 (even or odd permutation), and diag(L) = I, we get that
 // det(A) = ([is P odd] * -2 + 1) * prod(diag(U))
-std::tuple<Tensor, Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
+std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
   Tensor lu, pivs, infos;
   std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors*/false);
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "at::_det_lu_based_helper(): Invalid argument passed to LU");
-
-  Tensor p, l, u;
-  std::tie(p, l, u) = at::lu_unpack(lu, pivs, /*unpack_data=*/true, /*unpack_pivots=*/true);
 
   // find det(P)
   auto n = self.size(-1);
@@ -94,9 +91,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& se
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
   auto p_det = n_transpositions_mod_2.mul_(-2).add_(1);
 
-  auto det = p_det * at::prod(u.diagonal(0, -2, -1), /*dim=*/-1);
+  auto det = p_det * at::prod(lu.diagonal(0, -2, -1), /*dim=*/-1);
 
-  return std::make_tuple(det, p, l, u);
+  return std::make_tuple(det, lu, pivs);
 }
 
 // torch.det, alias for torch.linalg.det

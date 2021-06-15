@@ -9775,7 +9775,7 @@
 - func: det(Tensor self) -> Tensor
   variants: function, method
 
-- func: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor p, Tensor l, Tensor u)
+- func: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor lu, Tensor pivs)
   variants: function
   dispatch:
     CPU, CUDA: _det_lu_based_helper
