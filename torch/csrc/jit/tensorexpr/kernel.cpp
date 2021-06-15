@@ -3027,7 +3027,7 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
       LoopNest::splitWithMask(flattened, blockSize, &inner);
       flattened->set_gpu_block_index(0);
       inner->set_gpu_thread_index(0);
-      l.setBufferMap(flattened, block_analysis->getBufferMap());
+      flattened->set_buffer_map(block_analysis->getBufferMap());
     }
   }
 
