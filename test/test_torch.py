@@ -8068,23 +8068,23 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         finally:
             torch.set_num_threads(num_threads)
 
-#Test Python Array API Constants        
+# Test Python Array API Constants        
 class TestConstants(TestCase):
     def test_e(self):
-        self.assertIsInstance(torch.e,float)
-        torch.testing.assert_close(torch.e,math.e)
-        
+        self.assertIsInstance(torch.e, float)
+        torch.testing.assert_close(torch.e, math.e)
+
     def test_pi(self):
-        self.assertIsInstance(torch.pi,float)
-        torch.testing.assert_close(torch.pi,math.pi)
+        self.assertIsInstance(torch.pi, float)
+        torch.testing.assert_close(torch.pi, math.pi)
 
     def test_nan(self):
-        self.assertIsInstance(torch.nan,float)
-        torch.testing.assert_close(torch.nan,math.nan,equal_nan=True)
+        self.assertIsInstance(torch.nan, float)
+        torch.testing.assert_close(torch.nan, math.nan, equal_nan=True)
 
     def test_inf(self):
-        self.assertIsInstance(torch.inf,float)
-        torch.testing.assert_close(torch.inf,math.inf)
+        self.assertIsInstance(torch.inf, float)
+        torch.testing.assert_close(torch.inf, math.inf)
 
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
