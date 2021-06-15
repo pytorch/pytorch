@@ -277,6 +277,10 @@ __global__ void rrelu_with_noise_cuda_kernel(
 
   for (int linear_index = idx; linear_index < rounded_size; linear_index += grid_stride) {
     auto rand = random_func(&state);
+
+    // ensure that (&rand.x)[ii] is safe
+    CUDA_KERNEL_ASSERT(sizeof(rand)/sizeof(rand.x) == unroll_factor);
+
     #pragma unroll
     for (int ii = 0; ii < unroll_factor; ii++) {
       int li = linear_index + blockDim.x * gridDim.x * ii;
@@ -372,21 +376,22 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
 
   auto input = self.contiguous();
   auto noise_ = noise.contiguous();
+  auto output_ = output.contiguous();
 
   if (training) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         self.scalar_type(), "rrelu_with_noise_out_cuda", [&] {
           _rrelu_with_noise_cuda_train<scalar_t>(
-              output, input, noise_, lower, upper, generator);
+              output_, input, noise_, lower, upper, generator);
         });
-  } else {
-    auto lower_tensor = scalar_to_tensor(lower);
-    auto upper_tensor = scalar_to_tensor(upper);
-    auto negative = (lower_tensor + upper_tensor) / 2;
-    Scalar negative_slope = negative.item();
-    at::leaky_relu_out(output, self, negative_slope);
   }
-  return output;
+  else {
+    auto lower_tensor = lower.to<double>();
+    auto upper_tensor = upper.to<double>();
+    Scalar negative_slope = (lower_tensor + upper_tensor) / 2;
+    at::leaky_relu_out(output_, self, negative_slope);
+  }
+  return output_;
 }
 
 Tensor rrelu_with_noise_cuda(
