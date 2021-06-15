@@ -4935,12 +4935,12 @@ class ModuleTest(object):
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.with_tf32 = kwargs.get('with_tf32', self.is_criterion_test)
         self.check_inplace = kwargs.get('check_inplace', False)
+        self.should_test_pickle = kwargs.get('pickle', not self.is_criterion_test)
         if self.is_criterion_test:
             self.check_half = kwargs.get('check_half', True)
             self.check_bfloat16 = kwargs.get('check_bfloat16', False)
             self.check_complex = kwargs.get('check_complex', False)
         else:
-            self.should_test_pickle = kwargs.get('pickle', True)
             self.FIXME_no_cuda_gradgrad_comparison = \
                 kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
             self.precision = kwargs.get('precision', 2e-4)
@@ -5046,7 +5046,7 @@ class ModuleTest(object):
             self.test_noncontig(test_case, module, input)
 
         # === Check that the module can be pickled & unpickled.
-        if not self.is_criterion_test and self.should_test_pickle:
+        if self.should_test_pickle:
             # TODO: do this with in-memory files as soon as torch.save will support it
             with tempfile.TemporaryFile() as f:
                 test_case._forward(module, input)
