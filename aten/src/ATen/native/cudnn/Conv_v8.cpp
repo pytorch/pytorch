@@ -182,23 +182,27 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   int64_t uids[] = {'x', 'y', 'w'};
 
   auto sources = get_generator_sources(opGraph, desc, x, deterministic, allow_tf32);
-  auto predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
+  auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return false;
   };
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   size_t max_workspace_size = 0u;
-  auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), predicate_function);
+  auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), initial_predicate_function);
 
   int device;
   THCudaCheck(cudaGetDevice(&device));
   size_t max_block_size = 0;
   size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+  cudnn_frontend::executionPlans_t valid_plans;
 
-  std::for_each(plans.begin(), plans.end(), [&max_workspace_size, &max_block_size](cudnn_frontend::ExecutionPlan& plan) { 
+  std::for_each(plans.begin(), plans.end(), [&max_workspace_size, &max_block_size, &valid_plans](cudnn_frontend::ExecutionPlan& plan) { 
     size_t curr_workspace_size = plan.getWorkspaceSize();
-    if (curr_workspace_size > max_workspace_size && curr_workspace_size <= max_block_size) {
-      max_workspace_size = plan.getWorkspaceSize();
+    if (curr_workspace_size <= max_block_size) {
+      if (curr_workspace_size > max_workspace_size && curr_workspace_size <= max_block_size) {
+        max_workspace_size = plan.getWorkspaceSize();
+      }
+      valid_plans.emplace_back(std::move(plan));
     }
   });
   TORCH_CHECK_WITH(CUDAOutOfMemoryError, max_workspace_size < 1_TiB, "Not enough memory for workspace!");
@@ -210,7 +214,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
       .setUids(3, uids)
       .build();
 
-  auto options = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(plans), variantPack);
+  auto options = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& option : options) {
