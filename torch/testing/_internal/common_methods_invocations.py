@@ -6591,8 +6591,6 @@ op_db: List[OpInfo] = [
                         device_type='cuda', dtypes=(torch.bfloat16,)),
            )),
     OpInfo('svd',
-           ref=scipy.linalg.svd if TEST_SCIPY else _NOTHING,
-           variant_test_name='test_svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_svd,
