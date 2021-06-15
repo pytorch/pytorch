@@ -21,6 +21,9 @@ class RegularFuncWrapper:
         self.func = func
 
     def __call__(self, inputs, **kwargs):
+        if len(inputs) == 2 and isinstance(inputs[1], (int, float, complex, bool)):
+            # binary op with tensorlist and scalar.
+            inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
         return [self.func(*i, **kwargs) for i in zip(*inputs)]
 
 
@@ -61,9 +64,12 @@ class TestForeach(TestCase):
             RegularFuncWrapper(op.ref_inplace),
         )
 
-    # note(mkozuki): Foreach binary ops upcast 16-bits inputs to 32-bits and downcast outputs to original dtype.
-    def _requires_cast(self, op, dtype, is_fastpath, inputs, inputs2=None):
-        second_arg = inputs[1] if inputs2 is None else inputs2
+    # note(mkozuki): Input/Output type casting for add/sub.
+    # For BFloat16/Float16 I/O with add/sub,
+    # foreach implementations cast inputs to float32 and downcast the result
+    # to original dtype, while regular implementations don't.
+    def _requires_cast(self, op, dtype, is_fastpath, inputs):
+        second_arg = inputs[1] if isinstance(inputs[1], list) else [inputs[1] for _ in range(len(inputs[0]))]
         return (
             op.func in (torch._foreach_add, torch._foreach_sub, torch._foreach_add_, torch._foreach_sub_) and
             dtype in (torch.bfloat16, torch.float16) and
@@ -84,52 +90,26 @@ class TestForeach(TestCase):
 
         return tensors
 
-    def _regular_binary_test(self, dtype, op, ref, inputs, is_fastpath, *, inputs2=None, alpha=None):
-        requires_cast = self._requires_cast(op, dtype, is_fastpath, inputs, inputs2)
-        ref_inputs = [inputs[0], inputs[1] if inputs2 is None else inputs2]
-        if (
-            op.func == torch._foreach_sub and
-            (
-                # case 1: test_binary_op_tensorlists_(fast|slow)path with `torch.bool`
-                dtype == torch.bool or
-                # case 2: test_binary_op_scalar_(fast|slow)path with boolearn scalar
-                inputs2 is not None and any(isinstance(a, bool) for a in inputs2) or
-                # case 3: test_binary_op_scalarlist_(fast|slow)path with boolean scalar list
-                inputs2 is None and any(isinstance(a, bool) for a in inputs[1])
-            )
-        ):
-            with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
-                op(inputs, self.is_cuda, is_fastpath)
-            with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
+    def _regular_binary_test(self, dtype, op, ref, inputs, is_fastpath, *, alpha=None):
+        requires_cast = self._requires_cast(op, dtype, is_fastpath, inputs)
+        ref_inputs = inputs
+        if requires_cast:
+            ref_inputs = [[t.to(torch.float32) for t in ref_inputs[0]], ref_inputs[1]]
+        try:
+            actual = op(inputs, self.is_cuda, is_fastpath)
+        except RuntimeError as e:
+            with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 ref(ref_inputs)
-            return
-        if is_fastpath:
-            if requires_cast:
-                ref_inputs = [[t.to(torch.float32) for t in ref_inputs[0]], ref_inputs[1]]
+        else:
             expected = ref(ref_inputs)
             if requires_cast:
                 expected = [t.to(dtype) for t in expected]
-            actual = op(inputs, self.is_cuda, is_fastpath)
-            self.assertEqual(expected, actual)
-        else:
-            try:
-                actual = op(inputs, self.is_cuda, is_fastpath)
-            except RuntimeError as e:
-                with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                    ref(ref_inputs)
-            else:
-                expected = ref(ref_inputs)
-                self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected)
         if alpha is not None:
-            # note(mkozuki): Input/Output type casting.
-            # For BFloat16/Float16 I/O with add/sub with alpha parameter,
-            # foreach implementations cast inputs to float32 and downcast the result
-            # to originaly dtype, while regular implementations don't.
             kwargs = {'alpha': alpha}
-            requires_cast = dtype in (torch.float16, torch.bfloat16) and self.is_cuda and is_fastpath
             ref_inputs = inputs
             if requires_cast:
-                ref_inputs = [[t.to(torch.float32) for t in ref_inputs[0]], ref_inputs[1]]
+                ref_inputs = [[t.to(torch.float32) for t in tensors] for tensors in ref_inputs]
             try:
                 actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
             except RuntimeError as e:
@@ -144,14 +124,9 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(expected, actual)
 
-    def _inplace_binary_test(self, dtype, inplace, inplace_ref, inputs, is_fastpath, *, inputs2=None, alpha=None):
-        requires_cast = self._requires_cast(inplace, dtype, is_fastpath, inputs, inputs2)
-        if inputs2 is not None:
-            requires_cast = requires_cast and all(isinstance(a, (int, float, bool)) for a in inputs2)
-        ref_inputs = [
-            [t.clone().detach() for t in inputs[0]],
-            inputs[1] if inputs2 is None else inputs2,
-        ]
+    def _inplace_binary_test(self, dtype, inplace, inplace_ref, inputs, is_fastpath, *, alpha=None):
+        requires_cast = self._requires_cast(inplace, dtype, is_fastpath, inputs)
+        ref_inputs = [[t.clone().detach() for t in inputs[0]], inputs[1]]
         if requires_cast:
             ref_inputs = [[t.to(torch.float32) for t in ref_inputs[0]], ref_inputs[1]]
         try:
