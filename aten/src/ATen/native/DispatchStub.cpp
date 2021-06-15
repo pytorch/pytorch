@@ -34,11 +34,10 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
+    // Only AVX512 can only be used if ATEN_CPU_CAPABILITY is set to AVX512.
+    // Otherwise AVX512_256 would be used.
     if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX512_256;
-    }
-    if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_fma3()) {
-      return CPUCapability::AVX512;
     }
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX2;

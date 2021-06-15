@@ -59,6 +59,7 @@ namespace {
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
     class FunctionalBF16Tests : public ::testing::Test {};
+    template <typename T>
     class FunctionalTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
@@ -1307,7 +1308,8 @@ namespace {
             },
             test_case);
     }
-    TYPED_TEST(FunctionalBF16Tests, Reduce) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+      TYPED_TEST(FunctionalBF16Tests, Reduce) {
       using vec = TypeParam;
       // Can't use ValueType<TypeParam> here:
       // Vectorized<BFloat16>::value_type returns uint16_t on AVX512
@@ -1357,46 +1359,6 @@ namespace {
         auto y2 = at::vec::map_reduce_all<VT>([](auto x) { return x - x.exp(); }, sum, x_b1, len);
         ASSERT_TRUE(cmp(y1, y2)) << "Failure Details:\nTest Seed to reproduce: " << seed
             << "\nmap_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
-    TYPED_TEST(FunctionalTests, Map) {
-        using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
-        constexpr auto R = 2LL; // residual
-        constexpr auto N = vec::size() + R;
-        CACHE_ALIGN VT x1[N];
-        CACHE_ALIGN VT x2[N];
-        CACHE_ALIGN VT x3[N];
-        CACHE_ALIGN VT x4[N];
-        CACHE_ALIGN VT y[N];
-        CACHE_ALIGN VT ref_y[N];
-        auto seed = TestSeed();
-        ValueGen<VT> generator(VT(-100), VT(100), seed);
-        for (int64_t i = 0; i < N; i++) {
-          x1[i] = generator.get();
-          x2[i] = generator.get();
-          x3[i] = generator.get();
-          x4[i] = generator.get();
-        }
-        auto cmp = [&](VT* y, VT* ref_y) {
-          AssertVectorized<vec>(NAME_INFO(Map), vec::loadu(y), vec::loadu(ref_y)).check(true);
-          AssertVectorized<vec>(NAME_INFO(Map), vec::loadu(y + vec::size(), R), vec::loadu(ref_y + vec::size(), R)).check(true);
-        };
-        // test map: y = x1
-        at::vec::map<VT>([](vec x) { return x; }, y, x1, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i]; }
-        cmp(y, ref_y);
-        // test map2: y = x1 + x2
-        at::vec::map2<VT>([](vec x1, vec x2) { return x1 + x2; }, y, x1, x2, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i]; }
-        cmp(y, ref_y);
-        // test map3: y = x1 + x2 + x3
-        at::vec::map3<VT>([](vec x1, vec x2, vec x3) { return x1 + x2 + x3; }, y, x1, x2, x3, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
-        cmp(y, ref_y);
-        // test map3: y = x1 + x2 + x3 + x4
-        at::vec::map4<VT>([](vec x1, vec x2, vec x3, vec x4) { return x1 + x2 + x3 + x4; }, y, x1, x2, x3, x4, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
-        cmp(y, ref_y);
-    }
       }
       // Map2ReduceAll
       for (int64_t len = 1; len <= N; len++) {
@@ -1413,6 +1375,7 @@ namespace {
             << "\nmap3_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
       }
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(FunctionalBF16Tests, Map) {
       using vec = TypeParam;
       using VT = c10::BFloat16;
@@ -1468,6 +1431,48 @@ namespace {
         }
       }
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    TYPED_TEST(FunctionalTests, Map) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        constexpr auto R = 2LL; // residual
+        constexpr auto N = vec::size() + R;
+        CACHE_ALIGN VT x1[N];
+        CACHE_ALIGN VT x2[N];
+        CACHE_ALIGN VT x3[N];
+        CACHE_ALIGN VT x4[N];
+        CACHE_ALIGN VT y[N];
+        CACHE_ALIGN VT ref_y[N];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (int64_t i = 0; i < N; i++) {
+          x1[i] = generator.get();
+          x2[i] = generator.get();
+          x3[i] = generator.get();
+          x4[i] = generator.get();
+        }
+        auto cmp = [&](VT* y, VT* ref_y) {
+          AssertVectorized<vec>(NAME_INFO(Map), vec::loadu(y), vec::loadu(ref_y)).check(true);
+          AssertVectorized<vec>(NAME_INFO(Map), vec::loadu(y + vec::size(), R), vec::loadu(ref_y + vec::size(), R)).check(true);
+        };
+        // test map: y = x1
+        at::vec::map<VT>([](vec x) { return x; }, y, x1, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i]; }
+        cmp(y, ref_y);
+        // test map2: y = x1 + x2
+        at::vec::map2<VT>([](vec x1, vec x2) { return x1 + x2; }, y, x1, x2, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i]; }
+        cmp(y, ref_y);
+        // test map3: y = x1 + x2 + x3
+        at::vec::map3<VT>([](vec x1, vec x2, vec x3) { return x1 + x2 + x3; }, y, x1, x2, x3, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
+        cmp(y, ref_y);
+        // test map3: y = x1 + x2 + x3 + x4
+        at::vec::map4<VT>([](vec x1, vec x2, vec x3, vec x4) { return x1 + x2 + x3 + x4; }, y, x1, x2, x3, x4, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
+        cmp(y, ref_y);
+    }
+
 #else
 #error GTEST does not have TYPED_TEST
 #endif

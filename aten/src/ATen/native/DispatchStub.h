@@ -72,11 +72,11 @@ struct TORCH_API DispatchStubImpl {
   void* get_call_ptr(
     DeviceType device_type
     , void *DEFAULT
-#ifdef HAVE_AVX512_CPU_DEFINITION
-      , void *AVX512
-#endif
 #ifdef HAVE_AVX512_256_CPU_DEFINITION
       , void *AVX512_256
+#endif
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , void *AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
       , void *AVX2
@@ -93,11 +93,11 @@ struct TORCH_API DispatchStubImpl {
    */
   void* choose_cpu_impl(
     void *DEFAULT
-#ifdef HAVE_AVX512_CPU_DEFINITION
-    , void *AVX512
-#endif
 #ifdef HAVE_AVX512_256_CPU_DEFINITION
       , void *AVX512_256
+#endif
+#ifdef HAVE_AVX512_CPU_DEFINITION
+    , void *AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
     , void *AVX2
