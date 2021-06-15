@@ -222,7 +222,7 @@ TEST(BoundsInference, _5) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getLoopStmtsFor(b);
-  l.splitWithTail(loops[0], 16, &inner, &tail);
+  LoopNest::splitWithTail(loops[0], 16, &inner, &tail);
   For* outer = loops[0];
 
   {
@@ -533,7 +533,7 @@ TEST(BoundsInference, CacheReads) {
   auto bounds_info_before = inferBounds(l.root_stmt());
 
   Stmt* j_loop = l.getLoopStmtsFor(B)[1];
-  l.cacheAccesses(A->buf(), "A_local", j_loop);
+  LoopNest::cacheAccesses(A->buf(), "A_local", j_loop);
 
   auto bounds_info_after = inferBounds(l.root_stmt());
 
@@ -734,7 +734,7 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
   // A.
   For* outer = l.getLoopStmtsFor(A)[0];
   // `outer` loop get transformed to the outer loop after splitting.
-  l.splitWithTail(outer, 5, &inner, &tail);
+  LoopNest::splitWithTail(outer, 5, &inner, &tail);
 
   using namespace analysis;
 
