@@ -199,7 +199,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   std::for_each(plans.begin(), plans.end(), [&] (cudnn_frontend::ExecutionPlan& plan) {
     size_t curr_workspace_size = plan.getWorkspaceSize();
     if (curr_workspace_size <= max_block_size) {
-      if (curr_workspace_size > max_workspace_size && curr_workspace_size <= max_block_size) {
+      if (curr_workspace_size > max_workspace_size) {
         max_workspace_size = plan.getWorkspaceSize();
       }
       valid_plans.emplace_back(std::move(plan));
