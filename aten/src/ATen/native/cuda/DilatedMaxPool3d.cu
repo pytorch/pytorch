@@ -199,7 +199,7 @@ void max_pool3d_with_indices_out_cuda_template(
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ input, "input", 3 };
 
-  checkAllSameGPU("max_pool3d_with_indices_out_cuda",
+  checkAllSameGPU(__func__,
                   {output_arg, indices_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
@@ -307,7 +307,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   TensorArg input_arg{ input, "input", 3 };
   TensorArg indices_arg{ indices, "indices", 4 };
 
-  checkAllSameGPU("max_pool3d_with_indices_backward_out_cuda",
+  checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?

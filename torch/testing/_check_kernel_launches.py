@@ -74,8 +74,11 @@ def check_file(filename):
     """
     if not (filename.endswith(".cu") or filename.endswith(".cuh")):
         return 0
-    contents = open(filename, "r").read()
-    return check_code_for_cuda_kernel_launches(contents, filename)
+    fo = open(filename, "r")
+    contents = fo.read()
+    unsafeCount = check_code_for_cuda_kernel_launches(contents, filename)
+    fo.close()
+    return unsafeCount
 
 
 def check_cuda_kernel_launches():

@@ -769,7 +769,7 @@ def onlyOnCPUAndCUDA(fn):
 # Specifies per-dtype precision overrides.
 # Ex.
 #
-# @precisionOverride(torch.half : 1e-2, torch.float : 1e-4)
+# @precisionOverride({torch.half : 1e-2, torch.float : 1e-4})
 # @dtypes(torch.half, torch.float, torch.double)
 # def test_X(self, device, dtype):
 #   ...
