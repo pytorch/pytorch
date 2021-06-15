@@ -4934,6 +4934,7 @@ class ModuleTest(object):
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.with_tf32 = kwargs.get('with_tf32', self.is_criterion_test)
+        self.check_inplace = kwargs.get('check_inplace', False)
         if self.is_criterion_test:
             self.check_half = kwargs.get('check_half', True)
             self.check_bfloat16 = kwargs.get('check_bfloat16', False)
@@ -4944,7 +4945,6 @@ class ModuleTest(object):
                 kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
             self.precision = kwargs.get('precision', 2e-4)
             self.cudnn = kwargs.get('cudnn', False)
-            self.check_inplace = kwargs.get('check_inplace', False)
             self.skip_double = kwargs.get('skip_double', False)
             self.skip_half = kwargs.get('skip_half', False)
 
@@ -5016,6 +5016,7 @@ class ModuleTest(object):
         # === Instantiate the module. ===
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
+        input_tuple = input if isinstance(input, tuple) else (input,)
 
         # === Check that the module can be printed. ===
         module.__repr__()
@@ -5054,42 +5055,39 @@ class ModuleTest(object):
                 module_copy = torch.load(f)
                 test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
+        # === Check in-place vs. out-of-place variant outputs. ===
+        if self.check_inplace:
+            # check_inplace doesn't support multiple input tensors, since we don't have any modules
+            # that modify the inputs in-place and that accept more than one input
+            assert len(input_tuple) == 1
+            input = input_tuple[0]
+
+            module_ip = self.constructor(*self.constructor_args, inplace=True)
+
+            input_version = input._version
+            with freeze_rng_state():
+                output = module(input)
+            test_case.assertEqual(input._version, input_version)
+
+            input_ip = deepcopy(input)
+            input_ip_clone = input_ip.clone()
+            with freeze_rng_state():
+                output_ip = module_ip(input_ip_clone)
+            test_case.assertNotEqual(input_ip_clone._version, input_version)
+            test_case.assertEqual(output, output_ip)
+            grad = output.data.clone().normal_()
+            if input.grad is not None:
+                with torch.no_grad():
+                    input.grad.zero_()
+            if input_ip.grad is not None:
+                with torch.no_grad():
+                    input_ip.grad.zero_()
+            output.backward(grad)
+            output_ip.backward(grad)
+            test_case.assertEqual(input.grad, input_ip.grad)
+
         # === Do the meat of the module test. ===
         if not self.is_criterion_test:
-            input_tuple = input if isinstance(input, tuple) else (input,)
-
-            if self.check_inplace:
-                # check if the inplace variant of the module gives the same result
-                # as the out-of-place
-
-                # check_inplace doesn't support multiple input tensors, since we don't have any modules
-                # that modify the inputs in-place and that accept more than one input
-                assert len(input_tuple) == 1
-                input = input_tuple[0]
-
-                module_ip = self.constructor(*self.constructor_args, inplace=True)
-
-                input_version = input._version
-                with freeze_rng_state():
-                    output = module(input)
-                test_case.assertEqual(input._version, input_version)
-
-                input_ip = deepcopy(input)
-                input_ip_clone = input_ip.clone()
-                with freeze_rng_state():
-                    output_ip = module_ip(input_ip_clone)
-                test_case.assertNotEqual(input_ip_clone._version, input_version)
-                test_case.assertEqual(output, output_ip)
-                grad = output.data.clone().normal_()
-                if input.grad is not None:
-                    with torch.no_grad():
-                        input.grad.zero_()
-                if input_ip.grad is not None:
-                    with torch.no_grad():
-                        input_ip.grad.zero_()
-                output.backward(grad)
-                output_ip.backward(grad)
-                test_case.assertEqual(input.grad, input_ip.grad)
 
             def assert_module_parameters_are(tensor_type, device_id=None):
                 for p in module.parameters():
