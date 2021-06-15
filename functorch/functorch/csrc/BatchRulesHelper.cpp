@@ -13,6 +13,9 @@ Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_d
   if (!maybe_batch_dim.has_value()) {
     return tensor;
   }
+  if (maybe_batch_dim.value() == 0) {
+    return tensor;
+  }
   return tensor.movedim(maybe_batch_dim.value(), 0);
 }
 
