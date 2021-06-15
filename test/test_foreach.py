@@ -53,68 +53,13 @@ class TestForeach(TestCase):
     # note(mkozuki): It might be the case that the expected number of `cudaLaunchKernel`s
     # is greater than 1 once foreach functions internally separate their input `TensorList`s by
     # devices & dtypes into vectors of tensors.
-    def _create_funcs(self, op, n_expected_cudaLaunchKernels):
+    def _get_funcs(self, op, n_expected_cudaLaunchKernels):
         return (
             ForeachFuncWrapper(op.method_variant, n_expected_cudaLaunchKernels),
             RegularFuncWrapper(op.ref),
             ForeachFuncWrapper(op.inplace_variant, n_expected_cudaLaunchKernels),
             RegularFuncWrapper(op.ref_inplace),
         )
-
-    def _get_funcs(
-        self,
-        op,
-        *,
-        n_expected_cudaLaunchKernels=1,
-        dtype=None,
-        scalars=None,
-        n_tensors=None,
-        is_fastpath=False,
-    ):
-        if not is_fastpath:
-            return self._create_funcs(op, n_expected_cudaLaunchKernels)
-        disable_fast_route = False
-        has_integer = dtype in torch.testing.get_all_int_dtypes()
-        has_bool = dtype == torch.bool
-        has_complex_scalar, has_float_scalar, has_int_scalar, has_bool_scalar = False, False, False, False
-        if scalars is not None:
-            if not isinstance(scalars, list):
-                scalars = [scalars]
-            for s in scalars:
-                if isinstance(s, complex):
-                    has_complex_scalar = True
-                if isinstance(s, float):
-                    has_float_scalar = True
-                if isinstance(s, int):
-                    has_int_scalar = True
-                if isinstance(s, bool):
-                    has_bool_scalar = True
-        # mixed scalarlist
-        if has_complex_scalar and has_float_scalar and has_int_scalar:
-            disable_fast_route = True
-            if dtype in torch.testing.get_all_complex_dtypes():
-                disable_fast_route = False
-        # torch.bool and (bool Scalar or bool ScalarList)
-        if has_bool and has_int_scalar and not has_bool_scalar:
-            disable_fast_route = True
-        # complex Scalar and int/bool/float Tensor
-        if has_complex_scalar and dtype not in torch.testing.get_all_complex_dtypes():
-            disable_fast_route = True
-        # int/bool Tensor and float/complex Scalar
-        if (has_integer or has_bool) and (has_complex_scalar or has_float_scalar):
-            disable_fast_route = True
-        # `_foreach_add.List` with bool tensors & default alpha uses slow path
-        if op.ref == torch.add:
-            if has_bool and not (has_int_scalar or has_bool_scalar):
-                disable_fast_route = True
-        # `div` with int/bool Tensor requires type promotion, i.e., slow path
-        if op.ref == torch.div:
-            if has_bool or has_integer:
-                disable_fast_route = True
-
-        if disable_fast_route:
-            n_expected_cudaLaunchKernels = n_tensors
-        return self._create_funcs(op, n_expected_cudaLaunchKernels)
 
     # note(mkozuki): Foreach binary ops upcast 16-bits inputs to 32-bits and downcast outputs to original dtype.
     def _requires_cast(self, op, dtype, is_fastpath, inputs, inputs2=None):
@@ -221,12 +166,7 @@ class TestForeach(TestCase):
                 expected = [t.to(dtype) for t in ref_inputs[0]]
             self.assertEqual(expected, inputs[0])
         if alpha is not None:
-            # note(mkozuki): Input/Output type casting.
-            # For BFloat16/Float16 I/O with add/sub with alpha parameter,
-            # foreach implementations cast inputs to float32 and downcast the result
-            # to originaly dtype, while regular implementations don't.
             kwargs = {'alpha': alpha}
-            requires_cast = dtype in (torch.float16, torch.bfloat16) and self.is_cuda and is_fastpath
             ref_inputs = inputs
             if requires_cast:
                 ref_inputs = [[t.to(torch.float32) for t in tensors] for tensors in inputs]
@@ -245,9 +185,9 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(expected, inputs[0])
 
-    def _test_binary_op_tensorlists(self, device, dtype, opinfo, N, is_fastpath):
-        op, ref, inplace_op, inplace_ref = self._get_funcs(
-            opinfo, dtype=dtype, scalars=None, n_tensors=N, is_fastpath=is_fastpath)
+    def _test_binary_op_tensorlists(self, device, dtype, opinfo, N, is_fastpath, disable_fastpath):
+        n_expected_cudaLaunchKernels = N if disable_fastpath else 1
+        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
         inputs = [
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
@@ -259,168 +199,72 @@ class TestForeach(TestCase):
             self._regular_binary_test(dtype, op, ref, inputs, is_fastpath, alpha=alpha)
             self._inplace_binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, alpha=alpha)
 
+    @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_tensorlists_fastpath(self, device, dtype, op):
         for N in N_values:
-            self._test_binary_op_tensorlists(device, dtype, op, N, True)
+            disable_fastpath = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+            if op.ref == torch.add and dtype == torch.bool:
+                disable_fastpath = True
+            self._test_binary_op_tensorlists(device, dtype, op, N, True, disable_fastpath)
 
     @dtypes(*torch.testing.get_all_dtypes())
     @ops(foreach_binary_op_db)
     def test_binary_op_tensorlists_slowpath(self, device, dtype, op):
         for N in N_values:
-            self._test_binary_op_tensorlists(device, dtype, op, N, False)
+            self._test_binary_op_tensorlists(device, dtype, op, N, False, False)
 
-    def _test_binary_op_scalar(self, device, dtype, opinfo, N, scalar, is_fastpath):
-        op, ref, inplace_op, inplace_ref = self._get_funcs(
-            opinfo, dtype=dtype, scalars=scalar, n_tensors=N, is_fastpath=is_fastpath)
+    def _test_binary_op_scalar(self, device, dtype, opinfo, N, scalar, is_fastpath, disable_fastpath):
+        n_expected_cudaLaunchKernels = N if disable_fastpath else 1
+        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
         inputs = [opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath), scalar]
-        inputs2 = [scalar for _ in range(N)]
-        self._regular_binary_test(dtype, op, ref, inputs, is_fastpath, inputs2=inputs2)
-        self._inplace_binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, inputs2=inputs2)
-
-    @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_op_int_scalar_fastpath(self, device, dtype, op):
-        for N in N_values:
-            scalar = random.randint(0, 9) + 1
-            self._test_binary_op_scalar(device, dtype, op, N, scalar, True)
-
-    @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
-    @ops(foreach_binary_op_db)
-    def test_binary_op_int_scalar_slowpath(self, device, dtype, op):
-        for N in N_values:
-            scalar = random.randint(0, 9) + 1
-            self._test_binary_op_scalar(device, dtype, op, N, scalar, False)
-
-    @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_op_float_scalar_fastpath(self, device, dtype, op):
-        for N in N_values:
-            scalar = 1.0 - random.random()
-            self._test_binary_op_scalar(device, dtype, op, N, scalar, True)
-
-    @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
-    @ops(foreach_binary_op_db)
-    def test_binary_op_float_scalar_slowpath(self, device, dtype, op):
-        for N in N_values:
-            scalar = 1.0 - random.random()
-            self._test_binary_op_scalar(device, dtype, op, N, scalar, False)
-
-    @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_op_complex_scalar_fastpath(self, device, dtype, op):
-        for N in N_values:
-            scalar = complex(1.0 - random.random(), 1.0 - random.random())
-            self._test_binary_op_scalar(device, dtype, op, N, scalar, True)
-
-    @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
-    @ops(foreach_binary_op_db)
-    def test_binary_op_complex_scalar_slowpath(self, device, dtype, op):
-        for N in N_values:
-            scalar = complex(1.0 - random.random(), 1.0 - random.random())
-            self._test_binary_op_scalar(device, dtype, op, N, scalar, False)
-
-    @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_op_bool_scalar_fastpath(self, device, dtype, op):
-        for N in N_values:
-            scalar = True
-            self._test_binary_op_scalar(device, dtype, op, N, scalar, True)
-
-    @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
-    @ops(foreach_binary_op_db)
-    def test_binary_op_bool_scalar_slowpath(self, device, dtype, op):
-        for N in N_values:
-            scalar = True
-            self._test_binary_op_scalar(device, dtype, op, N, scalar, False)
-
-    def _test_binary_op_scalarlist(self, device, dtype, opinfo, N, scalarlist, is_fastpath):
-        op, ref, inplace_op, inplace_ref = self._get_funcs(
-            opinfo, dtype=dtype, scalars=scalarlist, n_tensors=N, is_fastpath=is_fastpath)
-        inputs = [opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath), scalarlist]
         self._regular_binary_test(dtype, op, ref, inputs, is_fastpath)
         self._inplace_binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
 
     @skipCUDAIfRocm
+    @skipMeta
     @ops(foreach_binary_op_db)
-    def test_binary_op_int_scalarlist_fastpath(self, device, dtype, op):
+    def test_binary_op_scalar_fastpath(self, device, dtype, op):
         for N in N_values:
-            scalarlist = [random.randint(0, 9) + 1 for _ in range(N)]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True)
+            for i, scalar in enumerate([
+                random.randint(1, 10),
+                1.0 - random.random(),
+                True,
+                complex(1.0 - random.random(), 1.0 - random.random()),
+            ]):
+                disable_fastpath = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+                # int scalar
+                if i == 0:
+                    disable_fastpath |= dtype == torch.bool
+                # float scalar
+                if i == 1:
+                    disable_fastpath |= dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+                # bool scalar
+                if i == 2:
+                    disable_fastpath |= dtype == torch.bool
+                    if op.ref in (torch.add, torch.mul):
+                        disable_fastpath = False
+                # complex scalar
+                if i == 3:
+                    disable_fastpath |= dtype not in torch.testing.get_all_complex_dtypes()
+                print(scalar, disable_fastpath)
+                self._test_binary_op_scalar(device, dtype, op, N, scalar, True, disable_fastpath)
 
-    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     @ops(foreach_binary_op_db)
-    def test_binary_op_int_scalarlist_slowpath(self, device, dtype, op):
+    def test_binary_op_scalar_slowpath(self, device, dtype, op):
+        scalar_values = [
+            random.randint(1, 10), 1.0 - random.random(), True, complex(1.0 - random.random(), 1.0 - random.random())]
         for N in N_values:
-            scalarlist = [random.randint(0, 9) + 1 for _ in range(N)]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False)
+            for scalar in scalar_values:
+                self._test_binary_op_scalar(device, dtype, op, N, scalar, False, False)
 
-    @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_op_float_scalarlist_fastpath(self, device, dtype, op):
-        for N in N_values:
-            scalarlist = [1.0 - random.random() for _ in range(N)]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True)
-
-    @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
-    @ops(foreach_binary_op_db)
-    def test_binary_op_float_scalarlist_slowpath(self, device, dtype, op):
-        for N in N_values:
-            scalarlist = [1.0 - random.random() for _ in range(N)]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False)
-
-    @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_op_complex_scalarlist_fastpath(self, device, dtype, op):
-        for N in N_values:
-            scalarlist = [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True)
-
-    @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
-    @ops(foreach_binary_op_db)
-    def test_binary_op_complex_scalarlist_slowpath(self, device, dtype, op):
-        for N in N_values:
-            scalarlist = [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False)
-
-    @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_op_bool_scalarlist_fastpath(self, device, dtype, op):
-        for N in N_values:
-            scalarlist = [True for _ in range(N)]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True)
-
-    @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
-    @ops(foreach_binary_op_db)
-    def test_binary_op_bool_scalarlist_slowpath(self, device, dtype, op):
-        for N in N_values:
-            scalarlist = [True for _ in range(N)]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False)
-
-    @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_op_mixed_scalarlist_without_bool_fastpath(self, device, dtype, op):
-        _scalarlist = [1, 2.0, 3.0 + 4.5j]
-        for N in N_values:
-            scalarlist = _scalarlist + [3.0 for _ in range(N - len(_scalarlist))]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True)
-
-    @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
-    @ops(foreach_binary_op_db)
-    def test_binary_op_mixed_scalarlist_without_bool_slowpath(self, device, dtype, op):
-        _scalarlist = [1, 2.0, 3.0 + 4.5j]
-        for N in N_values:
-            scalarlist = _scalarlist + [3.0 for _ in range(N - len(_scalarlist))]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False)
+    def _test_binary_op_scalarlist(self, device, dtype, opinfo, N, scalarlist, is_fastpath, disable_fastpath):
+        n_expected_cudaLaunchKernels = N if disable_fastpath else 1
+        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
+        inputs = [opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath), scalarlist]
+        self._regular_binary_test(dtype, op, ref, inputs, is_fastpath)
+        self._inplace_binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
 
     # note(mkozuki): Why two functions depending on with/without bool?
     # `foreach_sub` & `foreach_sub_` do `sub_check(tensors[i], scalars[i])` from i=1...N.
@@ -432,21 +276,47 @@ class TestForeach(TestCase):
     # separating mixed scalarlist tests. By setting the first element of scalarlist to bool,
     # they are expected to throw bool sub error even in inplace test.
     @skipCUDAIfRocm
+    @skipMeta
     @ops(foreach_binary_op_db)
-    def test_binary_op_mixed_scalarlist_with_bool_fastpath(self, device, dtype, op):
-        _scalarlist = [True, 1, 2.0, 3.0 + 4.5j]
+    def test_binary_op_scalarlist_fastpath(self, device, dtype, op):
         for N in N_values:
-            scalarlist = _scalarlist + [3.0 for _ in range(N - len(_scalarlist))]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True)
+            for i, scalarlist in enumerate([
+                [random.randint(0, 9) + 1 for _ in range(N)],
+                [1.0 - random.random() for _ in range(N)],
+                [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)],
+                [True for _ in range(N)],
+                [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 3)],
+                [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]
+            ]):
+                bool_int_div = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+                disable_fastpath = bool_int_div
+                # int scalarlist
+                if i == 0:
+                    disable_fastpath |= dtype == torch.bool
+                # float scalarlist
+                if i == 1:
+                    disable_fastpath |= dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+                # complex scalarlist
+                if i == 2:
+                    disable_fastpath |= dtype not in torch.testing.get_all_complex_dtypes()
+                # mixed scalarlist
+                if i == 4 or i == 5:
+                    disable_fastpath |= True and dtype not in torch.testing.get_all_complex_dtypes()
+                self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True, disable_fastpath)
 
-    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     @ops(foreach_binary_op_db)
-    def test_binary_op_mixed_scalarlist_with_bool_slowpath(self, device, dtype, op):
-        _scalarlist = [True, 1, 2.0, 3.0 + 4.5j]
+    def test_binary_op_scalarlist_slowpath(self, device, dtype, op):
         for N in N_values:
-            scalarlist = _scalarlist + [3.0 for _ in range(N - len(_scalarlist))]
-            self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False)
+            for scalarlist in [
+                [random.randint(0, 9) + 1 for _ in range(N)],
+                [1.0 - random.random() for _ in range(N)],
+                [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)],
+                [True for _ in range(N)],
+                [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 3)],
+                [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]
+            ]:
+                self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False, False)
 
     def _test_pointwise_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in N_values:
