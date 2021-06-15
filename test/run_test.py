@@ -23,7 +23,11 @@ from typing_extensions import TypedDict
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (get_previous_reports_for_branch, Report, HAVE_BOTO3)
+    from tools.stats_utils.s3_stat_parser import (
+        get_previous_reports_for_branch,
+        get_previous_reports_for_pr,
+        Report,
+        HAVE_BOTO3)
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
@@ -382,6 +386,8 @@ or `conda install ninja`. Alternatively, disable said tests with
 """
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
+
+ENABLE_PR_HISTORY_REORDERING = bool(os.environ.get("ENABLE_PR_HISTORY_REORDERING", "0") == "1")
 
 JIT_EXECUTOR_TESTS = [
     'test_jit_cuda_fuser',
@@ -1161,33 +1167,58 @@ def query_changed_test_files() -> List[str]:
     lines = [line.strip() for line in lines]
     return lines
 
+def query_failure_test_module(reports: List[Tuple["Report", str]]) -> List[str]:
+    test_modules = []
+    if len(reports) == 0 or len(reports[0]) == 0:
+        return test_modules
+    report = reports[0][0]
+    assert report.get('format_version') == 2, "S3 format currently handled is version 2 only"
+    files: Dict[str, Any] = report['files']
+    for fname, file in files.items():
+        contains_failure = any(
+            any(case['status'] == 'errored' or case['status'] == 'failed' 
+                for _, case in suite['cases'].items())
+                    for _, suite in file['suites'].items())
+        if contains_failure:
+            test_modules.append(fname)
+    return test_modules
+
 
 def reorder_tests(tests: List[str]) -> List[str]:
-    try:
-        changed_files = query_changed_test_files()
-    except Exception:
-        # If unable to get changed files from git, quit without doing any sorting
-        return tests
+    sorted_tests = tests
+    if ENABLE_PR_HISTORY_REORDERING and HAVE_BOTO3:
+        pr_number = os.environ.get("CIRCLE_PR_NUMBER", "")
+        if len(pr_number):
+            ci_job_prefix = get_stripped_CI_job()
+            s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(
+                pr_number, ci_job_prefix)
+            prioritized_tests = query_failure_test_module(s3_reports)
+        else:
+            return tests
+    else:
+        try:
+            changed_files = query_changed_test_files()
+        except Exception:
+            # If unable to get changed files from git, quit without doing any sorting
+            return tests
 
-    prefix = f"test{os.path.sep}"
-    changed_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
-    changed_tests = [f[len(prefix):] for f in changed_tests]
-    changed_tests = [f[:-len(".py")] for f in changed_tests]
+        prefix = f"test{os.path.sep}"
+        prioritized_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
+        prioritized_tests = [f[len(prefix):] for f in prioritized_tests]
+        prioritized_tests = [f[:-len(".py")] for f in prioritized_tests]
 
     bring_to_front = []
     the_rest = []
 
     for test in tests:
-        if test in changed_tests:
+        if test in prioritized_tests:
             bring_to_front.append(test)
         else:
             the_rest.append(test)
-
-    sorted_tests = bring_to_front + the_rest
-
-    if len(sorted_tests) != len(tests):
-        # Something went wrong, bail out without doing any sorting
-        return tests
+    if len(bring_to_front) + len(the_rest) != len(tests):
+        sorted_tests = bring_to_front + the_rest
+    else:
+        print("Something went wrong in CI reordering, bail out without doing any sorting")
 
     return sorted_tests
 
@@ -1237,6 +1268,9 @@ def main():
 
     if IS_IN_CI:
         selected_tests = reorder_tests(selected_tests)
+    
+    print(selected_tests)
+    exit(0)
 
     has_failed = False
     failure_messages = []
