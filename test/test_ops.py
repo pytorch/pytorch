@@ -8,7 +8,7 @@ import numpy as np
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
+    (TestCase, compare_with_reference, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, suppress_warnings, numpy_to_torch_dtype_dict, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING)
@@ -73,6 +73,7 @@ class TestOpInfo(TestCase):
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on given tensors
+    """
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
             if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
@@ -136,14 +137,17 @@ class TestOpInfo(TestCase):
                 for x, y in zip(expected, actual):
                     # Testing multi-outputs results
                     _helper_reference_numerics(x, y, msg, exact_dtype, equal_nan)
+    """
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
     @suppress_warnings
-    @ops(ref_test_ops)
+    @ops(ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
     def test_reference_testing(self, device, dtype, op):
-        tensors = op.sample_inputs(device, dtype)
-        self._test_reference_numerics(dtype, op, tensors)
+        sample_inputs = op.sample_inputs(device, dtype)
+        for sample_input in sample_inputs:
+            compare_with_reference(op, op.ref, sample_input)
+        # self._test_reference_numerics(dtype, op, tensors)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
