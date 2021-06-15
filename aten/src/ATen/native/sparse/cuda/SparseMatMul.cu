@@ -13,7 +13,6 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-#include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>

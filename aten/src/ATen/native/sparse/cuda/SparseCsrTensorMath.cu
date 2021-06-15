@@ -13,7 +13,6 @@
 #include <cuda_runtime.h>
 #include <type_traits>
 
-#include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
