@@ -1592,19 +1592,19 @@ Example::
         add("key3", 3);
         add("key3", 2);
         if (get("key") != "6") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key0") != "value0") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key1") != "value1") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key2") != "value2") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key3") != "15") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
       },
       py::call_guard<py::gil_scoped_release>());
