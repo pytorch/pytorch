@@ -15,6 +15,7 @@ import math
 from functools import partial
 import inspect
 import io
+import logging
 import copy
 import operator
 import argparse
@@ -58,6 +59,9 @@ import torch.backends.mkl
 from enum import Enum
 
 torch.backends.disable_global_flags()
+
+logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+LOGGER = logging.getLogger("TestLog")
 
 FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
@@ -755,6 +759,8 @@ class CudaMemoryLeakCheck():
     def __init__(self, testcase, name=None):
         self.name = testcase.id() if name is None else name
         self.testcase = testcase
+
+        LOGGER.debug(f"=-=-=-= CUDA mem leak check on: {self.name} =-=-=-=")
 
         # initialize context & RNG to prevent false positive detections
         # when the test is the first to initialize those
