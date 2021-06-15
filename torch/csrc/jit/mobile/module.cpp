@@ -52,7 +52,6 @@ namespace {
 void set_train_recurse(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     bool on) {
-  std::cout << "mobile: ivalue name: " << obj->name() << " ? " << obj->type()->findAttributeSlot("training") << std::endl;
   if (auto slot = obj->type()->findAttributeSlot("training")) {
     obj->setSlot(*slot, on);
   }
