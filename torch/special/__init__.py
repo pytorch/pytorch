@@ -35,6 +35,41 @@ Example::
     tensor([  -inf, 0.0000, 0.3466])
 """)
 
+psi = _add_docstr(_special.special_psi,
+                  r"""
+psi(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.special.digamma`.
+""")
+
+digamma = _add_docstr(_special.special_digamma,
+                      r"""
+digamma(input, *, out=None) -> Tensor
+
+Computes the logarithmic derivative of the gamma function on `input`.
+
+.. math::
+    \digamma(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
+""" + r"""
+Args:
+    input (Tensor): the tensor to compute the digamma function on
+
+Keyword args:
+    {out}
+
+.. note::  This function is similar to SciPy's `scipy.special.digamma`.
+
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`.
+           Previously it returned `NaN` for `0`.
+
+Example::
+
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.special.digamma(a)
+    tensor([-0.5772, -1.9635])
+
+""".format(**common_args))
+
 gammaln = _add_docstr(_special.special_gammaln,
                       r"""
 gammaln(input, *, out=None) -> Tensor
@@ -272,6 +307,29 @@ Example::
     tensor([2.7726, 2.1972, 1.3863])
 """.format(**common_args))
 
+i0 = _add_docstr(_special.special_i0,
+                 r"""
+i0(input, *, out=None) -> Tensor
+
+Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = I_0(\text{input}_{i}) = \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.i0(torch.arange(5, dtype=torch.float32))
+    tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
+
+""".format(**common_args))
+
 i0e = _add_docstr(_special.special_i0e,
                   r"""
 i0e(input, *, out=None) -> Tensor
@@ -289,4 +347,64 @@ Keyword args:
 Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
+""".format(**common_args))
+
+i1 = _add_docstr(_special.special_i1,
+                 r"""
+i1(input, *, out=None) -> Tensor
+Computes the first order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \frac{(\text{input}_{i})}{2} * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!) * (k+1)!}
+
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.i1(torch.arange(5, dtype=torch.float32))
+    tensor([0.0000, 0.5652, 1.5906, 3.9534, 9.7595])
+""".format(**common_args))
+
+i1e = _add_docstr(_special.special_i1e,
+                  r"""
+i1e(input, *, out=None) -> Tensor
+Computes the exponentially scaled first order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \exp(-|x|) * i1(x) =
+        \exp(-|x|) * \frac{(\text{input}_{i})}{2} * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!) * (k+1)!}
+
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.i1e(torch.arange(5, dtype=torch.float32))
+    tensor([0.0000, 0.2079, 0.2153, 0.1968, 0.1788])
+""".format(**common_args))
+
+ndtr = _add_docstr(_special.special_ndtr,
+                   r"""
+ndtr(input, *, out=None) -> Tensor
+Computes the area under the standard Gaussian probability density function,
+integrated from minus infinity to :attr:`input`, elementwise.
+
+.. math::
+    \text{ndtr}(x) = \frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
+    tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
 """.format(**common_args))

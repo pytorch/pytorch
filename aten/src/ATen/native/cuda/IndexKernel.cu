@@ -1,4 +1,5 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/TensorTransformations.h> // flip
 
 #include <type_traits>
 #include <ATen/ATen.h>
@@ -457,11 +458,54 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   return self;
 }
 
+template <typename scalar_t>
+void flip_kernel_impl(TensorIterator& iter) {
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      flip_kernel_impl<scalar_t>(sub_iter);
+    }
+    return;
+  }
+
+  char* const __restrict__ out_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  const char* const __restrict__ in_ptr = reinterpret_cast<const char*>(iter.data_ptr(1));
+
+  const auto offset_calc = make_offset_calculator<2, /*signed_strides=*/true>(iter);
+
+  auto loop = [=]C10_DEVICE(const int i) {
+    const auto offsets = offset_calc.get(i);
+    // offsets can be negative here, but it's fine
+    scalar_t* const __restrict__ out_data = reinterpret_cast<scalar_t*>(out_ptr + offsets[0]);
+    const scalar_t* const __restrict__ in_data = reinterpret_cast<const scalar_t*>(in_ptr + offsets[1]);
+    *out_data = *in_data;
+  };
+  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
+}
+
+void flip_kernel(TensorIterator& iter, const bool quantized) {
+  if (quantized) {
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cuda",
+    [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      flip_kernel_impl<dtype>(iter);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+                                           iter.dtype(), "flip_cuda",
+    [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      flip_kernel_impl<dtype>(iter);
+    });
+  }
+}
+
+
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(put_stub, &put_kernel);
 REGISTER_DISPATCH(take_stub, &take_kernel);
+REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
 }} // namespace at::native

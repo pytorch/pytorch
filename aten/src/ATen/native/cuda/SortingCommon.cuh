@@ -1,3 +1,4 @@
+#pragma once
 #include <ATen/ATen.h>
 #include <ATen/native/SortingUtils.h>
 #include <assert.h>
@@ -13,6 +14,7 @@
 namespace at {
 namespace native {
 
+// Is this questionable namespace pollution?
 #if defined(__HIP_PLATFORM_HCC__)
 constexpr int MAX_BLOCK_SIZE = 256;
 
@@ -47,7 +49,7 @@ static bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
 }
 
 template <typename scalar_t, bool handleNaN = false>
-struct ThrustGTOp {
+struct GTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
     return (handleNaN && THCNumerics<scalar_t>::isnan(lhs) &&
             !THCNumerics<scalar_t>::isnan(rhs)) ||
@@ -56,7 +58,7 @@ struct ThrustGTOp {
 };
 
 template <typename scalar_t, bool handleNaN = false>
-struct ThrustLTOp {
+struct LTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
     return (handleNaN && THCNumerics<scalar_t>::isnan(rhs) &&
             !THCNumerics<scalar_t>::isnan(lhs)) ||
