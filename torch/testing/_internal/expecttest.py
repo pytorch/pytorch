@@ -248,12 +248,13 @@ class TestCase(unittest.TestCase):
                     # Try to give a more accurate bounds based on AST
                     for n in ast.walk(old_ast):
                         if isinstance(n, ast.Expr):
-                            if LINENO_AT_START and n.lineno == start_lineno:
-                                end_lineno = n.end_lineno
+                            if hasattr(n, 'end_lineno'):
+                                assert LINENO_AT_START
+                                end_lineno = n.end_lineno  # type: ignore
                                 break
-                            elif not LINENO_AT_START and n.end_lineno == end_lineno:
-                                start_lineno = n.lineno
-                                break
+                            else:
+                                if n.lineno < end_lineno:
+                                    start_lineno = n.lineno
 
                     new, delta = replace_string_literal(old, start_lineno, end_lineno, actual)
 
