@@ -38,6 +38,8 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         fn_args: Positional arguments for `fn`
         fn_kwargs: Keyword arguments for `fn`
         nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0)
+        This also accepts -1 as input to apply the function to the lowest nesting level. It currently doesn't support
+        argument < -1.
     """
     datapipe: IterDataPipe
     fn: Callable

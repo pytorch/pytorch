@@ -17,8 +17,12 @@ class FilterIterDataPipe(MapIterDataPipe):
         fn_args: Positional arguments for `filter_fn`
         fn_kwargs: Keyword arguments for `filter_fn`
         drop_empty_batches: By default, drops batch if it is empty after filtering instead of keeping an empty list
-        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0)
+        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0).
+        This also accepts -1 as input to apply filtering to the lowest nesting level. It currently doesn't support
+        argument < -1.
     """
+    drop_empty_batches: bool
+
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  filter_fn: Callable[..., bool],
