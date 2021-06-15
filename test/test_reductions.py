@@ -13,7 +13,7 @@ import warnings
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
-    IS_WINDOWS, make_tensor)
+    IS_WINDOWS, make_tensor, is_aten_cpu_capability_avx512)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, precisionOverride)
@@ -1109,6 +1109,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
             torch.nansum(x)
 
+    @unittest.skipIf(is_aten_cpu_capability_avx512, "This test is flaky. Ref: Issue 59415")
     def test_nansum_out_dtype(self, device):
         dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
         for inp_dtype, out_dtype in combinations(dtypes, 2):

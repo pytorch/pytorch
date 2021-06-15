@@ -707,6 +707,12 @@ def is_iterable(obj):
         return False
 
 
+def is_aten_cpu_capability_avx512():
+    if os.environ("ATEN_CPU_CAPABILITY") is "avx512":
+        return True
+    return False
+
+
 def is_iterable_of_tensors(iterable, include_empty=False):
     """ Returns True if iterable is an iterable of tensors and False o.w.
 

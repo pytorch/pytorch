@@ -133,11 +133,11 @@ private:
     return reinterpret_cast<FnPtr>(
       impl.get_call_ptr(device_type
       , reinterpret_cast<void*>(DEFAULT)
-#ifdef HAVE_AVX512_CPU_DEFINITION
-      , reinterpret_cast<void*>(AVX512)
-#endif
 #ifdef HAVE_AVX512_256_CPU_DEFINITION
       , reinterpret_cast<void*>(AVX512_256)
+#endif
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX512)
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
       , reinterpret_cast<void*>(AVX2)
@@ -165,11 +165,11 @@ public:
   }
 
   static FnPtr DEFAULT;
-#ifdef HAVE_AVX512_CPU_DEFINITION
-  static FnPtr AVX512;
-#endif
 #ifdef HAVE_AVX512_256_CPU_DEFINITION
   static FnPtr AVX512_256;
+#endif
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  static FnPtr AVX512;
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   static FnPtr AVX2;
@@ -216,17 +216,16 @@ struct RegisterHIPDispatch {
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
   template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
 
+#ifdef HAVE_AVX512_256_CPU_DEFINITION
+#define REGISTER_AVX512_256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512_256, fn)
+#else
+#define REGISTER_AVX512_256_DISPATCH(name, fn)
+#endif
 
 #ifdef HAVE_AVX512_CPU_DEFINITION
 #define REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512, fn)
 #else
 #define REGISTER_AVX512_DISPATCH(name, fn)
-#endif
-
-#ifdef HAVE_AVX512_256_CPU_DEFINITION
-#define REGISTER_AVX512_256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512_256, fn)
-#else
-#define REGISTER_AVX512_256_DISPATCH(name, fn)
 #endif
 
 #ifdef HAVE_AVX2_CPU_DEFINITION

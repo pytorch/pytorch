@@ -37,16 +37,20 @@ static CPUCapability compute_cpu_capability() {
     // Only AVX512 can only be used if ATEN_CPU_CAPABILITY is set to AVX512.
     // Otherwise AVX512_256 would be used.
     if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_fma3()) {
+      setenv("ATEN_CPU_CAPABILITY", "avx512_256", 1);
       return CPUCapability::AVX512_256;
     }
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
+      setenv("ATEN_CPU_CAPABILITY", "avx2", 1);
       return CPUCapability::AVX2;
     }
   }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
+  setenv("ATEN_CPU_CAPABILITY", "vsx", 1);
   return CPUCapability::VSX;
 #else
+  setenv("ATEN_CPU_CAPABILITY", "default", 1);
   return CPUCapability::DEFAULT;
 #endif
 }
@@ -80,11 +84,11 @@ void* DispatchStubImpl::get_call_ptr(
       if (!fptr) {
         fptr = choose_cpu_impl(
           DEFAULT
-#ifdef HAVE_AVX512_CPU_DEFINITION
-          , AVX512
-#endif
 #ifdef HAVE_AVX512_256_CPU_DEFINITION
           , AVX512_256
+#endif
+#ifdef HAVE_AVX512_CPU_DEFINITION
+          , AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
           , AVX2
@@ -128,16 +132,16 @@ void* DispatchStubImpl::choose_cpu_impl(
 ) {
   auto capability = static_cast<int>(get_cpu_capability());
   (void)capability;
-#ifdef HAVE_AVX512_CPU_DEFINITION
-  if (capability >= static_cast<int>(CPUCapability::AVX512)) {
-    TORCH_INTERNAL_ASSERT(AVX512, "DispatchStub: missing AVX512 kernel");
-    return AVX512;
-  }
-#endif
 #ifdef HAVE_AVX512_256_CPU_DEFINITION
   if (capability >= static_cast<int>(CPUCapability::AVX512_256)) {
     TORCH_INTERNAL_ASSERT(AVX512_256, "DispatchStub: missing AVX512_256 kernel");
     return AVX512_256;
+  }
+#endif
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::AVX512)) {
+    TORCH_INTERNAL_ASSERT(AVX512, "DispatchStub: missing AVX512 kernel");
+    return AVX512;
   }
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
