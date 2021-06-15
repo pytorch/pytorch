@@ -451,6 +451,7 @@ def maybe_insert_input_equalization_observers_for_node(
     new_args = []
     for arg in node.args:
         if not isinstance(arg, Node) or node_arg_is_bias(node, arg):
+            new_args.append(arg)
             continue
 
         is_weight = node_arg_is_weight(node, arg)
