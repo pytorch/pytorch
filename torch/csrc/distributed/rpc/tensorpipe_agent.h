@@ -62,7 +62,7 @@ constexpr int64_t kCudaBasicChannelPriority = 0;
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
-struct TransportRegistration {
+struct TORCH_API TransportRegistration {
   std::shared_ptr<tensorpipe::transport::Context> transport;
   int64_t priority;
   std::string address;
@@ -71,7 +71,7 @@ struct TransportRegistration {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
-struct ChannelRegistration {
+struct TORCH_API ChannelRegistration {
   std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 };
@@ -81,7 +81,7 @@ C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
-struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
+struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
   TensorPipeRpcBackendOptions(
       int numWorkerThreads,
       optional<std::vector<std::string>> transports,
@@ -146,13 +146,13 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
 };
 
 // Struct to track the network source metrics
-struct NetworkSourceInfo {
+struct TORCH_API NetworkSourceInfo {
   worker_id_t srcRank;
   std::vector<uint8_t> srcMachineAddr;
 };
 
 // Struct to track aggregated network metrics
-struct AggregatedNetworkData {
+struct TORCH_API AggregatedNetworkData {
   uint64_t numCalls{0};
   uint64_t totalSentBytes{0};
   uint64_t totalRecvBytes{0};
@@ -163,7 +163,7 @@ struct AggregatedNetworkData {
 // to transparently move tensors and payloads through the fastest available
 // transport or channel. It acts like a hybrid RPC transport, providing shared
 // memory (linux) and TCP (linux & mac) support. CUDA support is in progress.
-class TensorPipeAgent : public RpcAgent {
+class TORCH_API TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
       const c10::intrusive_ptr<::c10d::Store>& store,
