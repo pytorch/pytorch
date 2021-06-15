@@ -290,10 +290,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if is_reference and self.binary_op in binary_reference_op_supported_dtypes and \
                 dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
             if dtypes in binary_op_int8_dtypes:
-                args = load_arg(quantized=[0, 1])(node.args)
-                args = load_arg(quantized=False)(node.args)
-                kwargs = load_arg(quantized=False)(node.kwargs)
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
+                args = load_arg(quantized=[torch.quint8, torch.qint8])(node.args)
+                args = load_arg(quantized=torch.float)(node.args)
+                kwargs = load_arg(quantized=torch.float)(node.kwargs)
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
@@ -305,7 +305,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     "No implementation found for dtype combination: {}"
                     "for op {} with is_reference={} despite it being listed as supported"
                     "this should not happen".format(dtypes, self.binary_op, is_reference))
-                return quantized_graph.node_copy(node, load_arg(quantized=False))
+                return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
         elif not is_reference and self.binary_op in binary_op_supported_dtypes and \
                 dtypes in binary_op_supported_dtypes[self.binary_op]:
             if dtypes in [(torch.quint8, torch.qint8, None)]:
@@ -336,7 +336,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                             node.name, scale, zero_point, modules,
                             quantized_graph, node_name_to_scope)
                     kwargs = {**self.binary_op_node.kwargs}
-                    add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
+                    add_args = (*load_arg(quantized=activation_dtype(qconfig))(self.binary_op_node.args), scale_arg, zero_point_arg)
                     op = quantized_graph.create_node(
                         'call_function', self.quantized_binary_op, add_args, kwargs)
                     return op
@@ -344,14 +344,14 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 assert dtypes == (torch.float16, torch.float16, None)
                 # TODO (refactor) this is duplicated, maybe have a helper function
                 if self.relu_node:
-                    op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
+                    op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
                     relu_args = [op_out]
-                    relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
-                    relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                    relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                    relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
                     op_out = quantized_graph.create_node(
                         "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
                 else:
-                    op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
+                    op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return quantized_graph.create_node(
                     "call_method", "to", (op_out, torch.float16,), {}
                 )
@@ -373,14 +373,14 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                           )
             )
             if self.relu_node:
-                op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
+                op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
                 relu_args = [op_out]
-                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
-                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
                 return quantized_graph.create_node(
                     "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
             else:
-                return quantized_graph.node_copy(node, load_arg(quantized=False))
+                return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
 
 
 @register_quant_pattern(torch.cat)
@@ -396,7 +396,7 @@ class CatQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
-        return quantized_graph.node_copy(node, load_arg(quantized=True))
+        return quantized_graph.node_copy(node, load_arg(quantized=torch.quint8))
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
@@ -472,14 +472,14 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 "supported by Conv "
                 "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             if self.relu_node:
-                conv_out = quantized_graph.node_copy(self.conv_node, load_arg(quantized=False))
+                conv_out = quantized_graph.node_copy(self.conv_node, load_arg(quantized=torch.float))
                 relu_args = [conv_out]
-                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
-                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
                 return quantized_graph.create_node(
                     "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
             else:
-                return quantized_graph.node_copy(node, load_arg(quantized=False))
+                return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
 
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
 
@@ -504,20 +504,20 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             return quantized_graph.create_node(
                 'call_module',
                 self.conv_node.target,
-                (load_arg(quantized=True)(self.conv_node.args[0]),),
+                (load_arg(quantized=torch.quint8)(self.conv_node.args[0]),),
                 {})
         else:  # call_function
             assert self.conv_node.op == "call_function"
             if is_reference:
-                args = load_arg(quantized=[0, 1])(self.conv_node.args)
-                args = load_arg(quantized=False)(self.conv_node.args)
-                kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
+                args = load_arg(quantized=[torch.quint8, torch.qint8])(self.conv_node.args)
+                args = load_arg(quantized=torch.float)(self.conv_node.args)
+                kwargs = load_arg(quantized=torch.float)(self.conv_node.kwargs)
                 op_out = quantized_graph.create_node(
                     "call_function", self.conv, args, kwargs)
                 if self.relu_node:
                     relu_args = [op_out]
-                    relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
-                    relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                    relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                    relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
                     op_out = quantized_graph.create_node(
                         "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
 
@@ -542,10 +542,10 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             else:
                 assert len(self.conv_node.args) >= 7, \
                     "only conv2d calls with all arguments specified is supported right now in is_reference=False option"
-                args = load_arg(quantized=[0, 1])(self.conv_node.args)
+                args = load_arg(quantized={0: torch.quint8, 1:torch.qint8})(self.conv_node.args)
                 # pack weight
-                weight = load_arg(quantized=True)(self.conv_node.args[1])
-                other_args = load_arg(quantized=False)(self.conv_node.args[2:])
+                weight = load_arg(quantized=torch.qint8)(self.conv_node.args[1])
+                other_args = load_arg(quantized=torch.float)(self.conv_node.args[2:])
                 bias, stride, padding, dilation, groups = other_args
                 if self.conv == torch.nn.functional.conv1d:
                     # F.conv1d can take `int` as well as `list[int]` for stride,
@@ -563,7 +563,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # construct conv input
                 if activation_int8_quantized:
                     qconv_op = get_qconv_op(self.conv, self.relu_node is not None)
-                    conv_input = load_arg(quantized=True)(self.conv_node.args[0])
+                    conv_input = load_arg(quantized=torch.quint8)(self.conv_node.args[0])
 
                     activation_post_process = \
                         self._maybe_get_last_node_only_observer(modules)
@@ -575,7 +575,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                             self.conv_node.name, scale, zero_point, modules,
                             quantized_graph, node_name_to_scope)
                     qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
-                    kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
+                    kwargs = load_arg(quantized=torch.float)(self.conv_node.kwargs)
                     op = quantized_graph.create_node(
                         'call_function', qconv_op, qconv_args, kwargs)
                     # Store the name of the fused op to get the path of node after fusion as well.
@@ -644,10 +644,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 "supported by Linear "
                 "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             if self.relu_node:
-                op_out = quantized_graph.node_copy(self.linear_node, load_arg(quantized=False))
+                op_out = quantized_graph.node_copy(self.linear_node, load_arg(quantized=torch.float))
                 relu_args = [op_out]
-                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
-                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
                 return quantized_graph.create_node(
                     "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
             else:
@@ -683,27 +683,30 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             parent_name, name = _parent_name(self.linear_node.target)
             setattr(modules[parent_name], name, quantized)
             # activation needs to be quantized for static quantization
+            dtype = torch.float
+            if activation_int8_quantized:
+                dtype = activation_dtype(qconfig)
             return quantized_graph.create_node(
                 'call_module',
                 self.linear_node.target,
-                (load_arg(quantized=activation_int8_quantized)(self.linear_node.args[0]),), {})
+                (load_arg(quantized=dtype)(self.linear_node.args[0]),), {})
         else:  # call_function
             assert self.linear_node.op == 'call_function'
             if is_reference:
-                quantized_input_idxs = []
+                quantized_input_dtypes = [torch.float, torch.float]
                 if activation_int8_quantized:
-                    quantized_input_idxs.append(0)
+                    quantized_input_dtypes[0] = torch.quint8
                 if weight_is_statically_quantized(qconfig):
-                    quantized_input_idxs.append(1)
-                args = load_arg(quantized=quantized_input_idxs)(self.linear_node.args)
-                args = load_arg(quantized=False)(self.linear_node.args)
-                kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
+                    quantized_input_dtypes[1] = torch.qint8
+                args = load_arg(quantized=quantized_input_dtypes)(self.linear_node.args)
+                args = load_arg(quantized=torch.float)(self.linear_node.args)
+                kwargs = load_arg(quantized=torch.float)(self.linear_node.kwargs)
                 op_out = quantized_graph.create_node(
                     "call_function", torch.nn.functional.linear, args, kwargs)
                 if self.relu_node:
                     relu_args = [op_out]
-                    relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
-                    relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                    relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                    relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
                     op_out = quantized_graph.create_node(
                         "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
 
@@ -731,17 +734,19 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 if dtypes != (torch.float16, torch.float16, None):
                     # linear args
                     # (x, weight, bias, ...)
+                    # TODO: the name should be weight is int8 quantized
                     weight_quantized = weight_is_statically_quantized(qconfig)
-                    linear_weight = load_arg(quantized=weight_quantized)(self.linear_node.args[1])
+                    dtype = weight_dtype if weight_quantized else torch.float
+                    linear_weight = load_arg(quantized=dtype)(self.linear_node.args[1])
 
                     # get other arguments
-                    kwargs = {**load_arg(quantized=False)(self.linear_node.kwargs)}
+                    kwargs = {**load_arg(quantized=torch.float)(self.linear_node.kwargs)}
                     # pack weight
                     bias = None
                     # all args after bias, including bias
-                    other_args = load_arg(quantized=False)(self.linear_node.args[2:])
+                    other_args = load_arg(quantized=torch.float)(self.linear_node.args[2:])
                     if len(self.linear_node.args) > 2:
-                        bias = load_arg(quantized=False)(self.linear_node.args[2])
+                        bias = load_arg(quantized=torch.float)(self.linear_node.args[2])
                         other_args = other_args[1:]  # remove the bias argument
                     else:
                         assert 'bias' in kwargs, \
@@ -755,7 +760,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # construct linear input
                 if activation_int8_quantized:
                     qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
-                    linear_input = load_arg(quantized=True)(self.linear_node.args[0])
+                    linear_input = load_arg(quantized=torch.quint8)(self.linear_node.args[0])
                     activation_post_process = \
                         self._maybe_get_last_node_only_observer(modules)
                     assert activation_post_process is not None
@@ -779,7 +784,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     qlinear_op = torch.ops.quantized.linear_dynamic \
                         if weight_dtype == torch.qint8 \
                         else torch.ops.quantized.linear_dynamic_fp16
-                    linear_input = load_arg(quantized=False)(self.linear_node.args[0])
+                    linear_input = load_arg(quantized=torch.float)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore[assignment]
                     op_out = quantized_graph.create_node(
                         "call_function", qlinear_op, qlinear_args, kwargs)
@@ -794,14 +799,14 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     assert dtypes == (torch.float16, torch.float16, None)
                     # TODO (refactor) this is duplicated, maybe have a helper function
                     if self.relu_node:
-                        op_out = quantized_graph.node_copy(self.linear_node, load_arg(quantized=False))
+                        op_out = quantized_graph.node_copy(self.linear_node, load_arg(quantized=torch.float))
                         relu_args = [op_out]
-                        relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
-                        relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                        relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
+                        relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
                         op_out = quantized_graph.create_node(
                             "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
                     else:
-                        op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
+                        op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                     return quantized_graph.create_node(
                         "call_method", "to", (op_out, torch.float16), {})
 
@@ -844,7 +849,7 @@ class BatchNormQuantizeHandler(QuantizeHandler):
             'call_module',
             self.bn_node.target,
             load_arg(quantized=[0])(self.bn_node.args),
-            load_arg(quantized=False)(self.bn_node.kwargs))
+            load_arg(quantized=torch.float)(self.bn_node.kwargs))
 
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
@@ -895,8 +900,8 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
         return quantized_graph.create_node(
             'call_module',
             emb_node.target,
-            load_arg(quantized=False)(emb_node.args),
-            load_arg(quantized=False)(emb_node.kwargs))
+            load_arg(quantized=torch.float)(emb_node.args),
+            load_arg(quantized=torch.float)(emb_node.kwargs))
 
 # TODO (maybe): merge with embedding quantize handler
 @register_quant_pattern(torch.nn.GRUCell)
@@ -949,8 +954,8 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
         return quantized_graph.create_node(
             'call_module',
             node.target,
-            load_arg(quantized=False)(node.args),
-            load_arg(quantized=False)(node.kwargs))
+            load_arg(quantized=torch.float)(node.args),
+            load_arg(quantized=torch.float)(node.kwargs))
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
@@ -1052,7 +1057,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 "dtype combination: {} is not "
                 "supported by {} "
                 "supported dtype combinations are: {}".format(dtypes, self.op, supported_dtypes[self.op]))
-            return quantized_graph.node_copy(node, load_arg(quantized=False))
+            return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
         # TODO: make helper functions for (torch.quint8, torch.qint8, None)
         if not is_reference:
             if dtypes in [(torch.quint8, torch.qint8, None)]:
@@ -1071,7 +1076,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                         'call_module',
                         node.target,
                         load_arg(quantized=[0])(node.args),
-                        load_arg(quantized=False)(node.kwargs))
+                        load_arg(quantized=torch.float)(node.kwargs))
                 else:
                     assert node.op == "call_function"
                     # call_function
@@ -1087,7 +1092,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     "call_function to be a function instead of a string"
                     quantized_op = get_quantized_operator(node.target)
                     args = load_arg(quantized=[0])(node.args)
-                    kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg,
+                    kwargs = {**load_arg(quantized=torch.float)(node.kwargs), "output_scale": scale_arg,
                               "output_zero_point": zero_point_arg}
                     if quantized_op in ARGS_TO_SKIP:
                         args_to_skip = ARGS_TO_SKIP[quantized_op]
@@ -1102,16 +1107,16 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 warnings.warn(
                     "Only reference patterns are currently supported for {dtype} dtype with {op} op"
                     "".format(dtype=dtypes, op=self.op))
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return quantized_graph.create_node(
                     "call_method", "to", (op_out, torch.float16), {})
         else:
             assert is_reference
             if dtypes in [(torch.quint8, torch.qint8, None)]:
                 load_arg(quantized=[0])(node.args)
-                args = load_arg(quantized=False)(node.args)
-                kwargs = load_arg(quantized=False)(node.kwargs)
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
+                args = load_arg(quantized=torch.float)(node.args)
+                kwargs = load_arg(quantized=torch.float)(node.kwargs)
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
@@ -1120,7 +1125,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
             else:
                 assert dtypes in [(torch.float16, torch.float16, None)]
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return quantized_graph.create_node(
                     "call_method", "to", (op_out, torch.float16), {})
 
@@ -1148,7 +1153,7 @@ class ELUQuantizeHandler(QuantizeHandler):
 
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
-        kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale_arg, 'output_zero_point': zero_point_arg}
+        kwargs = {**load_arg(quantized=torch.float)(node.kwargs), 'output_scale': scale_arg, 'output_zero_point': zero_point_arg}
         kwargs.pop('inplace')
         return quantized_graph.create_node(
             'call_function', quantized_op, args, kwargs)  # type: ignore[arg-type]
@@ -1210,7 +1215,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes == (torch.float16, torch.float16, None):
-            op_out = quantized_graph.node_copy(node, load_arg(quantized=False))
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
             return quantized_graph.create_node(
                 "call_method", "to", (op_out, torch.float16,), {}
             )
