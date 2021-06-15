@@ -955,11 +955,6 @@ void lu_solve_trans_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivo
   });
 }
 
-// This is a type dispatching helper function for 'apply_lu_solve'
-void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_kernel(b, lu, pivots, /*trans=*/'N');
-}
-
 } // anonymous namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1046,11 +1041,6 @@ REGISTER_ARCH_DISPATCH(lu_stub, DEFAULT, &lu_kernel);
 REGISTER_AVX_DISPATCH(lu_stub, &lu_kernel);
 REGISTER_AVX2_DISPATCH(lu_stub, &lu_kernel);
 REGISTER_VSX_DISPATCH(lu_stub, &lu_kernel);
-
-REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
-REGISTER_AVX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
-REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel);
-REGISTER_VSX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
 REGISTER_AVX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);

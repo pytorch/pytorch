@@ -3562,7 +3562,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-DEFINE_DISPATCH(lu_solve_stub);
 DEFINE_DISPATCH(lu_solve_trans_stub);
 
 // Supports arbitrary batch dimensions for self and LU_data (implicitly LU_pivots also)
@@ -3595,7 +3594,7 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
   IntArrayRef new_pivots_sizes(LU_data_broadcasted.sizes().data(), LU_data_broadcasted.dim() - 1);
   Tensor LU_pivots_broadcasted = LU_pivots.expand(new_pivots_sizes);
 
-  // lu_solve_stub (apply_lu_solve) requires batched column major (Fortran-contiguous) tensors
+  // lu_solve_trans_stub (apply_lu_solve) requires batched column major (Fortran-contiguous) tensors
   // 'result' tensor is modified in-place and must be a copy of 'self_broadcasted'
   Tensor result = cloneBatchedColumnMajor(self_broadcasted);
 
@@ -3604,7 +3603,7 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
   Tensor LU_data_working_copy = is_LU_data_batched_column_major ? LU_data_broadcasted : cloneBatchedColumnMajor(LU_data_broadcasted);
   Tensor LU_pivots_working_copy = LU_pivots_broadcasted.is_contiguous() ? LU_pivots_broadcasted : LU_pivots_broadcasted.contiguous();
 
-  lu_solve_stub(self.device().type(), result, LU_data_working_copy, LU_pivots_working_copy);
+  lu_solve_trans_stub(self.device().type(), result, LU_data_working_copy, LU_pivots_working_copy, /*trans=*/'N');
   return result;
 }
 

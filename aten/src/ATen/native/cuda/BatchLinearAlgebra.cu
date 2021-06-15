@@ -2875,12 +2875,6 @@ static void lu_solve_trans_magma(const Tensor& b, const Tensor& lu, const Tensor
 
 REGISTER_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_magma);
 
-static void lu_solve_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_magma(b, lu, pivots, /*trans=*/'N');
-}
-
-REGISTER_DISPATCH(lu_solve_stub, &lu_solve_magma);
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
