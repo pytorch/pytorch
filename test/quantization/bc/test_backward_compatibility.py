@@ -2,7 +2,7 @@
 
 import sys
 import os
-
+import unittest 
 # torch
 import torch
 import torch.nn as nn
@@ -11,7 +11,7 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 
 # Testing utils
-from torch.testing._internal.common_utils import TestCase, is_aten_cpu_capability_avx512
+from torch.testing._internal.common_utils import TestCase, IS_ATEN_CPU_CAPABILITY_AVX512
 from torch.testing._internal.common_quantized import override_qengines, qengine_is_fbgemm
 
 def remove_prefix(text, prefix):
@@ -216,7 +216,7 @@ class TestSerialization(TestCase):
             # TODO: graph mode quantized conv3d module
 
     @override_qengines
-    @unittest.skipIf(is_aten_cpu_capability_avx512, "This test fails on Intel Cascade Lake machines. Ref: Issue 59098")
+    @unittest.skipIf(IS_ATEN_CPU_CAPABILITY_AVX512, "This test fails on Intel Cascade Lake machines. Ref: Issue 59098")
     def test_lstm(self):
         class LSTMModule(torch.nn.Module):
             def __init__(self):

@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    skipIfRocm, is_aten_cpu_capability_avx512
+    skipIfRocm, IS_ATEN_CPU_CAPABILITY_AVX512
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -249,7 +249,7 @@ class TestOptim(TestCase):
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
 
-    @unittest.skipIf(is_aten_cpu_capability_avx512, "This test's flakiness is visible with AVX512. Ref: Issue 56187")
+    @unittest.skipIf(IS_ATEN_CPU_CAPABILITY_AVX512, "This test's flakiness is visible with AVX512. Ref: Issue 56187")
     def test_sgd(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
             self._test_basic_cases(
