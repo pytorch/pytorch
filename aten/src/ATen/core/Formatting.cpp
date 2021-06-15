@@ -33,203 +33,141 @@ private:
   std::ios saved;
 };
 
+struct Formatter {
+  Formatter(const Tensor& self) 
+  : sz_(1), intMode_(true), sciMode_(false) {
+    std::stringstream ss;
+
+    Tensor mask = (self.ne(at::Scalar(0))).__and__(self.isfinite());
+    Tensor nonzeroFiniteVals = self.masked_select(mask);
+
+    if (nonzeroFiniteVals.numel() == 0){
+      return;
+    }
+
+    Tensor nonzeroFiniteAbs = nonzeroFiniteVals.abs();
+    double nonZeroFiniteMin = nonzeroFiniteAbs.min().item<double>();
+    double nonZeroFiniteMax = nonzeroFiniteAbs.max().item<double>();
+
+    auto size = nonzeroFiniteVals.numel();
+    auto nzf_p = nonzeroFiniteVals.data_ptr<double>();
+
+    for (int64_t i = 0; i < size; i++) {
+      auto z = nzf_p[i];
+      if (z != std::ceil(z)) {
+        intMode_ = false;
+        break;
+      }
+    }
+
+    if (intMode_) {
+      if ((nonZeroFiniteMax / nonZeroFiniteMin) > 1000. ||
+          nonZeroFiniteMax > 1.e8) {
+        sciMode_ = true;
+        ss << std::scientific << std::setprecision(4);
+      } else {
+        ss << std::defaultfloat;
+      }
+    } else {
+      if ((nonZeroFiniteMax / nonZeroFiniteMin) > 1000. ||
+          nonZeroFiniteMax > 1.e8 || nonZeroFiniteMin < 1.e-4) {
+        sciMode_ = true;
+        ss << std::scientific << std::setprecision(4);
+      } else {
+        ss << std::fixed << std::setprecision(4);
+      }
+    }
+
+    for (int64_t i = 0; i < nzfValsSize; i++) {
+      ss << nzf_p[i];
+      sz_ = std::max(sz_, (int64_t) ss.str().length());
+      ss.str("");
+    }
+  }
+
+  std::string format(double value, bool isFloatingDtype) const {
+    std::stringstream ss;
+
+    if (isFloatingDtype) {
+      if (sciMode_) {
+        ss << std::scientific << std::setprecision(4);
+        ss << std::setw(sz_) << value;
+      } else if (intMode_) {
+        ss << defaultfloat;
+        if (std::isfinite(value)) {
+          ss << std::setw(sz_) << value << ".";
+        } else {
+          ss << std::setw(sz_) << value ;
+        }
+      } else {
+        ss << std::fixed << std::setprecision(4);
+        ss << std::setw(sz_) << value;
+      }
+    } else {
+      ss << defaultfloat;
+      ss << std::setw(sz_) << value;
+    }
+    return ss.str();
+  }
+
+private:
+  int64_t sz_;
+  bool intMode_;
+  bool sciMode_;
+};
+
 std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {
   return out << t.toString();
 }
 
-static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Tensor& self) {
-  auto size = self.numel();
-  if(size == 0) {
-    return std::make_tuple(1., 0);
-  }
-  bool intMode = true;
-  auto self_p = self.data_ptr<double>();
-  for(int64_t i = 0; i < size; i++) {
-    auto z = self_p[i];
-    if(std::isfinite(z)) {
-      if(z != std::ceil(z)) {
-        intMode = false;
-        break;
+std::string __vectorString( const Tensor& tensor_, const Formatter& formatter, bool isFloatingDtype) {
+  std::stringstream ss;
+  if (tensor_.numel() > 0) {
+    double* tensor_p = tensor_.data_ptr<double>();
+    ss << "[";
+    for (int64_t i = 0; i < tensor_.size(0); i++) {
+      ss << formatter.format(tensor_p[i], isFloatingDtype);
+      if (i < tensor_.size(0) - 1) {
+        ss << ", ";
       }
     }
+    ss << "]";
   }
-  int64_t offset = 0;
-  while(!std::isfinite(self_p[offset])) {
-    offset = offset + 1;
-    if(offset == size) {
-      break;
-    }
-  }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double expMin;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double expMax;
-  if(offset == size) {
-    expMin = 1;
-    expMax = 1;
+  return ss.str();
+}
+
+std::string __tensorString(const Tensor & tensor_, const Formatter& formatter, int64_t indent, bool isFloatingDtype){
+  std::stringstream ss ;
+  std::vector<std::string> slices;
+  int64_t dim = tensor_.dim();
+
+  if (dim == 0) {
+    ss << defaultfloat << tensor_.data_ptr<double>()[0] << std::endl;
+    ss << "[ " << tensor_.toString() << "{}";
+    return ss.str();
+  } else if (dim == 1) {
+    return __vectorString(tensor_, formatter, isFloatingDtype);
   } else {
-    expMin = fabs(self_p[offset]);
-    expMax = fabs(self_p[offset]);
-    for(int64_t i = offset; i < size; i++) {
-      double z = fabs(self_p[i]);
-      if(std::isfinite(z)) {
-        if(z < expMin) {
-          expMin = z;
-        }
-        if(self_p[i] > expMax) {
-          expMax = z;
-        }
-      }
-    }
-    if(expMin != 0) {
-      expMin = std::floor(std::log10(expMin)) + 1;
-    } else {
-      expMin = 1;
-    }
-    if(expMax != 0) {
-      expMax = std::floor(std::log10(expMax)) + 1;
-    } else {
-      expMax = 1;
+    for ( int64_t i = 0; i < tensor_.size(0); i++){
+      slices.push_back(__tensorString(tensor_.select(0, i), formatter, indent+1, isFloatingDtype));
     }
   }
-  double scale = 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t sz;
-  if(intMode) {
-    if(expMax > 9) {
-      sz = 11;
-      stream << std::scientific << std::setprecision(4);
-    } else {
-      sz = expMax + 1;
-      stream << defaultfloat;
-    }
-  } else {
-    if(expMax-expMin > 4) {
-      sz = 11;
-      if(std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
-        sz = sz + 1;
+  ss << "[";
+  for (unsigned long i = 0; i < slices.size(); i++){
+    if (i < slices.size() - 1){
+      ss << slices[i] << "," ;
+      for (int64_t d = 0; d < dim-1; d++){
+        ss << std::endl;
       }
-      stream << std::scientific << std::setprecision(4);
-    } else {
-      if(expMax > 5 || expMax < 0) {
-        sz = 7;
-        scale = std::pow(10, expMax-1);
-        stream << std::fixed << std::setprecision(4);
-      } else {
-        if(expMax == 0) {
-          sz = 7;
-        } else {
-          sz = expMax+6;
-        }
-        stream << std::fixed << std::setprecision(4);
+      for(int64_t i = 0; i < indent+1; i++) {
+        ss << " ";
       }
+    } else {
+      ss << slices[i];
     }
   }
-  return std::make_tuple(scale, sz);
-}
-
-static void __printIndent(std::ostream &stream, int64_t indent)
-{
-  for(int64_t i = 0; i < indent; i++) {
-    stream << " ";
-  }
-}
-
-static void printScale(std::ostream & stream, double scale) {
-  FormatGuard guard(stream);
-  stream << defaultfloat << scale << " *" << std::endl;
-}
-static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
-{
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double scale;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t sz;
-  std::tie(scale, sz) = __printFormat(stream, self);
-
-  __printIndent(stream, indent);
-  int64_t nColumnPerLine = (linesize-indent)/(sz+1);
-  int64_t firstColumn = 0;
-  int64_t lastColumn = -1;
-  while(firstColumn < self.size(1)) {
-    if(firstColumn + nColumnPerLine <= self.size(1)) {
-      lastColumn = firstColumn + nColumnPerLine - 1;
-    } else {
-      lastColumn = self.size(1) - 1;
-    }
-    if(nColumnPerLine < self.size(1)) {
-      if(firstColumn != 0) {
-        stream << std::endl;
-      }
-      stream << "Columns " << firstColumn+1 << " to " << lastColumn+1;
-      __printIndent(stream, indent);
-    }
-    if(scale != 1) {
-      printScale(stream,scale);
-      __printIndent(stream, indent);
-    }
-    for(int64_t l = 0; l < self.size(0); l++) {
-      Tensor row = self.select(0,l);
-      double *row_ptr = row.data_ptr<double>();
-      for(int64_t c = firstColumn; c < lastColumn+1; c++) {
-        stream << std::setw(sz) << row_ptr[c]/scale;
-        if(c == lastColumn) {
-          stream << std::endl;
-          if(l != self.size(0)-1) {
-            if(scale != 1) {
-              __printIndent(stream, indent);
-              stream << " ";
-            } else {
-              __printIndent(stream, indent);
-            }
-          }
-        } else {
-          stream << " ";
-        }
-      }
-    }
-    firstColumn = lastColumn + 1;
-  }
-}
-
-void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
-{
-  std::vector<int64_t> counter(self.ndimension()-2);
-  bool start = true;
-  bool finished = false;
-  counter[0] = -1;
-  for(size_t i = 1; i < counter.size(); i++)
-    counter[i] = 0;
-  while(true) {
-    for(int64_t i = 0; self.ndimension()-2; i++) {
-      counter[i] = counter[i] + 1;
-      if(counter[i] >= self.size(i)) {
-        if(i == self.ndimension()-3) {
-          finished = true;
-          break;
-        }
-        counter[i] = 0;
-      } else {
-        break;
-      }
-    }
-    if(finished) {
-      break;
-    }
-    if(start) {
-      start = false;
-    } else {
-      stream << std::endl;
-    }
-    stream << "(";
-    Tensor tensor = self;
-    for(int64_t i=0; i < self.ndimension()-2; i++) {
-      tensor = tensor.select(0, counter[i]);
-      stream << counter[i]+1 << ",";
-    }
-    stream << ".,.) = " << std::endl;
-    __printMatrix(stream, tensor, linesize, 1);
-  }
+  ss << "]";
+  return ss.str();
 }
 
 std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
@@ -243,7 +181,8 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else {
-    Tensor tensor;
+    bool isFloatingDtype =  tensor_.is_floating_point();
+    Tensor tensor;    
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
     } else if (tensor_.is_mkldnn()) {
@@ -252,40 +191,20 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     } else {
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }
-    if(tensor.ndimension() == 0) {
-      stream << defaultfloat << tensor.data_ptr<double>()[0] << std::endl;
-      stream << "[ " << tensor_.toString() << "{}";
-    } else if(tensor.ndimension() == 1) {
-      if (tensor.numel() > 0) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        double scale;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int64_t sz;
-        std::tie(scale, sz) =  __printFormat(stream, tensor);
-        if(scale != 1) {
-          printScale(stream, scale);
-        }
-        double* tensor_p = tensor.data_ptr<double>();
-        for (int64_t i = 0; i < tensor.size(0); i++) {
-          stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
-        }
-      }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "}";
-    } else if(tensor.ndimension() == 2) {
-      if (tensor.numel() > 0) {
-        __printMatrix(stream, tensor, linesize, 0);
-      }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "}";
-    } else {
-      if (tensor.numel() > 0) {
-        __printTensor(stream, tensor, linesize);
-      }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
-      for(int64_t i = 1; i < tensor.ndimension(); i++) {
-        stream << "," << tensor.size(i);
-      }
-      stream << "}";
+
+    std::string prefix = "tensor(";
+    int64_t indent = prefix.length();
+    stream << prefix;
+    Formatter formatter(tensor);
+    std::string tensorStr = __tensorString(tensor, formatter, indent, isFloatingDtype);
+    stream << tensorStr << ")" << std::endl;
+
+    stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
+    for(int64_t i = 1; i < tensor.ndimension(); i++) {
+      stream << "," << tensor.size(i);
     }
+    stream << "}";
+
     if (tensor_.is_quantized()) {
       stream << ", qscheme: " << toString(tensor_.qscheme());
       if (tensor_.qscheme() == c10::kPerTensorAffine) {
