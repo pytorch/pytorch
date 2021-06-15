@@ -103,7 +103,9 @@ Tensor cudnn_convolution_plumbing(
 
   // conv2d that we have a batch rule for
   if (self.dim() == 4) {
-    return at::conv2d(self, weight, nullopt, stride, padding, dilation, groups);
+    // Contiguous because usually conv is followed by BN and BN calls .contiguous
+    // which can fail due to https://github.com/facebookresearch/functorch/issues/55
+    return at::conv2d(self, weight, nullopt, stride, padding, dilation, groups).contiguous();
   }
 
   static auto op = c10::Dispatcher::singleton()
@@ -171,7 +173,7 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
   if (self_bdim.has_value() && self_value.dim() == 5 && first_dim_has_size_1(self_value, *self_bdim) && grad_output_bdim.has_value() && !weight_bdim.has_value()) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     auto result = cudnn_conv_per_sample_grad_rule(
-        self_value, self_bdim, 
+        self_value, self_bdim,
         grad_output_value, grad_output_bdim,
         weight_value, weight_bdim,
         padding, stride, dilation, groups,
@@ -190,6 +192,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("conv2d", conv2d_batching_rule);
   m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
-  // m.impl("cudnn_convolution", cudnn_convolution_plumbing);
+  m.impl("cudnn_convolution", cudnn_convolution_plumbing);
 }
 }}
