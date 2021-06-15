@@ -1526,8 +1526,9 @@ def type_as(g, self, other):
             # We don't know the type of other, bail by emitting ATen
             return g.op("ATen", self, other, operator_s="type_as")
         else:
-            raise RuntimeError("Unsupported: ONNX export of type_as for tensor "
-                               "of unknown dtype.")
+            raise RuntimeError('Unsupported: ONNX export of type_as for tensor '
+                               'of unknown dtype. Please check if the dtype of the '
+                               'parameter passed to the type_as function is correct.')
 
 
 @parse_args("v", "v", "i", "f")
