@@ -8,10 +8,10 @@ import numpy as np
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
+    (TestCase, compare_with_reference, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, suppress_warnings, numpy_to_torch_dtype_dict, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, test_funcs, _NOTHING)
+    (op_db, _NOTHING)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -22,7 +22,8 @@ from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 from collections.abc import Sequence
 
 
-only_testing_ops = list(filter(lambda op: op.ref is not _NOTHING, test_funcs))
+# Get names of all the operators which have ref in their entry in OpInfo (testing infra)
+ref_test_ops = list(filter(lambda op: op.ref is not _NOTHING, op_db))
 
 
 # Tests that apply to all operators
@@ -70,16 +71,23 @@ class TestOpInfo(TestCase):
         else:
             self.assertEqual(actual, expected, msg, exact_device=False, **kwargs)
 
+    # Tests that the function and its (array-accepting) reference produce the same
+    #   values on given tensors
+    """
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
             if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
                 exact_dtype = False
 
             if dtype in [torch.uint8, torch.int8, torch.bool]:
+                # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
+                # while NumPy computes in float16
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype,
                                        exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
 
             elif dtype is torch.bfloat16:
+                # TODO: This file will dynamically change, ideally not good to share link to the line number
+                # Ref: https://github.com/pytorch/pytorch/blog/master/torch/testing/_internal/common_utils.py#L1149
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype,
                                        exact_dtype=exact_dtype, rtol=16e-3, atol=1e-5)
 
@@ -89,27 +97,36 @@ class TestOpInfo(TestCase):
         for sample_input in tensors:
             sample_args = sample_input.args
             sample_kwargs = sample_input.kwargs
-            sample_input = sample_input.input
-            torch_kwargs, numpy_kwargs = op.sample_kwargs(sample_input.device, dtype, sample_input)
+            sample_torch_input = sample_input.input
+            torch_kwargs, numpy_kwargs = op.sample_kwargs(sample_torch_input.device, dtype, sample_torch_input)
             numpy_args = []
+            out_numpy_dtype = None
+
             if dtype is torch.bfloat16:
                 for sample_arg in sample_args:
-                    numpy_arg = sample_arg.cpu().to(torch.float32).numpy() if isinstance(sample_arg, torch.Tensor) \
-                                    else sample_arg
+                    if isinstance(sample_arg, torch.Tensor):
+                        numpy_arg = sample_arg.cpu().to(torch.float32).numpy()
+                    else:
+                        return
                     numpy_args.append(numpy_arg)
-                sample_numpy_input = sample_input.cpu().clone().to(torch.float32).numpy()
+                sample_numpy_input = sample_torch_input.cpu().clone().to(torch.float32).numpy()
             else:
                 for sample_arg in sample_args:
-                    numpy_arg = sample_arg.cpu().numpy() if isinstance(sample_arg, torch.Tensor) else sample_arg
+                    if isinstance(sample_arg, torch.Tensor):
+                        numpy_arg = sample_arg.cpu().to(dtype).numpy()
+                    else:
+                        return
                     numpy_args.append(numpy_arg)
-                sample_numpy_input = sample_input.cpu().clone().numpy()
-            actual = op(sample_input, *sample_args, **torch_kwargs)
+                sample_numpy_input = sample_torch_input.cpu().to(dtype).numpy()
+
+            actual = op(sample_torch_input, *sample_args, **torch_kwargs)
             expected = op.ref(sample_numpy_input, *numpy_args, **numpy_kwargs)
 
-            if sample_input.numel() < 10:
+            # Crafts a custom error message for smaller, printable tensors
+            if sample_torch_input.numel() < 10:
                 msg = ("Failed to produce expected results! Input tensor was"
-                        " {0}, torch result is {1}, and reference result is"
-                        " {2}.").format(sample_input, actual, expected)
+                       " {0}, torch result is {1}, and reference result is"
+                       " {2}.").format(sample_torch_input, actual, expected)
             else:
                 msg = None
 
@@ -118,13 +135,18 @@ class TestOpInfo(TestCase):
                 _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan)
             else:
                 for x, y in zip(expected, actual):
+                    # Testing multi-outputs results
                     _helper_reference_numerics(x, y, msg, exact_dtype, equal_nan)
+    """
 
+    # Tests that the function and its (array-accepting) reference produce the same
+    #   values on the tensors from sample_inputs func for the corresponding op.
     @suppress_warnings
-    @ops(only_testing_ops)
+    @ops(ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
     def test_reference_testing(self, device, dtype, op):
-        tensors = op.sample_inputs(device, dtype)
-        self._test_reference_numerics(dtype, op, tensors)
+        sample_inputs = op.sample_inputs(device, dtype)
+        for sample_input in sample_inputs:
+            compare_with_reference(op, op.ref, sample_input)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype

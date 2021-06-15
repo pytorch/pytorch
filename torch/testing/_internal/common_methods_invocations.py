@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import \
 from setuptools import distutils
 
 if TEST_SCIPY:
+    import scipy
     import scipy.special
 
 
@@ -146,6 +147,26 @@ class SampleInput(object):
 
         return self._repr_helper(formatter)
 
+    def splat(self):
+        # TODO: Is this required? op(sample.splat()) doesn't work
+        # TODO: This needs comment
+        return (self.input, self.args, self.kwargs)
+
+    def numpy(self):
+        # Returns the NumPy version of the input
+        # Only supports torch.Tensor objects, if an arg is a scalar - a TypeError will be raised
+        sample_torch_input, sample_args, sample_kwargs = self.splat()
+        numpy_args = list()
+
+        for sample_arg in sample_args:
+            if isinstance(sample_arg, torch.Tensor):
+                numpy_arg = sample_arg.cpu().numpy()
+            else:
+                raise TypeError(f"Only torch.Tensor types supported but got {type(sample_arg)}")
+            numpy_args.append(numpy_arg)
+        sample_numpy_input = sample_torch_input.cpu().numpy()
+
+        return (sample_numpy_input, numpy_args, sample_kwargs)
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
@@ -4399,18 +4420,24 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cdouble]),
                    )),
     OpInfo('add',
+           ref=np.add,
+           variant_test_name='test_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
            supports_inplace_autograd=False,
            supports_forward_ad=True),
     OpInfo('mul',
+           ref=np.multiply,
+           variant_test_name='test_mul',
            aliases=('multiply',),
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            assert_autodiffed=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_binary_pwise),
     OpInfo('sub',
+           ref=np.subtract,
+           variant_test_name='test_subtract',
            aliases=('subtract',),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            assert_autodiffed=True,
@@ -4485,6 +4512,8 @@ op_db: List[OpInfo] = [
                         device_type='cuda', active_if=not SM53OrLater)),
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
+           ref=np.dot,
+           variant_test_name='test_dot',
            dtypes=all_types_and_complex_and(torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
@@ -4549,16 +4578,24 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     OpInfo('amax',
+           ref=np.amax,
+           variant_test_name='test_amax',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin,),
     OpInfo('amin',
+           ref=np.amin,
+           variant_test_name='test_amin',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin),
     OpInfo('argmax',
+           ref=np.argmax,
+           variant_test_name='test_argmax',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_argmax_argmin,),
     OpInfo('argmin',
+           ref=np.argmin,
+           variant_test_name='test_argmin',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_argmax_argmin,),
@@ -4644,6 +4681,8 @@ op_db: List[OpInfo] = [
                                 active_if=IS_WINDOWS),
                    )),
     OpInfo('atan2',
+           ref=np.arctan2,
+           variant_test_name='test_atan2',
            dtypes=all_types_and(torch.bool),
            dtypesIfCPU=all_types_and(torch.bool),
            dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -4680,6 +4719,8 @@ op_db: List[OpInfo] = [
                    dtypes=integral_types_and(torch.bool),
                    supports_autograd=False),
     OpInfo('cdist',
+           ref=scipy.spatial.distance.cdist if TEST_SCIPY else None,
+           variant_test_name='test_cdist',
            dtypes=floating_types(),
            supports_out=False,
            supports_gradgrad=False,
@@ -4692,6 +4733,8 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    assert_autodiffed=True),
     OpInfo('cholesky',
+           ref=np.linalg.cholesky,
+           variant_test_name='test_cholesky',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
@@ -5907,6 +5950,7 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('roll',
            ref=np.roll,
+           variant_test_name='test_roll',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            sample_inputs_func=sample_inputs_roll),
@@ -6407,6 +6451,8 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                         device_type='cuda', dtypes=integral_types_and(torch.bfloat16)))),
     OpInfo('svd',
+           ref=scipy.linalg.svd if TEST_SCIPY else _NOTHING,
+           variant_test_name='test_svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_svd,
