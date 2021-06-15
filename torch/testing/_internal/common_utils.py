@@ -933,6 +933,7 @@ def compare_with_reference(torch_fn, ref_fn, sample_input):
     try:
         n_inp, n_args, _ = sample_input.numpy()
     except TypeError:
+        # TODO: This needs a comment
         return
     t_inp, t_args, _ = sample_input.splat()
 
