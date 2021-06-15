@@ -4930,6 +4930,7 @@ class ModuleTest(object):
         self.test_cpu = kwargs.get('test_cpu', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
+        self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         if self.is_criterion_test:
             self._required_arg_names.add('target')
             self.check_half = kwargs.get('check_half', True)
@@ -4947,7 +4948,6 @@ class ModuleTest(object):
             self.skip_double = kwargs.get('skip_double', False)
             self.skip_half = kwargs.get('skip_half', False)
             self.with_tf32 = kwargs.get('with_tf32', False)
-            self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
 
     def get_name(self):
         if self.fullname is not None:
@@ -5195,46 +5195,41 @@ class ModuleTest(object):
             torch.set_num_threads(num_threads)
 
         # === Check gradients. ===
-        if self.is_criterion_test:
-            params = tuple(x for x in module.parameters())
-            if not isinstance(input, tuple):
-                inputs = (input,) + params + (target,)
 
-                def apply_fn(input, target, *params):
-                    return module(input, target)
-            else:
-                inputs = input + params + (target,)
-
-                def apply_fn(input1, input2, target, *params):  # type: ignore[misc]
-                    return module(input1, input2, target)
-
-            gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
-
-            if self.check_gradgrad:
-                gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
+        # gradcheck doesn't support operators that take in dense inputs but
+        # return sparse parameters. This only happens in the case of nn.Embedding
+        # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
+        # is a slightly different version of gradcheck that can handle this.
+        if self.has_sparse_gradients:
+            assert len(input_tuple) == 1
+            test_input_jacobian = torch.is_floating_point(input_tuple[0])
+            test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
             params = tuple(x for x in module.parameters())
-            num_inputs = len(input_tuple)
+            if self.is_criterion_test:
+                if not isinstance(input, tuple):
+                    inputs = (input,) + params + (target,)
 
-            def fn_to_gradcheck(*inputs_and_params, **kwargs):
-                assert not kwargs
-                return test_case._forward(module, inputs_and_params[:num_inputs])
+                    def fn_to_gradcheck(input, target, *params):
+                        return module(input, target) + 0.1
+                else:
+                    inputs = input + params + (target,)
 
-            # gradcheck doesn't support operators that take in dense inputs but
-            # return sparse parameters. This only happens in the case of nn.Embedding
-            # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
-            # is a slightly different version of gradcheck that can handle this.
-            if self.has_sparse_gradients:
-                assert num_inputs == 1
-                test_input_jacobian = torch.is_floating_point(input_tuple[0])
-                test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
+                    def fn_to_gradcheck(input1, input2, target, *params):  # type: ignore[misc]
+                        return module(input1, input2, target) + 0.1
             else:
-                test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
-                                               check_batched_grad=self.check_batched_grad))
+                inputs = input_tuple + params
+                num_inputs = len(input_tuple)
 
+                def fn_to_gradcheck(*inputs_and_params, **kwargs):
+                    assert not kwargs
+                    return test_case._forward(module, inputs_and_params[:num_inputs])
+
+            test_case.assertTrue(
+                gradcheck(fn_to_gradcheck, inputs, check_batched_grad=self.check_batched_grad))
             if self.check_gradgrad:
-                test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
-                                                   check_batched_grad=self.check_batched_grad))
+                test_case.assertTrue(
+                    gradgradcheck(fn_to_gradcheck, inputs, check_batched_grad=self.check_batched_grad))
 
     def test_cuda(self, test_case, dtype=None, extra_args=None):
         if self.is_criterion_test:
