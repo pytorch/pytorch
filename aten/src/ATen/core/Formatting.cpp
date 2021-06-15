@@ -88,9 +88,6 @@ struct Formatter {
       } else {
         sstream << std::fixed << std::setprecision(4);
       }
-    } else {
-      ss << defaultfloat;
-      ss << std::setw(sz_) << value;
     }
 
     // Iterate once over the elements to set maxWidth_
