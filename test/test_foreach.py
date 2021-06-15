@@ -382,7 +382,7 @@ class TestForeach(TestCase):
             self.assertEqual(copied_inputs, inputs)
 
     def _test_unary(self, device, dtype, opinfo, N, is_fastpath):
-        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo)
+        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, 1)
         inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
         # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
         if opinfo.name == "_foreach_abs" and dtype in torch.testing.get_all_complex_dtypes():
@@ -648,7 +648,7 @@ class TestForeach(TestCase):
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         if self.device_type != 'cuda':
             self.skipTest('CUDA is necessary for tests with tensors on different devices')
-        method, ref, inplace_method, ref_inplace = self._get_funcs(op)
+        method, ref, inplace_method, ref_inplace = self._get_funcs(op, 1)
         # tensors: ['cuda', 'cpu]
         tensors = op.sample_inputs(device, dtype, 2)
         tensors[1] = tensors[1].to('cpu')
