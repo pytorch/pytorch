@@ -114,6 +114,7 @@
 #include "lazy_tensor_core/csrc/ops/triangular_solve.h"
 #include "lazy_tensor_core/csrc/ops/tril.h"
 #include "lazy_tensor_core/csrc/ops/triu.h"
+#include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/uniform.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
@@ -2086,6 +2087,37 @@ LazyTensor::native_batch_norm_backward(const LazyTensor& grad_out,
   ir::NodePtr node = ir::MakeNode<ir::ops::NativeBatchNormBackward>(
       grad_out.GetIrValue(), input.GetIrValue(), weight_value,
       save_mean.GetIrValue(), save_invstd.GetIrValue(), training, eps);
+  LazyTensor grad_input = input.CreateFrom(ir::Value(node, 0));
+  LazyTensor grad_weight = input.CreateFrom(ir::Value(node, 1));
+  LazyTensor grad_bias = input.CreateFrom(ir::Value(node, 2));
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight),
+                         std::move(grad_bias));
+}
+
+std::tuple<LazyTensor, LazyTensor, LazyTensor>
+LazyTensor::ts_native_batch_norm_backward(
+    const LazyTensor& grad_out, const LazyTensor& input,
+    const LazyTensor& weight, const LazyTensor& running_mean,
+    const LazyTensor& running_var, const LazyTensor& save_mean,
+    const LazyTensor& save_invstd, bool training, double eps,
+    lazy_tensors::Span<const bool> output_mask) {
+  lazy_tensors::Shape features_shape = BatchNormFeaturesShape(input);
+  ir::Value weight_value =
+      GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
+  ir::NodePtr node;
+  LTC_CHECK_EQ(running_mean.is_null(), running_var.is_null());
+  if (running_mean.is_null()) {
+    node = ir::MakeNode<ir::ops::TSNativeBatchNormBackward>(
+        grad_out.GetIrValue(), input.GetIrValue(), weight_value,
+        save_mean.GetIrValue(), save_invstd.GetIrValue(), training, eps,
+        std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
+  } else {
+    node = ir::MakeNode<ir::ops::TSNativeBatchNormBackward>(
+        grad_out.GetIrValue(), input.GetIrValue(), weight_value,
+        running_mean.GetIrValue(), running_var.GetIrValue(),
+        save_mean.GetIrValue(), save_invstd.GetIrValue(), training, eps,
+        std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
+  }
   LazyTensor grad_input = input.CreateFrom(ir::Value(node, 0));
   LazyTensor grad_weight = input.CreateFrom(ir::Value(node, 1));
   LazyTensor grad_bias = input.CreateFrom(ir::Value(node, 2));

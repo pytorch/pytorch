@@ -17,6 +17,7 @@
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/softmax.h"
+#include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
@@ -66,6 +67,9 @@ class TSNodeLowering : public NodeLowering {
       }
       case at::aten::native_batch_norm: {
         return InferBatchNorm(node);
+      }
+      case at::aten::native_batch_norm_backward: {
+        return InferBatchNormBackward(node);
       }
       case at::aten::permute: {
         auto permute =
@@ -129,6 +133,11 @@ class TSNodeLowering : public NodeLowering {
       return LowerBatchNorm(ir::NodeCast<ir::ops::TSNativeBatchNormForward>(
           node, ir::OpKind(at::aten::native_batch_norm)));
     }
+    if (node->op().op == at::aten::native_batch_norm_backward) {
+      return LowerBatchNormBackward(
+          ir::NodeCast<ir::ops::TSNativeBatchNormBackward>(
+              node, ir::OpKind(at::aten::native_batch_norm_backward)));
+    }
     if (node->op().op == at::aten::constant_pad_nd) {
       return LowerConstantPad(ir::NodeCast<ir::ops::ConstantPadNd>(
           node, ir::OpKind(at::aten::constant_pad_nd)));
@@ -185,6 +194,13 @@ class TSNodeLowering : public NodeLowering {
     const ir::Output& running_var = node->operand(4);
     return lazy_tensors::ShapeUtil::MakeTupleShape(
         {input.shape(), running_mean.shape(), running_var.shape()});
+  }
+
+  static lazy_tensors::Shape InferBatchNormBackward(const ir::Node* node) {
+    const ir::Output& input = node->operand(1);
+    const ir::Output& weight = node->operand(2);
+    return lazy_tensors::ShapeUtil::MakeTupleShape(
+        {input.shape(), weight.shape(), weight.shape()});
   }
 
   static lazy_tensors::Shape InferBmm(const ir::Node* node) {
@@ -292,6 +308,27 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(node->training());
     arguments.emplace_back(node->momentum());
     arguments.emplace_back(node->eps());
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerBatchNormBackward(
+      const ir::ops::TSNativeBatchNormBackward* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    for (size_t i = 0; i < 3; ++i) {
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(i)));
+    }
+    const auto& operands = node->operands();
+    c10::optional<at::Tensor> null_arg;
+    if (operands.size() == 5) {
+      arguments.emplace_back(null_arg);
+      arguments.emplace_back(null_arg);
+    }
+    for (size_t i = 3; i < operands.size(); ++i) {
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(i)));
+    }
+    arguments.emplace_back(node->training());
+    arguments.emplace_back(node->eps());
+    arguments.emplace_back(node->output_mask());
     return LowerBuiltin(node, arguments);
   }
 
