@@ -234,7 +234,6 @@ class TestShapeOps(TestCase):
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
 
-    @onlyCPU
     @dtypes(torch.float)
     def test_lab_diagonal_multidim(self, device, dtype):
         x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)

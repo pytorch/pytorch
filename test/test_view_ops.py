@@ -1021,7 +1021,6 @@ class TestOldViewOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_regex):
             tensor.chunk(-2)
 
-    @onlyCPU
     def test_lab_chunk(self, device):
         tensor = torch.rand(4, 7)
         num_chunks = 3
