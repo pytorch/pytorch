@@ -232,13 +232,18 @@ def get_weight_eq_obs(node: Node, model: GraphModule, modules: Dict[str, nn.Modu
     equalization observer if it has been newly created
     """
 
-    # Find the next node that is either a nn.Linear or a functional layer
-    while (node.op not in ('output', 'call_function') and not
-           (node.op == 'call_module' and isinstance(node.target, str) and
-            isinstance(modules[node.target], nn.Linear))):
+    # Find the next node that is either a nn.Linear or a WeightEqualizationObserver
+    while node.op != 'output' and not \
+        (node.op == 'call_module' and isinstance(node.target, str) and
+         (isinstance(modules[node.target], nn.Linear) or
+          isinstance(modules[node.target], _WeightEqualizationObserver))):
         node = node.next
 
-    if node.op == 'call_module':
+    if not isinstance(node.target, str):
+        return None, None
+    elif node.op == 'call_module' and isinstance(modules[node.target], _WeightEqualizationObserver):
+        return node, None
+    elif node.op == 'call_module' and isinstance(modules[node.target], nn.Linear):
         # If the next node is a nn.Linear layer, then it must have a
         # WeightEqualizationObserver configuration
         equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
@@ -246,25 +251,7 @@ def get_weight_eq_obs(node: Node, model: GraphModule, modules: Dict[str, nn.Modu
 
         weight_eq_obs = equalization_qconfig_map.get(node.name, None).weight()
         assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
-        # TODO: Maybe we should check that this weight observer comes somewhat
-        # directly after the given InputEqualizationObserver node, but I'm not sure
-        # how to check that
         return node, weight_eq_obs
-
-    elif node.op == 'call_function':
-        # If the next node is a functional layer, then the weight observer node
-        # has already been created, so we want to traverse the weight observer
-        # nodes to find the WeightEqualizationObserver node
-        assert(isinstance(node.args[1], Node))
-        weight_observer_nodes = collect_producer_nodes(node.args[1])
-        if weight_observer_nodes is None:
-            return None, None
-
-        for weight_obs_node in weight_observer_nodes:
-            assert(isinstance(weight_obs_node.target, str))
-            if isinstance(modules[weight_obs_node.target], _WeightEqualizationObserver):
-                # We return None for the weight_eq_obs because it already exists
-                return weight_obs_node, None
 
     return None, None
 
