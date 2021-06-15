@@ -90,7 +90,9 @@ def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
     total_num_of_elems += output_elem
     # Assume for now if it's quantized then it's qint8 or quint8
     if tensor_meta.is_quantized:
-        size_per_elem_bytes = torch._empty_affine_quantized([], dtype=tensor_meta.dtype).element_size()
+        size_per_elem_bytes = torch._empty_affine_quantized(
+            [], dtype=tensor_meta.dtype
+        ).element_size()
     else:
         size_per_elem_bytes = torch.tensor([], dtype=tensor_meta.dtype).element_size()
     total_size = size_per_elem_bytes * total_num_of_elems
@@ -106,7 +108,9 @@ def serialize_stride(stride: Tuple[int]) -> str:
     return str(list(stride))
 
 
-def serialize_tensor_quantization(tensor: torch.Tensor, weights: Dict, pcq_prefix: str) -> Tuple[Dict, Dict]:
+def serialize_tensor_quantization(
+    tensor: torch.Tensor, weights: Dict, pcq_prefix: str
+) -> Tuple[Dict, Dict]:
     """
     Args:
         tensor: The tensor from which we try to extract quantization information.
@@ -174,19 +178,29 @@ def serialize_tensor_quantization(tensor: torch.Tensor, weights: Dict, pcq_prefi
         torch.per_channel_symmetric,
     }:
         # per_channel_scales is float64. Here we save it as float32.
-        weights[f"{pcq_prefix}_per_channel_scales"] = tensor.q_per_channel_scales().float()
+        weights[
+            f"{pcq_prefix}_per_channel_scales"
+        ] = tensor.q_per_channel_scales().float()
         scheme["q_per_channel_scales"] = f"{pcq_prefix}_per_channel_scales"
         per_channel_dict.update(
-            serialize_weight(weights[f"{pcq_prefix}_per_channel_scales"], weights, f"{pcq_prefix}_per_channel_scales")
+            serialize_weight(
+                weights[f"{pcq_prefix}_per_channel_scales"],
+                weights,
+                f"{pcq_prefix}_per_channel_scales",
+            )
         )
 
         # per_channel_zero_point is int64. Here we save it as int32.
-        weights[f"{pcq_prefix}_per_channel_zero_points"] = tensor.q_per_channel_zero_points().int()
-        scheme[
-            "q_per_channel_zero_points"
-        ] = f"{pcq_prefix}_per_channel_zero_points"
+        weights[
+            f"{pcq_prefix}_per_channel_zero_points"
+        ] = tensor.q_per_channel_zero_points().int()
+        scheme["q_per_channel_zero_points"] = f"{pcq_prefix}_per_channel_zero_points"
         per_channel_dict.update(
-            serialize_weight(weights[f"{pcq_prefix}_per_channel_zero_points"], weights, f"{pcq_prefix}_per_channel_zero_points")
+            serialize_weight(
+                weights[f"{pcq_prefix}_per_channel_zero_points"],
+                weights,
+                f"{pcq_prefix}_per_channel_zero_points",
+            )
         )
 
         scheme["q_per_channel_axis"] = tensor.q_per_channel_axis()
@@ -201,7 +215,9 @@ def serialize_weight(tensor: torch.Tensor, weights: Dict, name: str) -> Dict:
     weight_dict[name]["stride"] = serialize_stride(tensor.stride())
 
     if tensor.is_quantized:
-        quantization_info, per_channel_dict = serialize_tensor_quantization(tensor, weights, name)
+        quantization_info, per_channel_dict = serialize_tensor_quantization(
+            tensor, weights, name
+        )
         weight_dict[name].update(quantization_info)
         weight_dict.update(per_channel_dict)
 
@@ -215,7 +231,9 @@ def serialize_leaf_module(
 
     for p_name, p_value in node.attrs_for_lowering.items():  # type: ignore[attr-defined]
         if isinstance(p_value, torch.Tensor):
-            weights_metadata.update(serialize_weight(p_value, weights, f"{name_prefix}.{p_name}"))
+            weights_metadata.update(
+                serialize_weight(p_value, weights, f"{name_prefix}.{p_name}")
+            )
             weights[f"{name_prefix}.{p_name}"] = p_value
         else:
             parameters[p_name] = str(p_value)
@@ -341,10 +359,29 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         if node.op == "get_attr":
             # If we are targeting a parent constant we update the target.
             if node.target.startswith("parent."):
-                stripped_name = node.target[len("parent."):]
+                stripped_name = node.target[len("parent.") :]
                 node.name = stripped_name
                 node_rep["target"] = stripped_name
-                weight = serialize_weight(weights[stripped_name], weights, node.target[len("parent."):])
+                weight = serialize_weight(
+                    weights[stripped_name], weights, node.target[len("parent.") :]
+                )
+                # For quantized embedding tables we need to update the shape/type,
+                # so we check if the users of this get_attr is a quantized EB and this is the weight for the EB.
+                user_targets = {
+                    _get_qualified_name(n.target).replace("glow.fb.fx.", ""): n
+                    for n in node.users.keys()
+                }
+                if (
+                    "acc_ops.embedding_bag_byte_rowwise_offsets" in user_targets
+                    and str(
+                        user_targets[
+                            "acc_ops.embedding_bag_byte_rowwise_offsets"
+                        ].kwargs["weight"]
+                    )
+                    == stripped_name
+                ):
+                    weight[stripped_name]["dtype"] = "acc.uint8fused"
+
                 serialized_dict["weights"].update(weight)
             else:
                 # Find the actual target parameter/buffer from the fx_module.
