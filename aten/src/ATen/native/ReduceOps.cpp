@@ -1306,10 +1306,11 @@ TORCH_IMPL_FUNC(argmax_out)
  bool keepdim,
  const Tensor& result) {
   c10::MaybeOwned<Tensor> in;
-  IntArrayRef dims;
+  DimVector dims;
+  int64_t wrapped_dim = 0;
 
   if (dim.has_value()) {
-    auto wrapped_dim = maybe_wrap_dim(dim.value(), self.dim());
+    wrapped_dim = maybe_wrap_dim(dim.value(), self.dim());
     auto sizes = self.sizes();
 
     if (sizes[wrapped_dim] == 1) {
