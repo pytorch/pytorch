@@ -148,11 +148,13 @@ class SampleInput(object):
         return self._repr_helper(formatter)
 
     def splat(self):
-        return tuple((self.input, self.args, self.kwargs,))
+        # TODO: Is this required? op(sample.splat()) doesn't work
+        # TODO: This needs comment
+        return (self.input, self.args, self.kwargs)
 
     def numpy(self):
         # Returns the NumPy version of the input
-        # Only supports torch.Tensor objects, if an arg is a scalar - an error will be raised
+        # Only supports torch.Tensor objects, if an arg is a scalar - a TypeError will be raised
         sample_torch_input, sample_args, sample_kwargs = self.splat()
         numpy_args = list()
 
@@ -164,7 +166,7 @@ class SampleInput(object):
             numpy_args.append(numpy_arg)
         sample_numpy_input = sample_torch_input.cpu().numpy()
 
-        return tuple((sample_numpy_input, numpy_args, sample_kwargs))
+        return (sample_numpy_input, numpy_args, sample_kwargs)
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
