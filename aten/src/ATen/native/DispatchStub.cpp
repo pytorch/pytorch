@@ -83,11 +83,11 @@ CPUCapability get_cpu_capability() {
 void* DispatchStubImpl::get_call_ptr(
   DeviceType device_type
   , void *DEFAULT
-#ifdef HAVE_AVX512_CPU_DEFINITION
-  , void *AVX512
-#endif
 #ifdef HAVE_AVX512_256_CPU_DEFINITION
   , void *AVX512_256
+#endif
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  , void *AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   , void *AVX2
@@ -137,11 +137,11 @@ void* DispatchStubImpl::get_call_ptr(
 
 void* DispatchStubImpl::choose_cpu_impl(
   void *DEFAULT
-#ifdef HAVE_AVX512_CPU_DEFINITION
-  , void *AVX512
-#endif
 #ifdef HAVE_AVX512_256_CPU_DEFINITION
   , void *AVX512_256
+#endif
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  , void *AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   , void *AVX2
