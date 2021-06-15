@@ -105,6 +105,26 @@ at::Tensor AtenXlaType::add(const at::Tensor& self, const at::Tensor& other,
                     });
 }
 
+at::Tensor AtenXlaType::addcmul(const at::Tensor& self,
+                                const at::Tensor& tensor1,
+                                const at::Tensor& tensor2,
+                                const at::Scalar& value) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(LazyTensor::addcmul(
+      bridge::GetLtcTensor(self), value, bridge::GetLtcTensor(tensor1),
+      bridge::GetLtcTensor(tensor2)));
+}
+
+at::Tensor& AtenXlaType::addcmul_(at::Tensor& self, const at::Tensor& tensor1,
+                                  const at::Tensor& tensor2,
+                                  const at::Scalar& value) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::addcmul_(self_tensor, value, bridge::GetLtcTensor(tensor1),
+                       bridge::GetLtcTensor(tensor2));
+  return self;
+}
+
 at::Tensor AtenXlaType::alias(const at::Tensor& self) {
   LTC_FN_COUNTER("xla::");
   return self;
