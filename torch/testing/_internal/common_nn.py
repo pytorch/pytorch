@@ -5009,6 +5009,10 @@ class ModuleTest(object):
         return self._arg_cache[name]
 
     def __call__(self, test_case):
+        # === Setup: set # threads to 1.
+        num_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+
         # === Instantiate the module. ===
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
@@ -5052,8 +5056,6 @@ class ModuleTest(object):
 
         # === Do the meat of the module test. ===
         if not self.is_criterion_test:
-            num_threads = torch.get_num_threads()
-            torch.set_num_threads(1)
             input_tuple = input if isinstance(input, tuple) else (input,)
 
             if self.check_inplace:
@@ -5191,7 +5193,6 @@ class ModuleTest(object):
                         module.half().cuda()
                         module(*input_tuple)
                         assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
-            torch.set_num_threads(num_threads)
 
         # === Check gradients. ===
 
@@ -5229,6 +5230,9 @@ class ModuleTest(object):
             if self.check_gradgrad:
                 test_case.assertTrue(
                     gradgradcheck(fn_to_gradcheck, inputs, check_batched_grad=self.check_batched_grad))
+
+        # === Post: return # threads back. ===
+        torch.set_num_threads(num_threads)
 
     def test_cuda(self, test_case, dtype=None, extra_args=None):
         if self.is_criterion_test:
