@@ -299,7 +299,10 @@ def scale_input_node(node: Node, modules: Dict[str, nn.Module]) -> None:
     assert(isinstance(node.target, str))
     input_eq_obs = modules[node.target]
     assert(isinstance(input_eq_obs, _InputEqualizationObserver))
-    _, input_quant_obs = get_next_input_obs(node, modules)
+
+    input_quant_obs_node = node.args[0]
+    assert(isinstance(input_quant_obs_node, Node) and isinstance(input_quant_obs_node.target, str))
+    input_quant_obs = modules[input_quant_obs_node.target]
 
     if not isinstance(input_quant_obs, ObserverBase):
         return
@@ -389,7 +392,7 @@ def convert_eq_obs(
                                           |
                                      WeightQuantObs
                                           |
-        x -> InpEqObs -> InpQuantObs -> linear -> OutQuantObs
+        x -> InpQuantObs -> InpEqObs -> linear -> OutQuantObs
 
     After:
                                               scaled weight values
@@ -402,16 +405,20 @@ def convert_eq_obs(
     """
     for node in model.graph.nodes:
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
-            prev_node = node.args[0]
+            inp_quant_obs_node = node.args[0]
+            prev_node = inp_quant_obs_node.args[0]
+
             # TODO: Possible special handling for connected linear layers
             # Update the following input quantization observer's min/max values
             scale_input_node(node, modules)
 
-            # Replace the InputEqualizationObserver with a mul operator to scale
-            # all input values
+            # Remove the InputEqualization node and add a mul operator before
+            # the quantization observer node that appears before the equalization node
+            # Before: x -> input_quant_obs -> input_eq_obs -> linear
+            # After: x -> mul -> input_quant_obs -> linear
 
             # Create a node containing the equalization scale
-            with model.graph.inserting_after(prev_node):
+            with model.graph.inserting_before(inp_quant_obs_node):
                 name = node.name + '_scale'
                 setattr(model, name, modules[node.target].equalization_scale)
                 eq_scale_node = model.graph.create_node('get_attr', name)
@@ -421,19 +428,18 @@ def convert_eq_obs(
                 inputs = (prev_node, eq_scale_node)
                 mul_node = model.graph.create_node("call_function", torch.mul, inputs)
 
-            # Replace the current node with the new mul node
+            # Set the mul nod to be the input_quant_obs_node's input instead of
+            # the previous node
+            inp_quant_obs_node.replace_input_with(prev_node, mul_node)
+
+            # For all of the current node's users, replace the current node with
+            # the input quantization observer node
             orig_users = list(node.users.keys())
             for user_node in orig_users:
-                user_node.replace_input_with(node, mul_node)
+                user_node.replace_input_with(node, inp_quant_obs_node)
 
             # Erase the InputEqualizationObserver node
             model.graph.erase_node(node)
-
-            # Alternatively, instead of lines 379-390, we could do the following:
-            # inputs = (prev_node, eq_scale_node)
-            # node.op = "call_function"
-            # node.target = torch.mul
-            # node.args = tuple(inputs)
 
         elif weight_eq_obs_dict.get(node.name, None) is not None:
             weight_eq_obs = weight_eq_obs_dict.get(node.name)
