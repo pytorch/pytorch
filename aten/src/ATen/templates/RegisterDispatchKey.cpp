@@ -11,7 +11,6 @@
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/MetaFunctions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
