@@ -4996,18 +4996,18 @@ for shape in [(1,), ()]:
             @staticmethod
             def backward(ctx, x):
                 return x
-        inplace_custom = Func.apply
+        view_custom = Func.apply
 
         def run_test(fn, fn_type, grad_mode_view, grad_mode_iview, requires_grad, error1, error2):
             # This test checks the behavior of inplace-view functions when
             # the views are created in grad mode or not
-            base = torch.rand(2, requires_grad=requires_grad).clone()
+            base = torch.rand(2, 3, requires_grad=requires_grad).clone()
             # 1. Create a view with `grad_mode=grad_mode_view`
             with torch.set_grad_enabled(grad_mode_view):
                 if fn_type == "multi_view":
                     inp = base.unbind()[0]
                 elif fn_type == "custom" :
-                    inp = inplace_custom(base)
+                    inp = view_custom(base)
                 else:
                     inp = base.view_as(base)
 
@@ -5018,12 +5018,14 @@ for shape in [(1,), ()]:
                         fn(inp)
                     return
                 else:
+                    # If error is None, check that runs without error
                     fn(inp)
             # 3. Do inplace on the (new) view
             if error2 is not None:
                 with self.assertRaisesRegex(RuntimeError, error2):
                     inp.add_(1)
             else:
+                # If error is None, check that runs without error
                 inp.add_(1)
 
         no_grad_err = "A view was created in no_grad mode"
@@ -5038,32 +5040,36 @@ for shape in [(1,), ()]:
                             error1 = None  # expected error when we do inplace_view on original view
                             error2 = None  # expected error when we do inplace on the resulting view
 
-                            if not grad_mode_view and grad_mode_iview and requires_grad:
-                                error1 = no_grad_err
-                            if not grad_mode_view and not grad_mode_iview and requires_grad:
-                                error2 = no_grad_err
+                            if requires_grad:
+                                if not grad_mode_view and grad_mode_iview:
+                                    error1 = no_grad_err
+                                if not grad_mode_view and not grad_mode_iview:
+                                    error2 = no_grad_err
 
-                            if fn_type == "multi_view":
-                                if grad_mode_view and grad_mode_iview and requires_grad:
-                                    error1 = multi_view_err
-                                if grad_mode_view and not grad_mode_iview and requires_grad:
-                                    error2 = multi_view_err
+                                if fn_type == "multi_view":
+                                    if grad_mode_view and grad_mode_iview:
+                                        error1 = multi_view_err
+                                    if grad_mode_view and not grad_mode_iview:
+                                        error2 = multi_view_err
 
-                            if fn_type == "custom":
-                                if grad_mode_view and grad_mode_iview and requires_grad:
-                                    error1 = custom_err
-                                if grad_mode_view and not grad_mode_iview and requires_grad:
-                                    error2 = custom_err
+                                if fn_type == "custom":
+                                    if grad_mode_view and grad_mode_iview:
+                                        error1 = custom_err
+                                    if grad_mode_view and not grad_mode_iview:
+                                        error2 = custom_err
 
-                            print(fn_type, grad_mode_view, grad_mode_iview, requires_grad, error1, error2)
                             run_test(fn, fn_type, grad_mode_view, grad_mode_iview, requires_grad, error1, error2)
 
-        # TODO maybe we should just run all of theses?
-        # as_strided_, detach_, squeeze_, swapaxes_, swapdims_, t_,
-        # transpose_, unsqueeze_,
+        # This list was created by logging gen_inplace_or_view_type.py
+        #   detach_ is excluded for this test because it cannot be applied to
+        #   views and thus does not return a view
         run_tests(lambda v: v.as_strided_((1, 0), (2, 2)))
         run_tests(lambda v: v.transpose_(0, 0))
         run_tests(lambda v: v.t_())
+        run_tests(lambda v: v.squeeze_(0))
+        run_tests(lambda v: v.unsqueeze_(0))
+        run_tests(lambda v: v.swapdims_(0, 0))
+        run_tests(lambda v: v.swapaxes_(0, 0))
 
     # TODO This is not the correct behavior -
     # See https://github.com/pytorch/pytorch/issues/49825#issuecomment-794466627
@@ -8583,16 +8589,16 @@ class TestAutogradInferenceMode(TestCase):
                 self.assertFalse(func_out.requires_grad)
 
     def test_inference_mode_inf_tensor_in_inf_mode_inplace_op(self):
+        @torch.inference_mode()
         def run_test(fn):
-            with torch.inference_mode():
-                for requires_grad in (True, False):
-                    c = torch.ones(1, 2, 3, requires_grad=requires_grad)
+            for requires_grad in (True, False):
+                c = torch.ones(1, 2, 3, requires_grad=requires_grad)
 
-                    # after perform inplace operation, tensor is still
-                    # an inference tensor
-                    fn(c)
-                    self.assertTrue(torch.is_inference(c))
-                    self.assertEqual(c.requires_grad, requires_grad)
+                # after performing inplace operation, tensor is still
+                # an inference tensor
+                fn(c)
+                self.assertTrue(torch.is_inference(c))
+                self.assertEqual(c.requires_grad, requires_grad)
         run_test(lambda x: x.add_(2))
         run_test(lambda x: x.transpose_(0, 1))
 
