@@ -4938,7 +4938,6 @@ class ModuleTest(object):
             self.check_complex = kwargs.get('check_complex', False)
             self.with_tf32 = kwargs.get('with_tf32', True)
         else:
-            self.jacobian_input = kwargs.get('jacobian_input', True)
             self.should_test_pickle = kwargs.get('pickle', True)
             self.FIXME_no_cuda_gradgrad_comparison = \
                 kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
