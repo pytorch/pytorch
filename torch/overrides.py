@@ -1377,8 +1377,14 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
                 continue
 
             if not callable(func) and hasattr(func, "__get__"):
-                overridable_funcs[func].append(func.__get__)
-                continue
+                if func.__get__ in get_ignored_functions():
+                    msg = ("{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
+                           "but still has an explicit override")
+                    assert func.__get__ not in get_testing_overrides(), msg.format(namespace, func.__name__)
+                    continue
+                else:
+                    overridable_funcs[func].append(func.__get__)
+                    continue
 
             if not callable(func):
                 continue
