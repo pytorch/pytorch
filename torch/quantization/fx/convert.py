@@ -180,10 +180,12 @@ def _convert(model: GraphModule, is_reference: bool = False,
         qconfig_map,
         custom_module_classes=custom_module_classes)
 
-    # Calculate the equalization scale, update the observers with the scaled
-    # inputs, and scale the weight
-    weight_eq_obs_dict = update_obs_for_equalization(model, modules)
-    convert_eq_obs(model, modules, weight_eq_obs_dict)
+    if model._equalization_qconfig_map is not None:
+        # If we want to do equalization then do the following:
+        # Calculate the equalization scale, update the observers with the scaled
+        # inputs, and scale the weight
+        weight_eq_obs_dict = update_obs_for_equalization(model, modules)
+        convert_eq_obs(model, modules, weight_eq_obs_dict)
 
     quantized_graph = Graph()
     env: Dict[str, Tuple[Node, Optional[torch.dtype]]] = {}

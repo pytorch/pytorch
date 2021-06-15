@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
+from .utils import get_new_attr_name_with_prefix
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
@@ -235,24 +236,27 @@ def get_weight_eq_obs(
     equalization observer if it has been newly created
     """
 
-    # Find the next node that is either a nn.Linear or a functional layer
-    weight_node = input_eq_obs_node.next
-    while (weight_node.op not in ('output', 'call_function') and not
-           (weight_node.op == 'call_module' and isinstance(weight_node.target, str) and
-            isinstance(modules[weight_node.target], nn.Linear))):
-        weight_node = weight_node.next
+    # Find the op node that comes directly after the input equaliation observer
+    op_node = None
+    for user in input_eq_obs_node.users.keys():
+        if node_supports_equalization(user, modules):
+            op_node = user
+            break
 
-    if weight_node.op == 'call_module':
-        # If the next weight_node is a nn.Linear layer, then it must have a
+    if op_node is None:
+        return None, None
+
+    elif op_node.op == 'call_module':
+        # If the next op_node is a nn.Linear layer, then it must have a
         # WeightEqualizationObserver configuration
         equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
-        assert(equalization_qconfig_map.get(weight_node.name, None) is not None)
+        assert(equalization_qconfig_map.get(op_node.name, None) is not None)
+        weight_eq_obs = equalization_qconfig_map.get(op_node.name, None).weight()
 
-        weight_eq_obs = equalization_qconfig_map.get(weight_node.name, None).weight()
         assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
-        return weight_node, weight_eq_obs
+        return op_node, weight_eq_obs
 
-    elif weight_node.op == 'call_function':
+    elif op_node.op == 'call_function':
         # TODO
         return None, None
 
@@ -275,7 +279,7 @@ def get_next_input_obs(node: Node, modules: Dict[str, nn.Module]):
     input_obs = modules[node.target]
     return node, input_obs
 
-def get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module]) -> torch.Tensor:
+def maybe_get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module]) -> Optional[torch.Tensor]:
     """ If the next next node is an InputEqualizationObserver then we want to
     return its equalization scale, else we return 1
 
@@ -289,9 +293,9 @@ def get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module]) -> to
     _, next_next_obs = get_next_input_obs(next_node, modules)
     if isinstance(next_next_obs, _InputEqualizationObserver):
         return next_next_obs.equalization_scale
-    return torch.tensor(1)
+    return None
 
-def scale_input_node(node: Node, modules: Dict[str, nn.Module]) -> None:
+def scale_input_observer(node: Node, modules: Dict[str, nn.Module]) -> None:
     """ Scales the following input quantization observer's min/max values by
     updating the values with the scaled min/max values calculated by the input
     equalization observer
@@ -315,7 +319,7 @@ def scale_weight_node(
     node: Node,
     modules: Dict[str, nn.Module],
     equalization_scale: torch.Tensor,
-    next_equalization_scale: torch.Tensor,
+    next_equalization_scale: Optional[torch.Tensor],
 ) -> None:
     """ Scale the weights for input-weight equalization by multiplying the
     weight by 1/equalization_scale and next_equalization_scale
@@ -334,6 +338,11 @@ def scale_weight_node(
     assert(isinstance(weight, torch.Tensor))
 
     scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale))
+
+    if next_equalization_scale is None:
+        modules[node.target].weight = nn.Parameter(scaled_weight)
+        return
+
     scaled_weight = torch.mul(scaled_weight, next_equalization_scale)
     modules[node.target].weight = nn.Parameter(scaled_weight)
 
@@ -410,7 +419,7 @@ def convert_eq_obs(
 
             # TODO: Possible special handling for connected linear layers
             # Update the following input quantization observer's min/max values
-            scale_input_node(node, modules)
+            scale_input_observer(node, modules)
 
             # Remove the InputEqualization node and add a mul operator before
             # the quantization observer node that appears before the equalization node
@@ -419,7 +428,8 @@ def convert_eq_obs(
 
             # Create a node containing the equalization scale
             with model.graph.inserting_before(inp_quant_obs_node):
-                name = node.name + '_scale'
+                get_new_eq_scale_name = get_new_attr_name_with_prefix(prev_node.name + '_equalization_scale')
+                name = get_new_eq_scale_name(modules)
                 setattr(model, name, modules[node.target].equalization_scale)
                 eq_scale_node = model.graph.create_node('get_attr', name)
 
@@ -449,8 +459,8 @@ def convert_eq_obs(
             equalization_scale = weight_eq_obs.equalization_scale
 
             # Scales the weights and runs the weight quantization observers
-            next_equalization_scale = get_next_equalization_scale(node, modules)
-            scale_weight_node(node, modules, equalization_scale, next_equalization_scale)
+            maybe_next_equalization_scale = maybe_get_next_equalization_scale(node, modules)
+            scale_weight_node(node, modules, equalization_scale, maybe_next_equalization_scale)
 
 def _convert_equalization_ref(model: GraphModule):
     """ Reference function which applies changes needed for equalization, but
