@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/CUDATest.hpp>
@@ -15,12 +16,12 @@ using c10d::ProcessGroup;
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
   std::vector<T> tests;
-  for (auto i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     tests.push_back(std::move(T(path, std::forward<Args>(args)...)));
   }
 
   std::vector<std::thread> threads;
-  for (auto i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     threads.push_back(std::thread([i, N, &tests] { tests[i].start(i, N); }));
   }
 
@@ -71,7 +72,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
         state_(::at::globalContext().lazyInitCUDA()) {
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
-    for (auto i = 0; i < numTensors_; i++) {
+    for (const auto i : c10::irange(numTensors_)) {
       inputs_[i] = at::empty(
           {16, 16},
           at::device(
@@ -87,7 +88,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     //
     at::cuda::OptionalCUDAGuard deviceGuard;
     streams_.reserve(numDevices_);
-    for (auto i = 0; i < numDevices_; i++) {
+    for (const auto i : c10::irange(numDevices_)) {
       deviceGuard.set_index(i);
       streams_.push_back(at::cuda::getStreamFromPool());
     }
@@ -136,13 +137,13 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
 
     // Launch sleep on every stream
     at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
+    for (const auto i : c10::irange(numDevices_)) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
     }
 
     // Launch value initialization for every tensor
-    for (auto i = 0; i < numTensors_; i++) {
+    for (const auto i : c10::irange(numTensors_)) {
       deviceGuard.set_index(i % numDevices_);
       inputs_[i].fill_(pg_->getRank() * numTensors_ + i);
     }
@@ -162,13 +163,13 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
 
     // Launch sleep on every stream
     at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
+    for (const auto i : c10::irange(numDevices_)) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
     }
 
     // Launch value initialization for every tensor
-    for (auto i = 0; i < numTensors_; i++) {
+    for (const auto i : c10::irange(numTensors_)) {
       deviceGuard.set_index(i % numDevices_);
       inputs_[i].fill_(pg_->getRank() * numTensors_ + i);
     }
@@ -212,7 +213,7 @@ void runAsyncAllreduceTest(
 
       EXPECT_EQ(tensor.numel(), result_tensor.numel());
 
-      for (auto k = 0; k < tensor.numel(); k++) {
+      for (const auto k : c10::irange(tensor.numel())) {
         EXPECT_EQ(data[k], expected);
         EXPECT_EQ(result_data[k], expected);
       }

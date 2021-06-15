@@ -35,6 +35,11 @@ CONFIG_TREE_DATA = [
             ("10.2", [
                 ("3.6", [
                     ("shard_test", [X(True)]),
+                    ("slow_gradcheck", [
+                        (True, [
+                            ('shard_test', [XImportant(True)]),
+                        ]),
+                    ]),
                     ("libtorch", [
                         (True, [
                             ('build_only', [X(True)]),
@@ -176,9 +181,17 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
+            "slow_gradcheck": SlowGradcheckConfigNode,
         }
         return next_nodes[experimental_feature]
 
+
+class SlowGradcheckConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_slow_gradcheck"] = True
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
 
 class PureTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):
