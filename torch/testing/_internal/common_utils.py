@@ -963,11 +963,11 @@ def compare_with_reference(torch_fn, ref_fn, sample_input):
         msg = None
 
     if isinstance(actual, torch.Tensor):
-        torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype), msg = msg)
+        torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype), msg=msg)
     else:
         for x, y in zip(expected, actual):
             # Testing multi-outputs results
-            torch.testing.assert_close(actual, expected, msg = msg)
+            torch.testing.assert_close(actual, expected, msg=msg)
 
 # This implements a variant of assertRaises/assertRaisesRegex where we first test
 # if the exception is NotImplementedError, and if so just skip the test instead
