@@ -5017,6 +5017,8 @@ class ModuleTest(object):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
         input_tuple = input if isinstance(input, tuple) else (input,)
+        if self.is_criterion_test:
+            target = self._get_target()
 
         # === Check that the module can be printed. ===
         module.__repr__()
@@ -5025,7 +5027,6 @@ class ModuleTest(object):
         # === Check the forward output against the reference function. ===
         if self.reference_fn is not None:
             if self.is_criterion_test:
-                target = self._get_target()
                 out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
                 ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
                 expected_out = self.reference_fn(*ref_args)
