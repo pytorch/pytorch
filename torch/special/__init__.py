@@ -35,6 +35,41 @@ Example::
     tensor([  -inf, 0.0000, 0.3466])
 """)
 
+psi = _add_docstr(_special.special_psi,
+                  r"""
+psi(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.special.digamma`.
+""")
+
+digamma = _add_docstr(_special.special_digamma,
+                      r"""
+digamma(input, *, out=None) -> Tensor
+
+Computes the logarithmic derivative of the gamma function on `input`.
+
+.. math::
+    \digamma(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
+""" + r"""
+Args:
+    input (Tensor): the tensor to compute the digamma function on
+
+Keyword args:
+    {out}
+
+.. note::  This function is similar to SciPy's `scipy.special.digamma`.
+
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`.
+           Previously it returned `NaN` for `0`.
+
+Example::
+
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.special.digamma(a)
+    tensor([-0.5772, -1.9635])
+
+""".format(**common_args))
+
 gammaln = _add_docstr(_special.special_gammaln,
                       r"""
 gammaln(input, *, out=None) -> Tensor

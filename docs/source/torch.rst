@@ -421,6 +421,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf
@@ -477,7 +478,6 @@ Other Operations
     cdist
     clone
     combinations
-    cov
     cross
     cummax
     cummin

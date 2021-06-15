@@ -497,7 +497,6 @@ static void _trace_post_record(
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
-  variable_list output_vars(num_outputs);
   auto graph = node->owningGraph();
   node->addOutput();
   if (!unpack_output) {
