@@ -1,3 +1,8 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
 from torch.testing._internal.common_methods_invocations import op_db
 
 # Generated from codegen/gen_functorch_op_db.py via
