@@ -326,8 +326,11 @@ def main() -> None:
     paths = [path.rstrip("/") for path in options.paths]
     if options.diff_file:
         with open(options.diff_file, "r") as f:
-            line_filters = find_changed_lines_from_diff(f)
-            files = list(line_filters.keys())
+            changed_files = find_changed_lines_from_diff(f)
+            line_filters = [
+                {"name": name, "lines": lines} for name, lines, in changed_files.items()
+            ]
+            files = list(changed_files.keys())
     else:
         files = get_all_files(paths)
     file_patterns = get_file_patterns(options.glob, options.regex)
