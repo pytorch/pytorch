@@ -745,6 +745,10 @@ RegisterOperators reg(
            handler(ss.str());
          },
          aliasAnalysisSpecialCase()),
+     // This is an alternative to aten::cat op that takes variable number of
+     // parameters as input.
+     // Format:
+     //    prim::Concat(Tensors..., dim) -> Tensor
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::Concat(...) -> Tensor"),
          [](Stack* stack) {
@@ -752,9 +756,8 @@ RegisterOperators reg(
            auto dim = pop(stack).toInt();
            std::vector<at::Tensor> inputs(num_inputs - 1);
            for (int i = 0; i < num_inputs - 1; ++i) {
-             inputs[i] = pop(stack).toTensor();
+             inputs[num_inputs - 2 - i] = pop(stack).toTensor();
            }
-           std::reverse(inputs.begin(), inputs.end());
            push(stack, at::cat(inputs, dim));
          },
          aliasAnalysisFromSchema()),
