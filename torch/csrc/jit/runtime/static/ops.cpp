@@ -1256,6 +1256,11 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
         const auto in1_i = p_node->Input(1).toScalarType();
         p_node->Output(0) = at::native::to(in0_t, in1_i, in2_i, in3_i, in4_o);
       }
+      // in case that Output(0) is an alias of in0_t, copy the tensor.
+      if (p_node->Output(0).toTensor().unsafeGetTensorImpl() ==
+          in0_t.unsafeGetTensorImpl()) {
+        p_node->Output(0) = in0_t.clone();
+      }
     };
   }
   return nullptr;
