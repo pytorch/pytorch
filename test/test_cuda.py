@@ -1,6 +1,8 @@
 from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
+import contextlib
+import ctypes
 import gc
 import io
 import pickle
@@ -1311,6 +1313,40 @@ class TestCuda(TestCase):
             try_realloc = torch.cuda.FloatTensor([10, 10])
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
+
+    @contextlib.contextmanager
+    def _get_external_stream(self, device):
+        cudart = torch.cuda.cudart()
+        stream = ctypes.c_ulonglong(0)
+        stream_p = ctypes.POINTER(ctypes.c_void_p)(stream)
+        stream_p_int = ctypes.cast(stream_p, ctypes.c_void_p).value
+        with device:
+            try:
+                out = cudart.cudaStreamCreate(stream_p_int)
+                self.assertEqual(out, 0)
+                self.assertNotEqual(stream.value, 0)
+                yield stream.value
+            finally:
+                out = cudart.cudaStreamDestroy(stream.value)
+                self.assertEqual(out, 0)
+
+    @skipIfRocm
+    def test_external_streams(self):
+        device = torch.cuda.device(0)
+        with self._get_external_stream(device) as stream_v:
+            ext_stream = torch.cuda.streams.ExternalStream(stream_v)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_external_streams_multi_device(self):
+        device = torch.cuda.device(1)
+        with self._get_external_stream(device) as stream_v:
+            ext_stream = torch.cuda.streams.ExternalStream(
+                stream_v, device=device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
 
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
