@@ -121,7 +121,7 @@ static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
 
-bool check_has_torch_dispatch(PyObject *obj) {
+static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
   return (
     !THPVariable_CheckTypeExact(tp) &&
@@ -149,9 +149,7 @@ static PyObject* THPVariable_NewWithVar(
     v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
     const auto& var = THPVariable_Unpack(v);
     var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
-    // Quick short circuits for well known type that definitely doesn't have
-    // torch function
-    if (type != (PyTypeObject*)THPVariableClass && check_has_torch_dispatch(obj)) {
+    if (check_has_torch_dispatch(obj)) {
       var.unsafeGetTensorImpl()->set_python_dispatch(true);
     }
   }
@@ -1494,12 +1492,16 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   // The plan: convert all the arguments back into PyObjects,
   // extracting out the tensor handles, then call
   // handle_torch_function_no_python_arg_parser
+  // NB: at the point arguments are pushed to the stack, ALL defaults
+  // are already present
 
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(num_arguments));
-  py::dict kwargs;  // TODO: actually populate kwargs sometimes?
+  // TODO: actually populate kwargs sometimes?  At the moment, every argument
+  // just gets passed positionally
+  py::dict kwargs;
   // For now, overloads get coalesced.  Might be easier for users if they get
   // overload resolution but is more complicated (need to expose separate
   // functions per overload)
@@ -1540,12 +1542,11 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   ));
 
   if (op.schema().returns().size() == 1) {
-    torch::jit::push(stack, torch::jit::toTypeInferredIValue(out));
+    torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));
   } else {
-    py::list outs = py::cast<py::list>(out);
-    TORCH_INTERNAL_ASSERT(outs.size() == op.schema().returns().size());
+    auto outs = py::cast<py::sequence>(out);
     for (unsigned idx = 0; idx < outs.size(); idx++) {
-      torch::jit::push(stack, torch::jit::toTypeInferredIValue(outs[idx]));
+      torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), op.schema().returns()[idx].type()));
     }
   }
 }
@@ -1575,6 +1576,7 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
     "__torch_dispatch__"
   ));
 
+  TORCH_CHECK(THPVariable_Check(out.ptr()), "detach returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected Tensor");
   const Tensor& res_t = THPVariable_Unpack(out.ptr());
   return res_t.getIntrusivePtr();
 }

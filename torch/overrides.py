@@ -228,11 +228,10 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
-        Tensor._python_dispatch,
+        Tensor._python_dispatch.__get__,
         Tensor._conj,
         Tensor._conj_physical,
     }
-
 
 @functools.lru_cache(None)
 def get_testing_overrides() -> Dict[Callable, Callable]:
@@ -465,8 +464,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.geqrf: lambda input, out=None: -1,
         torch.i0: lambda input, out=None: -1,
         torch.inner: lambda input, other, out=None: -1,
-        torch.outer: lambda input, vec2, out=None: -1,  # alias for torch.ger
-        torch.ger: lambda input, vec2, out=None: -1,
+        torch.outer: lambda input, vec2, out=None: -1,
+        torch.ger: lambda input, vec2, out=None: -1,  # alias for torch.outer
         torch.gradient: lambda input, spacing=None, dim=None, edge_order=1: -1,
         torch.grid_sampler: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_2d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
@@ -494,6 +493,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.index_select: lambda input, dim, index, out=None: -1,
         torch.index_fill: lambda input, dim, index, value: -1,
         torch.isfinite: lambda tensor: -1,
+        torch.isin: lambda e, te, assume_unique=False, invert=False: -1,
         torch.isinf: lambda tensor: -1,
         torch.isreal: lambda tensor: -1,
         torch.isposinf: lambda input, out=None: -1,
@@ -874,6 +874,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.exp2: lambda input: -1,
         torch.special.expm1: lambda input: -1,
         torch.special.expit: lambda input: -1,
+        torch.special.digamma: lambda input: -1,
+        torch.special.psi: lambda input: -1,
         torch.special.gammaln: lambda input: -1,
         torch.special.i0: lambda input: -1,
         torch.special.i0e: lambda input: -1,
@@ -1375,8 +1377,14 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
                 continue
 
             if not callable(func) and hasattr(func, "__get__"):
-                overridable_funcs[func].append(func.__get__)
-                continue
+                if func.__get__ in get_ignored_functions():
+                    msg = ("{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
+                           "but still has an explicit override")
+                    assert func.__get__ not in get_testing_overrides(), msg.format(namespace, func.__name__)
+                    continue
+                else:
+                    overridable_funcs[func].append(func.__get__)
+                    continue
 
             if not callable(func):
                 continue

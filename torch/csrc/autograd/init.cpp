@@ -17,6 +17,12 @@
 
 #include <set>
 
+struct DisableTorchDispatch {
+  DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
+  }
+  c10::impl::ExcludeDispatchKeyGuard guard_;
+};
+
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
@@ -253,6 +259,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
+
+  py::class_<DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
+      .def(py::init<>());
 
   Py_RETURN_TRUE;
 }

@@ -267,7 +267,7 @@ struct C10_API PyInterpreter {
   // c10::impl::PyInterpreter *, _object *)'" See
   // https://github.com/google/sanitizers/issues/911
 
-  // Report the name of htis interpreter
+  // Report the name of this interpreter
   __ubsan_ignore_function__ std::string name() const {
     return (*name_fn_)(this);
   }
@@ -695,6 +695,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(storage_access_should_throw_)) {
       throw_storage_access_error();
     }
+    return storage_;
+  }
+
+  /**
+   * Return the underlying storage, unsafely assuming this is a basic strided
+   * tensor. In cases where `storage` access would throw, this returns a
+   * default-constructed Storage.
+   */
+  inline const Storage& unsafe_storage() const {
     return storage_;
   }
 

@@ -32,11 +32,11 @@ static void noop_decref_fn(const PyInterpreter*, PyObject*) {
 }
 
 static c10::intrusive_ptr<TensorImpl> noop_detach_fn(const PyInterpreter*, const TensorImpl*) {
-  return c10::intrusive_ptr<TensorImpl>();
+  TORCH_INTERNAL_ASSERT(0, "attempted to detach (shallow_copy_and_detach) Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
 static void noop_dispatch_fn(const PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  TORCH_INTERNAL_ASSERT(0);
+  TORCH_INTERNAL_ASSERT(0, "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
 void PyInterpreter::disarm() noexcept {
@@ -471,7 +471,7 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python)) {
+  if (key_set_.has(DispatchKey::Python) && !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
     auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
     if (r) return r;
     // otherwise just copy the TensorImpl and not the PyObject.  Since
@@ -495,7 +495,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python)) {
+  if (key_set_.has(DispatchKey::Python) && !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
     auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
     if (r) return r;
     // otherwise just copy the TensorImpl and not the PyObject.  Since
