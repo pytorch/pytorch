@@ -27,6 +27,35 @@ namespace cuda {
 
 int FusionExecutor::fusion_id_counter_ = 0; // NOLINT
 
+namespace {
+
+static const char* defineIndexMode(KernelIndexMode index_mode) {
+  switch (index_mode) {
+    case KernelIndexMode::INT32:
+      return "typedef int nvfuser_index_t;\n";
+    case KernelIndexMode::INT64:
+      return "typedef int64_t nvfuser_index_t;\n";
+    default:
+      break;
+  }
+
+  TORCH_INTERNAL_ASSERT(false, "unknow indexing mode");
+  return "";
+}
+
+static const char* defineIntegerTypes() {
+  return R"(
+typedef unsigned char uint8_t;
+typedef signed char int8_t;
+typedef short int int16_t;
+typedef unsigned int uint32_t;
+typedef long long int int64_t;
+typedef unsigned long long int uint64_t;
+)";
+}
+
+} // namespace
+
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
@@ -37,7 +66,8 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
 #endif
 #endif
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
-      " {\n" + executor_utils::kernelPreamble() + kernel + "}\n";
+      " {\n" + defineIntegerTypes() + defineIndexMode(options_.index_mode) +
+      executor_utils::kernelPreamble() + kernel + "}\n";
 
   if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
@@ -614,7 +644,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
   }
 
-  KernelArgumentHolder kernel_arguments;
+  KernelArgumentHolder kernel_arguments(options_.index_mode);
   kernel_arguments.push(inputs);
   kernel_arguments.push(allocated_outputs);
   kernel_arguments.push(global_buffers.empty_buffers);
@@ -731,7 +761,7 @@ void FusionExecutor::runRtc(
   c10::DeviceGuard dg(options_.device);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  KernelArgumentHolder kernel_arguments;
+  KernelArgumentHolder kernel_arguments(options_.index_mode);
   kernel_arguments.push(args);
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
       compiled_kernel_.function,

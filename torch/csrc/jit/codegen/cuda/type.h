@@ -14,6 +14,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+enum class KernelIndexMode { INT32, INT64 };
+
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
   template <typename T>

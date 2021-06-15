@@ -149,17 +149,18 @@ __inline__ __device__ void blockWelford(
 namespace welford {
 // Utility functions
 template <typename _dim3>
-__host__ __device__ __forceinline__ size_t size(const _dim3& d) {
-  return (size_t)d.x * (size_t)d.y * (size_t)d.z;
+__host__ __device__ __forceinline__ nvfuser_index_t size(const _dim3& d) {
+  return (nvfuser_index_t)d.x * (nvfuser_index_t)d.y * (nvfuser_index_t)d.z;
 }
 
 #define isize(d) d.x* d.y* d.z
 
 template <typename _dim3pos, typename _dim3dim>
-__host__ __device__ __forceinline__ size_t
+__host__ __device__ __forceinline__ nvfuser_index_t
 offset(const _dim3pos& pos, const _dim3dim& dim) {
-  return (size_t)pos.x + (size_t)pos.y * (size_t)dim.x +
-      (size_t)pos.z * (size_t)dim.x * (size_t)dim.y;
+  return (nvfuser_index_t)pos.x +
+      (nvfuser_index_t)pos.y * (nvfuser_index_t)dim.x +
+      (nvfuser_index_t)pos.z * (nvfuser_index_t)dim.x * (nvfuser_index_t)dim.y;
 }
 
 #define ioffset(pos, dim) pos.x + pos.y* dim.x + pos.z* dim.x* dim.y
@@ -175,14 +176,16 @@ __host__ __device__ dim3 dimension_of_reduction_segment(const _dim3& grid_dim) {
 
 // Returns the number of blocks in each reduction segment.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
-__host__ __device__ size_t size_of_reduction_segment(const _dim3& grid_dim) {
+__host__ __device__ nvfuser_index_t
+size_of_reduction_segment(const _dim3& grid_dim) {
   return size(
       dimension_of_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(grid_dim));
 }
 
 // Returns the total number of reduction segments.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
-__host__ __device__ size_t number_of_reduction_segments(const _dim3& grid_dim) {
+__host__ __device__ nvfuser_index_t
+number_of_reduction_segments(const _dim3& grid_dim) {
   return (X_BLOCK ? 1 : grid_dim.x) * (Y_BLOCK ? 1 : grid_dim.y) *
       (Z_BLOCK ? 1 : grid_dim.z);
 }
@@ -194,9 +197,9 @@ template <
     bool Z_BLOCK,
     typename _dim3bi,
     typename _dim3gd>
-__host__ __device__ size_t
+__host__ __device__ nvfuser_index_t
 index_of_reduction_segment(const _dim3bi& block_idx, const _dim3gd& grid_dim) {
-  size_t seg_idx = 0;
+  nvfuser_index_t seg_idx = 0;
   if (!Z_BLOCK)
     seg_idx += block_idx.z;
   if (!Y_BLOCK)
@@ -213,9 +216,9 @@ template <
     bool Z_BLOCK,
     typename _dim3bi,
     typename _dim3gd>
-__host__ __device__ size_t
+__host__ __device__ nvfuser_index_t
 offset_in_reduction_segment(const _dim3bi& block_idx, const _dim3gd& grid_dim) {
-  size_t offset = 0;
+  nvfuser_index_t offset = 0;
   if (Z_BLOCK)
     offset = offset * grid_dim.z + block_idx.z;
   if (Y_BLOCK)
@@ -270,7 +273,7 @@ __device__ void gridWelfordLastBlock(
     const T* in_M2,
     const T* in_avg,
     const TN* in_N,
-    const size_t in_size,
+    const nvfuser_index_t in_size,
     T* shared_buf_M2,
     T* shared_buf_avg,
     TN* shared_buf_N,
@@ -289,7 +292,7 @@ __device__ void gridWelfordLastBlock(
     inp_avg = in_avg[tid];
     inp_N = in_N[tid];
   }
-  for (size_t i = tid + block_size; i < in_size; i += block_size) {
+  for (nvfuser_index_t i = tid + block_size; i < in_size; i += block_size) {
     welfordCombine(inp_M2, inp_avg, inp_N, in_M2[i], in_avg[i], in_N[i]);
   }
   const auto should_write = (X_THREAD || threadIdx.x == 0) &&
@@ -325,7 +328,7 @@ __device__ void gridWelfordLastBlock(
     }
     block_sync::sync();
     if (should_write) {
-      size_t offset_write =
+      nvfuser_index_t offset_write =
           offset_in_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(
               threadIdx, blockDim);
       inp_M2 = shared_buf_M2[offset_write];

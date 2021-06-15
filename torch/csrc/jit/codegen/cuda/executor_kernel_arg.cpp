@@ -10,22 +10,82 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+namespace {
+
+template <typename T, typename nvfuser_index_t>
+std::unique_ptr<TensorArgAbstract> getTensorArg(int nDims) {
+  switch (nDims) {
+    case (0):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 0, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    case (1):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 1, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    case (2):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 2, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    case (3):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 3, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    case (4):
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 4, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    case (5):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 5, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    case (6):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 6, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    case (7):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 7, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    case (8):
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      return std::make_unique<TensorArg<
+          TensorArgCodegen<T, 8, nvfuser_index_t>,
+          nvfuser_index_t>>();
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Tried to gerneate a tensor to run a generated kernel with ",
+          nDims,
+          " dimensions, however it must be a 1-8 dimensional tensor.");
+  }
+  return nullptr;
+}
+
+template <typename INDEX_MODE>
 std::unique_ptr<TensorArgAbstract> getTensorArg(
     c10::ScalarType dtype,
     int nDims) {
   switch (dtype) {
     case c10::ScalarType::Double:
-      return getTensorArg<double>(nDims);
+      return getTensorArg<double, INDEX_MODE>(nDims);
     case c10::ScalarType::Float:
-      return getTensorArg<float>(nDims);
+      return getTensorArg<float, INDEX_MODE>(nDims);
     case c10::ScalarType::Half:
-      return getTensorArg<at::Half>(nDims);
+      return getTensorArg<at::Half, INDEX_MODE>(nDims);
     case c10::ScalarType::Bool:
-      return getTensorArg<bool>(nDims);
+      return getTensorArg<bool, INDEX_MODE>(nDims);
     case c10::ScalarType::Long:
-      return getTensorArg<int64_t>(nDims);
+      return getTensorArg<int64_t, INDEX_MODE>(nDims);
     case c10::ScalarType::Int:
-      return getTensorArg<int32_t>(nDims);
+      return getTensorArg<int32_t, INDEX_MODE>(nDims);
     default:
       TORCH_CHECK(
           false,
@@ -35,13 +95,33 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
   }
 }
 
+} // namespace
+
+std::unique_ptr<TensorArgAbstract> getTensorArg(
+    c10::ScalarType dtype,
+    int nDims,
+    KernelIndexMode index_mode) {
+  switch (index_mode) {
+    case KernelIndexMode::INT32:
+      return getTensorArg<int>(dtype, nDims);
+    case KernelIndexMode::INT64:
+      return getTensorArg<int64_t>(dtype, nDims);
+    default:
+      break;
+  }
+
+  TORCH_INTERNAL_ASSERT(false, "unknown index mode");
+  return nullptr;
+}
+
 // Push a tensor to the arguments
 void KernelArgumentHolder::push(const at::Tensor& tensor) {
   changed_ = true;
   int nDims = tensor.ndimension();
 
   c10::ScalarType dtype = tensor.scalar_type();
-  std::unique_ptr<TensorArgAbstract> tensor_arg = getTensorArg(dtype, nDims);
+  std::unique_ptr<TensorArgAbstract> tensor_arg =
+      getTensorArg(dtype, nDims, index_mode_);
   tensor_arg->setPointer(tensor.data_ptr());
   for (int i = 0; i < nDims; i++) {
     tensor_arg->setSize(i, tensor.sizes()[i]);

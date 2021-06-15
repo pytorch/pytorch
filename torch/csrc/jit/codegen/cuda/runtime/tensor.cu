@@ -1,11 +1,3 @@
-
-typedef unsigned char uint8_t;
-typedef signed char int8_t;
-typedef short int int16_t;
-typedef unsigned int uint32_t;
-typedef long long int int64_t;
-typedef unsigned long long int uint64_t;
-
 template <typename T, int N>
 struct Tensor {
   __device__ T& operator[](int64_t ind) {
@@ -13,8 +5,8 @@ struct Tensor {
   };
 
   T* data;
-  int64_t size[N];
-  int64_t stride[N];
+  nvfuser_index_t size[N];
+  nvfuser_index_t stride[N];
 };
 
 // Specialization for 0-dim case as it does not need size and stride arrays.

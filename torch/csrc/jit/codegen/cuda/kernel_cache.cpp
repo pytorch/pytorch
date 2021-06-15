@@ -453,6 +453,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     }
     CompileOptions options;
     options.device = c10::Device(DeviceType::CUDA, device_index);
+    options.index_mode = scheduler_entry->indexMode();
     FusionGuard fg(fusion_to_run.get());
     scheduler_entry->schedule(fusion_to_run.get());
     // Load launch params for reduction and normalization kernels

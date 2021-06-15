@@ -1160,8 +1160,8 @@ TEST(NVFuserTest, FusionParser_CUDA) {
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
   if ((((((((blockIdx.x * 1) + (1 - 1)) * 1) + (1 - 1)) * 128) + threadIdx.x) < T0.size[0])) {
-    constexpr int64_t ki81 = 0;
-    constexpr int64_t ki83 = 0;
+    constexpr nvfuser_index_t ki81 = 0;
+    constexpr nvfuser_index_t ki83 = 0;
     float T2[1];
     T2[0]
       = T0[(((((((blockIdx.x * 1) + ki81) * 1) + ki83) * 128) + threadIdx.x) * 1)]

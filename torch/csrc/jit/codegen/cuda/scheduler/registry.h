@@ -61,6 +61,10 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo {
   //!  will assume it is contiguous and aligned to 128bit/16Byte
   size_t getVectorizableWidth(TensorView* tv);
 
+  KernelIndexMode getIndexMode() {
+    return index_mode_;
+  }
+
   Fusion* fusion() {
     return complete_fusion_;
   }
@@ -85,12 +89,16 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo {
       const at::Tensor& tensor,
       size_t max_word_size_in_byte);
 
+  // check if input is compatible with 32b index mode
+  void collectIndexModeInfo(const at::ArrayRef<at::IValue>& inputs);
+
  private:
   std::unique_ptr<ExpressionEvaluator> expression_evaluator_ = nullptr;
   Fusion* complete_fusion_;
   std::unordered_map<TensorView*, size_t> alignment_map_;
   std::unordered_map<TensorView*, size_t> vectorword_map_;
   size_t common_alignment_size_;
+  KernelIndexMode index_mode_ = KernelIndexMode::INT64;
 };
 
 //! Virtual base class for schedule heuristics
@@ -139,6 +147,10 @@ class TORCH_CUDA_CU_API SchedulerEntry {
     return heuristc_;
   }
 
+  KernelIndexMode indexMode() const {
+    return index_mode_;
+  }
+
   const ReductionParams& reductionParams() const {
     TORCH_INTERNAL_ASSERT(
         has_reduction_param_, "This schedule heuristic is not reduction.");
@@ -174,6 +186,9 @@ class TORCH_CUDA_CU_API SchedulerEntry {
 
   //! Pointwise parameters if applicable
   PointwiseParams pparams_;
+
+  //! Kernel Index Mode
+  KernelIndexMode index_mode_;
 };
 
 //! Hash function for a scheduler entry

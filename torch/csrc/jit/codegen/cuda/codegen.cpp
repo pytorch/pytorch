@@ -156,7 +156,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
           // Unpack shared mem pointer
           auto space_type = kernel_summary.largest_smem_data_type;
           indent()
-              << "int64_t block_size = blockDim.x*blockDim.y*blockDim.z;\n";
+              << "nvfuser_index_t block_size = blockDim.x*blockDim.y*blockDim.z;\n";
           indent() << space_type << " *shared_mem_var = "
                    << "static_cast<" << space_type << "*>("
                    << "shared_mem);\n";
@@ -937,8 +937,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
 
     if (node->start()->isZeroInt() && node->stop()->isOneInt()) {
-      indent() << "constexpr " << node->index()->dtype() << " "
-               << gen(node->index()) << " = 0;\n";
+      indent() << "constexpr "
+               << "nvfuser_index_t"
+               << " " << gen(node->index()) << " = 0;\n";
       handleScope(node->body());
       return;
     }
@@ -957,9 +958,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else {
       step_code << gen_index << " += " << gen_step;
     }
-    indent() << "for(int64_t " << gen_index << " = " << gen_start << "; "
-             << gen_index << " < " << gen_stop << "; " << step_code.str()
-             << ") ";
+    indent() << "for(nvfuser_index_t " << gen_index << " = " << gen_start
+             << "; " << gen_index << " < " << gen_stop << "; "
+             << step_code.str() << ") ";
     startBlock(true);
     handleScope(node->body());
     endBlock();

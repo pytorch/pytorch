@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
+#include <limits>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -276,6 +278,7 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
   if (create_expr_evaluator) {
     initializeExpressionEvaluator(inputs);
   }
+  collectIndexModeInfo(inputs);
 }
 
 SchedulerRuntimeInfo::SchedulerRuntimeInfo(
@@ -475,7 +478,62 @@ size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
   return vector_size;
 }
 
+void SchedulerRuntimeInfo::collectIndexModeInfo(
+    const at::ArrayRef<at::IValue>& inputs) {
+  // Save 1 more bit besides the sign bit to be conservative
+  constexpr int64_t most_positive_int32_index =
+      std::numeric_limits<int>::max() / 2;
+  constexpr int64_t most_negative_int32_index =
+      std::numeric_limits<int>::min() / 2;
+
+  // Start by setting index mode to int32
+  index_mode_ = KernelIndexMode::INT32;
+
+  // Check all runtime inputs, and if any one of
+  //  the input's index exceeds max_int32 will
+  //  fall back to int64 indexing
+  for (auto ivalue_input : inputs) {
+    if (ivalue_input.isTensor()) {
+      auto tensor_input = ivalue_input.toTensor();
+      int64_t tensor_most_positive_index = 0;
+      int64_t tensor_most_negative_index = 0;
+      for (auto dim_i = 0; dim_i < tensor_input.ndimension(); dim_i++) {
+        // Ignore broadcast dimensions
+        if (tensor_input.size(dim_i) > 1) {
+          // accumulate based on the sign of stride
+          if (tensor_input.stride(dim_i) > 0) {
+            // Acuumulate positive stride
+            tensor_most_positive_index +=
+                (tensor_input.size(dim_i) - 1) * tensor_input.stride(dim_i);
+          } else {
+            // Acuumulate negative stride
+            tensor_most_negative_index +=
+                (tensor_input.size(dim_i) - 1) * tensor_input.stride(dim_i);
+          }
+        }
+      }
+
+      // Fall back to int64 if it can be either too positive
+      //  or too negative.
+      if (tensor_most_positive_index > most_positive_int32_index ||
+          tensor_most_negative_index < most_negative_int32_index) {
+        index_mode_ = KernelIndexMode::INT64;
+        return;
+      }
+    }
+  }
+}
+
 bool SchedulerEntry::sameAs(const SchedulerEntry* other) {
+  if (heuristc_ != other->heuristc_) {
+    return false;
+  }
+  if (index_mode_ != other->index_mode_) {
+    return false;
+  }
+  // Heuristic equal should imply has_reduction_param_ equal,
+  //  need to double check if it is the case before removing
+  //  the below one.
   if (has_reduction_param_ != other->has_reduction_param_) {
     return false;
   }
@@ -484,7 +542,6 @@ bool SchedulerEntry::sameAs(const SchedulerEntry* other) {
   } else {
     return pparams_ == other->pparams_;
   }
-
   return true;
 }
 
@@ -755,17 +812,26 @@ std::unique_ptr<SchedulerEntry> SchedulerEntry::makeEntry(
     ScheduleHeuristic sh,
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info) {
+  std::unique_ptr<SchedulerEntry> scheduler_entry = nullptr;
   switch (sh) {
     case ScheduleHeuristic::PointWise:
-      return std::make_unique<PointWiseScheduler>(fusion, runtime_info);
+      scheduler_entry =
+          std::make_unique<PointWiseScheduler>(fusion, runtime_info);
+      break;
     case ScheduleHeuristic::Reduction:
-      return std::make_unique<SingleReductionScheduler>(fusion, runtime_info);
+      scheduler_entry =
+          std::make_unique<SingleReductionScheduler>(fusion, runtime_info);
+      break;
     case ScheduleHeuristic::Normalization:
-      return std::make_unique<NormalizationScheduler>(fusion, runtime_info);
+      scheduler_entry =
+          std::make_unique<NormalizationScheduler>(fusion, runtime_info);
+      break;
     default:
       TORCH_INTERNAL_ASSERT(false, "unreachable");
   }
-  return nullptr;
+
+  scheduler_entry->index_mode_ = runtime_info.getIndexMode();
+  return scheduler_entry;
 }
 
 // Simply loop through the list as baseline strategy

@@ -45,17 +45,18 @@ namespace reduction {
 
 // Utility functions
 template <typename _dim3>
-__device__ __forceinline__ size_t size(const _dim3& d) {
-  return (size_t)d.x * (size_t)d.y * (size_t)d.z;
+__device__ __forceinline__ nvfuser_index_t size(const _dim3& d) {
+  return (nvfuser_index_t)d.x * (nvfuser_index_t)d.y * (nvfuser_index_t)d.z;
 }
 
 #define isize(d) d.x* d.y* d.z
 
 template <typename _dim3pos, typename _dim3dim>
-__device__ __forceinline__ size_t
+__device__ __forceinline__ nvfuser_index_t
 offset(const _dim3pos& pos, const _dim3dim& dim) {
-  return (size_t)pos.x + (size_t)pos.y * (size_t)dim.x +
-      (size_t)pos.z * (size_t)dim.x * (size_t)dim.y;
+  return (nvfuser_index_t)pos.x +
+      (nvfuser_index_t)pos.y * (nvfuser_index_t)dim.x +
+      (nvfuser_index_t)pos.z * (nvfuser_index_t)dim.x * (nvfuser_index_t)dim.y;
 }
 
 #define ioffset(pos, dim) pos.x + pos.y* dim.x + pos.z* dim.x* dim.y
@@ -71,14 +72,14 @@ __device__ dim3 dimension_of_reduction_segment(const _dim3& grid_dim) {
 
 // Returns the number of blocks in each reduction segment.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
-__device__ size_t size_of_reduction_segment(const _dim3& grid_dim) {
+__device__ nvfuser_index_t size_of_reduction_segment(const _dim3& grid_dim) {
   return size(
       dimension_of_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(grid_dim));
 }
 
 // Returns the total number of reduction segments.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
-__device__ size_t number_of_reduction_segments(const _dim3& grid_dim) {
+__device__ nvfuser_index_t number_of_reduction_segments(const _dim3& grid_dim) {
   return (X_BLOCK ? 1 : grid_dim.x) * (Y_BLOCK ? 1 : grid_dim.y) *
       (Z_BLOCK ? 1 : grid_dim.z);
 }
@@ -90,9 +91,9 @@ template <
     bool Z_BLOCK,
     typename _dim3bi,
     typename _dim3gd>
-__device__ size_t
+__device__ nvfuser_index_t
 index_of_reduction_segment(const _dim3bi& block_idx, const _dim3gd& grid_dim) {
-  size_t seg_idx = 0;
+  nvfuser_index_t seg_idx = 0;
   if (!Z_BLOCK)
     seg_idx += block_idx.z;
   if (!Y_BLOCK)
@@ -109,9 +110,9 @@ template <
     bool Z_BLOCK,
     typename _dim3bi,
     typename _dim3gd>
-__device__ size_t
+__device__ nvfuser_index_t
 offset_in_reduction_segment(const _dim3bi& block_idx, const _dim3gd& grid_dim) {
-  size_t offset = 0;
+  nvfuser_index_t offset = 0;
   if (Z_BLOCK)
     offset = offset * grid_dim.z + block_idx.z;
   if (Y_BLOCK)
@@ -195,7 +196,7 @@ template <
 __device__ void gridReduceLastBlock(
     T& out,
     const T* in,
-    const size_t in_size,
+    const nvfuser_index_t in_size,
     Func reduction_op,
     T* shared_buf,
     bool read_write_pred,
@@ -209,7 +210,7 @@ __device__ void gridReduceLastBlock(
   if (tid < in_size) {
     inp = in[tid];
   }
-  for (size_t i = tid + block_size; i < in_size; i += block_size) {
+  for (nvfuser_index_t i = tid + block_size; i < in_size; i += block_size) {
     reduction_op(inp, in[i]);
   }
 
