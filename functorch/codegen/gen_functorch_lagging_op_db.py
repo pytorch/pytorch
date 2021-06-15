@@ -1,5 +1,10 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from torch.testing._internal.common_methods_invocations import op_db
-import pprint
 
 
 def num_leading_spaces(line: str) -> int:
@@ -20,6 +25,11 @@ def deindent(code: str) -> str:
 if __name__ == '__main__':
     supported = {(opinfo.name, opinfo.variant_test_name) for opinfo in op_db}
     print(deindent("""\
+    # Copyright (c) Facebook, Inc. and its affiliates.
+    # All rights reserved.
+    #
+    # This source code is licensed under the BSD-style license found in the
+    # LICENSE file in the root directory of this source tree.
     from torch.testing._internal.common_methods_invocations import op_db
 
     # Generated from codegen/gen_functorch_op_db.py via
