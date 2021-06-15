@@ -437,8 +437,11 @@ void Module::train(bool on) {
   int i = 0;
   for (Module m : modules()) {
     std::cout << "jit: module " << i++ << std::endl;
+    std::cout << "jit:  ivalue name is: " << m._ivalue()->name() << std::endl;
+    if (i == 17) {
+      std::cout << "check here" << std::endl;
+    }
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
-      std::cout << "jit:  ivalue name is: " << m._ivalue()->name() << std::endl;
       m._ivalue()->setSlot(*slot, on);
     } else {
       TORCH_INTERNAL_ASSERT("'training' attribute not found");
