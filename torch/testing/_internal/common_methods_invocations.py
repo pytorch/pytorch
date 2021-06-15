@@ -164,7 +164,7 @@ class SampleInput(object):
             numpy_args.append(numpy_arg)
         sample_numpy_input = sample_torch_input.cpu().numpy()
 
-        return tuple(sample_numpy_input, numpy_args, sample_kwargs)
+        return tuple((sample_numpy_input, numpy_args, sample_kwargs))
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->

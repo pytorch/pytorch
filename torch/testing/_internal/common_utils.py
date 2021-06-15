@@ -930,24 +930,30 @@ def get_comparison_dtype(a, b):
 def compare_with_reference(torch_fn, ref_fn, sample_input):
     # Compares torch function with reference function for given sample input (object of SampleInput)
     # Note: only values are compares, type comparison is not done here
-    sample_np = sample_input.numpy()
-    actual = torch_fn(*sample_input.splat())
-    expected = ref_fn(*sample_np)
+    try:
+        n_inp, n_args, _ = sample_input.numpy()
+    except TypeError:
+        return
+    t_inp, t_args, _ = sample_input.splat()
+
+    t_kwargs, n_kwargs = torch_fn.sample_kwargs(t_inp.device, None, t_inp)
+    actual = torch_fn(t_inp, *t_args, **t_kwargs)
+    expected = ref_fn(n_inp, *n_args, **n_kwargs)
  
     # Crafts a custom error message for smaller, printable tensors
-    if sample_input.numel() < 10:
+    if t_inp.numel() < 10:
         msg = ("Failed to produce expected results! Input tensor was"
                 " {0}, torch result is {1}, and reference result is"
-                " {2}.").format(sample_input, actual, expected)
+                " {2}.").format(t_inp, actual, expected)
     else:
         msg = None
  
     if isinstance(actual, torch.Tensor):
-        torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype), msg)
+        torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype), msg = msg)
     else:
         for x, y in zip(expected, actual):
             # Testing multi-outputs results
-            torch.testing.assert_close(actual, expected, msg)
+            torch.testing.assert_close(actual, expected, msg = msg)
 
 # This implements a variant of assertRaises/assertRaisesRegex where we first test
 # if the exception is NotImplementedError, and if so just skip the test instead
