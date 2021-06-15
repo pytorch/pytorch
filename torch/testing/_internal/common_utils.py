@@ -707,7 +707,11 @@ def is_iterable(obj):
         return False
 
 
-IS_ATEN_CPU_CAPABILITY_AVX512 = os.environ["ATEN_CPU_CAPABILITY"] == "avx512"
+IS_ATEN_CPU_CAPABILITY_AVX512 = None
+try:
+    IS_ATEN_CPU_CAPABILITY_AVX512 = os.environ["ATEN_CPU_CAPABILITY"] == "avx512"
+except KeyError:
+    pass
 
 
 def is_iterable_of_tensors(iterable, include_empty=False):
