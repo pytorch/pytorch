@@ -147,7 +147,6 @@ class TestOpInfo(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             compare_with_reference(op, op.ref, sample_input)
-        # self._test_reference_numerics(dtype, op, tensors)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
