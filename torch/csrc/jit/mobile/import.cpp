@@ -180,6 +180,17 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
   }
 }
 
+bool isTensorInBytecodeArchive(
+    caffe2::serialize::PyTorchStreamReader& stream_reader) {
+  auto records = stream_reader.getAllRecords();
+  for (const auto& record : records) {
+    if (record.find("bytecode/") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
@@ -299,12 +310,12 @@ void BytecodeDeserializer::parseMethods(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          model_version <= caffe2::serialize::kProducedBytecodeVersion,
+          model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
       " and ",
-      caffe2::serialize::kProducedBytecodeVersion,
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
       "But the model version is ",
       model_version);
 
@@ -553,10 +564,15 @@ c10::IValue BytecodeDeserializer::readArchive(
     return objLoaderMobile(type, input, mcu);
   };
 
+  bool bytecode_tensor_in_constants_archive =
+      (archive_name == "bytecode" &&
+       !isTensorInBytecodeArchive(*reader_.get()));
+
   auto ivalues = torch::jit::readArchiveAndTensors(
       archive_name,
       /*pickle_prefix=*/"",
-      /*tensor_prefix=*/"",
+      /*tensor_prefix=*/
+      bytecode_tensor_in_constants_archive ? "constants/" : "",
       type_resolver,
       obj_loader,
       device_,

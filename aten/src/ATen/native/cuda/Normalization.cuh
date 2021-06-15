@@ -1664,6 +1664,7 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
           static_cast<accscalar_t>(norm_fct),
           reduction_size,
           stride);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       batch_norm_backward_elemt_channels_last_kernel<ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
@@ -1678,8 +1679,8 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
           static_cast<accscalar_t>(norm_fct),
           reduction_size,
           stride);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   return grad_input;
