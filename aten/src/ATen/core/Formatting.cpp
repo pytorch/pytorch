@@ -34,12 +34,24 @@ private:
 };
 
 struct Formatter {
-  Formatter(const Tensor& self) 
-  : sz_(1), intMode_(true), sciMode_(false) {
-    std::stringstream ss;
+  Formatter(const Tensor& tensor_, bool isFloatingDType) 
+  : maxWidth_(1), intMode_(true), sciMode_(false), isFloatingDtype_(isFloatingDType) {
 
-    Tensor mask = (self.ne(at::Scalar(0))).__and__(self.isfinite());
-    Tensor nonzeroFiniteVals = self.masked_select(mask);
+    //stream used to find maxWidth later
+    std::stringstream sstream;
+
+    if (!isFloatingDtype_){
+      auto value_p = tensor_.data_ptr<double>();
+      for (int64_t i = 0; i < tensor_.numel(); i++) {
+        sstream << value_p[i];
+        maxWidth_ = std::max(maxWidth_, (int64_t)sstream.str().length());
+        sstream.str("");
+      }
+      return;
+    }
+          
+    Tensor mask = (tensor_.ne(at::Scalar(0))).__and__(tensor_.isfinite());
+    Tensor nonzeroFiniteVals = tensor_.masked_select(mask);
 
     if (nonzeroFiniteVals.numel() == 0){
       return;
@@ -64,69 +76,73 @@ struct Formatter {
       if ((nonZeroFiniteMax / nonZeroFiniteMin) > 1000. ||
           nonZeroFiniteMax > 1.e8) {
         sciMode_ = true;
-        ss << std::scientific << std::setprecision(4);
+        sstream << std::scientific << std::setprecision(4);
       } else {
-        ss << std::defaultfloat;
+        sstream << std::defaultfloat;
       }
     } else {
       if ((nonZeroFiniteMax / nonZeroFiniteMin) > 1000. ||
           nonZeroFiniteMax > 1.e8 || nonZeroFiniteMin < 1.e-4) {
         sciMode_ = true;
-        ss << std::scientific << std::setprecision(4);
+        sstream << std::scientific << std::setprecision(4);
       } else {
-        ss << std::fixed << std::setprecision(4);
-      }
-    }
-
-    for (int64_t i = 0; i < nzfValsSize; i++) {
-      ss << nzf_p[i];
-      sz_ = std::max(sz_, (int64_t) ss.str().length());
-      ss.str("");
-    }
-  }
-
-  std::string format(double value, bool isFloatingDtype) const {
-    std::stringstream ss;
-
-    if (isFloatingDtype) {
-      if (sciMode_) {
-        ss << std::scientific << std::setprecision(4);
-        ss << std::setw(sz_) << value;
-      } else if (intMode_) {
-        ss << defaultfloat;
-        if (std::isfinite(value)) {
-          ss << std::setw(sz_) << value << ".";
-        } else {
-          ss << std::setw(sz_) << value ;
-        }
-      } else {
-        ss << std::fixed << std::setprecision(4);
-        ss << std::setw(sz_) << value;
+        sstream << std::fixed << std::setprecision(4);
       }
     } else {
       ss << defaultfloat;
       ss << std::setw(sz_) << value;
     }
-    return ss.str();
+
+    // Iterate once over the elements to set maxWidth_
+    for (int64_t i = 0; i < size; i++) {
+      sstream << nzf_p[i];
+      maxWidth_ = std::max(maxWidth_, (int64_t) sstream.str().length());
+      sstream.str("");
+    }
+  }
+
+  std::string format(double value) const {
+    std::stringstream sstream;
+
+    if (isFloatingDtype_) {
+      if (sciMode_) {
+        sstream << std::scientific << std::setprecision(4);
+        sstream << std::setw(maxWidth_) << value;
+      } else if (intMode_) {
+        sstream << defaultfloat;
+        if (std::isfinite(value)) {
+          sstream << std::setw(maxWidth_) << value << ".";
+        } else {
+          sstream << std::setw(maxWidth_) << value;
+        }
+      } else {
+        sstream << std::fixed << std::setprecision(4);
+        sstream << std::setw(maxWidth_) << value;
+      }
+    } else {
+      sstream << std::setw(maxWidth_) << value;
+    }
+    return sstream.str();
   }
 
 private:
-  int64_t sz_;
+  int64_t maxWidth_;
   bool intMode_;
   bool sciMode_;
+  bool isFloatingDtype_;
 };
 
 std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {
   return out << t.toString();
 }
 
-std::string __vectorString( const Tensor& tensor_, const Formatter& formatter, bool isFloatingDtype) {
+std::string __vectorString( const Tensor& tensor_, const Formatter& formatter) {
   std::stringstream ss;
   if (tensor_.numel() > 0) {
     double* tensor_p = tensor_.data_ptr<double>();
     ss << "[";
     for (int64_t i = 0; i < tensor_.size(0); i++) {
-      ss << formatter.format(tensor_p[i], isFloatingDtype);
+      ss << formatter.format(tensor_p[i]);
       if (i < tensor_.size(0) - 1) {
         ss << ", ";
       }
@@ -136,7 +152,8 @@ std::string __vectorString( const Tensor& tensor_, const Formatter& formatter, b
   return ss.str();
 }
 
-std::string __tensorString(const Tensor & tensor_, const Formatter& formatter, int64_t indent, bool isFloatingDtype){
+// Recursive function to generate the print output. Relies on the formatter
+std::string __tensorString(const Tensor & tensor_, const Formatter& formatter, int64_t indent){
   std::stringstream ss ;
   std::vector<std::string> slices;
   int64_t dim = tensor_.dim();
@@ -146,10 +163,10 @@ std::string __tensorString(const Tensor & tensor_, const Formatter& formatter, i
     ss << "[ " << tensor_.toString() << "{}";
     return ss.str();
   } else if (dim == 1) {
-    return __vectorString(tensor_, formatter, isFloatingDtype);
+    return __vectorString(tensor_, formatter);
   } else {
     for ( int64_t i = 0; i < tensor_.size(0); i++){
-      slices.push_back(__tensorString(tensor_.select(0, i), formatter, indent+1, isFloatingDtype));
+      slices.push_back(__tensorString(tensor_.select(0, i), formatter, indent+1));
     }
   }
   ss << "[";
@@ -159,7 +176,7 @@ std::string __tensorString(const Tensor & tensor_, const Formatter& formatter, i
       for (int64_t d = 0; d < dim-1; d++){
         ss << std::endl;
       }
-      for(int64_t i = 0; i < indent+1; i++) {
+      for(int64_t j = 0; j < indent+1; j++) {
         ss << " ";
       }
     } else {
@@ -181,7 +198,6 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else {
-    bool isFloatingDtype =  tensor_.is_floating_point();
     Tensor tensor;    
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
@@ -194,9 +210,11 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
 
     std::string prefix = "tensor(";
     int64_t indent = prefix.length();
+    bool isFloatingDtype =  tensor_.is_floating_point();
+    Formatter formatter(tensor, isFloatingDtype);
+
     stream << prefix;
-    Formatter formatter(tensor);
-    std::string tensorStr = __tensorString(tensor, formatter, indent, isFloatingDtype);
+    std::string tensorStr = __tensorString(tensor, formatter, indent);
     stream << tensorStr << ")" << std::endl;
 
     stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
