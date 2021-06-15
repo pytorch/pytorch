@@ -9,7 +9,7 @@ from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
     (TestCase, compare_with_reference, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck, suppress_warnings, numpy_to_torch_dtype_dict, torch_to_numpy_dtype_dict)
+     gradcheck, gradgradcheck, suppress_warnings, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING)
 from torch.testing._internal.common_device_type import \
@@ -44,6 +44,8 @@ class TestOpInfo(TestCase):
             for sample in samples:
                 op(sample.input, *sample.args, **sample.kwargs)
 
+    # TODO: This whole code will be removed once the new design is approved and tested!
+    """
     # Helper for comparing torch tensors and numpy arrays
     def assertEqualHelper(self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs):
         assert isinstance(actual, torch.Tensor)
@@ -73,7 +75,6 @@ class TestOpInfo(TestCase):
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on given tensors
-    """
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
             if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
