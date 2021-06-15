@@ -156,6 +156,7 @@ class SampleInput(object):
         # Returns the NumPy version of the input
         # Only supports torch.Tensor objects, if an arg is a scalar - a TypeError will be raised
         sample_torch_input, sample_args, sample_kwargs = self.splat()
+
         numpy_args = list()
 
         for sample_arg in sample_args:
@@ -164,7 +165,13 @@ class SampleInput(object):
             else:
                 raise TypeError(f"Only torch.Tensor types supported but got {type(sample_arg)}")
             numpy_args.append(numpy_arg)
-        sample_numpy_input = sample_torch_input.cpu().numpy()
+
+        if isinstance(sample_torch_input, torch.Tensor):
+            sample_numpy_input = sample_torch_input.cpu().numpy()
+        elif is_iterable_of_tensors(sample_torch_input):
+            sample_numpy_input = [sample_input.cpu().numpy() for sample_input in sample_torch_input]
+        else:
+            raise TypeError(f"Only torch.Tensor types support but got {type(sample_torch_input)}")
 
         return (sample_numpy_input, numpy_args, sample_kwargs)
 

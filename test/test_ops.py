@@ -23,7 +23,8 @@ from collections.abc import Sequence
 
 
 # Get names of all the operators which have ref in their entry in OpInfo (testing infra)
-ref_test_ops = list(filter(lambda op: op.ref is not _NOTHING, op_db))
+# TODO: Add None to _NOTHING?
+ref_test_ops = list(filter(lambda op: op.ref is not None and op.ref is not _NOTHING, op_db))
 
 
 # Tests that apply to all operators
@@ -141,6 +142,7 @@ class TestOpInfo(TestCase):
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
+    @onlyOnCPUAndCUDA
     @suppress_warnings
     @ops(ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
     def test_reference_testing(self, device, dtype, op):
