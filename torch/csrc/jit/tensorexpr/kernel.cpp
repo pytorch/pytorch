@@ -2984,9 +2984,9 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
         if (blockSize < 0) {
           blockSize = kDefaultBlockSize;
         }
-        l.splitWithMask(flattened, blockSize, &inner);
-        l.setGPUBlockIndex(flattened, 0);
-        l.setGPUThreadIndex(inner, 0);
+        LoopNest::splitWithMask(flattened, blockSize, &inner);
+        flattened->set_gpu_block_index(0);
+        inner->set_gpu_thread_index(0);
       } else if (loopLevels == 3) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
@@ -2997,10 +2997,10 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
         const int kDefaultBlockSize = 256;
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
-        l.splitWithMask(flattened, blockCount * blockSize, &inner);
-        l.splitWithMask(inner, blockSize, &inner1);
-        l.setGPUBlockIndex(inner, 0);
-        l.setGPUThreadIndex(inner1, 0);
+        LoopNest::splitWithMask(flattened, blockCount * blockSize, &inner);
+        LoopNest::splitWithMask(inner, blockSize, &inner1);
+        inner->set_gpu_block_index(0);
+        inner1->set_gpu_thread_index(0);
       } else {
         throw std::runtime_error(
             "Invalid loop-level: " + c10::to_string(loopLevels));
@@ -3024,10 +3024,10 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
       assert(flattened);
 
       For* inner = nullptr;
-      l.splitWithMask(flattened, blockSize, &inner);
-      l.setGPUBlockIndex(flattened, 0);
-      l.setGPUThreadIndex(inner, 0);
-      l.setBufferMap(flattened, block_analysis->getBufferMap());
+      LoopNest::splitWithMask(flattened, blockSize, &inner);
+      flattened->set_gpu_block_index(0);
+      inner->set_gpu_thread_index(0);
+      flattened->set_buffer_map(block_analysis->getBufferMap());
     }
   }
 
@@ -3115,8 +3115,7 @@ void TensorExprKernel::genInputDebugNames() {
     std::string sanitized_name = sanitizeName(input->debugName());
     // we could get fancier here, but name conflict is extremely unlikely
     while (name_set.count(sanitized_name)) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      sanitized_name = sanitized_name + "_";
+      sanitized_name.append("_");
     }
     value_to_name[input] = sanitized_name;
     name_set.insert(sanitized_name);
