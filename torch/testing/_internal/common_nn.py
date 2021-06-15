@@ -4889,8 +4889,6 @@ class ModuleTest(object):
         self.reference_fn = reference_fn
         self.is_criterion_test = is_criterion_test(kwargs)
         self._required_arg_names = {'constructor_args', 'input', 'extra_args'}
-        if self.is_criterion_test:
-            self._required_arg_names.add('target')
         for name in self._required_arg_names:
             if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
                 if name in {'constructor_args', 'extra_args'}:
@@ -4901,36 +4899,30 @@ class ModuleTest(object):
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 
+        self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.check_forward_only = kwargs.get('check_forward_only', False)
+        self.check_gradgrad = kwargs.get('check_gradgrad', True)
+        self.test_cpu = kwargs.get('test_cpu', True)
+        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
+        self.check_batched_grad = kwargs.get('check_batched_grad', True)
         if self.is_criterion_test:
             self._required_arg_names.add('target')
-            self.should_test_cuda = kwargs.get('test_cuda', True)
-            self.check_forward_only = kwargs.get('check_forward_only', False)
-            self.check_gradgrad = kwargs.get('check_gradgrad', True)
             self.check_half = kwargs.get('check_half', True)
             self.check_bfloat16 = kwargs.get('check_bfloat16', False)
             self.check_complex = kwargs.get('check_complex', False)
-            self.test_cpu = kwargs.get('test_cpu', True)
             self.with_tf32 = kwargs.get('with_tf32', True)
-            self.tf32_precision = kwargs.get('tf32_precision', 0.001)
-            self.check_batched_grad = kwargs.get('check_batched_grad', True)
         else:
             self.jacobian_input = kwargs.get('jacobian_input', True)
-            self.should_test_cuda = kwargs.get('test_cuda', True)
             self.should_test_pickle = kwargs.get('pickle', True)
             self.FIXME_no_cuda_gradgrad_comparison = \
                 kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
             self.precision = kwargs.get('precision', 2e-4)
-            self.check_forward_only = kwargs.get('check_forward_only', False)
             self.cudnn = kwargs.get('cudnn', False)
             self.check_inplace = kwargs.get('check_inplace', False)
-            self.check_gradgrad = kwargs.get('check_gradgrad', True)
             self.skip_double = kwargs.get('skip_double', False)
             self.skip_half = kwargs.get('skip_half', False)
             self.with_tf32 = kwargs.get('with_tf32', False)
-            self.tf32_precision = kwargs.get('tf32_precision', 0.001)
-            self.test_cpu = kwargs.get('test_cpu', True)
             self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
-            self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def get_name(self):
         if self.fullname is not None:
@@ -4998,33 +4990,41 @@ class ModuleTest(object):
         return map_variables(input)
 
     def __call__(self, test_case):
-        if self.is_criterion_test:
-            return self._criterion_test_call(test_case)
-        else:
-            return self._module_test_call(test_case)
-
-    def test_cuda(self, test_case, dtype=None, extra_args=None):
-        if self.is_criterion_test:
-            return self._criterion_test_cuda(test_case, dtype, extra_args)
-        else:
-            return self._module_test_cuda(test_case)
-
-    def _module_test_call(self, test_case):
+        # === Instantiate the module. ===
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
 
+        # === Check that these methods don't raise errors. ===
+        if self.is_criterion_test:
+            module.__repr__()
+            str(module)
+
+        # === Check the forward output against the reference function. ===
         if self.reference_fn is not None:
-            out = test_case._forward(module, input)
-            ref_input = deepcopy(input)
-            ref_module = deepcopy(module)
-            expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0], ref_module)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(out, expected_out)
+            if self.is_criterion_test:
+                target = self._get_target()
+                out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
+                ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
+                expected_out = self.reference_fn(*ref_args)
+                test_case.assertEqual(out, expected_out)
+            else:
+                out = test_case._forward(module, input)
+                ref_input = deepcopy(input)
+                ref_module = deepcopy(module)
+                expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0], ref_module)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                test_case.assertEqualIgnoreType(out, expected_out)
+
+        # === Possibly only check forward. ===
         if self.check_forward_only:
             return
-        self.test_noncontig(test_case, module, input)
 
-        if self.should_test_pickle:
+        # === Check forward with a noncontiguous input. ===
+        if not self.is_criterion_test:
+            self.test_noncontig(test_case, module, input)
+
+        # === Check that the module can be pickled & unpickled.
+        if not self.is_criterion_test and self.should_test_pickle:
             # TODO: do this with in-memory files as soon as torch.save will support it
             with tempfile.TemporaryFile() as f:
                 test_case._forward(module, input)
@@ -5033,7 +5033,34 @@ class ModuleTest(object):
                 module_copy = torch.load(f)
                 test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
-        self._do_test(test_case, module, input)
+        # === Do the meat of the module test. ===
+        if not self.is_criterion_test:
+            self._do_test(test_case, module, input)
+
+        # === Check gradients. ===
+        if self.is_criterion_test:
+            params = tuple(x for x in module.parameters())
+            if not isinstance(input, tuple):
+                inputs = (input,) + params + (target,)
+
+                def apply_fn(input, target, *params):
+                    return module(input, target)
+            else:
+                inputs = input + params + (target,)
+
+                def apply_fn(input1, input2, target, *params):  # type: ignore[misc]
+                    return module(input1, input2, target)
+
+            gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
+
+            if self.check_gradgrad:
+                gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
+
+    def test_cuda(self, test_case, dtype=None, extra_args=None):
+        if self.is_criterion_test:
+            return self._criterion_test_cuda(test_case, dtype, extra_args)
+        else:
+            return self._module_test_cuda(test_case)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -5339,42 +5366,6 @@ class ModuleTest(object):
                 test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
-
-    def _criterion_test_call(self, test_case):
-        module = self.constructor(*self.constructor_args)
-        input = self._get_input()
-
-        # Check that these methods don't raise errors
-        module.__repr__()
-        str(module)
-
-        target = self._get_target()
-
-        if self.reference_fn is not None:
-            out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
-            ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
-            expected_out = self.reference_fn(*ref_args)
-            test_case.assertEqual(out, expected_out)
-
-        if self.check_forward_only:
-            return
-
-        params = tuple(x for x in module.parameters())
-        if not isinstance(input, tuple):
-            inputs = (input,) + params + (target,)
-
-            def apply_fn(input, target, *params):
-                return module(input, target)
-        else:
-            inputs = input + params + (target,)
-
-            def apply_fn(input1, input2, target, *params):  # type: ignore[misc]
-                return module(input1, input2, target)
-
-        gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
-
-        if self.check_gradgrad:
-            gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def _criterion_test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
