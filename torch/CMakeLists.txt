@@ -278,7 +278,17 @@ if(USE_DISTRIBUTED)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
       list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
     endif()
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
+    # NCCL is a private dependency of libtorch, but libtorch_python includes
+    # some private headers of libtorch, which in turn include NCCL. As a hacky
+    # alternative to making NCCL a public dependency of libtorch, we make it
+    # a private dependency of libtorch_python as well.
+    if(USE_NCCL)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
+    endif()
+    # Same for MPI.
+    if(USE_MPI)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MPI_CXX_LIBRARIES})
+    endif()
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 endif()
 
