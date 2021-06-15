@@ -1180,6 +1180,7 @@ class DeviceCachingAllocator {
     auto it = pool.blocks.begin();
     while (it != pool.blocks.end()) {
       Block* block = *it;
+      ++it;
       if (!block->prev && !block->next) {
         release_block(block);
 
@@ -1189,7 +1190,6 @@ class DeviceCachingAllocator {
           pool.owner_PrivatePool->cudaMalloc_count--;
         }
       }
-      ++it;
     }
   }
 
