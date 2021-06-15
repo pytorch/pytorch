@@ -3565,7 +3565,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
 DEFINE_DISPATCH(lu_solve_trans_stub);
 
 // Supports arbitrary batch dimensions for self and LU_data (implicitly LU_pivots also)
-Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, const c10::string_view trans_str) {
+  auto trans = std::toupper(trans_str[0]);
+  switch (trans) {
+    case 'N':
+    case 'T':
+    case 'C':
+      break;
+    default:
+      TORCH_CHECK(false,
+                  "lu_solve: wrong `trans` parameter, it must be one of 'N', 'T' or 'C'");
+  }
   TORCH_CHECK(self.dim() >= 2,
               "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   TORCH_CHECK(LU_data.dim() >= 2,
@@ -3607,6 +3617,10 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
   return result;
 }
 
+Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  return at::_lu_solve_trans(self, LU_data, LU_pivots, "N");
+}
+
 Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, Tensor& result) {
   checkSameDevice("lu_solve", result, self);
   checkLinalgCompatibleDtype("lu_solve", result, self);
@@ -3614,10 +3628,6 @@ Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
-}
-
-Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, const c10::string_view trans) {
-  return self;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ legacy_lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
