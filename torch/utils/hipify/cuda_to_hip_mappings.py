@@ -554,6 +554,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ),
         ("device_functions.h", ("hip/device_functions.h", CONV_INCLUDE, API_RUNTIME)),
         ("driver_types.h", ("hip/driver_types.h", CONV_INCLUDE, API_RUNTIME)),
+        ("library_types.h", ("hip/library_types.h", CONV_INCLUDE, API_RUNTIME)),
         ("cuComplex.h", ("hip/hip_complex.h", CONV_INCLUDE, API_RUNTIME)),
         ("cuda_fp16.h", ("hip/hip_fp16.h", CONV_INCLUDE, API_RUNTIME)),
         (

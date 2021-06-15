@@ -9,12 +9,15 @@ namespace cuda {
 
 inline cudaDataType toCudaDataType(const c10::ScalarType& scalar_type) {
   switch (scalar_type) {
+// HIP doesn't define integral types
+#ifndef __HIP_PLATFORM_HCC__
     case c10::ScalarType::Byte:
       return CUDA_R_8U;
     case c10::ScalarType::Char:
       return CUDA_R_8I;
     case c10::ScalarType::Int:
       return CUDA_R_32I;
+#endif
     case c10::ScalarType::Half:
       return CUDA_R_16F;
     case c10::ScalarType::Float:
@@ -27,7 +30,7 @@ inline cudaDataType toCudaDataType(const c10::ScalarType& scalar_type) {
       return CUDA_C_32F;
     case c10::ScalarType::ComplexDouble:
       return CUDA_C_64F;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(__HIP_PLATFORM_HCC__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     case c10::ScalarType::Short:
       return CUDA_R_16I;
     case c10::ScalarType::Long:
