@@ -8068,7 +8068,7 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         finally:
             torch.set_num_threads(num_threads)
 
-# Test Python Array API Constants        
+# Test Python Array API Constants
 class TestConstants(TestCase):
     def test_e(self):
         self.assertIsInstance(torch.e, float)
