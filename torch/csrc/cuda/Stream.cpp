@@ -22,11 +22,12 @@ static PyObject * THCPStream_pynew(
 
   int priority = 0;
   uint64_t cdata = 0;
+  uint64_t stream_ptr = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static char *kwlist[] = {"priority", "_cdata", nullptr};
+  static char *kwlist[] = {"priority", "_cdata", "stream_ptr", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
-      args, kwargs, "|iK", kwlist, &priority, &cdata)) {
+      args, kwargs, "|iKK", kwlist, &priority, &cdata, &stream_ptr)) {
     return nullptr;
   }
 
@@ -35,11 +36,17 @@ static PyObject * THCPStream_pynew(
     return nullptr;
   }
 
+  if (stream_ptr) {
+    TORCH_CHECK(priority == 0, "Priority was explicitly set for a external stream")
+  }
+
   at::cuda::CUDAStream stream =
     cdata ?
     at::cuda::CUDAStream::unpack(cdata) :
-    at::cuda::getStreamFromPool(
-      /* isHighPriority */ priority < 0 ? true : false);
+      stream_ptr ?
+      at::cuda::getStreamFromExternal(reinterpret_cast<cudaStream_t>(stream_ptr), current_device) :
+      at::cuda::getStreamFromPool(
+        /* isHighPriority */ priority < 0 ? true : false);
 
   THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream.pack();
