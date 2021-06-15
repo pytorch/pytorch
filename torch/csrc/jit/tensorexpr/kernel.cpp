@@ -230,6 +230,23 @@ bool conv2dIsSupported(
   }
   return true;
 }
+
+static bool isContiguous(const torch::jit::Value* v) {
+  auto const& tt = v->type()->cast<TensorType>();
+  if (!tt) {
+    return false;
+  }
+  if (!tt->isComplete()) {
+    return false;
+  }
+  auto const& sizes = tt->sizes().concrete_sizes();
+  auto const& strides = tt->strides().concrete_sizes();
+  if (!sizes || !strides) {
+    return false;
+  }
+  return *strides == TensorType::contiguousStridesOf(*sizes);
+}
+
 // The fuser only supports conv2d with very specific properties:
 // - Static shapes: 4-d input and filter, 1-d bias.
 // - Constant strides/padding/dilation/groups
@@ -250,6 +267,14 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
     GRAPH_DEBUG("some params aren't static");
     return false;
   }
+
+  // All inputs should be contiguous so no transposition is required.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1)) ||
+      !isContiguous(node->input(2))) {
+    GRAPH_DEBUG("conv2dIsSupported: some inputs are not contiguous");
+    return false;
+  }
+
   return conv2dIsSupported(
       *input,
       *weight,
@@ -274,6 +299,12 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   // Proper ndim for tensor inputs.
   if (input0->dims.size() != 2 || input1->dims.size() != 2) {
     GRAPH_DEBUG("matmulIsSupported: Unsupported input sizes");
+    return false;
+  }
+
+  // Inputs should be contiguous, or the TE will needlessly transpose them.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1))) {
+    GRAPH_DEBUG("matmulIsSupported: Input shapes are not contiguous");
     return false;
   }
 
@@ -3093,6 +3124,16 @@ void TensorExprKernel::genInputDebugNames() {
   input_name_map_ = std::move(value_to_name);
 }
 
+template <typename T>
+static std::vector<ExprHandle> toExprHandles(const std::vector<T>& sizes) {
+  std::vector<ExprHandle> dims;
+  dims.reserve(sizes.size());
+  for (auto const& size : sizes) {
+    dims.emplace_back(IntImm::make(size));
+  }
+  return dims;
+}
+
 Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
   Tensor* result = nullptr;
@@ -3103,6 +3144,15 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
         std::string msg = std::string("Shapes for input '%") +
             input->debugName() + "' are unknown";
         throw malformed_input(msg);
+      }
+      if (isContiguous(input)) {
+        Placeholder inBuffer(
+            "t" + input_name_map_[input],
+            ToDtype(static_cast<ScalarType>(*tt->scalarType())),
+            toExprHandles(*tt->sizes().concrete_sizes()));
+        bufs_.emplace(input, inBuffer.data());
+        bufferArgs_.emplace_back(inBuffer);
+        break;
       }
       Placeholder inBuffer(
           "t" + input_name_map_[input],

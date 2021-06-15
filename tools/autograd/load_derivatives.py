@@ -17,54 +17,59 @@ from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
 from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type, SchemaKind
-from tools.codegen.utils import IDENT_REGEX, split_name_params
+from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader
 
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
+_GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
 def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
-    with open(derivatives_yaml_path, 'r') as f:
-        definitions = yaml.load(f, Loader=Loader)
+    # Do some caching as this is a deterministic function
+    global _GLOBAL_LOAD_DERIVATIVE_CACHE
+    key = (derivatives_yaml_path, native_yaml_path)
+    if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
 
-    functions = parse_native_yaml(native_yaml_path).native_functions
+        with open(derivatives_yaml_path, 'r') as f:
+            definitions = yaml.load(f, Loader=YamlLoader)
 
-    # What's the difference between function schema v.s. signature?
-    # function schema is the complete declaration including mutability annotation / default value and etc.
-    # signature is the canonical schema for a group of functions (in-place/out/functional variants)
-    # that are semantically related.
-    functions_by_signature: Dict[FunctionSchema, List[NativeFunction]] = defaultdict(list)
-    functions_by_schema: Dict[str, NativeFunction] = dict()
-    for function in functions:
-        functions_by_signature[function.func.signature()].append(function)
-        assert str(function.func) not in functions_by_schema
-        functions_by_schema[str(function.func)] = function
+        functions = parse_native_yaml(native_yaml_path).native_functions
 
-    infos = [
-        create_differentiability_info(defn, functions_by_signature, functions_by_schema)
-        for defn in definitions]
+        # What's the difference between function schema v.s. signature?
+        # function schema is the complete declaration including mutability annotation / default value and etc.
+        # signature is the canonical schema for a group of functions (in-place/out/functional variants)
+        # that are semantically related.
+        functions_by_signature: Dict[FunctionSchema, List[NativeFunction]] = defaultdict(list)
+        functions_by_schema: Dict[str, NativeFunction] = dict()
+        for function in functions:
+            functions_by_signature[function.func.signature()].append(function)
+            assert str(function.func) not in functions_by_schema
+            functions_by_schema[str(function.func)] = function
 
-    # To keep it byte-for-byte compatible with the old codegen, we assign op names as a separate
-    # step. We only assign op names to those with differentiable args, and only append suffix to
-    # duplicated op names. This can be simplified if the first of the duplicates can be named
-    # 'XyzBackward' instead of 'XyzBackward0' or unconditionally append '0' to singletons.
-    op_names = create_op_names(infos)
-    return [
-        DifferentiabilityInfo(
-            name=info.name,
-            func=info.func,
-            op=op_name,
-            derivatives=info.derivatives,
-            forward_derivatives=info.forward_derivatives,
-            all_saved_inputs=info.all_saved_inputs,
-            all_saved_outputs=info.all_saved_outputs,
-            args_with_derivatives=info.args_with_derivatives,
-            non_differentiable_arg_names=info.non_differentiable_arg_names,
-            output_differentiability=info.output_differentiability,
-        )
-        for info, op_name in zip(infos, op_names)]
+        infos = [
+            create_differentiability_info(defn, functions_by_signature, functions_by_schema)
+            for defn in definitions]
+
+        # To keep it byte-for-byte compatible with the old codegen, we assign op names as a separate
+        # step. We only assign op names to those with differentiable args, and only append suffix to
+        # duplicated op names. This can be simplified if the first of the duplicates can be named
+        # 'XyzBackward' instead of 'XyzBackward0' or unconditionally append '0' to singletons.
+        op_names = create_op_names(infos)
+        res = [
+            DifferentiabilityInfo(
+                name=info.name,
+                func=info.func,
+                op=op_name,
+                derivatives=info.derivatives,
+                forward_derivatives=info.forward_derivatives,
+                all_saved_inputs=info.all_saved_inputs,
+                all_saved_outputs=info.all_saved_outputs,
+                args_with_derivatives=info.args_with_derivatives,
+                non_differentiable_arg_names=info.non_differentiable_arg_names,
+                output_differentiability=info.output_differentiability,
+            )
+            for info, op_name in zip(infos, op_names)]
+
+        _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = res
+
+    return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 @with_native_function
 def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
