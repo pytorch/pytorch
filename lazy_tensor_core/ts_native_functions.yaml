@@ -67,6 +67,8 @@ supported:
   - lt.Tensor
   - lt_.Scalar
   - lt_.Tensor
+  - addcmul
+  - addcmul_
   - alias
 autograd:
   - max_pool2d
