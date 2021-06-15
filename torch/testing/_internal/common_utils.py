@@ -957,8 +957,8 @@ def compare_with_reference(torch_fn, ref_fn, sample_input):
     # Crafts a custom error message for smaller, printable tensors
     if t_inp.numel() < 10:
         msg = ("Failed to produce expected results! Input tensor was"
-                " {0}, torch result is {1}, and reference result is"
-                " {2}.").format(t_inp, actual, expected)
+               " {0}, torch result is {1}, and reference result is"
+               " {2}.").format(t_inp, actual, expected)
     else:
         msg = None
 
