@@ -196,7 +196,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
   cudnn_frontend::executionPlans_t valid_plans;
 
-  std::for_each(plans.begin(), plans.end(), [&max_workspace_size, &max_block_size, &valid_plans](cudnn_frontend::ExecutionPlan& plan) { 
+  std::for_each(plans.begin(), plans.end(), [&] (cudnn_frontend::ExecutionPlan& plan) {
     size_t curr_workspace_size = plan.getWorkspaceSize();
     if (curr_workspace_size <= max_block_size) {
       if (curr_workspace_size > max_workspace_size && curr_workspace_size <= max_block_size) {
