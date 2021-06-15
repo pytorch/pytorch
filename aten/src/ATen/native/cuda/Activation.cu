@@ -250,24 +250,6 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
 // -----------------------------------
 // rrelu
 // -----------------------------------
-template <typename scalar_t>
-inline scalar_t __device__ curand_uniform_type(curandState_t* state);
-
-template <>
-inline at::Half __device__ curand_uniform_type<at::Half>(curandState_t* state) {
-  return curand_uniform(state);
-}
-
-template <>
-inline float __device__ curand_uniform_type<float>(curandState_t *state) {
-  return curand_uniform(state);
-}
-
-template <>
-inline double __device__ curand_uniform_type<double>(curandState_t* state) {
-  return curand_uniform_double(state);
-}
-
 template <typename scalar_t, int unroll_factor, typename F>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(256, 4)
