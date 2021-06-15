@@ -195,7 +195,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else {
-    Tensor tensor;    
+    Tensor tensor;
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
     } else if (tensor_.is_mkldnn()) {
