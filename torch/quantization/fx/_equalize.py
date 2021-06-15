@@ -336,10 +336,22 @@ def scale_weight_node(
     assert(isinstance(weight, torch.Tensor))
 
     scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale))
-    scaled_weight = torch.mul(scaled_weight, next_equalization_scale)
+
+    # If there does not exist a connecting linear layer, then we can just set
+    # the weight value and return
+    if next_equalization_scale.ndim == 0 and next_equalization_scale == torch.tensor(1):
+        modules[node.target].weight = nn.Parameter(scaled_weight)
+        return
+
+    # Multiply the weights row wise by the next equalization scale
+    new_shape = [1] * weight.ndim
+    new_shape[0] = weight.size(0)
+    next_equalization_scale_reshaped = torch.reshape(next_equalization_scale, new_shape)
+    scaled_weight = torch.mul(scaled_weight, next_equalization_scale_reshaped)
+
     modules[node.target].weight = nn.Parameter(scaled_weight)
 
-    # TODO: The bias may need to be scaled for connecting linear layers
+    # Multiply the bias element wise by the next equalization scale
     bias = modules[node.target].bias
     assert(isinstance(bias, torch.Tensor))
 
@@ -447,17 +459,16 @@ def convert_eq_obs(
             inp_quant_obs_node = node.args[0]
             prev_node = inp_quant_obs_node.args[0]
 
-            # TODO: Possible special handling for connected linear layers
-            # We might need to replace the InputEqualizationObserver with another mul operator...
-            # if prev_node.op == 'call_module' and modules[prev_node.target].dtype != torch.float32:
-            # If this is a connecting linear layer, we want to remove the InputEqualizationObserver
-            #     # Replace the current node with the previous node
-            #     orig_users = list(node.users.keys())
-            #     for user_node in orig_users:
-            #         user_node.replace_input_with(node, prev_node)
-            #     # Erase the node
-            #     model.graph.erase_node(node)
-            #     continue
+            if prev_node.op == 'call_module' and isinstance(prev_node.target, str) and \
+               isinstance(modules[prev_node.target], nn.Linear):
+                # If this is a connecting linear layer, we want to remove the
+                # InputEqualizationObserver (current node)
+                orig_users = list(node.users.keys())
+                for user_node in orig_users:
+                    user_node.replace_input_with(node, inp_quant_obs_node)
+                # Erase the node
+                model.graph.erase_node(node)
+                continue
 
             # Update the following input quantization observer's min/max values
             scale_input_node(node, modules)

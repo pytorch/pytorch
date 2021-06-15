@@ -281,6 +281,18 @@ class TestEqualizeFx(QuantizationTestCase):
                 x = self.linear2(x)
                 return x
 
+        # Test with two connected linear layers
+        class Linear2Module(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(2, 2)
+                self.linear2 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                return x
+
         class Linear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -316,7 +328,8 @@ class TestEqualizeFx(QuantizationTestCase):
         tests = [(LinearModule, default_equalization_qconfig_dict),
                  (Linear2FP32Module, fp32_equalization_qconfig_dict),
                  (FunctionalLinearModule, default_equalization_qconfig_dict),
-                 (FunctionalLinear2FP32Module, fp32_equalization_qconfig_dict)]
+                 (FunctionalLinear2FP32Module, fp32_equalization_qconfig_dict),
+                 (Linear2Module, default_equalization_qconfig_dict)]
 
         for (M, equalization_qconfig_dict) in tests:
             m = M().eval()
@@ -331,5 +344,4 @@ class TestEqualizeFx(QuantizationTestCase):
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
             prepared(x)
             convert_fx(prepared)  # Check if compile?
-
             self.assertEqual(output, convert_ref_output)
