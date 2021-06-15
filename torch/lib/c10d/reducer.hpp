@@ -1,15 +1,14 @@
 #pragma once
 
 #include <atomic>
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#endif
 #include <memory>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
 
+#include <ATen/core/ivalue_inl.h>
+#include <ATen/ThreadLocalState.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Utils.hpp>
@@ -17,7 +16,9 @@
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#ifndef _WIN32
 #include <torch/csrc/distributed/autograd/context/context.h>
+#endif
 
 namespace c10d {
 
@@ -28,6 +29,28 @@ constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
 // Forward declaration
 class Logger;
+
+class Timer {
+ public:
+  enum class Event {
+    kForwardStart,
+    kBackwardComputeStart,
+    kBackwardComputeEnd,
+    kBackwardCommStart,
+    kBackwardCommEnd,
+  };
+
+  // Record the current event, i.e., mark it as having occurred now.
+  virtual void record(Event event) = 0;
+
+  // Return the difference between when two events occurred, in nanoseconds.
+  // Or nullopt if one of them hasn't been recorded.
+  virtual c10::optional<int64_t> measureDifference(Event start, Event end) = 0;
+
+  virtual ~Timer() = default;
+};
+
+C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class Reducer {
  public:
@@ -205,8 +228,19 @@ class Reducer {
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
 
-  using GradCallback =
-      torch::distributed::autograd::DistAutogradContext::GradCallback;
+  // We'd like to use DistAutogradContext::GradCallback here but dist autograd
+  // doesn't exist under Windows. So we just directly use the concrete type but
+  // to preserve and enforce our original intent we do a static assert when dist
+  // autograd is available.
+  using GradCallback = std::function<bool(at::Tensor&)>;
+#ifndef _WIN32
+  static_assert(
+      std::is_same<
+          GradCallback,
+          torch::distributed::autograd::DistAutogradContext::GradCallback>::
+          value,
+      "");
+#endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
   // A bucket replica represents [1..N] gradients to be reduced,
@@ -299,7 +333,7 @@ class Reducer {
     // Keep future work handle around DDP comm hook.
     // If no hook is registered, a temporary vanilla allreduce hook will be
     // used.
-    c10::intrusive_ptr<torch::jit::Future> future_work;
+    c10::intrusive_ptr<at::ivalue::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
@@ -335,37 +369,9 @@ class Reducer {
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
 
-  // CPU timestamp to record event start and end time.
-  struct CPUTimer {
-    // The timestamp of forward call start time in each iteration.
-    int64_t forward_start_time;
-    // The timestamp of backward computation start and end time in each
-    // iteration.
-    int64_t backward_compute_start_time;
-    int64_t backward_compute_end_time;
-    // The timestamp of first communication call start time in each iteration.
-    int64_t backward_comm_start_time;
-    // The timestamp of last communication call end time in each iteration.
-    int64_t backward_comm_end_time;
-  };
-
-  CPUTimer cpu_timer_{};
-
-#ifdef USE_CUDA
-  // GPU events to record event start and end time.
-  struct GPUTimer {
-    at::cuda::CUDAEvent forward_start = at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_compute_start =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_compute_end =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_comm_start =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_comm_end =
-        at::cuda::CUDAEvent(cudaEventDefault);
-  };
-  GPUTimer gpu_timer_;
-#endif
+  // Timing information.
+  int64_t backward_compute_start_time_ = -1;
+  std::unique_ptr<Timer> timer_;
 
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
@@ -390,6 +396,7 @@ class Reducer {
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
 
+#ifndef _WIN32
   struct RpcContext {
     using ContextPtr = torch::distributed::autograd::ContextPtr;
     // The shared_ptr is to hold the context instance.
@@ -399,6 +406,7 @@ class Reducer {
     void set(ContextPtr&& new_context_ptr);
   };
   RpcContext rpc_context_;
+#endif
 
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
