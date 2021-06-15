@@ -245,6 +245,7 @@ TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
 TORCH_API bool& getCatWoConditionals();
+TORCH_API bool& getOptConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);

@@ -2,7 +2,7 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 
@@ -12,7 +12,7 @@ namespace {
 
 template <typename scalar_t>
 void cpu_avg_pool(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     int kW, int kH,
     int dW, int dH,
@@ -96,7 +96,7 @@ void cpu_avg_pool(
 
 template <typename scalar_t>
 void cpu_avg_pool_channels_last(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     int kW, int kH,
     int dW, int dH,
@@ -119,7 +119,7 @@ void cpu_avg_pool_channels_last(
   int64_t output_height = output.size(2);
   int64_t output_width = output.size(3);
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
     int64_t n = 0;
@@ -209,7 +209,7 @@ void cpu_avg_pool_channels_last(
 
 template <typename scalar_t>
 void cpu_avg_pool_backward(
-    Tensor& grad_input_,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     int kW, int kH,
     int dW, int dH,
@@ -277,7 +277,7 @@ void cpu_avg_pool_backward(
 
 template <typename scalar_t>
 void cpu_avg_pool_backward_channels_last(
-    Tensor& grad_input_,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     int kW, int kH,
     int dW, int dH,
@@ -298,7 +298,7 @@ void cpu_avg_pool_backward_channels_last(
   int64_t output_height = grad_output.size(2);
   int64_t output_width = grad_output.size(3);
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   // parallel on dim N
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (int64_t n = begin; n < end; n++) {
@@ -357,7 +357,7 @@ void cpu_avg_pool_backward_channels_last(
 
 
 void avg_pool2d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     int kW, int kH,
     int dW, int dH,
@@ -383,7 +383,7 @@ void avg_pool2d_kernel_impl(
 }
 
 void avg_pool2d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     int kW, int kH,
     int dW, int dH,

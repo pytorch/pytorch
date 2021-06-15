@@ -78,8 +78,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
 
 DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
   switch (t) {
-    // case DispatchKey::CPU:
-    //  return DispatchKeySet(DispatchKey::AutocastCPU);
+    case DispatchKey::CPU:
+      return DispatchKeySet(DispatchKey::AutocastCPU);
     case DispatchKey::CUDA:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
     default:

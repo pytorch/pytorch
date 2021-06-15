@@ -295,6 +295,10 @@ TORCH_API Module freeze(
     c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
     bool optimize_numerics = true);
 
+// C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
+// there for details.
+TORCH_API Module optimize_for_inference(Module& module);
+
 namespace detail {
 
 struct TORCH_API SlotCursor {

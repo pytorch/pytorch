@@ -45,6 +45,7 @@ enum class OpType : std::uint8_t {
   RECV = 13,
   RECVANYSOURCE = 14,
   BARRIER = 15,
+  _REDUCE_SCATTER_BASE = 16,
   UNKNOWN = 100,
 };
 
@@ -259,26 +260,34 @@ class ProcessGroup : public torch::CustomClassHolder {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) = 0;
 
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+      at::Tensor&,
+      at::Tensor&,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    TORCH_CHECK(false, "ProcessGroup does not support reduce_scatter_base");
+  }
+
+
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    throw std::runtime_error("ProcessGroup does not support alltoall");
+    TORCH_CHECK(false, "ProcessGroup does not support alltoall");
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    throw std::runtime_error("ProcessGroup does not support alltoall");
+    TORCH_CHECK(false, "ProcessGroup does not support alltoall");
   }
 
   virtual void monitoredBarrier(
       const BarrierOptions& /* unused */, bool /* unused */ = false ) {
     auto backendName = getBackendName();
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         c10::str("ProcessGroup ",
         backendName,
         " does not support monitoredBarrier, only GLOO supports monitored barrier.")
@@ -290,7 +299,7 @@ class ProcessGroup : public torch::CustomClassHolder {
   // for GLOO and NCCL backends currently.
   virtual void setSequenceNumberForGroup() {
     auto backendName = getBackendName();
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         c10::str("ProcessGroup ",
         backendName,
         " does not yet support sequence numbers.")
@@ -302,7 +311,7 @@ class ProcessGroup : public torch::CustomClassHolder {
   // may indicate that there is some sort of collective desynchronization.
   virtual uint64_t getSequenceNumberForGroup() {
       auto backendName = getBackendName();
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         c10::str("ProcessGroup ",
         backendName,
         " does not yet support sequence numbers.")
