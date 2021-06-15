@@ -11,7 +11,7 @@ from ..observer import (
 from ..utils import check_min_max_valid
 
 from collections import namedtuple
-from typing import Dict, Any
+from typing import Dict, Any, Tuple, Optional
 import warnings
 
 
@@ -223,7 +223,11 @@ def node_supports_equalization(node: Node, modules) -> bool:
         return node.target == nn.functional.linear
     return False
 
-def get_weight_eq_obs(node: Node, model: GraphModule, modules: Dict[str, nn.Module]):
+def get_weight_eq_obs(
+    input_eq_obs_node: Node,
+    model: GraphModule,
+    modules: Dict[str, nn.Module]
+) -> Tuple[Optional[Node], Optional[_WeightEqualizationObserver]]:
     """ Gets the following weight equalization observer. There should always
     exsist a weight equalization observer after an input equalization observer.
 
@@ -232,22 +236,23 @@ def get_weight_eq_obs(node: Node, model: GraphModule, modules: Dict[str, nn.Modu
     """
 
     # Find the next node that is either a nn.Linear or a functional layer
-    while (node.op not in ('output', 'call_function') and not
-           (node.op == 'call_module' and isinstance(node.target, str) and
-            isinstance(modules[node.target], nn.Linear))):
-        node = node.next
+    weight_node = input_eq_obs_node.next
+    while (weight_node.op not in ('output', 'call_function') and not
+           (weight_node.op == 'call_module' and isinstance(weight_node.target, str) and
+            isinstance(modules[weight_node.target], nn.Linear))):
+        weight_node = weight_node.next
 
-    if node.op == 'call_module':
-        # If the next node is a nn.Linear layer, then it must have a
+    if weight_node.op == 'call_module':
+        # If the next weight_node is a nn.Linear layer, then it must have a
         # WeightEqualizationObserver configuration
         equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
-        assert(equalization_qconfig_map.get(node.name, None) is not None)
+        assert(equalization_qconfig_map.get(weight_node.name, None) is not None)
 
-        weight_eq_obs = equalization_qconfig_map.get(node.name, None).weight()
+        weight_eq_obs = equalization_qconfig_map.get(weight_node.name, None).weight()
         assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
-        return node, weight_eq_obs
+        return weight_node, weight_eq_obs
 
-    elif node.op == 'call_function':
+    elif weight_node.op == 'call_function':
         # TODO
         return None, None
 
@@ -352,6 +357,10 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
             assert(isinstance(input_eq_obs, _InputEqualizationObserver))
             next_node, weight_eq_obs = get_weight_eq_obs(node, model, modules)
 
+            if next_node is None or weight_eq_obs is None:
+                continue
+
+            assert(isinstance(next_node.target, str))
             weight_eq_obs(modules[next_node.target].weight)
 
             # Calculate and set the equalization scale values
@@ -370,8 +379,26 @@ def convert_eq_obs(
 ) -> None:
     """ Removes the input equalization observers and replaces them with mul
     operators whenever applicable. Updates the input quantization observers with
-    the scaled input min/max values. Scales the weights and runs the weight
-    quantization observers with the scaled weights.
+    the scaled input min/max values. Scales the weights by the current and next
+    equalization scales.
+
+    Before:
+                                     weight values
+                                          |
+                                      WeightEqObs
+                                          |
+                                     WeightQuantObs
+                                          |
+        x -> InpEqObs -> InpQuantObs -> linear -> OutQuantObs
+
+    After:
+                                              scaled weight values
+                                                      |
+                                                 WeightEqObs
+                                                      |
+       equalization scale                       WeightQuantObs
+              |                                       |
+        x -> mul -> InpQuantObs (scaled min/max) -> linear -> OutQuantObs
     """
     for node in model.graph.nodes:
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
