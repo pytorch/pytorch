@@ -106,12 +106,10 @@ struct TORCH_API DispatchStubImpl {
     std::atomic<void*> cpu_dispatch_ptr;
     void* cuda_dispatch_ptr;
     void* hip_dispatch_ptr;
-    void* ve_dispatch_ptr;
   #else
     std::atomic<void*> cpu_dispatch_ptr{nullptr};
     void* cuda_dispatch_ptr = nullptr;
     void* hip_dispatch_ptr = nullptr;
-    void* ve_dispatch_ptr = nullptr;
   #endif
 };
 
@@ -156,10 +154,6 @@ public:
     impl.hip_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
-  void set_ve_dispatch_ptr(FnPtr fn_ptr) {
-    impl.ve_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
-  }
-
   static FnPtr DEFAULT;
 #ifdef HAVE_AVX_CPU_DEFINITION
   static FnPtr AVX;
@@ -187,13 +181,6 @@ struct RegisterHIPDispatch {
   RegisterHIPDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
     // TODO: make this point at hip_dispatch_ptr
     stub.set_cuda_dispatch_ptr(value);
-  }
-};
-
-template <typename FnPtr, typename T>
-struct RegisterVEDispatch {
-  RegisterVEDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
-    stub.set_ve_dispatch_ptr(value);
   }
 };
 } // anonymous namespace
@@ -245,9 +232,6 @@ struct RegisterVEDispatch {
 
 #define REGISTER_HIP_DISPATCH(name, fn) \
   static RegisterHIPDispatch<decltype(fn), struct name> name ## __register(name, fn);
-
-#define REGISTER_VE_DISPATCH(name, fn) \
-  static RegisterVEDispatch<decltype(fn), struct name> name ## __register(name, fn);
 
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!
