@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple, Union, Any, cast
 from typing_extensions import Literal, TypedDict
 
 try:
-    import boto3
+    import boto3  # type: ignore[import]
     import botocore  # type: ignore[import]
     HAVE_BOTO3 = True
 except ImportError:
