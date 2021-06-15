@@ -72,14 +72,12 @@ class ArrayRef final {
   constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct an ArrayRef from a pointer and length.
-  ArrayRef(const T* data, size_t length)
-      : Data(data), Length(length) {
+  ArrayRef(const T* data, size_t length) : Data(data), Length(length) {
     debugCheckNullptrInvariant();
   }
 
   /// Construct an ArrayRef from a range.
-  ArrayRef(const T* begin, const T* end)
-      : Data(begin), Length(end - begin) {
+  ArrayRef(const T* begin, const T* end) : Data(begin), Length(end - begin) {
     debugCheckNullptrInvariant();
   }
 

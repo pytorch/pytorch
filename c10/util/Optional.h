@@ -530,9 +530,10 @@ using OptionalBase = std::conditional_t<
     detail_::is_arrayref<T>::value,
     arrayref_optional_base<T>,
     std::conditional_t<
-      std::is_trivially_destructible<T>::value, // if possible
-      constexpr_optional_base<std::remove_const_t<T>>, // use base with trivial destructor
-      optional_base<std::remove_const_t<T>>>>;
+        std::is_trivially_destructible<T>::value, // if possible
+        constexpr_optional_base<std::remove_const_t<T>>, // use base with
+                                                         // trivial destructor
+        optional_base<std::remove_const_t<T>>>>;
 #endif
 
 template <class T>
@@ -570,9 +571,10 @@ class optional : private OptionalBase<T> {
       detail_::is_arrayref<U>::value,
       arrayref_optional_base<U>,
       std::conditional_t<
-        std::is_trivially_destructible<U>::value, // if possible
-        constexpr_optional_base<std::remove_const_t<U>>, // use base with trivial destructor
-        optional_base<std::remove_const_t<U>>>>;
+          std::is_trivially_destructible<U>::value, // if possible
+          constexpr_optional_base<std::remove_const_t<U>>, // use base with
+                                                           // trivial destructor
+          optional_base<std::remove_const_t<U>>>>;
 #endif
 
   static_assert(
