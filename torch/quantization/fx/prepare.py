@@ -169,10 +169,7 @@ def insert_observer(
     if isinstance(observer, _InputEqualizationObserver) or isinstance(observer, _WeightEqualizationObserver):
         prefix = node.name + '_equalization_process_'
     else:
-        if 'equalization' in node.name:
-            prefix = node.name.replace('equalization', 'activation_post')
-        else:
-            prefix = node.name + '_activation_post_process_'
+        prefix = node.name + '_activation_post_process_'
     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
     observer_name = get_new_observer_name(model)
     setattr(model, observer_name, observer)
@@ -853,16 +850,16 @@ def insert_observers_for_model(
 
             if not skip_inserting_observers:
                 if node.op != 'output':
-                    # Insert equalization input observers if needed
-                    maybe_insert_input_equalization_observers_for_node(
-                        node, equalization_qconfig, model, modules, graph,
-                        node_name_to_target_dtype)
-
                     # this modifies node inplace
                     maybe_insert_input_observers_for_node(
                         node, qconfig, model, modules, graph,
                         node_name_to_target_dtype,
                         qhandler, prepare_custom_config_dict)
+
+                    # Insert equalization input observers if needed
+                    maybe_insert_input_equalization_observers_for_node(
+                        node, equalization_qconfig, model, modules, graph,
+                        node_name_to_target_dtype)
 
                     is_last_node_of_pattern = root_node is node
                     is_like_copy_node = \
