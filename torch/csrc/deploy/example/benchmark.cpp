@@ -146,8 +146,7 @@ struct RunJIT {
   }
   void operator()(int i) {
     if (cuda) {
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      int device_id = i % models_.size();
+      const auto device_id = i % models_.size();
       auto d = torch::Device(torch::DeviceType::CUDA, device_id);
       to_device(
           models_[device_id].forward(to_device_vec(eg_, d)),

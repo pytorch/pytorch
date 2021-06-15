@@ -81,6 +81,9 @@ python test/distributed/test_c10d_nccl.py
 # Run the Store tests.
 python test/distributed/test_store.py
 
+# Run Process Group Wrapper tests.
+python test/distributed/test_pg_wrapper.py
+
 # Run distributed tests, including tests for Distributed Data Parallel.
 python test/run_test.py --verbose -i distributed/test_distributed_fork
 python test/run_test.py --verbose -i distributed/test_distributed_spawn
