@@ -170,31 +170,37 @@ const auto get_fallback_method(const cudnn_frontend::OperationGraph &opGraph, co
 }
 
 auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
-  auto workspace_size = 1LL << 30;;
-  Tensor workspace;
-  workspace = at::empty({workspace_size}, x.options().dtype(kByte));
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
+
+  auto sources = get_generator_sources(opGraph, desc, x, deterministic, allow_tf32);
+  auto predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
+    return false;
+  };
+  cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
+  size_t max_workspace_size = 0u;
+  auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), predicate_function);
+  std::for_each(plans.begin(), plans.end(), [&max_workspace_size](cudnn_frontend::ExecutionPlan& plan) { 
+    if (plan.getWorkspaceSize() > max_workspace_size) {
+      max_workspace_size = plan.getWorkspaceSize();
+    }
+  });
+  Tensor workspace;
+  workspace = at::empty({max_workspace_size}, x.options().dtype(kByte));
   auto variantPack  = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(3, data_ptrs)
       .setWorkspacePointer(workspace.data_ptr())
       .setUids(3, uids)
       .build();
-  auto predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return plan.getWorkspaceSize() > workspace_size;
-  };
 
-  auto sources = get_generator_sources(opGraph, desc, x, deterministic, allow_tf32);
+  auto options = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(plans), variantPack);
 
-  cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
-  auto options = generator.cudnnFindPlan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(opGraph), variantPack, predicate_function);
-
-  cudnn_frontend::executionPlans_t plans;
+  cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& option : options) {
-    plans.emplace_back(std::move(option.plan));
+    sorted_plans.emplace_back(std::move(option.plan));
   }
-  return plans;
+  return sorted_plans;
 }
 
 auto get_plans_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
