@@ -5,7 +5,7 @@ set(TORCH_RPC_TEST_SOURCES
   ${TORCH_RPC_TEST_DIR}/test_wire_serialization.cpp
 )
 set(TORCH_RPC_TEST_DEPENDENCY_LIBS
-  torch c10d gtest process_group_agent
+  torch gtest process_group_agent
 )
 
 if(USE_GLOO)
