@@ -1477,7 +1477,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(op)(real_tensor)
         self.assertEqual(result.data_ptr(), real_tensor.data_ptr())
 
-    @unittest.expectedFailure
     def test_contiguous(self):
         op = Tensor.contiguous
 
@@ -2860,6 +2859,22 @@ class TestVmapOperatorsOpInfo(TestCase):
             # print(arg_values, kwarg_values)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
+
+    def test_group_norm(self, device):
+        test = functools.partial(_vmap_test, check_propagates_grad=False)
+
+        B, N, C, H, W = 2, 3, 24, 5, 7
+        op = F.group_norm
+
+        x = torch.randn(B, N, C, H, W)
+        weight = torch.randn(C)
+        bias = torch.randn(C)
+        test(self, op, (x, 3, weight, bias), in_dims=(0, None, None, None))
+
+        x = torch.randn(B, N, C, H, W)
+        weight = torch.randn(B, C)
+        bias = torch.randn(B, C)
+        test(self, op, (x, 4, weight, bias), in_dims=(0, None, 0, 0))
 
     @parameterized('training', {'train': True, 'eval': False})
     @parameterized('track_running_stats', {'running_stats1': True, 'running_stats0': False})
