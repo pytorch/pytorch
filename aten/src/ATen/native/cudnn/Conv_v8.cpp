@@ -19,11 +19,18 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/TensorUtils.h>
 
+#include <THC/THC.h>
+
 #include <unordered_map>
 
-namespace at { namespace native{
+namespace at { namespace native {
 
 namespace {
+
+// TODO: remove duplicate code in Conv_v7.cpp
+constexpr size_t operator "" _TiB(unsigned long long n) {
+  return size_t(n) * 1024 * 1024 * 1024 * 1024;
+}
 
 uint8_t getAlignment(const Tensor &t) {
   // alignment are in bytes
@@ -181,11 +188,20 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   size_t max_workspace_size = 0u;
   auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), predicate_function);
-  std::for_each(plans.begin(), plans.end(), [&max_workspace_size](cudnn_frontend::ExecutionPlan& plan) { 
-    if (plan.getWorkspaceSize() > max_workspace_size) {
+
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+  size_t max_block_size = 0;
+  size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
+  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+
+  std::for_each(plans.begin(), plans.end(), [&max_workspace_size, &max_block_size](cudnn_frontend::ExecutionPlan& plan) { 
+    size_t curr_workspace_size = plan.getWorkspaceSize();
+    if (curr_workspace_size > max_workspace_size && curr_workspace_size <= max_block_size) {
       max_workspace_size = plan.getWorkspaceSize();
     }
   });
+  TORCH_CHECK_WITH(CUDAOutOfMemoryError, max_workspace_size < 1_TiB, "Not enough memory for workspace!");
   Tensor workspace;
   workspace = at::empty({max_workspace_size}, x.options().dtype(kByte));
   auto variantPack  = cudnn_frontend::VariantPackBuilder()
