@@ -94,7 +94,6 @@ void check_argmax_argmin(
     bool keepdim) {
   DimVector shape;
 
-
   if (dim.has_value()) {
     native::zero_numel_check_dims(self, dim.value(), name);
     shape = get_reduction_shape(self, dim.value(), keepdim);
@@ -1323,10 +1322,11 @@ void argmax_argmin_impl(
     const Tensor& result,
     Stub& stub) {
   c10::MaybeOwned<Tensor> in;
-  IntArrayRef dims;
+  DimVector dims;
+  int64_t wrapped_dim = 0;
 
   if (dim.has_value()) {
-    auto wrapped_dim = maybe_wrap_dim(dim.value(), self.dim());
+    wrapped_dim = maybe_wrap_dim(dim.value(), self.dim());
     auto sizes = self.sizes();
 
     if (sizes[wrapped_dim] == 1) {
