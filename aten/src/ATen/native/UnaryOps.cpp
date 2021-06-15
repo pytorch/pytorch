@@ -441,6 +441,13 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
+// special_psi, alias for digamma
+Tensor& special_psi_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
+Tensor special_psi(const Tensor& self) { return self.digamma(); }
+// special_digamma, alias for digamma
+Tensor& special_digamma_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
+Tensor special_digamma(const Tensor& self) { return self.digamma(); }
+
 // special_i0, alias for i0
 Tensor& special_i0_out(const Tensor& self, Tensor& result) { return at::i0_out(result, self); }
 Tensor special_i0(const Tensor& self) { return self.i0(); }
