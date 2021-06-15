@@ -1496,7 +1496,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 //   m.impl("new_empty_strided", new_empty_strided_batching_rule);
 // //   m.impl("new_zeros", new_zeros_batching_rule);
 // //
-// //   m.impl("contiguous", contiguous_batching_rule);
+  m.impl("contiguous", contiguous_batching_rule);
 }
 
 }

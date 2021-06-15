@@ -56,5 +56,13 @@ std::tuple<A, B> slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue> a
   return vector_to_result<A, B>(stack);
 }
 
+template <typename A, typename B, typename C>
+std::tuple<A, B, C> slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue> args) {
+  std::vector<IValue> stack(args.begin(), args.end());
+  batchedTensorForLoopFallback(op, &stack);
+  return vector_to_result<A, B, C>(stack);
+}
+
+
 }
 } // namespace at

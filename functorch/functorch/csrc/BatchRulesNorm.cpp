@@ -105,8 +105,65 @@ Tensor batch_norm_plumbing(
       training, momentum, eps, cudnn_enabled});
 }
 
+
+std::tuple<Tensor,int64_t,Tensor,int64_t,Tensor,int64_t>
+native_group_norm_input_batch_rule(
+    const Tensor & input, int64_t input_bdim,
+    const c10::optional<Tensor> & weight,
+    const c10::optional<Tensor> & bias, int64_t N, int64_t C,
+    int64_t HxW, int64_t group, double eps) {
+  auto bdim_size = input.size(input_bdim);
+  auto input_ = reshape_dim_into(input_bdim, 0, input);
+  auto result = at::native_group_norm(input_, weight, bias, N * bdim_size, C, HxW, group, eps);
+  return std::make_tuple(
+      reshape_dim_outof(0, bdim_size, std::get<0>(result)), 0,
+      reshape_dim_outof(0, bdim_size, std::get<1>(result)), 0,
+      reshape_dim_outof(0, bdim_size, std::get<2>(result)), 0);
+}
+
+std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
+    const Tensor & input, const c10::optional<Tensor> & weight,
+    const c10::optional<Tensor> & bias, int64_t N, int64_t C,
+    int64_t HxW, int64_t group, double eps) {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+
+  Tensor input_value;
+  optional<int64_t> input_bdim;
+  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
+  optional<Tensor> weight_value;
+  optional<int64_t> weight_bdim;
+  if (weight) {
+      std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight.value(), cur_level);
+  }
+  optional<Tensor> bias_value;
+  optional<int64_t> bias_bdim;
+  if (bias) {
+      std::tie(bias_value, bias_bdim) = unwrapTensorAtLevel(bias.value(), cur_level);
+  }
+
+  if (input_bdim && !weight_bdim && !bias_bdim) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    auto result = native_group_norm_input_batch_rule(
+        input_value, *input_bdim, weight_value, bias_value,
+        N, C, HxW, group, eps);
+    return std::make_tuple(
+        makeBatched(std::get<0>(result), std::get<1>(result), cur_level),
+        makeBatched(std::get<2>(result), std::get<3>(result), cur_level),
+        makeBatched(std::get<4>(result), std::get<5>(result), cur_level));
+  }
+
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::native_group_norm", "");
+  return slow_fallback<Tensor,Tensor,Tensor>(op, { input, weight, bias, N, C, HxW, group, eps });
+}
+
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("batch_norm", batch_norm_plumbing);
+  m.impl("native_group_norm", native_group_norm_plumbing);
+  m.impl("group_norm", native::group_norm);
 }
 
 }}
