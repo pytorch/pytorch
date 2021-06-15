@@ -4881,6 +4881,31 @@ def is_criterion_test(test_params):
     return any([name in test_params for name in ['target', 'target_fn', 'target_size']])
 
 
+def noncontiguize(obj):
+    """
+    Helper function for making an object non-contiguous.
+    """
+    if isinstance(obj, list):
+        return [noncontiguize(o) for o in obj]
+    elif isinstance(obj, tuple):
+        return tuple(noncontiguize(o) for o in obj)
+    tensor = obj
+    ndim = tensor.dim()
+    # Always making only the last dimension noncontiguous is easy to hide
+    # bugs because .view(-1) will still work. So try to find a dim with size
+    # > 1 and make that non-contiguous, i.e., stack + select on the
+    # dimension directly after that.
+    dim = ndim
+    for d in range(ndim):
+        if tensor.size(d) > 1:
+            dim = d + 1
+            break
+    noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
+    assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
+    noncontig.requires_grad = tensor.requires_grad
+    return noncontig
+
+
 class ModuleTest(object):
     def __init__(self, constructor, desc='', reference_fn=None, fullname=None, **kwargs):
         self.desc = desc
@@ -5233,27 +5258,6 @@ class ModuleTest(object):
                     assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
         torch.set_num_threads(num_threads)
 
-    def noncontiguize(self, obj):
-        if isinstance(obj, list):
-            return [self.noncontiguize(o) for o in obj]
-        elif isinstance(obj, tuple):
-            return tuple(self.noncontiguize(o) for o in obj)
-        tensor = obj
-        ndim = tensor.dim()
-        # Always making only the last dimension noncontiguous is easy to hide
-        # bugs because .view(-1) will still work. So try to find a dim with size
-        # > 1 and make that non-contiguous, i.e., stack + select on the
-        # dimension directly after that.
-        dim = ndim
-        for d in range(ndim):
-            if tensor.size(d) > 1:
-                dim = d + 1
-                break
-        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
-        noncontig.requires_grad = tensor.requires_grad
-        return noncontig
-
     def test_noncontig(self, test_case, module, input):
         # check no scalars, can't make non-contig
         if isinstance(input, torch.Tensor) and input.dim() == 0:
@@ -5270,8 +5274,8 @@ class ModuleTest(object):
             d_input = deepcopy(test_case._backward(module, input, output, grad_output))
             d_param = deepcopy(test_case._get_parameters(module)[1])
 
-        nc_input = self.noncontiguize(input)
-        nc_grad_output = self.noncontiguize(grad_output)
+        nc_input = noncontiguize(input)
+        nc_grad_output = noncontiguize(grad_output)
         for contig_i, contig_g in product((True, False), repeat=2):
             i = input if contig_i else nc_input
             # Some ops, e.g., nn.Flatten, return gradient that shares
