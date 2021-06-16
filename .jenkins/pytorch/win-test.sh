@@ -43,7 +43,7 @@ fi
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 # Try to pull value from CIRCLE_PULL_REQUEST
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
 if [ -n "$IN_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
   file_diff_from_base "$DETERMINE_FROM"
