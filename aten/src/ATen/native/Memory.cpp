@@ -10,17 +10,30 @@ namespace at {
 namespace native {
 
 bool is_pinned(const Tensor& self) {
-  return detail::getCUDAHooks().isPinnedPtr(self.storage().data());
+  deviceExclusiveCheck();
+  if (hasCUDA()) {
+    return detail::getCUDAHooks().isPinnedPtr(self.storage().data());
+  }
+  return detail::getXPUHooks().isPinnedPtr(self.storage().data());
 }
 
 Tensor pin_memory(const Tensor& self) {
   if (!self.device().is_cpu()) {
     AT_ERROR("cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
   }
+
+  deviceExclusiveCheck();
   if (self.is_pinned()) {
     return self;
   }
-  auto* allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
+
+  c10::Allocator* allocator;
+  if (hasCUDA()) {
+    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
+  } else if (hasXPU()) {
+    allocator = detail::getXPUHooks().getPinnedMemoryAllocator();
+  }
+
   auto storage = Storage(
       Storage::use_byte_size_t(),
       detail::computeStorageNbytes(

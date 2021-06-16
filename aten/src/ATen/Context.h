@@ -9,6 +9,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/QEngine.h>
@@ -27,29 +28,35 @@ class TORCH_API Context {
 
   const Generator& defaultGenerator(Device device) {
     DeviceType device_type = device.type();
-    initCUDAIfNeeded(device_type);
-    initHIPIfNeeded(device_type);
+    initDeviceIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
     } else {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
   }
   Device getDeviceFromPtr(void* data, DeviceType device_type) {
-    initCUDAIfNeeded(device_type);
-    initHIPIfNeeded(device_type);
+    initDeviceIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDeviceFromPtr(data);
     } else {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
   }
   static bool isPinnedPtr(void* data) {
-    return detail::getCUDAHooks().isPinnedPtr(data);
+    deviceExclusiveCheck();
+    if (hasCUDA()) {
+      return detail::getCUDAHooks().isPinnedPtr(data);
+    }
+    return detail::getXPUHooks().isPinnedPtr(data);
   }
   static bool hasOpenMP() ;
   static bool hasMKL() ;
@@ -75,6 +82,28 @@ class TORCH_API Context {
   }
   static bool hasMLC() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
+  }
+  static bool hasXPU() {
+    return detail::getXPUHooks().hasXPU();
+  }
+  static void deviceExclusiveCheck() {
+    int count = 0;
+    if (hasCUDA()) {
+      count++;
+    }
+    if (hasHIP()) {
+      count++;
+    }
+    if (hasXPU()) {
+      count++;
+    }
+    if (count > 1) {
+      throw std::runtime_error(
+              "Enabling CUDA, HIP and XPU at same time in ATen is not supported,"
+              "as HIP masqueradesto be CUDA (e.g., when you say CUDA, on a HIP build of ATen,"
+              "this actually means HIP, while XPU cannot work with two others."
+              "Rebuild PyTorch with one or the other disabled.");
+    }
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -212,13 +241,10 @@ class TORCH_API Context {
   void unsetDefaultMobileCPUAllocator();
 
  private:
-  void initCUDAIfNeeded(DeviceType p) {
+  void initDeviceIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
       lazyInitCUDA();
-    }
-  }
-  void initHIPIfNeeded(DeviceType p) {
-    if (p == DeviceType::HIP) {
+    } else if (p == DeviceType::HIP) {
       lazyInitHIP();
     }
   }
@@ -287,6 +313,14 @@ static inline bool hasXLA() {
 
 static inline bool hasMLC() {
   return globalContext().hasMLC();
+}
+
+static inline bool hasXPU() {
+  return globalContext().hasXPU();
+}
+
+static inline void deviceExclusiveCheck() {
+  globalContext().deviceExclusiveCheck();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.

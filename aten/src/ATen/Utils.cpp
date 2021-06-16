@@ -41,7 +41,12 @@ Tensor empty_cpu(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::Allocator* allocator;
   if (pin_memory) {
-    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
+    deviceExclusiveCheck();
+    if (hasCUDA()) {
+      allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
+    } else if (hasXPU()) {
+      allocator = detail::getXPUHooks().getPinnedMemoryAllocator();
+    }
   } else {
     allocator = at::getCPUAllocator();
   }
