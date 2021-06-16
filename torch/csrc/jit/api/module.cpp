@@ -433,14 +433,38 @@ Module Module::clone_impl(
   return r;
 }
 
+void set_train_recurse(ObjectPtr obj, bool on) {
+  if (auto slot = obj->type()->findAttributeSlot("training")) {
+    obj->setSlot(*slot, on);
+    std::cout << "jit success recurse at . " << obj->name() << std::endl;
+  } else {
+    std::cout << "jit fail recurse. " << std::endl;
+  }
+  int i = 0;
+  for (const auto& slot : obj->slots()) {
+    // slots is a list of IValue. Continue setting training attribute only
+    // if the slot is an Object and a module.
+    if (slot.isObject() && slot.toObjectRef().type()->is_module()) {
+      set_train_recurse(slot.toObject(), on);
+    }
+  }
+}
+
 void Module::train(bool on) {
+  std::cout << "number of modules in jit: " << modules().size() << std::endl;
+  int i = 0;
   for (Module m : modules()) {
+    std::cout << "module: " << i++ << std::endl;
+//    m.dump(true, true, true);
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
       m._ivalue()->setSlot(*slot, on);
     } else {
       TORCH_INTERNAL_ASSERT("'training' attribute not found");
     }
   }
+
+  auto obj = _ivalue();
+  set_train_recurse(obj, true);
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {

@@ -393,6 +393,8 @@ struct slot_iterator_impl {
     // traversals. We do this by adding a new SlotCursor to track the traversal.
     if (recurse_ &&
         top().module_._ivalue()->type()->getAttribute(top().i_)->is_module()) {
+      std::cout << "jit process" << std::endl;
+      cur().dump();
       cursors_.emplace_back(SlotCursor{cur().toModule(), 0});
       return;
     }
