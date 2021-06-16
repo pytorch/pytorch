@@ -181,7 +181,7 @@ def convert(model: GraphModule, is_reference: bool = False,
         custom_module_classes=custom_module_classes)
 
     quantized_graph = Graph()
-    env: Dict[str, Dict[Optional[torch.dtype], Node]] = defaultdict(lambda: defaultdict(Node))
+    env: Dict[str, Dict[Optional[torch.dtype], Node]] = defaultdict(lambda: defaultdict(Node))  # type: ignore[arg-type]
 
     graph_inputs: List[str] = []
     for node in model.graph.nodes:
@@ -215,7 +215,7 @@ def convert(model: GraphModule, is_reference: bool = False,
                 'trying to load quantized node but did not find node:' + \
                 n.name + ' in environment:' + str(env)
             dtype_to_node = env[n.name]
-            local_dtype = dtype
+            local_dtype : Optional[torch.dtype] = dtype
             if local_dtype == torch.float and local_dtype not in dtype_to_node:
                 local_dtype = None
             if local_dtype in [torch.float, None]:
@@ -261,7 +261,7 @@ def convert(model: GraphModule, is_reference: bool = False,
         def load_arg_impl(arg_or_args):
             # we'll update the format of `quantized`
             # to better match arg_or_args
-            updated_quantized: Optional[Union[List[int], torch.dtype, Tuple[int, ...]]] = quantized
+            updated_quantized: Optional[Union[List[int], torch.dtype, Dict[int, torch.dtype], Tuple[int, ...]]] = quantized
 
             if isinstance(quantized, (tuple, list)) and \
                len(quantized) == 1 and isinstance(arg_or_args, Node):
@@ -363,8 +363,8 @@ def convert(model: GraphModule, is_reference: bool = False,
         elif isinstance(prev_node, Node) and prev_node.name in env:
             # if previous node is already quantized, we'll just remove the
             # activation_post_process
-            prev_dtype_to_node = env[prev_node.name]
-            current_dtype = observer_module.dtype
+            prev_dtype_to_node: Dict[Optional[torch.dtype], Node] = env[prev_node.name]
+            current_dtype: Optional[torch.dtype] = observer_module.dtype  # type: ignore[assignment]
             if current_dtype in prev_dtype_to_node:
                 env[node.name][current_dtype] = prev_dtype_to_node[current_dtype]
             else:

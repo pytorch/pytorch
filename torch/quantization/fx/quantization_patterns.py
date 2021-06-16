@@ -542,7 +542,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             else:
                 assert len(self.conv_node.args) >= 7, \
                     "only conv2d calls with all arguments specified is supported right now in is_reference=False option"
-                args = load_arg(quantized={0: torch.quint8, 1:torch.qint8})(self.conv_node.args)
+                args = load_arg(quantized={0: torch.quint8, 1: torch.qint8})(self.conv_node.args)
                 # pack weight
                 weight = load_arg(quantized=torch.qint8)(self.conv_node.args[1])
                 other_args = load_arg(quantized=torch.float)(self.conv_node.args[2:])
