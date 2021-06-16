@@ -42,7 +42,7 @@ using ReflectionPad2dOptions = ReflectionPadOptions<2>;
 ///
 /// Example:
 /// ```
-/// ReflectionPad3d model(ReflectionPad3dOptions({1, 1, 2, 0}));
+/// ReflectionPad3d model(ReflectionPad3dOptions({1, 1, 2, 0, 1, 1}));
 /// ```
 using ReflectionPad3dOptions = ReflectionPadOptions<3>;
 
