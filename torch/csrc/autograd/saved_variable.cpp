@@ -37,7 +37,6 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
       "you can make a clone to get a normal tensor and use it in autograd.")
 
     was_default_constructed_ = false;
-    is_inplace_on_view_ = is_inplace_on_view;
     const auto& version_counter = impl::version_counter(variable);
     saved_version_ = version_counter.current_version();
 
@@ -48,28 +47,24 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // we are currently constructing (the one that owns this SavedVariable).
     // 2. If the variable is a leaf, it only has weak reference to the grad_accumulator
     // which cannot create a cycle.
+    // In those cases, we save the original variable and don't need further processing.
     if (!is_output || variable.is_leaf()) {
       saved_original_ = true;
       data_ = variable;
       return;
     }
 
+    // From now on, we can assume the variable is not a leaf and is an output.
+
+    is_inplace_on_view_ = is_inplace_on_view;
     output_nr_ = variable.output_nr();
-    requires_grad_ = variable.requires_grad();
-    has_grad_fn_ = !variable.is_leaf();
     version_counter_ = version_counter;
 
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
 
-    if (variable.is_leaf()) {
-      grad_accumulator_ = impl::grad_accumulator(variable);
-    } else if (!is_output) {
-      grad_fn_ = variable.grad_fn();
-    }
-
-    if(is_output && is_inplace_on_view) {
+    if(is_inplace_on_view) {
       weak_grad_fn_ = variable.grad_fn();
     }
 
@@ -94,9 +89,10 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // We want grad_fn here to provide the most helpful debug message to the user
   // if versions don't match
   auto grad_fn = saved_original_ ? data_.grad_fn()
-                                : is_inplace_on_view_ ? weak_grad_fn_.lock()
-                                                      : grad_fn_;
-  if (has_grad_fn_ && !grad_fn) {
+                                 : is_inplace_on_view_ ? weak_grad_fn_.lock()
+                                                       : nullptr;
+
+  if (!saved_original_ && !grad_fn) {
     TORCH_CHECK(saved_for,"No grad_fn for non-leaf saved variable");
     grad_fn = std::move(saved_for);
   }
@@ -128,29 +124,21 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     TORCH_CHECK(false, message.str());
   }
 
+  // The version counter is correct. If we have the original variable, we simply return it
+
   if (saved_original_) {
     return data_;
   }
 
+  // From now on, we can assume the variable is not a leaf and is an output.
+  // Additionnally, because the variable is not a leaf, we have its grad_fn
+  // (computed above) and need to attach it to the returned tensor.
+
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
-  Variable var;
-  if (grad_fn) {
-    var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
-  } else {
-    var = make_variable(data_, requires_grad_);
-  }
+  Variable var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
   impl::set_version_counter(var, saved_version_);
-
-  // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
-  // should have saved the grad accumulator. Even if the Variable no longer
-  // alive, the accumulator should be kept alive by the references in the
-  // graph).
-  if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired()) {
-    TORCH_CHECK(false, "No grad accumulator for a saved leaf!");
-  }
-  impl::set_grad_accumulator(var, grad_accumulator_);
 
   // NB: var here is never a view so there is no need to make anything special
   // for the case where the saved Tensor was a view. This whole argument relies
