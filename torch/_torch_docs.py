@@ -1250,8 +1250,8 @@ Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
 Both :attr:`input` and :attr:`other` must have integer dtypes. The result will have the same dtype as :attr:`input`.
 
 Args:
-    input: the first input tensor
-    other: the second input tensor
+    input (Tensor or Scalar): the first input tensor
+    other (Tensor or Scalar): the second input tensor
 
 Keyword args:
     {out}
@@ -1270,8 +1270,8 @@ Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
 Both :attr:`input` and :attr:`other` must have integer dtypes. The result will have the same dtype as :attr:`input`.
 
 Args:
-    input: the first input tensor
-    other: the second input tensor
+    input (Tensor or Scalar): the first input tensor
+    other (Tensor or Scalar): the second input tensor
 
 Keyword args:
     {out}
