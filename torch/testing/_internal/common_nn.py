@@ -2204,14 +2204,14 @@ new_module_tests = [
     ),
     dict(
         module_name='ReflectionPad3d',
-        constructor_args=((1, 2, 3, 4, 1, 2),),
-        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 3, 4, 1, 2})',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
         input_size=(2, 3, 8, 8, 8),
     ),
     dict(
         module_name='ReflectionPad3d',
-        constructor_args=((1, 2, 3, 4, 1, 2),),
-        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 3, 4, 1, 2})',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
         input_fn=lambda: torch.rand(2, 3, 8, 8, 8, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
