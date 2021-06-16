@@ -1832,17 +1832,26 @@ except RuntimeError as e:
         stream = torch.cuda.Stream()
 
         for x_first_use_on_ambient in (True, False):
-            with torch.cuda.stream(stream):
-                x = torch.randn(5, 5, device='cuda', requires_grad=True)
-                model = StreamModel().cuda()
-                x.register_hook(lambda grad: self.assertEqual(torch.cuda.current_stream(),
-                                                              stream if x_first_use_on_ambient else model.stream0))
-                for i in range(5):
-                    model(x, x_first_use_on_ambient).sum().backward()
-            # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
-            torch.cuda.current_stream().wait_stream(stream)
+            for out_of_place in (True, False):
+                with torch.cuda.stream(stream):
+                    x = torch.randn(5, 5, device='cuda', requires_grad=True)
+                    model = StreamModel().cuda()
+                    x.register_hook(lambda grad: self.assertEqual(torch.cuda.current_stream(),
+                                                                  stream if x_first_use_on_ambient else model.stream0))
+                    iters = 1 if out_of_place else 5
+                    for i in range(iters):
+                        loss = model(x, x_first_use_on_ambient).sum()
+                        if out_of_place:
+                            x_grad = torch.autograd.grad((loss,), (x,))[0]
+                        else:
+                            loss.backward()
+                # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
+                torch.cuda.current_stream().wait_stream(stream)
 
-            self.assertEqual(x.grad, torch.ones_like(x) * 5 * 5)
+                if out_of_place:
+                    self.assertEqual(x_grad, torch.ones_like(x) * 5 * iters)
+                else:
+                    self.assertEqual(x.grad, torch.ones_like(x) * 5 * iters)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_streaming_backwards_device_transfer(self):
