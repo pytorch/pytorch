@@ -17,6 +17,16 @@
 namespace torch_lazy_tensors {
 namespace {
 
+void CheckSubOperandTypes(at::ScalarType type1, at::ScalarType type2) {
+  LTC_CHECK(type1 != at::kBool || type2 != at::kBool)
+      << "Subtraction, the `-` operator, with two bool tensors is not "
+         "supported. Use the `^` or `logical_xor()` operator instead.";
+  LTC_CHECK(type1 != at::kBool && type2 != at::kBool)
+      << "Subtraction, the `-` operator, with a bool tensor is not "
+         "supported. If you are trying to invert a mask, use the `~` or "
+         "`logical_not()` operator instead.";
+}
+
 std::pair<LazyTensor, LazyTensor> GetBinaryOperands(const at::Tensor& self,
                                                     const at::Tensor& other) {
   LazyTensor self_tensor;
@@ -817,6 +827,52 @@ at::Tensor& AtenXlaType::squeeze_(at::Tensor& self, int64_t dim) {
   } else {
     bridge::LtcUpdateTensors(xlatens_tensors, xlatens, xlatens_update_indices);
   }
+  return self;
+}
+
+at::Tensor AtenXlaType::sub(const at::Tensor& self, const at::Tensor& other,
+                            const at::Scalar& alpha) {
+  LTC_FN_COUNTER("xla::");
+  CheckSubOperandTypes(self.scalar_type(), other.scalar_type());
+  at::native::alpha_check(at::result_type(self, other), alpha);
+  return DoBinaryOp(self, other,
+                    [&](const LazyTensor& xself, const LazyTensor& xother,
+                        at::ScalarType dtype) {
+                      return LazyTensor::sub(xself, xother, alpha, dtype);
+                    });
+}
+
+at::Tensor AtenXlaType::sub(const at::Tensor& self, const at::Scalar& other,
+                            const at::Scalar& alpha) {
+  LTC_FN_COUNTER("xla::");
+  CheckSubOperandTypes(self.scalar_type(), GetScalarType(other));
+  return DoBinaryOp(self, other,
+                    [&](const LazyTensor& xself, const at::Scalar& other,
+                        at::ScalarType dtype) {
+                      return LazyTensor::sub(xself, other, alpha, dtype);
+                    });
+}
+
+at::Tensor& AtenXlaType::sub_(at::Tensor& self, const at::Tensor& other,
+                              const at::Scalar& alpha) {
+  LTC_FN_COUNTER("xla::");
+  CheckBinaryOpTypePromotion(self, self, other);
+  at::native::alpha_check(at::result_type(self, other), alpha);
+  CheckSubOperandTypes(self.scalar_type(), other.scalar_type());
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::sub_(self_tensor,
+                   bridge::GetOrCreateLtcTensor(other, self_tensor.GetDevice()),
+                   alpha);
+  return self;
+}
+
+at::Tensor& AtenXlaType::sub_(at::Tensor& self, const at::Scalar& other,
+                              const at::Scalar& alpha) {
+  LTC_FN_COUNTER("xla::");
+  CheckBinaryOpTypePromotion(self, self, other);
+  CheckSubOperandTypes(self.scalar_type(), GetScalarType(other));
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::sub_(self_tensor, other, alpha);
   return self;
 }
 

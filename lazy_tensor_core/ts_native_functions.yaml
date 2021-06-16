@@ -48,6 +48,10 @@ supported:
   - transpose_
   - unsqueeze
   - unsqueeze_
+  - sub.Tensor
+  - sub_.Tensor
+  - sub.Scalar
+  - sub_.Scalar
   - view
   - ne.Scalar
   - ne.Tensor
