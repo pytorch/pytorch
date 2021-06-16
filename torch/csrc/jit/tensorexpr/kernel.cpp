@@ -16,6 +16,47 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
+namespace {
+
+static bool checkTypes(const ScalarType highType, const int typeConstraints) {
+  if (typeConstraints == kAllTypes) {
+    return true;
+  }
+
+  if (c10::isIntegralType(highType, false)) {
+    return (typeConstraints & kIntegralTypes) != 0;
+  } else if (c10::isFloatingType(highType)) {
+    return (typeConstraints & kFloatingPointTypes) != 0;
+  } else if (highType == ScalarType::Bool) {
+    return (typeConstraints & kBoolType) != 0;
+  }
+
+  // assume JIT not supporting complex and qint yet
+  TORCH_INTERNAL_ASSERT((typeConstraints & (kQintTypes | kComplexTypes)) == 0);
+  return false;
+}
+
+static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
+  if (e.dtype().scalar_type() == dt) {
+    return e;
+  }
+
+  switch (dt) {
+// NOLINTNEXTLINE
+#define TYPE_CASE(Type, Name) \
+  case ScalarType::Name:      \
+    e = cast<Type>(e);        \
+    break;
+    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      throw unsupported_dtype();
+  }
+  return e;
+}
+
+} // namespace
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -411,6 +452,52 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
+void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
+  if (inputs.empty()) {
+    return;
+  }
+
+  // Find the highest type among the inputs.
+  ScalarType highType = inputs[0].dtype().scalar_type();
+  for (const auto input : inputs) {
+    highType = promoteTypes(highType, input.dtype().scalar_type());
+  }
+
+  if (!checkTypes(highType, typeConstraints)) {
+    throw unsupported_dtype();
+  }
+
+  for (ExprHandle& e : inputs) {
+    e = promoteToDtype(e, highType);
+  }
+}
+
+ExprHandle demoteOutput(
+    const ExprHandle& e,
+    const c10::optional<ScalarType> type) {
+  if (!type.has_value()) {
+    return e;
+  }
+  if (*type == e.dtype().scalar_type()) {
+    return e;
+  }
+
+  switch (*type) {
+// NOLINTNEXTLINE
+#define TYPE_CASE(Type, Name) \
+  case ScalarType::Name:      \
+    return cast<Type>(e);
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    case ScalarType::Bool:
+      return cast<bool>(e);
+    default:
+      throw unsupported_dtype();
+  }
+
+  return e;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -447,25 +534,6 @@ ExprHandle TensorExprKernel::chunk(
   }
 
   return BufHandle(b).load(indices);
-}
-
-ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
-  if (e.dtype().scalar_type() == dt) {
-    return e;
-  }
-
-  switch (dt) {
-// NOLINTNEXTLINE
-#define TYPE_CASE(Type, Name) \
-  case ScalarType::Name:      \
-    e = cast<Type>(e);        \
-    break;
-    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
-#undef TYPE_CASE
-    default:
-      throw unsupported_dtype();
-  }
-  return e;
 }
 
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
@@ -802,72 +870,6 @@ ExprHandle clamp(
     const ExprHandle& input) {
   auto mm = CompareSelect::make(input, cmin, cmin, input, kLT);
   return CompareSelect::make(mm, cmax, cmax, mm, kGT);
-}
-
-bool checkTypes(const ScalarType highType, const int typeConstraints) {
-  if (typeConstraints == kAllTypes) {
-    return true;
-  }
-
-  if (c10::isIntegralType(highType, false)) {
-    return (typeConstraints & kIntegralTypes) != 0;
-  } else if (c10::isFloatingType(highType)) {
-    return (typeConstraints & kFloatingPointTypes) != 0;
-  } else if (highType == ScalarType::Bool) {
-    return (typeConstraints & kBoolType) != 0;
-  }
-
-  // assume JIT not supporting complex and qint yet
-  TORCH_INTERNAL_ASSERT((typeConstraints & (kQintTypes | kComplexTypes)) == 0);
-  return false;
-}
-
-void promoteInputs(
-    std::vector<ExprHandle>& inputs,
-    const int typeConstraints = kAllTypes) {
-  if (inputs.empty()) {
-    return;
-  }
-
-  // Find the highest type among the inputs.
-  ScalarType highType = inputs[0].dtype().scalar_type();
-  for (const auto input : inputs) {
-    highType = promoteTypes(highType, input.dtype().scalar_type());
-  }
-
-  if (!checkTypes(highType, typeConstraints)) {
-    throw unsupported_dtype();
-  }
-
-  for (ExprHandle& e : inputs) {
-    e = promoteToDtype(e, highType);
-  }
-}
-
-ExprHandle demoteOutput(
-    const ExprHandle& e,
-    const c10::optional<ScalarType> type) {
-  if (!type.has_value()) {
-    return e;
-  }
-  if (*type == e.dtype().scalar_type()) {
-    return e;
-  }
-
-  switch (*type) {
-// NOLINTNEXTLINE
-#define TYPE_CASE(Type, Name) \
-  case ScalarType::Name:      \
-    return cast<Type>(e);
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
-#undef TYPE_CASE
-    case ScalarType::Bool:
-      return cast<bool>(e);
-    default:
-      throw unsupported_dtype();
-  }
-
-  return e;
 }
 
 static bool isOne(ExprHandle e) {
@@ -1671,67 +1673,9 @@ Tensor* tensorexpr::computeOperandValue(
     } break;
 
     case aten::batch_norm: {
-      bool hasWeight = true;
-      bool hasBias = true;
+      return computeBatchNorm(inputs, outputShape, outputType);
+    }
 
-      if (c10::get_if<ArgNone>(&inputs[1])) {
-        hasWeight = false;
-      }
-
-      if (c10::get_if<ArgNone>(&inputs[2])) {
-        hasBias = false;
-      }
-
-      return Compute(
-          "aten_batch_norm",
-          c10::fmap<DimArg>(outputShape),
-          [&](const std::vector<VarHandle>& axes) {
-            TORCH_INTERNAL_ASSERT(axes.size() >= 2);
-            // axes: N, C, H, W
-            std::vector<ExprHandle> indices(axes.begin(), axes.end());
-            ExprHandle c = indices[1];
-
-            // Parameter list:
-            // input, weight, bias, mean, var, training, momentum, eps,
-            // cudnn_enabled
-            std::vector<ExprHandle> exprInputs = {
-                tensorOrConstant(inputs[0], indices), // input
-                tensorOrConstant(inputs[3], {c}), // mean
-                tensorOrConstant(inputs[4], {c}), // var
-                constant(inputs[7]) // eps
-            };
-
-            if (hasWeight) {
-              exprInputs.push_back(tensorOrConstant(inputs[1], {c}));
-            }
-            if (hasBias) {
-              exprInputs.push_back(tensorOrConstant(inputs[2], {c}));
-            }
-            promoteInputs(exprInputs);
-
-            ExprHandle input = exprInputs[0];
-            ExprHandle mean = exprInputs[1];
-            ExprHandle var = exprInputs[2];
-            ExprHandle eps = exprInputs[3];
-            ExprHandle weight = FloatImm::make(1);
-            ExprHandle bias = FloatImm::make(0);
-
-            if (hasWeight) {
-              weight = exprInputs[4];
-            }
-            // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-            if (hasBias) {
-              bias = exprInputs[5];
-            }
-
-            // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-            auto inv_var = rsqrt(var + eps);
-            auto alpha = inv_var * weight;
-            auto beta = bias - mean * alpha;
-            auto output = input * alpha + beta;
-            return demoteOutput(output, outputType);
-          });
-    } break;
     case aten::log: {
       return computeOneOperand(
           "aten_log", inputs, outputShape, outputType, [](const ExprHandle& a) {
