@@ -220,3 +220,7 @@ def node_supports_equalization(node: Node, modules) -> bool:
     elif node.op == 'call_function':
         return node.target == nn.functional.linear
     return False
+
+def is_equalization_observer(observer: nn.Module) -> bool:
+    return (isinstance(observer, _InputEqualizationObserver) or
+            isinstance(observer, _WeightEqualizationObserver))
