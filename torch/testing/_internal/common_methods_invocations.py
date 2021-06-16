@@ -160,11 +160,9 @@ class SampleInput(object):
         numpy_args = list()
 
         for sample_arg in sample_args:
-            if isinstance(sample_arg, torch.Tensor):
-                numpy_arg = sample_arg.cpu().numpy()
-            else:
+            if not isinstance(sample_arg, torch.Tensor):
                 raise TypeError(f"Only torch.Tensor types supported but got {type(sample_arg)}")
-            numpy_args.append(numpy_arg)
+            numpy_args.append(sample_arg.cpu().numpy())
 
         if isinstance(sample_torch_input, torch.Tensor):
             sample_numpy_input = sample_torch_input.cpu().numpy()
