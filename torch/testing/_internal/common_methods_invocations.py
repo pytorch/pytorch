@@ -6589,7 +6589,7 @@ op_db: List[OpInfo] = [
                        # def the_method(i0):
                        #     return torch.polygamma(i0, 1)
                        #            ~~~~~~~~~~~~~~~ <--- HERE
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit'))
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     # A separate OpInfo entry for special.polygamma is needed to reorder the arguments
     # for the alias. See the discussion here: https://github.com/pytorch/pytorch/pull/59691#discussion_r650261939
@@ -6618,7 +6618,7 @@ op_db: List[OpInfo] = [
                        #     return torch.polygamma(i0, 1)
                        #            ~~~~~~~~~~~~~~~ <--- HERE
                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-                       SkipInfo('TestCommon', 'test_jit_alias_remapping')),
+                       SkipInfo('TestCommon', 'test_jit_alias_remapping'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
                    aliases=("special.polygamma",),
