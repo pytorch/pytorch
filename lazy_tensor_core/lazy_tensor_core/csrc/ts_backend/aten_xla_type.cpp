@@ -820,6 +820,25 @@ at::Tensor& AtenXlaType::squeeze_(at::Tensor& self, int64_t dim) {
   return self;
 }
 
+at::Tensor AtenXlaType::sum(const at::Tensor& self,
+                            c10::optional<at::ScalarType> dtype) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::sum(self_tensor,
+                      lazy_tensors::util::Iota<lazy_tensors::int64>(
+                          self_tensor.shape().get().rank()),
+                      /*keep_reduced_dimensions=*/false, dtype));
+}
+
+at::Tensor AtenXlaType::sum(const at::Tensor& self, at::IntArrayRef dim,
+                            bool keepdim, c10::optional<at::ScalarType> dtype) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(LazyTensor::sum(
+      bridge::GetLtcTensor(self),
+      lazy_tensors::util::ToVector<lazy_tensors::int64>(dim), keepdim, dtype));
+}
+
 at::Tensor AtenXlaType::t(const at::Tensor& self) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
