@@ -55,6 +55,7 @@ from jit.test_pdt import TestPDT  # noqa: F401
 from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
 from jit.test_module_apis import TestModuleAPIs  # noqa: F401
 from jit.test_script_profile import TestScriptProfile  # noqa: F401
+from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestInplaceToFunctionalActivation  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -15967,7 +15968,7 @@ class TestProducerVersion(unittest.TestCase):
 
     def test_version(self):
         # issue gh-32561
-        self.assertEqual(torch.onnx.producer_version, torch.__version__[:3])
+        self.assertTrue(torch.__version__.startswith(torch.onnx.producer_version))
 
 
 for test in autograd_method_tests():

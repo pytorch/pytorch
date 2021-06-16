@@ -105,7 +105,9 @@ SerializedPyObj serializePyObject(IValue value) {
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
     const py::object& function,
+    std::vector<c10::Stream> streams,
     bool isAsyncExecution) const {
+  c10::MultiStreamGuard guard(streams);
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   py::gil_scoped_acquire acquire;
 
@@ -154,83 +156,89 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::vector<c10::Stream> streams) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
 
   c10::intrusive_ptr<JitFuture> future;
   if (scriptCall.hasOp()) {
-    future = runJitOperator(*scriptCall.op(), scriptCall.stackRef());
+    future = runJitOperator(
+        *scriptCall.op(), scriptCall.stackRef(), std::move(streams));
   } else {
     future = runJitFunction(
         scriptCall.qualifiedName(),
         scriptCall.stackRef(),
+        std::move(streams),
         scriptCall.isAsyncExecution());
   }
 
   return future->then(
       [](JitFuture& jitFuture) {
-        return c10::make_intrusive<Message>(
-            ScriptResp(jitFuture.value()).toMessage());
+        return withDataPtrs(ScriptResp(jitFuture.value()).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::vector<c10::Stream> streams) const {
   auto& upc = static_cast<UnpickledPythonCall&>(rpc);
-  auto future = runPythonFunction(upc.pythonUdf(), upc.isAsyncExecution());
+  auto future = runPythonFunction(
+      upc.pythonUdf(), std::move(streams), upc.isAsyncExecution());
 
   return future->then(
       [](JitFuture& future) {
-        return c10::make_intrusive<Message>(
+        return withDataPtrs(
             PythonResp(serializePyObject(future.value())).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
-    RpcCommandBase& rpc) const {
+    RpcCommandBase& rpc,
+    std::vector<c10::Stream> streams) const {
   auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
 
   c10::intrusive_ptr<JitFuture> future;
   if (scriptRemoteCall.hasOp()) {
-    future =
-        runJitOperator(*scriptRemoteCall.op(), scriptRemoteCall.stackRef());
+    future = runJitOperator(
+        *scriptRemoteCall.op(),
+        scriptRemoteCall.stackRef(),
+        std::move(streams));
   } else {
     future = runJitFunction(
         scriptRemoteCall.qualifiedName(),
         scriptRemoteCall.stackRef(),
+        std::move(streams),
         scriptRemoteCall.isAsyncExecution());
   }
 
   return assignOwnerRRef(
       scriptRemoteCall.retRRefId(),
       scriptRemoteCall.retForkId(),
-      std::move(future),
-      /*lsctx=*/nullptr);
+      std::move(future));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
     RpcCommandBase& rpc,
-    std::shared_ptr<LazyStreamContext> lsctx) const {
+    std::vector<c10::Stream> streams) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
-  auto future = runPythonFunction(uprc.pythonUdf(), uprc.isAsyncExecution());
+  auto future = runPythonFunction(
+      uprc.pythonUdf(), std::move(streams), uprc.isAsyncExecution());
 
-  return assignOwnerRRef(
-      uprc.rrefId(), uprc.forkId(), std::move(future), std::move(lsctx));
+  return assignOwnerRRef(uprc.rrefId(), uprc.forkId(), std::move(future));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
-    RpcCommandBase& rpc,
-    std::shared_ptr<LazyStreamContext> lsctx) const {
+    RpcCommandBase& rpc) const {
   auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
 
-  auto future = retrieveOwnerRRef(prf.rrefId(), std::move(lsctx));
+  auto future = retrieveOwnerRRef(prf.rrefId());
 
   return future->then(
       [](JitFuture& future) {
         SerializedPyObj result = serializePyObject(future.value());
-        return c10::make_intrusive<Message>(
+        return withDataPtrs(
             PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -247,9 +255,9 @@ void RequestCallbackImpl::handleRRefDelete(
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
-    std::shared_ptr<LazyStreamContext> ctx) const {
+    std::vector<c10::Stream> streams) const {
   try {
-    return processRpc(rpc, messageType, std::move(ctx));
+    return processRpc(rpc, messageType, std::move(streams));
   } catch (py::error_already_set& e) {
     // Pass a dummy message ID since it will be overwritten anyways.
     auto future = asFuture(handleError(e, messageType, -1));
@@ -280,8 +288,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRRefBackward(
     RpcCommandBase& rpc) const {
   auto& rrefBackwardReq = static_cast<RRefBackwardReq&>(rpc);
 
-  auto future =
-      retrieveOwnerRRef(rrefBackwardReq.getRRefId(), /*lsctx=*/nullptr);
+  auto future = retrieveOwnerRRef(rrefBackwardReq.getRRefId());
 
   return future->then(
       [autogradContextId = rrefBackwardReq.getAutogradContextId(),
@@ -290,7 +297,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRRefBackward(
         PyRRef::backwardOwnerRRef(
             autogradContextId, retainGraph, future.value());
 
-        return c10::make_intrusive<Message>(RRefBackwardResp().toMessage());
+        return withDataPtrs(RRefBackwardResp().toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -298,7 +305,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRRefBackward(
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runJitFunction(
     const c10::QualifiedName& name,
     std::vector<at::IValue>& stack,
+    std::vector<c10::Stream> streams,
     bool isAsyncExecution) const {
+  c10::MultiStreamGuard guard(streams);
   c10::intrusive_ptr<JitFuture> future;
   try {
     // runAsync() starts in the calling thread, but may return an uncompleted

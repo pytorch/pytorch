@@ -21,5 +21,5 @@ enum class TrainingMode {
 // stable. only bump it when it's necessary
 static const size_t IR_VERSION = 6;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static const char* PRODUCER_VERSION = "1.9";
+static const char* PRODUCER_VERSION = "1.10";
 }} // namespace torch::onnx
