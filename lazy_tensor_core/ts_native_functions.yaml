@@ -52,6 +52,7 @@ supported:
   - sub_.Tensor
   - sub.Scalar
   - sub_.Scalar
+  - addmm
   - view
   - ne.Scalar
   - ne.Tensor

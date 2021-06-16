@@ -135,6 +135,23 @@ at::Tensor& AtenXlaType::addcmul_(at::Tensor& self, const at::Tensor& tensor1,
   return self;
 }
 
+at::Tensor AtenXlaType::addmm(const at::Tensor& self, const at::Tensor& mat1,
+                              const at::Tensor& mat2, const at::Scalar& beta,
+                              const at::Scalar& alpha) {
+  LTC_FN_COUNTER("xla::");
+  // xla::dot doesn't support integer types.
+  if (beta.to<double>() != 1 || alpha.to<double>() != 1 ||
+      !at::native::is_floating_point(self) ||
+      !at::native::is_floating_point(mat1) ||
+      !at::native::is_floating_point(mat2)) {
+    return AtenXlaTypeDefault::addmm(self, mat1, mat2, beta, alpha);
+  }
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::addmm(bridge::GetLtcTensor(mat1),
+                        /*weight=*/bridge::GetLtcTensor(mat2),
+                        /*bias=*/bridge::GetLtcTensor(self)));
+}
+
 at::Tensor AtenXlaType::alias(const at::Tensor& self) {
   LTC_FN_COUNTER("xla::");
   return self;

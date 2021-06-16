@@ -64,6 +64,7 @@ class TSNodeLowering : public NodeLowering {
         // Only used from bmm currently.
         return InferBmm(node);
       }
+      case at::aten::addmm:
       case at::aten::mm: {
         return InferMm(node);
       }
@@ -138,6 +139,14 @@ class TSNodeLowering : public NodeLowering {
       }
       return LowerConstant(ir::NodeCast<ir::ops::Constant>(
           node, ir::OpKind(at::prim::Constant)));
+    }
+    if (node->op().op == at::aten::addmm) {
+      std::vector<torch::jit::NamedValue> arguments;
+      // The addmm operator in PyTorch takes bias first.
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
+      return LowerBuiltin(node, arguments);
     }
     if (node->op().op == at::aten::bernoulli) {
       std::vector<torch::jit::NamedValue> arguments;
