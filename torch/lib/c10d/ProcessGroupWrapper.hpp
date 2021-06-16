@@ -9,7 +9,7 @@
 
 namespace c10d {
 
-class ProcessGroupWrapper : public ProcessGroup {
+class TORCH_API ProcessGroupWrapper : public ProcessGroup {
  public:
   explicit ProcessGroupWrapper(
       c10::intrusive_ptr<ProcessGroup> pg,
