@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/operators/matmul.h>
+#include <torch/csrc/jit/tensorexpr/nope/matmul.h>
 
 namespace torch {
 namespace jit {

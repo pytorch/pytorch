@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/tensorexpr/operators/softmax.h>
+#include <torch/csrc/jit/tensorexpr/nope/softmax.h>
 
 namespace torch {
 namespace jit {

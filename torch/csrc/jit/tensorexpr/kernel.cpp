@@ -11,7 +11,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
-#include <torch/csrc/jit/tensorexpr/operators/operators.h>
+#include <torch/csrc/jit/tensorexpr/nope/operators.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;

@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/tensorexpr/operators/norm.h>
+#include <torch/csrc/jit/tensorexpr/nope/norm.h>
 
 namespace torch {
 namespace jit {

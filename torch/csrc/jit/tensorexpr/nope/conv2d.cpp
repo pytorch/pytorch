@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
-#include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
+#include <torch/csrc/jit/tensorexpr/nope/conv2d.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
