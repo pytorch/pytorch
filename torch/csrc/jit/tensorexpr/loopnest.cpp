@@ -1246,10 +1246,6 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
     }
   }
 
-  if (!f) {
-    throw malformed_input("sliceHead attempted on null loop", f);
-  }
-
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!p) {
     throw malformed_input("sliceHead attempted on loop with no parent", p);
@@ -1285,10 +1281,6 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
       *tail = f;
       return;
     }
-  }
-
-  if (!f) {
-    throw malformed_input("sliceTail attempted on null loop", f);
   }
 
   Block* p = dynamic_cast<Block*>(f->get_parent());
@@ -2055,10 +2047,11 @@ bool LoopNest::areLoopsPerfectlyNested(const std::vector<For*>& loops) {
 }
 
 void LoopNest::unroll(For* f, Stmt** unrolled) {
-  Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!f) {
     throw malformed_input("unroll attempted on null loop");
-  } else if (!p) {
+  }
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
     throw malformed_input("unroll attempted on loop with no parent");
   }
 
