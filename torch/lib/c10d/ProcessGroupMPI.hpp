@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_MPI
+
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -76,7 +78,7 @@ struct WorkEntry {
 //
 // CUDA tensor can be supported if the MPI used is CUDA-aware MPI, and
 // ProcessGroupMPI will automatically detect this support.
-class ProcessGroupMPI : public ProcessGroup {
+class TORCH_API ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
    public:
@@ -263,3 +265,5 @@ class ProcessGroupMPI : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_MPI

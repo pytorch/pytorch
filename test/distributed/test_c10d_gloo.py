@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     simple_sparse_reduce_tests,
     skip_if_win32,
     create_device,
+    verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -37,7 +38,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
 )
 import test_c10d_common
-from test_c10d_common import LOOPBACK, gpus_for_rank, Task, ModuleForDdpCommHook, SparseGradientModule
+from test_c10d_common import (
+    LOOPBACK,
+    gpus_for_rank,
+    Task,
+    ModuleForDdpCommHook,
+    SparseGradientModule,
+)
 
 
 def simple_reduce_tests(rank, world_size):
@@ -193,7 +200,6 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     @retry_on_connect_failures
     def test_default_store_timeout_gloo(self):
         self._test_default_store_timeout("gloo")
-
 
 @requires_gloo()
 @unittest.skipIf(
@@ -634,6 +640,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(tensors, outputs)
                 self.assertEqual(result, outputs)
 
+    @skip_if_win32()
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)
 
@@ -1824,14 +1831,17 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             ModuleForDdpCommHook(), process_group=process_group
         )
 
+        expected_err = "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
         with self.assertRaisesRegex(
                 ValueError,
-                "Communication hook: return annotation should be torch.futures.Future or torch._C.Future.",
+                expected_err,
         ):
             def comm_hook(state: object, bucket: dist.GradBucket) -> int:
                 return torch.futures.Future()
 
             model.register_comm_hook(state=None, hook=comm_hook)
+
+        verify_ddp_error_logged(model, expected_err)
 
         with self.assertRaisesRegex(
                 RuntimeError,

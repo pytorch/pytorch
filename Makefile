@@ -46,7 +46,6 @@ shellcheck:
 		--job 'shellcheck' \
 		--step 'Extract scripts from GitHub Actions workflows'
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file-filter '.sh' \
 		$(CHANGED_ONLY) \
 		--job 'shellcheck'
 
@@ -90,13 +89,11 @@ quick_checks:
 
 flake8:
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file-filter '.py' \
 		$(CHANGED_ONLY) \
 		--job 'flake8-py3'
 
 mypy:
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file-filter '.py' \
 		$(CHANGED_ONLY) \
 		--job 'mypy'
 
