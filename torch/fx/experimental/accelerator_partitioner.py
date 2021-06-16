@@ -222,9 +222,7 @@ def get_device_to_partitions_mapping(
             logical_id = partition.logical_device_ids[0]
             device = logical_id_to_device[logical_id]
             device_to_partitions[device] = [partition]
-            device_to_left_mem_bytes[device] = (
-                d.available_mem_bytes - partition.used_mem_bytes
-            )
+            device_to_left_mem_bytes[device] -= partition.used_mem_bytes
         else:
             no_device_partitions.append(partition)
     # Find devices for all the partitions without a device
@@ -312,7 +310,9 @@ class Partitioner:
             )
         # Single partition if the whole module can be fit into one device
         elif total_size_of_graph <= device_with_max_mem.available_mem_bytes:
-            self.find_single_partition(total_size_of_graph)
+            self.find_single_partition(
+                total_size_of_graph, logical_device_id=device_with_max_mem.logical_id
+            )
         elif total_size_of_graph > sum([d.available_mem_bytes for d in self.devices]):
             raise RuntimeError("Devices have no enough memory for the module")
         else:
@@ -348,7 +348,9 @@ class Partitioner:
         ret = PartitionResult(dag, module_with_submodules)
         return ret
 
-    def find_single_partition(self, total_size_of_graph) -> None:
+    def find_single_partition(
+        self, total_size_of_graph, logical_device_id: int = 0
+    ) -> None:
         """Fit the whole fx module into one device"""
         partition_0 = self.create_partition()
         for node in self.graph_module.graph.nodes:
@@ -356,7 +358,7 @@ class Partitioner:
                 break
             partition_0.nodes.add(node)
         partition_0.used_mem_bytes = total_size_of_graph
-        partition_0.logical_device_ids = [0]
+        partition_0.logical_device_ids = [logical_device_id]
         # Get the node to partition mapping
         self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         return
@@ -413,7 +415,7 @@ class Partitioner:
                         partition_to_left_mem_bytes[
                             partition
                         ] = device.available_mem_bytes
-                        # Update available mem for the current partitio
+                        # Update available mem for the current partition
                         partition.logical_device_ids.append(device.logical_id)
                     else:
                         # The current partition is not the first partition

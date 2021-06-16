@@ -166,7 +166,7 @@ class TestFXExperimental(JitTestCase):
         partitioner = Partitioner()
         devices = [
             Device("dev_0", 125, 0),
-            Device("dev_1", 125, 1),
+            Device("dev_1", 150, 1),
             Device("dev_2", 125, 2),
         ]
         partitioner_config = PartitionerConfig(devices)
@@ -174,7 +174,7 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
-        assert dag.nodes[0].logical_device_ids == [0]
+        assert dag.nodes[0].logical_device_ids == [1]
 
     def test_lack_of_devices(self):
         class TestModule(torch.nn.Module):
