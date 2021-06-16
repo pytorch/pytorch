@@ -304,11 +304,14 @@ __global__ void rrelu_with_noise_cuda_kernel(
 template <typename scalar_t>
 inline void _rrelu_with_noise_cuda_train(
     Tensor& output,
-    const Tensor& input,
-    const Tensor& noise,
+    const Tensor& input_,
+    const Tensor& noise_,
     const Scalar& lower_,
     const Scalar& upper_,
     c10::optional<Generator> generator) {
+  auto input = input_.contiguous();
+  auto noise = noise_.contiguous();
+  Tensor tmp_output = output.contiguous();
 
   int64_t numel = input.numel();
   auto execution_policy = calc_execution_policy(numel);
@@ -328,7 +331,7 @@ inline void _rrelu_with_noise_cuda_train(
 
   scalar_t* input_data = input.data_ptr<scalar_t>();
   scalar_t* noise_data = noise.data_ptr<scalar_t>();
-  scalar_t* output_data = output.data_ptr<scalar_t>();
+  scalar_t* output_data = tmp_output.data_ptr<scalar_t>();
 
   double lower = lower_.to<double>();
   double upper = upper_.to<double>();
@@ -361,6 +364,10 @@ inline void _rrelu_with_noise_cuda_train(
         });
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  if (!output.is_contiguous()) {
+    output.copy_(tmp_output);
+  }
 }
 
 Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
@@ -375,12 +382,10 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
   checkAllSameGPU("rrelu_with_noise_out_cuda", {self_arg, noise_arg, output_arg});
 
   if (training) {
-    auto input = self.contiguous();
-    auto noise_ = noise.contiguous();
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         self.scalar_type(), "rrelu_with_noise_out_cuda", [&] {
           _rrelu_with_noise_cuda_train<scalar_t>(
-              output, input, noise_, lower, upper, generator);
+              output, self, noise, lower, upper, generator);
         });
   }
   else {
