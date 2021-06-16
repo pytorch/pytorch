@@ -11,6 +11,8 @@ cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
     return CUDNN_DATA_DOUBLE;
   } else if (dtype == at::kHalf) {
     return CUDNN_DATA_HALF;
+  } else if (dtype == at::kBFloat16) {
+    return CUDNN_DATA_BFLOAT16;
   } else if (dtype == at::kInt) {
     return CUDNN_DATA_INT32;
   } else if (dtype == at::kByte) {

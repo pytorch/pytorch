@@ -52,17 +52,20 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id, uint8_t 
     .build();
 }
 
-cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation) {
+cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, const at::ScalarType scalar_type) {
   uint64_t convDim = stride.size();
-  return cudnn_frontend::ConvDescBuilder()
+  cudnn_frontend::ConvDescBuilder_v8& builder = cudnn_frontend::ConvDescBuilder()
     .setDataType(dataType)
     .setMathMode(CUDNN_CROSS_CORRELATION)
     .setNDims(convDim)
     .setStrides(convDim, stride.data())
     .setPrePadding(convDim, padding.data())
     .setPostPadding(convDim, padding.data())
-    .setDilation(convDim, dilation.data())
-    .build();
+    .setDilation(convDim, dilation.data());
+  if (scalar_type == kBFloat16) {
+    builder.setDataType(CUDNN_DATA_FLOAT);
+  }
+  return builder.build();
 }
 
 void filterEngineConfigs(
@@ -124,7 +127,7 @@ auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_
       .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
       .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
       .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
-      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
+      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation, x.scalar_type()))
       .build();
   std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
@@ -188,7 +191,6 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   size_t max_workspace_size = 0u;
   auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), initial_predicate_function);
-
   int device;
   THCudaCheck(cudaGetDevice(&device));
   size_t max_block_size = 0;
@@ -261,7 +263,6 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   const Tensor& x, const Tensor& y, const Tensor& w,
   const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
   const bool benchmark, const bool deterministic, const bool allow_tf32) {
-
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKey key;
