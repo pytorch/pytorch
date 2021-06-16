@@ -65,15 +65,16 @@ bool ceil_mode) {
     inputHeight, inputWidth,
     outputHeight, outputWidth, memory_format);
 
+  auto names = input.has_names() ? input.names() : ArrayRef<Dimname>();
   /* resize output and indices */
   if (input.ndimension() == 3) {
-    set_output(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), input.names());
+    set_output(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), names);
     /* indices will contain the locations for each output point */
-    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), input.names());
+    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), names);
   } else {
-    set_output(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), input.names());
+    set_output(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), names);
     /* indices will contain the locations for each output point */
-    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), input.names());
+    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), names);
   }
 }
 
