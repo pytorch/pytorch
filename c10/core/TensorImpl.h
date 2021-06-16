@@ -45,13 +45,13 @@ class Scalar;
 struct IValue;
 struct Storage;
 class OperatorHandle;
-}
+} // namespace c10
 
 namespace torch {
 namespace jit {
 using Stack = std::vector<c10::IValue>;
 }
-}
+} // namespace torch
 
 namespace c10 {
 
@@ -250,11 +250,22 @@ struct PyInterpreter;
 struct C10_API PyInterpreter {
   using name_sig = std::string(const PyInterpreter*);
   using decref_sig = void(const PyInterpreter*, PyObject*);
-  using detach_sig = c10::intrusive_ptr<TensorImpl>(const PyInterpreter*, const TensorImpl*);
-  using dispatch_sig = void(const PyInterpreter*, const c10::OperatorHandle&, torch::jit::Stack* stack);
+  using detach_sig =
+      c10::intrusive_ptr<TensorImpl>(const PyInterpreter*, const TensorImpl*);
+  using dispatch_sig = void(
+      const PyInterpreter*,
+      const c10::OperatorHandle&,
+      torch::jit::Stack* stack);
 
-  PyInterpreter(name_sig* name_fn, decref_sig* decref_fn, detach_sig* detach, dispatch_sig* dispatch)
-      : name_fn_(name_fn), decref_fn_(decref_fn), detach_fn_(detach), dispatch_fn_(dispatch) {}
+  PyInterpreter(
+      name_sig* name_fn,
+      decref_sig* decref_fn,
+      detach_sig* detach,
+      dispatch_sig* dispatch)
+      : name_fn_(name_fn),
+        decref_fn_(decref_fn),
+        detach_fn_(detach),
+        dispatch_fn_(dispatch) {}
 
   name_sig* name_fn_;
   decref_sig* decref_fn_;
@@ -280,12 +291,15 @@ struct C10_API PyInterpreter {
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
   // detach, which will also arrange for the PyObject to get copied in this
   // situation
-  __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(const TensorImpl* self) const {
+  __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(
+      const TensorImpl* self) const {
     return (*detach_fn_)(this, self);
   }
 
   // Invoke the Python boxed fallback dispatch to go back into Python
-  __ubsan_ignore_function__ void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack) const {
+  __ubsan_ignore_function__ void dispatch(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const {
     return (*dispatch_fn_)(this, op, stack);
   }
 

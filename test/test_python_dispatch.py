@@ -53,7 +53,7 @@ class LoggingTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e):
-            return e.elem if isinstance(e, torch.Tensor) else e
+            return e.elem if isinstance(e, LoggingTensor) else e
 
         def wrap(e):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
@@ -185,6 +185,21 @@ $2 = torch._ops.aten.abs($0, $1)''')
             RuntimeError, lambda: A(torch.zeros(1)).detach(),
             """detach returned invalid type str, expected Tensor"""
         )
+
+    def test_metadata_change_not_allowed(self) -> None:
+        x = LoggingTensor(torch.ones(1))
+        y = x.data
+        self.assertIsInstance(y, LoggingTensor)
+        self.assertRaises(RuntimeError, lambda: y.resize_(4))
+
+    def test_version(self) -> None:
+        x = LoggingTensor(torch.ones(1))
+        prev_vc = x._version
+        x.detach().add_(2)
+        cur_vc = x._version
+        self.assertNotEqual(prev_vc, cur_vc)
+        x.data.add_(2)
+        self.assertEqual(cur_vc, x._version)
 
 
 if __name__ == '__main__':
