@@ -872,6 +872,101 @@ The interface for specifying operator definitions is experimental;
 adventurous users should note that the APIs will probably
 change in a future interface.
 
+Autograd Function
+~~~~~~~~~~~~~~~~~
+
+Autograd functions can be used to compute operation results and gradients and save the history.
+More information on extending the torch.autograd engine can be found on this `page <https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function>`_.
+There are two ways to export a subclass of the torch.autograd.function.
+
+Symbolic Static Method
+^^^^^^^^^^^^^^^^^^^^^^
+
+You can add a symbolic static method to your function class. The symbolic method should contain a set
+of ONNX operators that represent operator's behavior in ONNX. Here's an example for adding symbolic to
+the your autograd function: ::
+
+
+    class MyRelu(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input):
+            ctx.save_for_backward(input)
+            return input.clamp(min=0)
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            input, = ctx.saved_tensors
+            grad_input = grad_output.clone()
+            grad_input[input < 0] = 0
+            return grad_input
+
+        @staticmethod
+        def symbolic(g, self):
+            return g.op("Clip", self, g.op('Constant', value_t=torch.tensor(0, dtype=torch.float)))
+
+    class MyModel(torch.nn.Module):
+        def forward(self, x):
+            my_relu = MyRelu.apply
+            return my_relu(x)
+
+    input_tensor = torch.randn(2, 3, 224, 224, requires_grad=True)
+    torch.onnx.export(MyModel(), input_tensor, 'test.onnx', opset_version=12)
+
+Export as Custom Operator
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Alternatively, you can register a custom symbolic function to export the autograd function as custom operator.
+This is designed for more advanced usage, because it gives you access to more info on the export symbolic side.
+Autograd functions are emitted in the IR graph as ``prim::PythonOp`` nodes. The attribute ``name`` identifies the
+original module name. The ``prim::PythonOp`` node object can be accessed by argument ``n``. The example below shows
+how you can access ``requires_grad`` info of the inputs and outputs of the autograd function. ::
+
+    class MyClip(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input, scalar):
+            ctx.save_for_backward(input)
+            return input.clamp(min=scalar)
+
+    class MyRelu(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input):
+            ctx.save_for_backward(input)
+            return input.clamp(min=0)
+
+    class MyModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.clip = MyClip.apply
+            self.relu = MyRelu.apply
+
+        def forward(self, x):
+            h = self.clip(x, 2)
+            h = self.relu(h)
+            return h
+
+    def symbolic_pythonop(g, n, *args, **kwargs):
+        # print information
+        print('original node: ', n)
+        for i, out in enumerate(n.outputs()):
+            print('original output {}: {}, requires grad: {}'.format(i, out, out.requiresGrad()))
+        import torch.onnx.symbolic_helper as sym_helper
+        for i, arg in enumerate(args):
+            print('arg {}: {}, requires grad: {}'.format(i, arg, arg.requiresGrad() if sym_helper._is_value(arg) else False))
+
+        name = kwargs['name']
+        if name == "MyClip":
+            return g.op("Clip", args[0], min_f=args[1])
+        elif name == "MyRelu":
+            return g.op("Relu", args[0])
+        else:
+            return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
+
+    from torch.onnx import register_custom_op_symbolic
+    register_custom_op_symbolic('::prim_PythonOp', symbolic_pythonop, 1)
+
+    input_tensor = torch.randn(2, 3, 224, 224, requires_grad=True)
+    torch.onnx.export(MyModule(), input_tensor, 'test.onnx', opset_version=12)
+
 Custom operators
 ~~~~~~~~~~~~~~~~
 
