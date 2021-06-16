@@ -196,7 +196,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
         int64_t groups,
         bool transpose,
         bool input_qrange_le_128) {
-  // TODO: save input_qrange_le_128
   TORCH_CHECK(
       kSpatialDim == 2 || kSpatialDim == 3,  // 1D is packed as 2d, hence we don't need other checks
       "QNNPACK packing only supports 2D / 3D convolution.");
