@@ -1911,12 +1911,8 @@ def hardtanh(g, self, min_val, max_val):
 
 @parse_args("v")
 def hardswish(g, self):
-    input = g.op("Add", self, g.op("Constant", value_t=torch.tensor(3, dtype=torch.float)))
-    hardtanh_ = sym_help._hardtanh_helper(g, input,
-                                          g.op("Constant", value_t=torch.tensor(0, dtype=torch.float)),
-                                          g.op("Constant", value_t=torch.tensor(6, dtype=torch.float)))
-    hardtanh_ = g.op("Div", hardtanh_, g.op("Constant", value_t=torch.tensor(6, dtype=torch.float)))
-    return g.op("Mul", self, hardtanh_)
+    hardsigmoid = g.op('HardSigmoid', self, alpha_f=1 / 6)
+    return g.op("Mul", self, hardsigmoid)
 
 
 @parse_args("v")
