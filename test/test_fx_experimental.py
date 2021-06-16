@@ -609,6 +609,47 @@ class TestFXExperimental(JitTestCase):
             )
             assert (input1 * input2) == traced(input1, input2)
 
+    def test_saturate_host(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, a):
+                add_1 = a + torch.rand(4)
+                add_2 = add_1 + torch.rand(4)
+                linear_1 = self.linear(add_1)
+                add_3 = add_2 + linear_1
+                add_4 = add_2 + add_3
+                return add_4
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
+        devices = [
+            Device("dev_0", 200, 0),
+            Device("dev_1", 200, 1),
+            Device("dev_2", 100, 2),
+            Device("dev_3", 100, 3),
+            Device("dev_4", 200, 4),
+            Device("dev_5", 100, 5),
+        ]
+        partitioner = Partitioner()
+        # Without host saturation, the model will be split into two partitions.
+        # dev_0 holds partition 0 of 192 bytes and dev_1 holds partition 1 of 48 bytes.
+        partitioner_config = PartitionerConfig(devices, saturate_host=True)
+        ret = partitioner.partition_graph(traced, m, partitioner_config)
+        module_with_submodules = ret.module_with_submodules
+        self.assertEqual(traced(a), module_with_submodules(a))
+
+        partitions = partitioner.partitions
+        self.assertEqual(len(partitions), 2)
+        # With host saturation, partition 1 will be replicated to dev_4, and partition 2
+        # will be replicated to dev_2.
+        self.assertEqual(partitions[0].logical_device_ids, [0, 4])
+        self.assertEqual(partitions[1].logical_device_ids, [1, 2])
+
     @skipIfNoTorchVision
     def test_conv_bn_fusion(self):
         rn18 = resnet18().eval()
