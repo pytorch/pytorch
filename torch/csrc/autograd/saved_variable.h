@@ -21,8 +21,8 @@ TORCH_API extern const char* ERR_BACKWARD_TWICE;
 class TORCH_API SavedVariable {
  public:
   SavedVariable() = default;
-  SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view=false);
-  SavedVariable(const c10::optional<Variable>& variable, bool is_output, bool is_inplace_view=false);
+  SavedVariable(const Variable& variable, bool is_output, bool is_inplace_on_view=false);
+  SavedVariable(const c10::optional<Variable>& variable, bool is_output, bool is_inplace_on_view=false);
   SavedVariable(SavedVariable&&) = default;
   SavedVariable& operator=(SavedVariable&&) = default;
   ~SavedVariable() {
@@ -46,6 +46,16 @@ class TORCH_API SavedVariable {
   }
 
  private:
+  // This field contains either:
+  // 1. the variable to save
+  // 2. or its tensor_data.
+  // If storing the variable itself would create a circular reference,
+  // we fall into the second case and its metadata is also saved separately.
+  // In that case, the grad_fn must be passed in to the unpack function when
+  // reconstructing the Variable (except when we are doing an inplace operation on
+  // a view, see below).
+  // The field saved_orignal_ below reflects the two cases: its value is true
+  // in the first case and false in the second case.
   at::Tensor data_;
 
   // This field is used to store the forward AD gradients associated with
@@ -60,6 +70,10 @@ class TORCH_API SavedVariable {
   std::shared_ptr<Node> grad_fn_;
   // Weak version of grad_fn_ that prevents leaks in rebase_history() for
   // inplace views.
+  // This variable is used when the user chooses to create a SavedVariable with
+  // is_inplace_on_view = true.
+  // In that case, the grad_fn passed in to the unpack function at unwrapping
+  // time is unused.
   std::weak_ptr<Node> weak_grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
   c10::VariableVersion version_counter_;
@@ -69,6 +83,7 @@ class TORCH_API SavedVariable {
   bool was_default_constructed_ = true;
   bool requires_grad_ = false;
   bool has_grad_fn_ = false;
-  bool is_inplace_view_ = false;
+  bool is_inplace_on_view_ = false;
+  bool saved_original_ = false;
 };
 }} // namespace torch::autograd
