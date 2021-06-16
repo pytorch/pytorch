@@ -6982,8 +6982,8 @@ class DistributedTest:
                     for i in range(6):
                         inp = torch.randn(10, 2, 4, 4).cuda(rank)
                         out = model_inference(inp)
-                        loss = out.sum()
-                        loss.backward()
+                        # Do not need to run backward as we are testing only
+                        # inference mode here.
 
                 # Ensure sync does not occur in eval() mode.
                 if BACKEND == "nccl":

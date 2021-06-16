@@ -255,10 +255,6 @@ Reducer::Reducer(
   if (find_unused_parameters_) {
     initialize_local_used_map();
   }
-
-  // Initializes various counters to manage autograd hooks and triggering of
-  // allreduce.
-  reset_bucket_counting();
 }
 
 // Note [Skip allreducing local_used_maps_dev]
@@ -492,6 +488,8 @@ void Reducer::push_rebuilt_params(const size_t& index) {
   // process to rebuild buckets, if we check this in should_rebuild_buckets then
   // the latter would break.
   if (all_rebuilt_params_pushed_) {
+    // We only enter here in the case we are calling multiple backwards with
+    // retain_graph=True in the iteration before rebuilding buckets.
     return;
   }
   rebuilt_params_.push_back(replicas_[0][index]);
@@ -917,9 +915,11 @@ void Reducer::initialize_buckets(
   this->rpc_context_.set(ThreadLocalDistAutogradContext::getContextPtr());
 #endif
 
-  // This shouldn't be called if we're expecting autograd hooks to fire.
+  // Note that we check !require_finalize instead of !expect_autograd_hooks
+  // since the latter is set in forward pass, and the former indicates
+  // at least one gradient hook has fired and we are in autograd execution.
   REDUCER_CHECK(
-      !expect_autograd_hooks_,
+      !require_finalize_,
       logger_,
       "`initialize_buckets` must NOT be called during autograd execution.");
 
@@ -1072,6 +1072,10 @@ void Reducer::initialize_buckets(
 
     buckets_.push_back(std::move(bucket));
   }
+  // Need to reset bucket.pending and variable.pending as buckets have been
+  // re-initialized and they must be appropriately set before the next backward
+  // pass.
+  reset_bucket_counting();
 }
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
@@ -1149,12 +1153,27 @@ void Reducer::populate_bucket_views_out(
   }
 }
 
-void Reducer::prepare_for_forward() {
+void Reducer::prepare_for_forward(bool will_run_grad_reduction) {
   std::lock_guard<std::mutex> lock(mutex_);
+  expect_autograd_hooks_ = will_run_grad_reduction;
+  // To maintain compatibility with current version, where prepare_for_forward
+  // is not called if will_run_grad_reduction is False.
+  if (!expect_autograd_hooks_) {
+    return;
+  }
   num_iterations_++;
   if (should_collect_runtime_stats()) {
     record_forward_compute_start_time();
   }
+}
+
+void Reducer::reset_variable_counting() {
+  // Reset unused parameter accounting.
+  has_marked_unused_parameters_ = false;
+  // Reset per iteration marked ready parameters.
+  perIterationReadyParams_.clear();
+  // Reset bucket counting.
+  reset_bucket_counting();
 }
 
 void Reducer::reset_bucket_counting() {
@@ -1239,19 +1258,10 @@ void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
   ++num_backward_calls_;
-
   backward_compute_start_time_ = current_time_in_nanos();
   if (should_collect_runtime_stats()) {
     record_backward_compute_start_time();
   }
-
-  // Reset accounting.
-  expect_autograd_hooks_ = true;
-
-  // Reset unused parameter accounting.
-  has_marked_unused_parameters_ = false;
-  // Reset per iteration marked ready parameters.
-  perIterationReadyParams_.clear();
 
   // If static graph is not set, search graph to detect unused parameters.
   // When static graph is set, unused_parameters_ will be detected and will
@@ -1412,9 +1422,9 @@ void Reducer::save_thread_local_state() {
 }
 
 void Reducer::finalize_backward() {
-  // No longer expect autograd hooks to fire after this function returns.
+  // Note that we don't reset expect_autograd_hooks_ so that we can re-run
+  // backwards with retain_graph=True.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
-  expect_autograd_hooks_ = false;
 
   // No longer require call to finalize after this function returns.
   TORCH_INTERNAL_ASSERT(require_finalize_);
@@ -1476,12 +1486,14 @@ void Reducer::finalize_backward() {
     local_used_maps_reduced_ = false;
   }
 
-  // Reset bucket counting to ensure we can appropriately launch allreduce for
-  // each bucket in the next backwards.
-  reset_bucket_counting();
+  // Reset various accounting variables including bucket counting to ensure we
+  // can appropriately launch allreduce for each bucket in the next backwards.
+  reset_variable_counting();
   // If we populated rebuilt params list in this backward call, avoid
-  // repopulating in subsequent backward calls.
-  all_rebuilt_params_pushed_ = !rebuilt_params_.empty();
+  // repopulating in subsequent backward calls. In particular this is needed to
+  // avoid re-pushing parameters when calling multiple backwards with
+  // retain_graph=True.
+  all_rebuilt_params_pushed_ = all_rebuilt_params_pushed_ || !rebuilt_params_.empty();
 
   if (should_collect_runtime_stats()) {
     record_backward_comm_end_time();
@@ -1637,10 +1649,6 @@ bool Reducer::rebuild_buckets() {
   rebuilt_param_indices_.clear();
 
   initialize_buckets(std::move(rebuilt_bucket_indices));
-  // Need to reset bucket.pending and variable.pending as buckets have been
-  // re-initialized and they must be appropriately set before the next backward
-  // pass.
-  reset_bucket_counting();
   return true;
 }
 
