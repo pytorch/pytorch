@@ -440,9 +440,9 @@ struct DifferentiableGraphOp {
     if (v.isTensor()) {
       v = IValue(detach(std::move(v).toTensor()));
     } else if (v.isTensorList()) {
-      c10::List<at::Tensor> lst = std::move(v).toTensorList();
-      for (size_t i = 0; i < lst.size(); ++i) {
-        lst.set(i, detach(lst.extract(i)));
+      std::vector<at::Tensor> lst = v.toTensorVector();
+      for (auto& tensor : lst) {
+        tensor = detach(tensor);
       }
       v = std::move(lst);
     }
