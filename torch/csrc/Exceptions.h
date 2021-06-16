@@ -294,8 +294,7 @@ struct ValueError : public PyTorchError {
 
 // Translates to Python NotImplementedError
 struct NotImplementedError : public PyTorchError {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  NotImplementedError() {}
+  NotImplementedError() = default;
   PyObject* python_type() override {
     return PyExc_NotImplementedError;
   }
