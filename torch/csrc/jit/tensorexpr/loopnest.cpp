@@ -520,8 +520,6 @@ class FunctionInliner : public IRMutator {
             "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0");
         continue;
       }
-      if (func_callee_arg == nullptr)
-        continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
         throw std::runtime_error(
