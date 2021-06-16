@@ -1069,7 +1069,6 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
   grad_input.zero_();
 
   if (batch_mode) {
-    // batch mode
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
       auto grad_input_p = grad_input.data_ptr<scalar_t>();
       auto grad_output_p = grad_output.data_ptr<scalar_t>();
