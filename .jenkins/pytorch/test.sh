@@ -52,9 +52,9 @@ else
 fi
 
 if [[ -n "$IN_PULL_REQUEST" ]]; then
-  export TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
+  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
 else
-  export TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
+  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then

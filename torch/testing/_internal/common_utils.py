@@ -392,8 +392,8 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
 
 # Determine whether to enable cuda memory leak check.
-# CUDA mem leak check is expensive and thus we dont want to execute it on every
-# test case / configurations.
+# CUDA mem leak check is expensive and thus we don't want to execute it on every
+# test case / configuration.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
 TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
 
