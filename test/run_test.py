@@ -1194,6 +1194,7 @@ def reorder_tests(tests: List[str]) -> List[str]:
             s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(
                 pr_number, ci_job_prefix)
             prioritized_tests = query_failure_test_module(s3_reports)
+            print("Prioritized test from previous CI info.")
 
     # Using file changes priority if no stats found from previous PR.
     if len(prioritized_tests) == 0:
@@ -1207,6 +1208,7 @@ def reorder_tests(tests: List[str]) -> List[str]:
         prioritized_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
         prioritized_tests = [f[len(prefix):] for f in prioritized_tests]
         prioritized_tests = [f[:-len(".py")] for f in prioritized_tests]
+        print("Prioritized test from test file changes.")
 
     bring_to_front = []
     the_rest = []
@@ -1217,12 +1219,12 @@ def reorder_tests(tests: List[str]) -> List[str]:
         else:
             the_rest.append(test)
     if len(tests) == len(bring_to_front) + len(the_rest):
-        print(f"reordering tests based on CI:\n"
-            f"prioritized: {bring_to_front}\n the rest: {the_rest}\n")
+        print(f"reordering tests for PR:\n"
+              f"prioritized: {bring_to_front}\nthe rest: {the_rest}\n")
         return bring_to_front + the_rest
     else:
         print(f"Something went wrong in CI reordering, expecting total of {len(tests)}:\n"
-            f"prioritized: {bring_to_front}\nthe rest: {the_rest}\n")
+              f"but found prioritized: {len(bring_to_front)}\nthe rest: {len(the_rest)}\n")
         return tests
 
 
