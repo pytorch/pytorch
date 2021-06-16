@@ -80,6 +80,11 @@ WINDOWS_WORKFLOWS = [
         build_environment="pytorch-win-vs2019-cuda10-cudnn7-py3",
         cuda_version="10.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+    ),
+    PyTorchWindowsWorkflow(
+        build_environment="pytorch-win-vs2019-cuda11-cudnn8-py3",
+        cuda_version="11.1",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
     )
 ]
 
