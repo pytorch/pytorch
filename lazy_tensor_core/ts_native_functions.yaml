@@ -42,6 +42,8 @@ supported:
   - sum.dim_IntList
   - t
   - t_
+  - tanh
+  - tanh_
   - transpose.int
   - transpose_
   - unsqueeze
@@ -74,6 +76,7 @@ supported:
   - addcmul
   - addcmul_
   - alias
+  - tanh_backward
 autograd:
   - max_pool2d
   - max_pool3d

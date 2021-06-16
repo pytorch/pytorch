@@ -80,6 +80,10 @@ class TSNodeLowering : public NodeLowering {
         return ir::ops::Permute::MakePermuteShape(argument.shape(),
                                                   permute->dims());
       }
+      case at::aten::pow: {
+        const ir::Output& argument = node->operand(0);
+        return argument.shape();
+      }
       case at::aten::sum: {
         return InferSum(
             ir::NodeCast<ir::ops::Sum>(node, ir::OpKind(at::aten::sum)));
