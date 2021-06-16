@@ -71,13 +71,11 @@ std::pair<IValue, IValue> getFunctionTuple(
   Inline(*graph);
 
   std::shared_ptr<MobileCode> code;
-  if (caffe2::serialize::kProducedBytecodeVersion == 6) {
-    code = std::make_shared<MobileCode>(
-        graph, func.name(), false /* emit_default_input_instructions */);
-  } else {
-    code = std::make_shared<MobileCode>(
-        graph, func.name(), true /* emit_default_input_instructions */);
-  }
+  code = std::make_shared<MobileCode>(
+      graph,
+      func.name(),
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::
+          is_enabled() /* emit_default_input_instructions */);
   auto instructions_copy = code->instructions();
 
   // operator names
@@ -173,11 +171,11 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    if (caffe2::serialize::kProducedBytecodeVersion == 6) {
+    if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
+      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    } else {
       operators.emplace_back(
           Tup({opname.name, opname.overload_name, num_args}));
-    } else {
-      operators.emplace_back(Tup({opname.name, opname.overload_name}));
     }
   }
 
@@ -436,7 +434,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*tensor_cdata_naming_scheme=*/false);
+        /*tensor_cdata_naming_scheme=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -475,10 +473,11 @@ void ScriptModuleSerializer::writeArchive(
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
         if (tensor_cdata_naming_scheme) {
-          tensor_names.push_back(
+          std::string string_id =
               std::to_string(reinterpret_cast<std::intptr_t>(
-                  tensor.storage().unsafeGetStorageImpl())) +
-              ".storage");
+                  tensor.storage().unsafeGetStorageImpl()));
+          tensor_names.push_back(string_id + ".storage");
+          storage_context_.addStorage(string_id, tensor.storage());
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }
@@ -629,12 +628,12 @@ void ScriptModuleSerializer::writeByteCode(
     const bool save_mobile_debug_info) {
   std::vector<c10::IValue> elements;
   BackendDebugInfoRecorder debug_info_recorder;
-  elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
+
+  elements.emplace_back(static_cast<int64_t>(version_to_write));
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
-  debug_info_elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
   moduleMethodsTuple(
       module, elements, debug_info_elements, debug_info_recorder);
@@ -643,8 +642,8 @@ void ScriptModuleSerializer::writeByteCode(
       telements,
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
-      /*tensor_dir=*/"bytecode/",
-      /*tensor_cdata_naming_scheme=*/false);
+      /*tensor_dir=*/"constants/",
+      /*tensor_cdata_naming_scheme=*/true);
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
@@ -847,6 +846,18 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   std::set<std::string> names;
   export_opnames(m, names);
   return std::vector<std::string>(names.begin(), names.end());
+}
+
+// Thread local flag (only happens in export, i.e. on server side)
+// to control if instructions for bytecode default inputs are emitted
+// or not. It's the major difference between bytecode v5 and v6.
+thread_local bool emitBytecodeDefaultInputs =
+    caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
+bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
+  return emitBytecodeDefaultInputs;
+}
+void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
+  emitBytecodeDefaultInputs = enabled;
 }
 
 } // namespace jit
