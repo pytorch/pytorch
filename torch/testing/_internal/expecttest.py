@@ -183,7 +183,12 @@ def replace_string_literal(src : str, start_lineno : int, end_lineno : int,
     if delta[0] > 0:
         delta[0] += 1  # handle the extra \\\n
 
-    def compute_raw_new_body_and_adjust_delta(m):
+    assert start_lineno <= end_lineno
+    start = nth_line(src, start_lineno)
+    end = nth_eol(src, end_lineno)
+    assert start <= end
+
+    def replace(m):
         s = new_string
         raw = m.group('raw') == 'r'
         if not raw or not ok_for_raw_triple_quoted_string(s, quote=m.group('quote')[0]):
@@ -196,13 +201,6 @@ def replace_string_literal(src : str, start_lineno : int, end_lineno : int,
 
         new_body = "\\\n" + s if "\n" in s and not raw else s
         delta[0] -= m.group('body').count("\n")
-        return raw, new_body
-
-    start = nth_line(src, start_lineno)
-    end = nth_eol(src, end_lineno)
-
-    def replace(m):
-        raw, new_body = compute_raw_new_body_and_adjust_delta(m)
         return ''.join(['r' if raw else '',
                         m.group('quote'),
                         new_body,
@@ -246,14 +244,16 @@ class TestCase(unittest.TestCase):
                     start_lineno = lineno
                     end_lineno = lineno
                     # Try to give a more accurate bounds based on AST
+                    # NB: this walk is in no specified order (in practice it's
+                    # breadth first)
                     for n in ast.walk(old_ast):
                         if isinstance(n, ast.Expr):
                             if hasattr(n, 'end_lineno'):
                                 assert LINENO_AT_START
-                                end_lineno = n.end_lineno  # type: ignore
-                                break
+                                if n.lineno == start_lineno:
+                                    end_lineno = n.end_lineno  # type: ignore[attr-defined]
                             else:
-                                if n.lineno < end_lineno:
+                                if n.lineno == end_lineno:
                                     start_lineno = n.lineno
 
                     new, delta = replace_string_literal(old, start_lineno, end_lineno, actual)
