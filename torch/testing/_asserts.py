@@ -66,19 +66,17 @@ def _check_complex_components_individually(
     """
 
     @functools.wraps(check_tensors)
-    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
-        if "equal_nan" in kwargs:
-            if kwargs["equal_nan"] == "relaxed":
-                relaxed_complex_nan = True
-                kwargs["equal_nan"] = True
-            else:
-                relaxed_complex_nan = False
-                kwargs["equal_nan"] = bool(kwargs["equal_nan"])
+    def wrapper(
+        actual: Tensor, expected: Tensor, *, equal_nan: Union[str, bool], **kwargs: Any
+    ) -> Optional[_TestingErrorMeta]:
+        if equal_nan == "relaxed":
+            relaxed_complex_nan = True
+            equal_nan = True
         else:
             relaxed_complex_nan = False
 
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensors(actual, expected, **kwargs)  # type: ignore[call-arg]
+            return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
 
         if relaxed_complex_nan:
             actual, expected = [
@@ -88,11 +86,11 @@ def _check_complex_components_individually(
                 for t in (actual, expected)
             ]
 
-        error_meta = check_tensors(actual.real, expected.real, **kwargs)  # type: ignore[call-arg]
+        error_meta = check_tensors(actual.real, expected.real, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
         if error_meta:
             return error_meta.amend_msg(postfix="\n\nThe failure occurred for the real part.")
 
-        error_meta = check_tensors(actual.imag, expected.imag, **kwargs)  # type: ignore[call-arg]
+        error_meta = check_tensors(actual.imag, expected.imag, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
         if error_meta:
             return error_meta.amend_msg(postfix="\n\nThe failure occurred for the imaginary part.")
 
@@ -744,9 +742,9 @@ def assert_close(
 assert_equal = functools.partial(assert_close, rtol=0.0, atol=0.0)
 assert_equal.__doc__ = r"""Asserts that :attr:`actual` and :attr:`expected` are close.
 
-    If :attr:`actual` and :attr:`expected` are real-valued and finite, they are considered equal if there values are 
-    bitwise equal and they have the same :attr:`~torch.Tensor.device` (if :attr:`check_device` is ``True``), same 
-    ``dtype`` (if :attr:`check_dtype` is ``True``), and the same stride (if :attr:`check_stride` is ``True``). 
+    If :attr:`actual` and :attr:`expected` are real-valued and finite, they are considered equal if there values are
+    bitwise equal and they have the same :attr:`~torch.Tensor.device` (if :attr:`check_device` is ``True``), same
+    ``dtype`` (if :attr:`check_dtype` is ``True``), and the same stride (if :attr:`check_stride` is ``True``).
     ``NaN``'s are only considered equal to each other if :attr:`equal_nan` is ``True``.
 
     If :attr:`actual` and :attr:`expected` are complex-valued, they are considered close if both their real and
@@ -800,9 +798,9 @@ assert_equal.__doc__ = r"""Asserts that :attr:`actual` and :attr:`expected` are 
     - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
 
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
-    
+
     .. seealso::
 
-        To assert that the values of corresponding scalars or tensor-likes are are close but are not required to be 
+        To assert that the values of corresponding scalars or tensor-likes are close but are not required to be
         bitwise equal, use :func:`assert_close` instead.
 """
