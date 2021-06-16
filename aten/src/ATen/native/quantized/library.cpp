@@ -75,7 +75,6 @@ TORCH_LIBRARY(quantized, m) {
   // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, bool input_qrange_le_128=True) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv1d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, bool input_qrange_le_128=True) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase"));
-  // TODO default value
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, bool input_qrange_le_128=True) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv3d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, bool input_qrange_le_128=True) -> __torch__.torch.classes.quantized.Conv3dPackedParamsBase"));
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
