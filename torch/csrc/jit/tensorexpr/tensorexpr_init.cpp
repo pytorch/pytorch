@@ -52,7 +52,7 @@ Dtype parsePythonDtype(py::handle obj) {
   if (py::isinstance(obj, py::module_::import("torch").attr("dtype"))) {
     return Dtype(reinterpret_cast<THPDtype*>(obj.ptr())->scalar_type);
   } else {
-    return py::cast<Dtype>(obj);
+    throw std::runtime_error("expected a torch.dtype instance");
   }
 }
 
@@ -171,7 +171,9 @@ void initTensorExprBindings(PyObject* module) {
       .def(py::init<
            const std::string&,
            const Dtype&,
-           std::vector<ExprHandle>&>())
+           const std::vector<ExprHandle>&>())
+      .def(py::init<const std::vector<ExprHandle>&, const Dtype&>())
+      .def(py::init<const std::vector<ExprHandle>&>())
       .def(
           "load",
           [](Placeholder& self, const std::vector<ExprHandle>& v) {
