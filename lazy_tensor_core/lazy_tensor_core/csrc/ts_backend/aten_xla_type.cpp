@@ -162,6 +162,27 @@ const at::Tensor& AtenXlaType::as_strided_(
   return self;
 }
 
+at::Tensor AtenXlaType::bernoulli(const at::Tensor& self,
+                                  c10::optional<at::Generator> generator) {
+  LTC_FN_COUNTER("xla::");
+  if (generator.has_value() && generator->defined()) {
+    return AtenXlaTypeDefault::bernoulli(self, generator);
+  }
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  return bridge::AtenFromLtcTensor(LazyTensor::bernoulli(self_tensor));
+}
+
+at::Tensor& AtenXlaType::bernoulli_(at::Tensor& self, double p,
+                                    c10::optional<at::Generator> generator) {
+  LTC_FN_COUNTER("xla::");
+  if (generator.has_value() && generator->defined()) {
+    return AtenXlaTypeDefault::bernoulli_(self, p, generator);
+  }
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::bernoulli_(self_tensor, p);
+  return self;
+}
+
 at::Tensor AtenXlaType::bmm(const at::Tensor& self, const at::Tensor& mat2) {
   LTC_FN_COUNTER("xla::");
   // xla::dot doesn't support integer types.
