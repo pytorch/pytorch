@@ -12,11 +12,7 @@ ReduceOp* Reducer::operator()(
     const std::vector<const Expr*>& output,
     const std::vector<const Var*>& inner) const {
   return new ReduceOp(
-      result_buf,
-      complete(result_buf, interaction_, body, output, inner),
-      output,
-      inner,
-      *this);
+      complete(result_buf, interaction_, body, output, inner), inner, *this);
 }
 
 ReduceOp* Reducer::operator()(
@@ -25,9 +21,7 @@ ReduceOp* Reducer::operator()(
     const std::vector<const Expr*>& output,
     const std::vector<const Var*>& inner) const {
   return new ReduceOp(
-      result_buf,
       complete(result_buf, interaction_, ExprHandle(body), output, inner),
-      output,
       inner,
       *this);
 }

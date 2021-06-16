@@ -55,6 +55,7 @@ class HelperWrapper(object):
         'sum': sum,
         'reduce_sum': reduce_sum,
         'sub': sub,
+        'arg_min': arg_min,
         'transpose': transpose,
         'iter': iter,
         'accuracy': accuracy,
@@ -134,4 +135,5 @@ class HelperWrapper(object):
         return helper_name in self._registry
 
 
+# pyre-fixme[6]: incompatible parameter type: expected ModuleType, got HelperWrapper
 sys.modules[__name__] = HelperWrapper(sys.modules[__name__])

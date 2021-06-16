@@ -30,11 +30,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
 void RegisterCodeGenList::AddStmtFactoryMethod(
     const std::string& name,
     const StmtFactoryMethod& stmt_factory_method) {
-  auto insert_ret =
-      stmt_factory_methods_.insert(std::make_pair(name, stmt_factory_method));
-  if (!insert_ret.second) {
-    throw std::runtime_error("Duplicated CodeGen names: " + name);
-  }
+  stmt_factory_methods_[name] = stmt_factory_method;
 }
 
 std::unique_ptr<CodeGen> CreateCodeGen(
@@ -59,6 +55,25 @@ const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
     return y.node();
   }
   return IRMutator::mutate(v);
+}
+
+void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
+  if (!bufferArg.isVar()) {
+    return callArg.data();
+  }
+
+  switch (bufferArg.dtype().scalar_type()) {
+#define TYPE_CASE(_1, Name) \
+  case ScalarType::Name:    \
+    return callArg.Name##Ptr();
+
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+
+    default:
+      throw unsupported_dtype();
+  }
+  return nullptr;
 }
 
 } // namespace tensorexpr

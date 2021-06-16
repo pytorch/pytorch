@@ -106,7 +106,9 @@ struct CodeTemplate {
       char c = template_text[pos];
       if (c == '$') {
         std::stringstream kss;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool comma_before;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool comma_after;
         size_t new_pos = parseKey(pos, kss, comma_before, comma_after);
         std::string k = kss.str();

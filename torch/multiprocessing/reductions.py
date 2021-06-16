@@ -52,22 +52,24 @@ class SharedCache(dict):
     def _after_fork(self):
         self.lock = threading.Lock()
 
+    def get(self, key):
+        with self.lock:
+            return dict.get(self, key)
+
     def __setitem__(self, key, storage_ref):
-        dict.__setitem__(self, key, storage_ref)
-        if len(self) > self.limit:
-            self.free_dead_references()
+        with self.lock:
+            dict.__setitem__(self, key, storage_ref)
+            if len(self) > self.limit:
+                self.free_dead_references()
 
     def free_dead_references(self):
-        # Multiple Python threads may call free_dead_references() concurrently.
-        # Without a lock, they may try deleting the same entry multiple times.
-        with self.lock:
-            live = 0
-            for key, storage_ref in list(self.items()):
-                if storage_ref.expired():
-                    del self[key]
-                else:
-                    live += 1
-            self.limit = max(128, live * 2)
+        live = 0
+        for key, storage_ref in list(self.items()):
+            if storage_ref.expired():
+                del self[key]
+            else:
+                live += 1
+        self.limit = max(128, live * 2)
 
 
 # mapping from handles to StorageWeakRef objects
@@ -121,9 +123,14 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+
     if tensor_cls == torch.nn.parameter.Parameter:
-        t = torch.nn.parameter.Parameter(t)
-    t.requires_grad = requires_grad
+        # It is crucial for integer tensors to receive
+        # the requires_grad=False as an argument in the constructor
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+
     return t
 
 

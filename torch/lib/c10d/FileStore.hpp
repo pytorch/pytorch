@@ -9,13 +9,18 @@
 
 namespace c10d {
 
-class FileStore : public Store {
+class TORCH_API FileStore : public Store {
  public:
   explicit FileStore(const std::string& path, int numWorkers);
 
   virtual ~FileStore();
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
+
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& expectedValue,
+      const std::vector<uint8_t>& desiredValue) override;
 
   std::vector<uint8_t> get(const std::string& key) override;
 

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
+
 #include <c10/core/QScheme.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -242,6 +243,19 @@ at::ScalarType getObserverDtype(Module& module, Value* v) {
   return at::ScalarType::Undefined;
 }
 
+at::ScalarType getObserverComputeDtype(Module& module, Value* v) {
+  auto observer_name = findObserverName(v);
+  if (observer_name.has_value()) {
+    auto observer_module = module.attr(observer_name.value()).toModule();
+    if (observer_module.hasattr("compute_dtype")) {
+      at::ScalarType scalar_type =
+          observer_module.attr("compute_dtype").toScalarType();
+      return scalar_type;
+    }
+  }
+  return at::ScalarType::Undefined;
+}
+
 c10::optional<std::string> getEmbeddingBagObsName(
     script::Module& module,
     Node* n) {
@@ -294,10 +308,16 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   std::vector<Value*> prepack_inputs = {observer_out};
   if (op_name == "embedding_bag_4bit") {
     bool optimized_qparams = false;
+    constexpr int NBINS = 200;
+    constexpr float RATIO = 0.16;
     Value* optimized_qparams_false = g->insertConstant(optimized_qparams);
+    Value* nbins_200 = g->insertConstant(NBINS);
+    Value* ratio_0_16 = g->insertConstant(RATIO);
     prepack_fn = "quantized::embedding_bag_4bit_prepack";
     quant_fn = "quantized::embedding_bag_4bit_rowwise_offsets";
     prepack_inputs.push_back(optimized_qparams_false);
+    prepack_inputs.push_back(nbins_200);
+    prepack_inputs.push_back(ratio_0_16);
   } else if (op_name == "embedding_bag_byte") {
     prepack_fn = "quantized::embedding_bag_byte_prepack";
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
@@ -307,6 +327,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   }
 
   std::vector<Use> uses = observer_out->uses();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node* embedding_bag_float_op;
   // We expect that the output of the weight observer will be consumed by the
   // embedding_bag operator.
@@ -322,6 +343,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   g->insertNode(prepack);
 
   std::vector<Value*> embedding_bag_inputs =
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       embedding_bag_float_op->inputs().vec();
   std::vector<Value*> qembedding_bag_inputs = {prepack->output()};
   const auto inputs_size = embedding_bag_float_op->inputs().size();
@@ -335,11 +357,11 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
 
   if (is_aten_op) {
     TORCH_CHECK(
-        inputs_size == 8,
-        "Expecting FP aten::embedding_bag operator to have 8 inputs");
+        inputs_size == 9,
+        "Expecting FP aten::embedding_bag operator to have 9 inputs");
     // input 0 is the output of prepack op.
     // Last input is added after we account for extra input in 4-bit case.
-    for (auto i = 1; i < inputs_size - 1; ++i) {
+    for (unsigned long i = 1; i < inputs_size - 2; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
     // The sparse field in the float operator denotes sparse gradients.
@@ -348,8 +370,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs[5] = pruned_const;
   } else {
     TORCH_CHECK(
-        inputs_size == 11,
-        "Expecting F.embedding_bag operator to have 11 inputs");
+        inputs_size == 12,
+        "Expecting F.embedding_bag operator to have 12 inputs");
     qembedding_bag_inputs.push_back(embedding_bag_inputs[1]); // indices
     qembedding_bag_inputs.push_back(embedding_bag_inputs[3]); // offsets
     qembedding_bag_inputs.push_back(
@@ -361,7 +383,11 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   }
 
   qembedding_bag_inputs.push_back(none); // compressed_indices_mapping
-  qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 1]);
+  qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 2]);
+
+  TORCH_CHECK(
+      embedding_bag_inputs[inputs_size - 1]->mustBeNone(),
+      "Expected aten::embedding_bag padding_idx input to be None");
 
   Node* qembedding_bag =
       g->create(Symbol::fromQualString(quant_fn), qembedding_bag_inputs);
@@ -369,6 +395,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     WithInsertPoint ins(embedding_bag_float_op);
     g->insertNode(qembedding_bag);
     // Verify that the outputs (apart from index 0) have no uses in the graph.
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 1; i < embedding_bag_float_op->outputs().size(); ++i) {
       TORCH_CHECK(
           !embedding_bag_float_op->output(i)->hasUses(),
@@ -405,6 +432,7 @@ void insertQuantizationOps(
     quantize_func = "quantize_per_tensor";
   }
   Value* original_val = observer->input(1);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node *quant, *choose_qparams, *dequant;
   // Temporary solution to quantize embedding_bag operators. Will be re-written
   // once we support quantization of embedding_bag weights.
@@ -427,10 +455,24 @@ void insertQuantizationOps(
     if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);
     } else if (!isWeight(module, observer_out)) {
-      // For activation tensors we insert choose_qparams, quant, dequant ops.
-      Value* dtype = g->insertGetAttr(self, qparam_names.back());
-      std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
-          g, observer_out, dtype, at::Symbol::aten(quantize_func));
+      auto observer_dtype = getObserverDtype(module, observer_out);
+      auto observer_compute_dtype =
+          getObserverComputeDtype(module, observer_out);
+      if (observer_dtype == at::ScalarType::QUInt8 ||
+          observer_dtype == at::ScalarType::QInt8 ||
+          observer_compute_dtype == at::ScalarType::QUInt8 ||
+          observer_compute_dtype == at::ScalarType::QInt8) {
+        // For activation tensors we insert choose_qparams, quant, dequant ops.
+        Value* dtype = g->insertGetAttr(self, qparam_names.back());
+        std::tie(choose_qparams, quant, dequant) =
+            insertChooseQParamQuantDequant(
+                g, observer_out, dtype, at::Symbol::aten(quantize_func));
+      } else {
+        // dtype does not require quantization, e.g. float32
+        // will just remove the observer call
+        observer_out->replaceAllUsesWith(original_val);
+        return;
+      }
     } else {
       // For weight tensors we insert quant-dequant ops.
       dequant =
@@ -443,6 +485,7 @@ void insertQuantizationOps(
   observer_out->replaceAllUsesWith(original_val);
 
   original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
+  GRAPH_DUMP("insert nodes:", original_val->owningGraph());
 }
 
 void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
@@ -494,6 +537,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
       user->replaceInputWith(dequant_out, std::get<2>(quant_ops)->output());
     }
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Node *choose_qparams, *quant, *dequant;
   for (const auto& n : nodes_to_rewrite) {
     std::tie(choose_qparams, quant, dequant) = n;
@@ -987,7 +1031,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       v->debugName(),
       " exists.");
   QParamVector qparams;
-  c10::QScheme qscheme;
+  c10::QScheme qscheme = c10::kPerTensorAffine;
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");
@@ -1122,10 +1166,11 @@ void InsertQuantDeQuantHelper::propagateQParams(
         "q_zero_point");
     Node* dtype = insertQParam(
         graph, quantized_input, prim::dtype, IntType::get(), "dtype");
-    quant_inputs = {original_output,
-                    scale->output(),
-                    zero_point->output(),
-                    dtype->output()};
+    quant_inputs = {
+        original_output,
+        scale->output(),
+        zero_point->output(),
+        dtype->output()};
   }
   Node* quant = insertQuant(
       graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
@@ -1475,6 +1520,7 @@ void ReplicateQuant(std::shared_ptr<Graph>& graph) {
     Node* if_node = n->input(0)->node();
     // move the nodes that produces the quantization parameters before
     // prim::If
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 1; i < n->inputs().size(); ++i) {
       n->input(i)->node()->moveBefore(if_node);
     }

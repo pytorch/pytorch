@@ -65,8 +65,10 @@ inline void check_args(
 
 using at::check_size_nonnegative;
 
+// assumes maximum value in created tensor is n-1 (e.g., torch.randperm(n))
 inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tensor) {
-  TORCH_CHECK(at::scalar_tensor(n, tensor.options()).defined(),
+  // match defined() to behavior of checks below
+  TORCH_CHECK(at::scalar_tensor(n>0?n-1:n, tensor.options()).defined(),
               "n is too large for result tensor type: '", tensor.toString(), "'");
 
   // Ensure sufficient precision for floating point representation.
@@ -89,8 +91,6 @@ using binary_fn = void (*)(TensorIterator&);
 
 DECLARE_DISPATCH(binary_fn, complex_stub);
 DECLARE_DISPATCH(binary_fn, polar_stub);
-
-DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t, const double), kaiser_window_stub);
 
 } // namespace native
 } // namespace at

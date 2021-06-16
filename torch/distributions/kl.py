@@ -106,8 +106,8 @@ def _dispatch_kl(type_p, type_q):
     # Check that the left- and right- lexicographic orders agree.
     # mypy isn't smart enough to know that _Match implements __lt__
     # see: https://github.com/python/typing/issues/760#issuecomment-710670503
-    left_p, left_q = min(_Match(*m) for m in matches).types  # type: ignore
-    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types  # type: ignore
+    left_p, left_q = min(_Match(*m) for m in matches).types  # type: ignore[type-var]
+    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types  # type: ignore[type-var]
     left_fun = _KL_REGISTRY[left_p, left_q]
     right_fun = _KL_REGISTRY[right_p, right_q]
     if left_fun is not right_fun:
@@ -437,10 +437,7 @@ def _kl_transformed_transformed(p, q):
         raise NotImplementedError
     if p.event_shape != q.event_shape:
         raise NotImplementedError
-    # extra_event_dim = len(p.event_shape) - len(p.base_dist.event_shape)
-    extra_event_dim = len(p.event_shape)
-    base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
-    return _sum_rightmost(base_kl_divergence, extra_event_dim)
+    return kl_divergence(p.base_dist, q.base_dist)
 
 
 @register_kl(Uniform, Uniform)

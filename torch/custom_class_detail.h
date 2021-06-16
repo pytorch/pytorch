@@ -4,8 +4,41 @@
 #include <ATen/core/function.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeTraits.h>
+#include <c10/util/irange.h>
 
 namespace torch {
+
+/// This struct is used to represent default values for arguments
+/// when registering methods for custom classes.
+///     static auto register_foo = torch::class_<Foo>("myclasses", "Foo")
+///       .def("myMethod", &Foo::myMethod, {torch::arg("name") = name});
+struct arg {
+  // Static method for representing a default value of None. This is meant to
+  // be used like so:
+  //     torch::arg("name") = torch::arg::none
+  // and is identical to:
+  //     torch::arg("name") = IValue()
+  static c10::IValue none() {
+    return c10::IValue();
+  }
+
+  // Explicit constructor.
+  explicit arg(std::string name) : name_(std::move(name)), value_(c10::nullopt) {}
+  // Assignment operator. This enables the pybind-like syntax of
+  // torch::arg("name") = value.
+  arg& operator=(const c10::IValue& rhs) {
+    value_ = rhs;
+    return *this;
+  }
+
+  // The name of the argument. This is copied to the schema; argument
+  // names cannot be extracted from the C++ declaration.
+  std::string name_;
+  // IValue's default constructor makes it None, which is not distinguishable from
+  // an actual, user-provided default value that is None. This boolean
+  // helps distinguish between the two cases.
+  c10::optional<c10::IValue> value_;
+};
 
 namespace detail {
 
@@ -79,11 +112,11 @@ call_torchbind_method_from_stack(
       typename c10::guts::infer_function_traits_t<Functor>::parameter_types;
   // TODO We shouldn't use c10::impl stuff directly here. We should use the KernelFunction API instead.
   return (functor)(c10::impl::ivalue_to_arg<
-                   std::remove_cv_t<std::remove_reference_t<
+                   typename c10::impl::decay_if_not_tensor<
                        c10::guts::typelist::
-                           element_t<ivalue_arg_indices, IValueArgTypes>>>,
-                   AllowDeprecatedTypes>::call(std::move(
-      torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args)))...);
+                           element_t<ivalue_arg_indices, IValueArgTypes>>::type,
+                   AllowDeprecatedTypes>::call(
+      torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args))...);
 }
 
 template <class Functor, bool AllowDeprecatedTypes>
@@ -125,7 +158,7 @@ inline bool validIdent(size_t i, char n) {
 }
 
 inline void checkValidIdent(const std::string& str, const char *type) {
-  for (size_t i = 0; i < str.size(); ++i) {
+  for (const auto i : c10::irange(str.size())) {
     TORCH_CHECK(validIdent(i, str[i]),
       type,
       " must be a valid Python/C++ identifier."
@@ -133,6 +166,22 @@ inline void checkValidIdent(const std::string& str, const char *type) {
       i, " is illegal.");
   }
 }
+
+class TORCH_API class_base {
+ protected:
+  explicit class_base(
+      const std::string& namespaceName,
+      const std::string& className,
+      std::string doc_string,
+      const std::type_info& intrusivePtrClassTypeid,
+      const std::type_info& taggedCapsuleClass);
+
+  static c10::FunctionSchema withNewArguments(
+      const c10::FunctionSchema& schema,
+      std::initializer_list<arg> default_args);
+  std::string qualClassName;
+  at::ClassTypePtr classTypePtr;
+};
 
 } // namespace detail
 

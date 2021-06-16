@@ -282,7 +282,7 @@ class Polynomial : public ExprNode<Polynomial> {
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
   RoundOff(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
+      : BinaryOpNode(lhs, rhs, IRNodeType::kOther) {}
 };
 
 class MaxTerm : public ExprNode<MaxTerm> {
@@ -406,7 +406,7 @@ class MinTerm : public ExprNode<MinTerm> {
 // Stmt simplification should occur in both modes.
 class TORCH_API IRSimplifierBase : public IRMutator {
  public:
-  virtual ~IRSimplifierBase() {}
+  ~IRSimplifierBase() override = default;
 
   Stmt* mutate(const Block* v) override;
 
@@ -422,6 +422,7 @@ class TORCH_API IRSimplifierBase : public IRMutator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   HashProvider hasher_;
 };
 
@@ -563,7 +564,6 @@ class TORCH_API TermExpander : public IRSimplifierBase {
 
   // Eliminate zero length allocations.
   Stmt* mutate(const Allocate* v) override;
-
   Stmt* mutate(const Free* v) override;
 
   // Override to enable condition fusing.
@@ -581,6 +581,7 @@ class TORCH_API IRSimplifier {
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
     e = e->accept_mutator(&expander);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     if (!expander.check_safe()) {
       throw malformed_input("eliminated null Allocation without free");
     }
@@ -610,6 +611,8 @@ class TORCH_API IRSimplifier {
   }
 };
 
+// Flattens the buf and performs the simplifier on the flattened dims.
+const Expr* buf_flat_size(const Buf* v);
 // Returns true if expressions A and B can be simplified to an equal expression.
 TORCH_API bool exprEquals(const Expr* A, const Expr* B);
 

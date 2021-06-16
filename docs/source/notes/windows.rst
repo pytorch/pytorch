@@ -15,8 +15,8 @@ MKL and MAGMA. Here are the steps to build with them.
     REM Make sure you have 7z and curl installed.
 
     REM Download MKL files
-    curl https://s3.amazonaws.com/ossci-windows/mkl_2020.0.166.7z -k -O
-    7z x -aoa mkl_2020.0.166.7z -omkl
+    curl https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z -k -O
+    7z x -aoa mkl_2020.2.254.7z -omkl
 
     REM Download MAGMA files
     REM version available:
@@ -30,7 +30,7 @@ MKL and MAGMA. Here are the steps to build with them.
     set CONFIG=release
     curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_%CUDA_PREFIX%_%CONFIG%.7z -o magma.7z
     7z x -aoa magma.7z -omagma
-    
+
     REM Setting essential environment variables
     set "CMAKE_INCLUDE_PATH=%cd%\mkl\include"
     set "LIB=%cd%\mkl\lib;%LIB%"
@@ -44,7 +44,7 @@ As an alternative, we can use ``Ninja`` to parallelize CUDA
 build tasks. It can be used by typing only a few lines of code.
 
 .. code-block:: bat
-    
+
     REM Let's install ninja first.
     pip install ninja
 
@@ -65,7 +65,7 @@ Extension
 CFFI Extension
 ^^^^^^^^^^^^^^
 
-The support for CFFI Extension is very experimental. There're 
+The support for CFFI Extension is very experimental. There're
 generally two steps to enable it under Windows.
 
 First, specify additional ``libraries`` in ``Extension``
@@ -84,7 +84,7 @@ object to make it build on Windows.
        libraries=['ATen', '_C'] # Append cuda libraries when necessary, like cudart
    )
 
-Second, here is a workground for "unresolved external symbol 
+Second, here is a workground for "unresolved external symbol
 state caused by ``extern THCState *state;``"
 
 Change the source code from C to C++. An example is listed below.
@@ -166,7 +166,7 @@ Import error
 
 The problem is caused by the missing of the essential files. Actually,
 we include almost all the essential files that PyTorch need for the conda
-package except VC2017 redistributable and some mkl libraries. 
+package except VC2017 redistributable and some mkl libraries.
 You can resolve this by typing the following command.
 
 .. code-block:: bat
@@ -174,7 +174,7 @@ You can resolve this by typing the following command.
     conda install -c peterjc123 vc vs2017_runtime
     conda install mkl_fft intel_openmp numpy mkl
 
-As for the wheels package, since we didn't pack some libraries and VS2017 
+As for the wheels package, since we didn't pack some libraries and VS2017
 redistributable files in, please make sure you install them manually.
 The `VS 2017 redistributable installer
 <https://aka.ms/vs/15/release/VC_redist.x64.exe>`_ can be downloaded.
@@ -255,7 +255,7 @@ Multiprocessing error "Broken pipe"
 
 This issue happens when the child process ends before the parent process
 finishes sending data. There may be something wrong with your code. You
-can debug your code by reducing the ``num_worker`` of 
+can debug your code by reducing the ``num_worker`` of
 :class:`~torch.utils.data.DataLoader` to zero and see if the issue persists.
 
 Multiprocessing error "driver shut down"
@@ -282,7 +282,7 @@ CUDA IPC operations
 They are not supported on Windows. Something like doing multiprocessing on CUDA
 tensors cannot succeed, there are two alternatives for this.
 
-1. Don't use ``multiprocessing``. Set the ``num_worker`` of 
+1. Don't use ``multiprocessing``. Set the ``num_worker`` of
 :class:`~torch.utils.data.DataLoader` to zero.
 
 2. Share CPU tensors instead. Make sure your custom

@@ -182,6 +182,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
     print_inline_ = true;
     const auto result = gen(stmt);
     print_inline_ = saved_inline;
+    // NOLINTNEXTLINE(performance-no-automatic-move)
     return result;
   }
 
@@ -293,9 +294,9 @@ class CudaKernelGenerator : private OptInConstDispatch {
       code_ << *op << gen(node->in());
     } else {
       if (node->getUnaryOpType() == UnaryOpType::Cast) {
-        const auto cast_str =
-            cast_func_str({node->in()->getDataType().value(),
-                           node->out()->getDataType().value()});
+        const auto cast_str = cast_func_str(
+            {node->in()->getDataType().value(),
+             node->out()->getDataType().value()});
         code_ << cast_str.value();
       } else {
         code_ << node->getUnaryOpType();

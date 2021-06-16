@@ -35,10 +35,13 @@ struct SourceRangeFactory {
         leading_whitespace_chars_(leading_whitespace_chars) {}
 
   SourceRange create(int line, int start_col, int end_col) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t start_byte_offset, end_byte_offset;
     std::tie(start_byte_offset, end_byte_offset) = line_col_to_byte_offs(
         line,
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         start_col + leading_whitespace_chars_,
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         end_col + leading_whitespace_chars_);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
   }
@@ -185,24 +188,28 @@ void initTreeViewBindings(PyObject* module) {
   py::class_<ClassDef, TreeView>(m, "ClassDef")
       .def(py::init([](const Ident& name,
                        std::vector<Stmt> body,
-                       std::vector<Property> props) {
+                       std::vector<Property> props,
+                       std::vector<Assign> assigns) {
         const auto& r = name.range();
         return ClassDef::create(
             r,
             name,
             Maybe<Expr>::create(r),
             wrap_list(r, std::move(body)),
-            wrap_list(r, std::move(props)));
+            wrap_list(r, std::move(props)),
+            wrap_list(r, std::move(assigns)));
       }));
+
   py::class_<Decl, TreeView>(m, "Decl").def(py::init(
       [](const SourceRange& r, std::vector<Param> params, Expr* return_type) {
         return Decl::create(
             r, wrap_list(r, std::move(params)), wrap_maybe(r, return_type));
       }));
 
-  py::class_<Delete, Stmt>(m, "Delete").def(py::init([](const Expr& expr) {
-    return Delete::create(expr);
-  }));
+  py::class_<Delete, Stmt>(m, "Delete")
+      .def(py::init([](const SourceRange& range, std::vector<Expr> targets) {
+        return Delete::create(range, wrap_list(range, std::move(targets)));
+      }));
 
   py::class_<WithItem, Expr>(m, "WithItem")
       .def(py::init([](const SourceRange& range, const Expr& target, Var* var) {
@@ -350,6 +357,14 @@ void initTreeViewBindings(PyObject* module) {
                        const Expr& target,
                        const Expr& iter) {
         return ListComp::create(range, elt, target, iter);
+      }));
+  py::class_<DictComp, Expr>(m, "DictComp")
+      .def(py::init([](const SourceRange& range,
+                       const Expr& key,
+                       const Expr& value,
+                       const Expr& target,
+                       const Expr& iter) {
+        return DictComp::create(range, key, value, target, iter);
       }));
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {

@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/nn/init.h>
 #include <torch/nn/modules/transformerlayer.h>
 #include <torch/nn/modules/transformercoder.h>
@@ -14,6 +15,7 @@ namespace nn {
 // ========================TransformerEncoderLayerImpl=========================
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
   const TransformerEncoderLayerOptions& options_) : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -81,6 +83,7 @@ Tensor TransformerEncoderLayerImpl::forward(
 // ========================TransformerDecoderLayerImpl=========================
 TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
   const TransformerDecoderLayerOptions& options_ ) : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -193,12 +196,13 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input){
 // ========================TransformerEncoderImpl=========================
 TransformerEncoderImpl::TransformerEncoderImpl(
   TransformerEncoderOptions options_) : options(std::move(options_)) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  for (int64_t i = 0; i < options.num_layers(); ++i) {
+  for (const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.encoder_layer()->clone());
   }
 
@@ -210,11 +214,12 @@ void TransformerEncoderImpl::reset() {
 
 void TransformerEncoderImpl::reset_parameters() {
   TORCH_CHECK(
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     layers->size() == options.num_layers(),
     "TransformerEncoder should have", options.num_layers(), " encoder layers, but got ", layers->size());
 
   size_t num_layers = layers->size();
-  for (size_t i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     layers->at<TransformerEncoderLayerImpl>(i).reset_parameters();
   }
   // a. No way to know whether module in AnyModule has api to reset_parameters, so replace instead
@@ -239,7 +244,7 @@ Tensor TransformerEncoderImpl::forward(
   if (num_layers > 0) {
     output = layers->at<TransformerEncoderLayerImpl>(0).forward(src, src_mask, src_key_padding_mask);
   }
-  for (size_t i = 1; i < num_layers; ++i) {
+  for (const auto i : c10::irange(1, num_layers)) {
     output = layers->at<TransformerEncoderLayerImpl>(i).forward(output, src_mask, src_key_padding_mask);
   }
 
@@ -252,13 +257,14 @@ Tensor TransformerEncoderImpl::forward(
 // ========================TransformerDecoderImpl=========================
 TransformerDecoderImpl::TransformerDecoderImpl(
   TransformerDecoderOptions options_ ) : options(std::move(options_)){
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
 void TransformerDecoderImpl::reset() {
 
   layers = this->register_module("layers", ModuleList());
-  for (int64_t i = 0; i < options.num_layers(); ++i) {
+  for (const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.decoder_layer()->clone());
   }
 
@@ -270,12 +276,13 @@ void TransformerDecoderImpl::reset() {
 
 void TransformerDecoderImpl::reset_parameters() {
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(layers->size() == options.num_layers(),
     "TransformerDecoder should have", options.num_layers(),
     " decoder layers, but got ", layers->size());
 
   size_t num_layers = layers->size();
-  for (size_t i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     layers->at<TransformerDecoderLayerImpl>(i).reset_parameters();
   }
   // a. No way to know whether module in AnyModule has api to reset_parameters, so replace instead
@@ -309,7 +316,7 @@ Tensor TransformerDecoderImpl::forward(
       tgt_key_padding_mask,
       memory_key_padding_mask);
   }
-  for (size_t i = 1; i < num_layers; ++i) {
+  for (const auto i : c10::irange(1, num_layers)) {
     output = layers->at<TransformerDecoderLayerImpl>(i).forward(
       output,
       memory,
@@ -329,6 +336,7 @@ Tensor TransformerDecoderImpl::forward(
 
 // =======================================TransformerImpl================================
 TransformerImpl::TransformerImpl(TransformerOptions options_ ) : options(std::move(options_)){
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

@@ -42,9 +42,13 @@ class TORCH_API RemoteProfilerManager {
  private:
   RemoteProfilerManager();
   ~RemoteProfilerManager() = default;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   RemoteProfilerManager(const RemoteProfilerManager& other) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   RemoteProfilerManager operator=(const RemoteProfilerManager& other) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   RemoteProfilerManager(RemoteProfilerManager&&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   RemoteProfilerManager& operator=(RemoteProfilerManager&&) = delete;
   local_id_t getNextLocalId();
   std::unordered_map<ProfilingId, std::string, ProfilingId::Hash>

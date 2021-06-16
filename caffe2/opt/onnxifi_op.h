@@ -4,8 +4,8 @@
 
 #include "onnx/onnx_pb.h"
 
-#include "c10/util/Exception.h"
-#include "c10/util/SmallVector.h"
+#include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -58,7 +58,10 @@ class OnnxifiOp final : public Operator<Context> {
         use_passed_output_shapes_(this->template GetSingleArgument<int>("use_passed_output_shapes", 0)),
         adjust_quantized_offset_(this->template GetSingleArgument<int>(
             "adjust_quantized_offset",
-            128)) {
+            128)),
+        use_onnxifi_batch_size_(this->template GetSingleArgument<int>(
+            "use_onnxifi_batch_size",
+            0)) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
@@ -128,6 +131,11 @@ class OnnxifiOp final : public Operator<Context> {
       adjust_quantized_offset_ = 0;
     }
 
+    LOG(INFO) << "use_onnx_=" << use_onnx_
+        << ", use_glow_aot_=" << use_glow_aot_
+        << ", use_passed_output_shapes_=" << use_passed_output_shapes_
+        << ", use_onnxifi_batch_size_=" << use_onnxifi_batch_size_;
+
     if (use_passed_output_shapes_) {
       // Populate output_shapes_per_bs_
       for (int bs = 1; bs < max_batch_size_; ++bs) {
@@ -143,8 +151,10 @@ class OnnxifiOp final : public Operator<Context> {
           name_to_shape.emplace(output_qshape_tp.name(), details::TensorInfo{output_qshape_tp});
         }
 
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
           auto it = name_to_shape.find(output_names_[output_idx]);
+          CAFFE_ENFORCE(it != name_to_shape.end());
           output_shapes_per_bs_[bs].push_back({});
           auto &output_shapes = output_shapes_per_bs_[bs].back();
           std::copy(it->second.dims.cbegin(), it->second.dims.cend(), std::back_inserter(output_shapes));
@@ -191,7 +201,13 @@ class OnnxifiOp final : public Operator<Context> {
   }
 #endif
  private:
-  void setOutputShapeAndType(int output_idx);
+  // Second argument is a cache vector to avoid repeated reallocation.
+  // The existence of this is not ideal, which is purely due to the fact that
+  // we use int64_t for c2::tensor dim but uint64_t for onnxDesciptor dim.
+  // Maybe we should just use int64_t.
+  void setOutputShapeAndType(
+      int output_idx,
+      c10::SmallVector<int64_t, 4>& tensor_dims_int64);
 
   void buildPropertyList(
       const OperatorDef& /* unused */,
@@ -253,6 +269,7 @@ class OnnxifiOp final : public Operator<Context> {
 
       // Release unused backend ids.
       for (size_t i = 0; i < num_backends; ++i) {
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         if (i == backend_index) {
           continue;
         }
@@ -333,6 +350,7 @@ class OnnxifiOp final : public Operator<Context> {
       decltype(onnxSetIOAndRunGraphPointer_) set;
       decltype(onnxReleaseTraceEventsPointer_) release;
       decltype(onnxWaitEventForPointer_) waitfor;
+      decltype(onnxGetCurrentBatchSizePointer_) currentbatchsize;
     } u;
     if (lib_->onnxGetExtensionFunctionAddress(
             backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
@@ -355,6 +373,13 @@ class OnnxifiOp final : public Operator<Context> {
     } else {
       onnxWaitEventForPointer_ = u.waitfor;
     }
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxGetCurrentBatchSizeFunction", &u.p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxWaitEventForPointer_ = nullptr;
+    } else {
+      onnxGetCurrentBatchSizePointer_ = u.currentbatchsize;
+    }
 #endif
   }
 
@@ -365,6 +390,9 @@ class OnnxifiOp final : public Operator<Context> {
       c10::ArrayRef<uint64_t> max_shape,
       details::OutputReshapeInfo &output_reshape_info,
       int index);
+
+  /// Helper method for updating output reshape info using provided output shape hints.
+  void extractOutputBatchSizes(int current_batch_size);
 
   /// Extract output batch size. If the output batch size is going to be at
   /// max_batch_size_, return true indicating that no output shape adjustment is
@@ -429,6 +457,8 @@ class OnnxifiOp final : public Operator<Context> {
       char* message,
       size_t* messageLength);
 
+  onnxStatus (*onnxGetCurrentBatchSizePointer_)(int64_t*);
+
   std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
 
@@ -469,11 +499,6 @@ class OnnxifiOp final : public Operator<Context> {
   // Indicate if i-th output is a quantized tensor
   std::vector<bool> quantized_outputs_;
 
-  // A cache vector to avoid repeated reallocation. The existence of this is not
-  // ideal, which is purely due to the factor that we use int64_t for c2::tensor
-  // dim but uint64_t for onnxDesciptor dim. Maybe we should just use int64_t
-  c10::SmallVector<int64_t, 4> tensor_dims_int64_;
-
   // This is for multi group quantization info
   std::vector<std::vector<float>> all_scales_;
   std::vector<std::vector<int32_t>> all_offsets_;
@@ -486,7 +511,7 @@ class OnnxifiOp final : public Operator<Context> {
   std::unordered_map<std::string, ShapeInfo> input_shape_info_;
 
   // Whether we should use passed output shape hints or do shape inference
-  bool use_passed_output_shapes_{false};
+  const bool use_passed_output_shapes_{false};
 
   // Whether we need to resize outputs or not
   bool adjust_output_batch_{false};
@@ -496,6 +521,9 @@ class OnnxifiOp final : public Operator<Context> {
 
   // Adjust the quantized offset to compensate mismatch of certain backend
   uint8_t adjust_quantized_offset_{0};
+
+  // Whether we should read batch size value from Onnxifi request data
+  const bool use_onnxifi_batch_size_{false};
 };
 
 } // namespace caffe2

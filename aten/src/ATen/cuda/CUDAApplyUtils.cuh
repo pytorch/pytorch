@@ -398,6 +398,14 @@ inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) 
   return true;
 }
 
+constexpr int getApplyBlocksPerSM() {
+  return AT_APPLY_BLOCKS_PER_SM;
+}
+
+constexpr int getApplyBlockSize() {
+  return AT_APPLY_THREADS_PER_BLOCK;
+}
+
 inline dim3 getApplyBlock() {
   return dim3(AT_APPLY_THREADS_PER_BLOCK);
 }
@@ -471,7 +479,8 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
                         max_threads_per_block,                         \
                         min_blocks_per_sm>                             \
    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(    \
-       aInfo, bInfo, static_cast<TYPE>(totalElements), op);
+       aInfo, bInfo, static_cast<TYPE>(totalElements), op);            \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
   switch (B) {                              \

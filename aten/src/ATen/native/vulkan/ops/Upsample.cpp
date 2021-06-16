@@ -36,11 +36,11 @@ Tensor upsample_nearest2d(
     input.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_input.has_image()) {
-      const struct {
+    if C10_LIKELY(v_input.has_image()) {
+      const struct Block final {
         uvec3 extents;
         uint32_t _;
         ivec2 iextents;
@@ -73,6 +73,7 @@ Tensor upsample_nearest2d(
           },
           VK_KERNEL(upsample_nearest2d),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -92,8 +93,7 @@ Tensor upsample_nearest2d(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }

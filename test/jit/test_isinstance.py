@@ -56,7 +56,7 @@ class TestIsinstance(JitTestCase):
             assert torch.jit.isinstance(x, List[torch.Tensor])
             assert not torch.jit.isinstance(x, Tuple[int])
 
-        x = [torch.Tensor([1]), torch.Tensor([2]), torch.Tensor([3])]
+        x = [torch.tensor([1]), torch.tensor([2]), torch.tensor([3])]
         self.checkScript(list_tensor_test, (x,))
 
     def test_dict(self):
@@ -104,8 +104,8 @@ class TestIsinstance(JitTestCase):
             assert torch.jit.isinstance(x, Optional[torch.Tensor])
             # assert torch.jit.isinstance(x, Optional[str])
             # TODO: above line in eager will evaluate to True while in
-            #       the TS interpreter will evaluate to False as the 
-            #       first torch.jit.isinstance refines the 'None' type 
+            #       the TS interpreter will evaluate to False as the
+            #       first torch.jit.isinstance refines the 'None' type
 
         x = None
         self.checkScript(optional_test_none, (x,))

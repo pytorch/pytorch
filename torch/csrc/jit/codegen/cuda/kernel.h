@@ -53,7 +53,7 @@ struct KernelSummary {
 //!  by a Fusion object. The goal is to have the Kernel object
 //!  own the Kernel IR nodes
 //!
-class TORCH_CUDA_API Kernel final : public NonCopyable {
+class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
  public:
   Kernel() = default;
 

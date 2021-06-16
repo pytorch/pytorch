@@ -25,7 +25,7 @@ inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
-    SourceRange loc,
+    const SourceRange& loc,
     bool is_constant = false);
 
 c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
@@ -77,8 +77,11 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   void checkForAddToConstantsError(std::stringstream& ss);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   py::object self;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   c10::optional<py::object> rcb;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Value* moduleSelf_ = nullptr;
 };
 
@@ -90,6 +93,20 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
       Function& m,
       const std::string& field) override;
 };
+
+// Used for desugaring uses of the torch.cuda module. All the CUDA APIs with
+// torch.cuda.* are resolved using CUDAPythonModuleValue.
+#ifndef __HIP_PLATFORM_HCC__
+struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
+  explicit CUDAPythonModuleValue(py::object mod)
+      : PythonValue(std::move(mod)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+};
+#endif
 
 // Represents all the parameters of a module as a List[Tensor]
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
@@ -172,16 +189,13 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
       override;
 
-  // call module.forward
+  // call module.forward with pre_hooks and hooks
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& caller,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
-      size_t n_binders) override {
-    return attr(loc, caller, "forward")
-        ->call(loc, caller, args, kwargs, n_binders);
-  }
+      size_t n_binders) override;
 
   std::shared_ptr<SugaredDict> getSugaredDict(
       const SourceRange& loc,
@@ -206,6 +220,14 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       TypePtr type_hint) override;
 
  private:
+  // Check that the type of all submodules is a subtype of ty. If the function
+  // returns false, more information about why it returns false (e.g. which
+  // submodule's type is not a subtype of ty) is printed it why_not if it is not
+  // null.
+  bool areAllSubmodulesSubtypeOf(
+      const TypePtr& ty,
+      std::ostream* why_not = nullptr) const;
+
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
 };

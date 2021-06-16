@@ -14,7 +14,7 @@ namespace cuda {
 class Fusion;
 
 // Clones nodes from an exiting Fusion
-class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
+class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
 
  public:
@@ -31,6 +31,7 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   template <class T>
   std::vector<T*> clone(const std::vector<T*>& container) {
     std::vector<T*> copy;
+    copy.reserve(container.size());
     for (auto p : container) {
       copy.push_back(clone(p));
     }

@@ -16,6 +16,12 @@ namespace jit {
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
+  // type_equal doesnt distinguish between mkldnn/pytorch cpu tensors,
+  // and we dont want to coalesce mkldnn tensors bc they do layout
+  // transformations based on usage
+  if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
+    return false;
+  }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
@@ -164,7 +170,9 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
     switch (lhs->kindOf(name)) {
       COMPARE_ATTRIBUTEVALUE(f)
+      COMPARE_ATTRIBUTEVALUE(c)
       COMPARE_ATTRIBUTEVALUE(fs)
+      COMPARE_ATTRIBUTEVALUE(cs)
       COMPARE_ATTRIBUTEVALUE(i)
       COMPARE_ATTRIBUTEVALUE(is)
       COMPARE_ATTRIBUTEVALUE(s)
@@ -207,6 +215,10 @@ size_t HashNode::operator()(const Node* k) const {
         type->isSubtypeOf(NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::f) {
       constant_hash = std::hash<double>{}(k->f(attr::value));
+    } else if (
+        type->isSubtypeOf(NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::c) {
+      constant_hash = c10::hash<c10::complex<double>>{}(k->c(attr::value));
     } else if (type->isSubtypeOf(BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }

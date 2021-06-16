@@ -18,4 +18,10 @@
     </application>
 
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!--
+     Permissions required by the Snapdragon Profiler to collect GPU metrics.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 </manifest>

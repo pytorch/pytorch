@@ -5,6 +5,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRandom) {
   using EMatXf = Eigen::MatrixXf;
 
@@ -26,6 +27,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRandom) {
       228.703079, 152.251892, 145.431564, 387.215454, 274.594238, 5.062420,
       11.040955, 66.328903, 269.686218;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float BBOX_XFORM_CLIP = log(1000.0 / 16.0);
   auto result = utils::bbox_transform(
       bbox.array(),
@@ -36,6 +38,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRandom) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-4);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRotated) {
   // Test rotated bbox transform w/o angle normalization
   using EMatXf = Eigen::MatrixXf;
@@ -59,6 +62,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRotated) {
       210.513, 235.963, 130.163, -50.0, 36.1956, 140.863, 62.2665, 259.645,
       180.5;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float BBOX_XFORM_CLIP = log(1000.0 / 16.0);
   auto result = utils::bbox_transform(
       bbox.array(),
@@ -70,6 +74,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRotated) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
   // Test rotated bbox transform with angle normalization
   using EMatXf = Eigen::MatrixXf;
@@ -92,6 +97,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
       147.631, 205.397, 55.0, 187.363, 214.185, 19.865, 31.0368, -80.0, 270.234,
       210.513, 235.963, 130.163, -50.0, 36.1956, 140.863, 62.2665, 259.645, 0.5;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float BBOX_XFORM_CLIP = log(1000.0 / 16.0);
   auto result = utils::bbox_transform(
       bbox.array(),
@@ -105,6 +111,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilsBoxesTest, ClipRotatedBoxes) {
   // Test utils::clip_boxes_rotated()
   using EMatXf = Eigen::MatrixXf;

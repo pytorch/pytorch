@@ -34,6 +34,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
 
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
@@ -216,8 +217,10 @@ class ReservoirSamplingOp final : public Operator<Context> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReservoirSampling, ReservoirSamplingOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReservoirSampling)
     .NumInputs({4, 7})
     .NumOutputs({2, 4})
@@ -271,6 +274,7 @@ This operator is thread-safe.
     .Output(2, "OBJECT_TO_POS_MAP", "(Optional) Same as the input")
     .Output(3, "POS_TO_OBJECT", "(Optional) Same as the input");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReservoirSampling);
 } // namespace
 } // namespace caffe2

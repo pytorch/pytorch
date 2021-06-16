@@ -1,8 +1,3 @@
-#include <array>
-#include <unordered_map>
-#include <thread>
-#include <chrono>
-#include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -12,15 +7,23 @@
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
+#include <c10/util/irange.h>
 
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/python_headers.h>
+
+#include <array>
+#include <unordered_map>
+#include <thread>
+#include <chrono>
+#include <sstream>
 
 #ifndef WIN32
 #include <pthread.h>
@@ -76,8 +79,34 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   torch::utils::cuda_lazy_init();
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int>(c10::cuda::current_device());
-  return PyLong_FromLong(device);
+  return THPUtils_packInt32(device);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  PyObject* arg1 = nullptr;
+  PyObject* arg2 = nullptr;
+  if(!PyArg_ParseTuple(args, "OO", &arg1, &arg2)) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "can_device_peer_access",
+        1,
+        "(int device, int peer_device);");
+    return nullptr;
+  }
+  THPUtils_assert(THPUtils_checkLong(arg1), "invalid argument to canDeviceAccessPeer");
+  THPUtils_assert(THPUtils_checkLong(arg2), "invalid argument to canDeviceAccessPeer");
+  int64_t device = THPUtils_unpackLong(arg1);
+  int64_t peer_device = THPUtils_unpackLong(arg2);
+
+  torch::utils::cuda_lazy_init();
+  auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
+  return PyBool_FromLong(can_access);
   END_HANDLE_TH_ERRORS
 }
 
@@ -85,7 +114,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   poison_fork();
-  return PyLong_FromLong(at::cuda::device_count());
+  return THPUtils_packUInt64(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
@@ -139,6 +168,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
     throw python_error();
   }
   auto stream = at::cuda::CUDAStream::unpack(bits);
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int>(c10::cuda::current_device());
   if (device != stream.device_index()) {
     THCPModule_setDevice(stream.device_index());
@@ -150,7 +180,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
-  return PyLong_FromLong((long) CUDA_VERSION);
+  return THPUtils_packInt64((int64_t) CUDA_VERSION);
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
@@ -319,7 +349,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
       "all", "small_pool", "large_pool"
     };
     py::dict dict;
-    for (size_t i = 0; i < statTypeNames.size(); ++i) {
+    for (const auto i : c10::irange(statTypeNames.size())) {
       dict[statTypeNames[i]] = statToDict(statArray[i]);
     }
     return dict;
@@ -484,7 +514,8 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
-  for(int i = 0; i < num_gpus; i++) {
+  for(const auto i : c10::irange(num_gpus)) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
     auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
     // This reference is meant to be given away, so no need to incref here.
@@ -505,11 +536,13 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_init",        THCPModule_initExtension,    METH_NOARGS,  nullptr},
   {"_cuda_setDevice",   THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
+  {"_cuda_canDeviceAccessPeer", THCPModule_canDeviceAccessPeer_wrap, METH_VARARGS, nullptr},
   {"_cuda_getArchFlags", THCPModule_getArchFlags, METH_NOARGS, nullptr},
   {"_cuda_isInBadFork", THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",

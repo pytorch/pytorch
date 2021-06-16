@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -11,6 +12,7 @@
 using c10::AliasInfo;
 using c10::BoolType;
 using c10::CapsuleType;
+using c10::ComplexType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
@@ -24,6 +26,7 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
@@ -41,7 +44,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"Storage", IntType::get()},
+      {"Storage", StorageType::get()},
       {"QScheme", QSchemeType::get()},
       {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
@@ -53,16 +56,18 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},
+      {"complex", ComplexType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
+      {"NoneType", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
       {"AnyClassType", at::AnyClassType::get()},
       {"AnyEnumType", at::AnyEnumType::get()},
   };
   auto tok = L.cur();
-  if (!L.nextIf(TK_NONE)) {
+  if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
     L.expect(TK_IDENT);
   }
   std::string text = tok.text();
@@ -162,6 +167,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
     if (L.cur().kind == ':') {
       L.expect(':');
       const std::string& num = L.expect(TK_NUMBER).text();
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::string::size_type num_len;
       device_idx = c10::stoi(num, &num_len);
     }
@@ -174,6 +180,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
 c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   L.expect('=');
   const std::string& num = L.expect(TK_NUMBER).text();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::string::size_type num_len;
   return (bool)c10::stoi(num, &num_len);
 }
@@ -226,6 +233,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         L.expect('=');
         parseList('[', ',', ']', [&] {
           const std::string& num = L.expect(TK_NUMBER).text();
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
           size_t stride = c10::stoi(num, &num_len);
           strides.push_back(stride);
@@ -250,6 +258,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       return;
     }
     const std::string& num = L.expect(TK_NUMBER).text();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
     size_t dim = c10::stoi(num, &num_len);
     dims.emplace_back(dim);

@@ -123,6 +123,7 @@ class IntDividerTester {
 
     int numCases = testCases_.size();
     testIntDivider<Value><<<512, 512>>>(dividersBuf_, testCasesBuf_, numCases);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     dividers_.clear();
     testCases_.clear();

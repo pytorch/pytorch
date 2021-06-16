@@ -24,7 +24,7 @@ do
 done
 lipo -i ${ZIP_DIR}/install/lib/*.a
 # copy the umbrella header and license
-cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/
+cp ${PROJ_ROOT}/ios/LibTorch-Lite.h ${ZIP_DIR}/src/
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
 ZIPFILE=libtorch_ios_nightly_build.zip
@@ -34,7 +34,13 @@ touch version.txt
 echo $(date +%s) > version.txt
 zip -r ${ZIPFILE} install src version.txt LICENSE
 # upload to aws
-brew install awscli
+# Install conda then 'conda install' awscli
+curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+chmod +x ~/conda.sh
+/bin/bash ~/conda.sh -b -p ~/anaconda
+export PATH="~/anaconda/bin:${PATH}"
+source ~/anaconda/bin/activate
+conda install -c conda-forge awscli --yes
 set +x
 export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
 export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}

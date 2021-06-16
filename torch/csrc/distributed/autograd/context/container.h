@@ -112,12 +112,17 @@ class TORCH_API DistAutogradContainer {
     std::unordered_map<int64_t, ContextPtr> contexts;
   };
 
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistAutogradContainer();
   ~DistAutogradContainer() = default;
 
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistAutogradContainer(const DistAutogradContainer&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistAutogradContainer& operator=(const DistAutogradContainer&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistAutogradContainer(DistAutogradContainer&&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   DistAutogradContainer& operator=(DistAutogradContainer&&) = delete;
 
   static DistAutogradContainer& getInstanceInternal();

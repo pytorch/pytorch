@@ -5,7 +5,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API AsyncSchedulingNet : public AsyncNetBase {
+class TORCH_API AsyncSchedulingNet : public AsyncNetBase {
  public:
   AsyncSchedulingNet(
       const std::shared_ptr<const NetDef>& net_def,

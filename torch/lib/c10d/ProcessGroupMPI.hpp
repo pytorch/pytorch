@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_MPI
+
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -7,6 +9,9 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#include <ATen/core/ivalue.h>
+#include <ATen/core/ivalue_inl.h>
 
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Types.hpp>
@@ -16,6 +21,8 @@
 
 namespace c10d {
 
+constexpr const char* MPI_BACKEND_NAME = "mpi";
+
 // WorkEntry is the state associated with a single MPI run instance.
 // It include the source Tensor list and destination Tensor list, as well as
 // The actual run function that will operate either on src or dst or both.
@@ -24,12 +31,10 @@ struct WorkEntry {
       std::vector<at::Tensor>* srcPtr,
       std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
-      : run(run) {
+      : dst(dstPtr ? *dstPtr : std::vector<at::Tensor>()),
+        run(std::move(run)) {
     if (srcPtr) {
       src = *srcPtr;
-    }
-    if (dstPtr) {
-      dst = *dstPtr;
     }
   }
 
@@ -40,7 +45,10 @@ struct WorkEntry {
 
   // For input and output tensors (in-place), we will always use src
   std::vector<at::Tensor> src;
-  std::vector<at::Tensor> dst;
+
+  // Copy of user provided outputs.
+  const std::vector<at::Tensor> dst;
+
   // src rank returned, for recv only
   int* srcRank = nullptr;
   std::function<void(std::unique_ptr<WorkEntry>&)> run;
@@ -70,16 +78,44 @@ struct WorkEntry {
 //
 // CUDA tensor can be supported if the MPI used is CUDA-aware MPI, and
 // ProcessGroupMPI will automatically detect this support.
-class ProcessGroupMPI : public ProcessGroup {
+class TORCH_API ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
+   public:
+    explicit WorkMPI(
+        std::vector<at::Tensor> outputTensors,
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt)
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+          outputTensors_(std::move(outputTensors)),
+          future_(c10::make_intrusive<at::ivalue::Future>(
+              c10::ListType::create(c10::TensorType::get()))) {}
+
+    std::vector<at::Tensor> result() override;
+
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+
    protected:
     friend class ProcessGroupMPI;
+
+   private:
+    void finishWorkMPI();
+    void finishWorkMPIError(std::exception_ptr eptr);
+
+    std::vector<at::Tensor> outputTensors_;
+    c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(at::Tensor tensor, MPI_Request request);
+    AsyncWork(
+        MPI_Request request,
+        std::vector<at::Tensor> outputTensors,
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt);
+
     virtual ~AsyncWork();
 
     bool isCompleted() override;
@@ -92,10 +128,13 @@ class ProcessGroupMPI : public ProcessGroup {
 
     void abort() override;
 
+    std::vector<at::Tensor> result() override;
+
    protected:
     void populateException();
 
-    at::Tensor tensor_;
+   private:
+    const std::vector<at::Tensor> outputTensors_;
     MPI_Request request_;
     MPI_Status status_;
   };
@@ -107,6 +146,10 @@ class ProcessGroupMPI : public ProcessGroup {
 
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
+
+  const std::string getBackendName() const override {
+    return std::string(MPI_BACKEND_NAME);
+  }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
@@ -130,7 +173,7 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -196,7 +239,10 @@ class ProcessGroupMPI : public ProcessGroup {
   // Helper function that is called by the destructor
   void destroy();
 
-  c10::intrusive_ptr<ProcessGroup::Work> enqueue(std::unique_ptr<WorkEntry> entry);
+  c10::intrusive_ptr<ProcessGroup::Work> enqueue(
+      std::unique_ptr<WorkEntry> entry,
+      const char* profilingTitle = nullptr,
+      const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
 
   bool stop_;
 
@@ -219,3 +265,5 @@ class ProcessGroupMPI : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_MPI

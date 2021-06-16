@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -143,7 +145,8 @@ static void ReplaceAddWithConcat(Block* b) {
         continue;
       }
 
-      TypePtr elem = it->input(0)->type()->cast<ListType>()->getElementType();
+      TypePtr elem =
+          it->input(0)->type()->castRaw<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
         Node* concat_node = b->owningGraph()->create(onnx::Concat, 1);
         concat_node->i_(attr::axis, 0);
@@ -190,14 +193,14 @@ static void fuseListAndListUnpack(Block* b) {
       fuseListAndListUnpack(child_block);
     }
     if (it->kind() == prim::ListUnpack) {
-      for (size_t i = 0; i < it->outputs().size(); i++) {
+      for (const auto i : c10::irange(it->outputs().size())) {
         auto output = it->outputs().at(i);
         if (it->inputs().size() == 1 &&
             it->input()->node()->kind() != prim::ListConstruct &&
             it->input()->type()->cast<ListType>() &&
             it->input()
                 ->type()
-                ->cast<ListType>()
+                ->castRaw<ListType>()
                 ->getElementType()
                 ->cast<IntType>()) {
           Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);

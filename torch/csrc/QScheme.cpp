@@ -27,6 +27,7 @@ PyObject *THPQScheme_reduce(PyObject *_self, PyObject *noargs) {
   return THPUtils_packString(self->name);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPQScheme_methods[] = {
   {"__reduce__", THPQScheme_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */
@@ -38,12 +39,14 @@ PyObject *THPQScheme_repr(THPQScheme *self)
   return THPUtils_packString("torch." + name);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPQSchemeType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.qscheme",                             /* tp_name */
   sizeof(THPQScheme),                          /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

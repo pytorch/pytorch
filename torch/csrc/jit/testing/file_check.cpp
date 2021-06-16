@@ -12,15 +12,16 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/testing/file_check.h>
+
 #include <algorithm>
 #include <iostream>
 #include <sstream>
 #include <string>
-
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
@@ -189,6 +190,7 @@ struct FileCheckImpl {
     addCheck(Check(type, s, count));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool has_run = false;
 
   friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
@@ -548,7 +550,11 @@ FileCheck* FileCheck::check_count(
     const std::string& str,
     size_t count,
     bool exactly) {
-  fcImpl->addCheck(CHECK_COUNT, str, count);
+  TORCH_INTERNAL_ASSERT(
+      count != 0 || exactly, "Count == 0 && !exactly doesn't do anything");
+  if (count) {
+    fcImpl->addCheck(CHECK_COUNT, str, count);
+  }
   if (exactly) {
     fcImpl->addCheck(CHECK_NOT, str);
   }

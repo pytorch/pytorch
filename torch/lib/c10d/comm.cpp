@@ -3,8 +3,8 @@
 #include <deque>
 
 #include <ATen/core/functional.h>
+#include <c10/util/irange.h>
 #include <c10d/reducer.hpp>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
@@ -30,7 +30,7 @@ class BroadcastWork {
     auto output_tensors = torch::utils::unflatten_dense_tensors(
         flat_tensor_.front(), bucket_tensors_);
     TORCH_INTERNAL_ASSERT(output_tensors.size() == bucket_tensors_.size());
-    for (size_t i = 0; i < output_tensors.size(); i++) {
+    for(const auto i : c10::irange(output_tensors.size())) {
       bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
     }
   }
@@ -46,7 +46,6 @@ class BroadcastWork {
   std::vector<at::Tensor> flat_tensor_;
 
  private:
-
   // The broadcast work that is kicked off upon construction.
   c10::intrusive_ptr<c10d::ProcessGroup::Work> work_;
 };
@@ -85,6 +84,18 @@ void broadcast_coalesced(
     in_flight.front().finish();
     in_flight.pop_front();
   }
+}
+
+std::vector<at::Tensor> GradBucket::getPerParameterTensors() const {
+  std::vector<at::Tensor> per_parameter_tensors;
+  size_t num_parameters = offsets_.size();
+  per_parameter_tensors.reserve(num_parameters);
+  for (const auto i : c10::irange(num_parameters)) {
+    per_parameter_tensors.push_back(
+        tensor_.slice(0, offsets_[i], offsets_[i] + lengths_[i])
+            .view(sizes_vec_[i]));
+  }
+  return per_parameter_tensors;
 }
 
 } // namespace c10d

@@ -93,6 +93,7 @@ from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
+from .lkj_cholesky import LKJCholesky
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import LowRankMultivariateNormal
@@ -108,7 +109,7 @@ from .relaxed_bernoulli import RelaxedBernoulli
 from .relaxed_categorical import RelaxedOneHotCategorical
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
-from .transforms import *
+from .transforms import *  # noqa: F403
 from .uniform import Uniform
 from .von_mises import VonMises
 from .weibull import Weibull
@@ -134,6 +135,7 @@ __all__ = [
     'HalfNormal',
     'Independent',
     'Kumaraswamy',
+    'LKJCholesky',
     'Laplace',
     'LogNormal',
     'LogisticNormal',

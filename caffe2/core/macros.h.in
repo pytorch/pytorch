@@ -44,10 +44,6 @@ static_assert(
 #cmakedefine CAFFE2_USE_NVTX
 #cmakedefine CAFFE2_USE_TRT
 
-#ifndef USE_NUMPY
-#cmakedefine USE_NUMPY
-#endif
-
 #ifndef EIGEN_MPL2_ONLY
 #cmakedefine EIGEN_MPL2_ONLY
 #endif

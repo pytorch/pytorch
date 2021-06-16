@@ -15,8 +15,13 @@ class Multinomial(Distribution):
     Note that :attr:`total_count` need not be specified if only :meth:`log_prob` is
     called (see example below)
 
-    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-              and it will be normalized to sum to 1.
+    .. note:: The `probs` argument must be non-negative, finite and have a non-zero sum,
+              and it will be normalized to sum to 1 along the last dimension. attr:`probs`
+              will return this normalized value.
+              The `logits` argument will be interpreted as unnormalized log probabilities
+              and can therefore be any real number. It will likewise be normalized so that
+              the resulting probabilities sum to 1 along the last dimension. attr:`logits`
+              will return this normalized value.
 
     -   :meth:`sample` requires a single shared `total_count` for all
         parameters and samples.
@@ -35,10 +40,10 @@ class Multinomial(Distribution):
     Args:
         total_count (int): number of trials
         probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        logits (Tensor): event log probabilities (unnormalized)
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     total_count: int
 
     @property
@@ -70,9 +75,9 @@ class Multinomial(Distribution):
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=True, event_dim=1)
     def support(self):
-        return constraints.integer_interval(0, self.total_count)
+        return constraints.multinomial(self.total_count)
 
     @property
     def logits(self):

@@ -4,6 +4,7 @@
 
 namespace at {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static Symbol kWildcard = Symbol::dimname("*");
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
@@ -24,6 +25,7 @@ bool Dimname::isValidName(const std::string& name) {
     return false;
   }
   for (auto it = name.begin(); it != name.end(); ++it) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (std::isalpha(*it) || *it == '_') {
       continue;
     } else if (it != name.begin() && std::isdigit(*it)) {

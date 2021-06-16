@@ -38,8 +38,8 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
       const std::vector<int64_t>& padding,
       const std::vector<int64_t>& dilation,
       int64_t groups,
-      c10::optional<Scalar> output_min,
-      c10::optional<Scalar> output_max)
+      const c10::optional<Scalar>& output_min,
+      const c10::optional<Scalar>& output_max)
       : weight(std::move(weight)),
         bias(std::move(bias)),
         stride(stride),
@@ -68,29 +68,75 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   std::function<void(void*)> releaseCallback = nullptr;
 };
 
-// The MPSCNNConvolution class takes weights in the order
-// [outputChannels][kernelHeight][kernelWidth][inputChannels/groups].
-static inline std::vector<float> permuteWeights(
-    const float* src,
-    const std::vector<int64_t>& sizes) {
-  const int64_t M = sizes[0];
-  const int64_t Cf = sizes[1];
-  const int64_t kH = sizes[2];
-  const int64_t kW = sizes[3];
-  std::vector<float> packedWeights(M * kH * kW * Cf);
-  for (auto m = 0; m < M; ++m) {
-    for (auto c = 0; c < Cf; ++c) {
-      for (auto kh = 0; kh < kH; ++kh) {
-        for (auto kw = 0; kw < kW; ++kw) {
-          int64_t oc = m * kH * kW * Cf + kh * kW * Cf + kw * Cf + c;
-          int64_t ic = m * Cf * kH * kW + c * kH * kW + kh * kW + kw;
-          packedWeights[oc] = src[ic];
-        }
-      }
+using SerializationTypeLinearPrePack = std::tuple<
+    Tensor,
+    c10::optional<Tensor>,
+    c10::optional<Scalar>,
+    c10::optional<Scalar>>;
+
+class LinearOpContext : public torch::jit::CustomClassHolder {
+ public:
+  SerializationTypeLinearPrePack pack() {
+    return std::make_tuple(weight_, bias_, output_min_, output_max_);
+  }
+  LinearOpContext() = delete;
+  LinearOpContext(
+      at::Tensor&& weight,
+      c10::optional<at::Tensor>&& bias,
+      const c10::optional<Scalar>& output_min,
+      const c10::optional<Scalar>& output_max)
+      : weight_(std::move(weight)),
+        bias_(std::move(bias)),
+        output_min_(output_min),
+        output_max_(output_max) {}
+
+  void release_resources() override {
+    if (releaseCallback_) {
+      releaseCallback_(opaqueOpPtr_);
+      opaqueOpPtr_ = nullptr;
     }
   }
-  return packedWeights;
-}
+
+  const Tensor& get_weight() const {
+    return weight_;
+  }
+
+  const c10::optional<Tensor>& get_bias() const {
+    return bias_;
+  }
+
+  const c10::optional<Scalar>& get_output_min() const {
+    return output_min_;
+  }
+
+  const c10::optional<Scalar>& get_output_max() const {
+    return output_max_;
+  }
+
+  void set_opaqueOpPtr(void* ptr) {
+    opaqueOpPtr_ = ptr;
+  }
+
+  void* get_opaqueOpPtr() const {
+    return opaqueOpPtr_;
+  }
+
+  void set_releaseCallback(const std::function<void(void*)>& func) {
+    releaseCallback_ = func;
+  }
+
+  std::function<void(void*)>& get_releaseCallback() {
+    return releaseCallback_;
+  }
+
+ private:
+  Tensor weight_;
+  c10::optional<Tensor> bias_;
+  c10::optional<Scalar> output_min_;
+  c10::optional<Scalar> output_max_;
+  void* opaqueOpPtr_ = nullptr; // reserved to hold MPSCNNFullyConnected objects
+  std::function<void(void*)> releaseCallback_ = nullptr;
+};
 
 } // namespace metal
 } // namespace native

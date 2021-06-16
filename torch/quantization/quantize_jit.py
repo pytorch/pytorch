@@ -77,9 +77,11 @@ def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
     model_c = model._c
     model_c = torch._C._jit_pass_insert_quant_dequant(model_c, 'forward', inplace, debug, quant_type)
     if not debug:
-        # Moving model parameters to CPU since quantized operators
-        # are only supported on CPU right now
-        model.cpu()
+        is_xpu = all(p.device.type == 'xpu' for p in model.parameters())
+        if not is_xpu:
+            # Moving model parameters to CPU since quantized operators
+            # are only supported on CPU and XPU right now
+            model.cpu()
         if preserved_attrs is None:
             preserved_attrs = []
         model_c = torch._C._jit_pass_quant_finalize(model_c, quant_type, preserved_attrs)
@@ -88,6 +90,7 @@ def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
     else:
         model = wrap_cpp_module(model_c)
     torch._C._jit_pass_constant_propagation(model.graph)
+    torch._C._jit_pass_dce(model.graph)
     return model
 
 def convert_jit(model, inplace=False, debug=False, preserved_attrs=None):
@@ -112,6 +115,7 @@ def _quantize_jit(model, qconfig_dict, run_fn=None, run_args=None, inplace=False
         model = convert_jit(model, True, debug)
 
     torch._C._jit_pass_constant_propagation(model.graph)
+    torch._C._jit_pass_dce(model.graph)
     return model
 
 def quantize_jit(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
@@ -126,7 +130,7 @@ def quantize_jit(model, qconfig_dict, run_fn, run_args, inplace=False, debug=Fal
         `model`: input float TorchScript model
         `qconfig_dict`: qconfig_dict is a dictionary with names of sub modules as key and
         qconfig for that module as value, empty key means the qconfig will be applied
-        to whole model unless it’s overwritten by more specific configurations, the
+        to whole model unless it's overwritten by more specific configurations, the
         qconfig for each module is either found in the dictionary or fallback to
          the qconfig of parent module.
 

@@ -176,6 +176,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`LKJCholesky`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.lkj_cholesky
+.. autoclass:: LKJCholesky
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -337,7 +346,7 @@ Probability distributions - torch.distributions
     :members:
     :undoc-members:
     :show-inheritance:
-    
+
 :hidden:`Weibull`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

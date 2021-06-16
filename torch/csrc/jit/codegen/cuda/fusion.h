@@ -45,7 +45,7 @@ class TensorView;
 
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
-class TORCH_CUDA_API FusionGuard {
+class TORCH_CUDA_CU_API FusionGuard {
  public:
   Fusion* prev_fusion;
 
@@ -66,7 +66,7 @@ class TORCH_CUDA_API FusionGuard {
  *
  * The Fusion owns the whole IR graph (Vals and Exprs)
  */
-class TORCH_CUDA_API Fusion final {
+class TORCH_CUDA_CU_API Fusion final {
  public:
   Fusion() = default;
 

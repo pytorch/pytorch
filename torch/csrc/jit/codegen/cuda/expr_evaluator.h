@@ -14,7 +14,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class TORCH_CUDA_API StatefulExpressionEvaluator : private OptOutDispatch {
+class TORCH_CUDA_CU_API StatefulExpressionEvaluator : private OptOutDispatch {
  public:
   explicit StatefulExpressionEvaluator(Fusion* fusion) : fusion_(fusion) {}
 

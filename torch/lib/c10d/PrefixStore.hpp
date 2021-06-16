@@ -5,7 +5,7 @@
 
 namespace c10d {
 
-class PrefixStore : public Store {
+class TORCH_API PrefixStore : public Store {
  public:
   explicit PrefixStore(
       const std::string& prefix,
@@ -14,6 +14,11 @@ class PrefixStore : public Store {
   virtual ~PrefixStore(){};
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
+
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& expectedValue,
+      const std::vector<uint8_t>& desiredValue) override;
 
   std::vector<uint8_t> get(const std::string& key) override;
 
@@ -30,6 +35,12 @@ class PrefixStore : public Store {
   void wait(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
+
+  const std::chrono::milliseconds& getTimeout() const noexcept override;
+
+  void setTimeout(const std::chrono::milliseconds& timeout) override;
+
+  void watchKey(const std::string& key, WatchKeyCallback callback) override;
 
  protected:
   std::string prefix_;

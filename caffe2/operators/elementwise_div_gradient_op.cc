@@ -23,10 +23,13 @@ void ComputeDivGradient(
     TGrad* dB,
     CPUContext* context) {
   const int A_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(A_dims, A_dims + ndim, 1, std::multiplies<int>());
   const int B_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(B_dims, B_dims + ndim, 1, std::multiplies<int>());
   const int C_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(C_dims, C_dims + ndim, 1, std::multiplies<int>());
   if (dA != nullptr) {
     math::Set<TGrad, CPUContext>(A_size, TGrad(0), dA, context);
@@ -62,6 +65,7 @@ bool DivFunctor<CPUContext>::Backward(
     CPUContext* context) const {
   if (A_dims == B_dims) {
     const int size = std::accumulate(
+        // NOLINTNEXTLINE(modernize-use-transparent-functors)
         A_dims.cbegin(), A_dims.cend(), 1, std::multiplies<int>());
     EigenVectorMap<TGrad>(dB, size) =
         -ConstEigenVectorArrayMap<TGrad>(dC, size) *
@@ -189,6 +193,7 @@ class BinaryElementwiseWithArgsGradientOp<
           A_dims = {static_cast<int>(C.numel())};
           B_dims = {1};
         } else {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           size_t pre, n, post;
           std::tie(pre, n, post) =
               elementwise_ops_utils::ComputeLegacyBroadcastSizes(C, B, axis_);
@@ -218,6 +223,7 @@ class BinaryElementwiseWithArgsGradientOp<
           A_dims = {static_cast<int>(A.numel())};
           B_dims = {1};
         } else {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           size_t pre, n, post;
           std::tie(pre, n, post) =
               elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
@@ -264,6 +270,7 @@ class BinaryElementwiseWithArgsGradientOp<
   BinaryFunctorWithDefaultCtor<DivFunctor<CPUContext>> functor_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     DivGradient,
     BinaryElementwiseGradientOp<
@@ -287,6 +294,7 @@ class GetDivGradient final : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Div, GetDivGradient);
 
 } // namespace caffe2

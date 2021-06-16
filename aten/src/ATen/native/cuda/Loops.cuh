@@ -1,6 +1,13 @@
 
 #pragma once
 
+#include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+
+#include <thrust/tuple.h>
+
 #define NUM_THREADS (C10_WARP_SIZE * 2)
 #define THREAD_WORK_SIZE 4
 #define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
@@ -9,13 +16,7 @@ constexpr int num_threads = NUM_THREADS;
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 constexpr int block_work_size = BLOCK_WORK_SIZE;
 
-#include <ATen/detail/FunctionTraits.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/TensorIteratorDynamicCasting.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-
-#include <thrust/tuple.h>
 
 namespace at { namespace native {
 
@@ -91,7 +92,9 @@ template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {
-    TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda());
+    TORCH_INTERNAL_ASSERT(
+      iter.device(arg).is_cuda(),
+      "argument ", arg, ": expected a CUDA device but found ", iter.device(arg));
   }
 
   if (iter.numel() == 0) {
@@ -152,6 +155,11 @@ void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
   if (iter.is_cpu_scalar(1)) {
     AUnaryFunctor<func_t> af(f, iter.scalar_value<arg1_t>(1));
     iter.remove_operand(1);
+    // TODO: When all kernels that use gpu_kernel_with_scalars are
+    // ported to structured, this device guard can be deleted.  This
+    // works around incorrect device guard generation for pre-structured
+    // kernels device guards, but structured kernels do it right and
+    // we can assume the device is already set correctly
     const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
     gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {

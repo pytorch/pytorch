@@ -6,7 +6,7 @@ import torch.nn as nn
 from .fuser_method_mappings import get_fuser_method
 # for backward compatiblity
 from .fuser_method_mappings import fuse_conv_bn  # noqa: F401
-from .fuser_method_mappings import fuse_conv_bn_relu  # noqa: F40
+from .fuser_method_mappings import fuse_conv_bn_relu  # noqa: F401
 
 from typing import List, Optional
 
@@ -36,6 +36,7 @@ def fuse_known_modules(mod_list, additional_fuser_method_mapping=None):
     conv, bn
     conv, bn, relu
     conv, relu
+    linear, bn
     linear, relu
     For these sequences, the first element in the output module list performs
     the fused operation. The rest of the elements are set to nn.Identity()
@@ -93,7 +94,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
     with the fused module, replacing the rest of the modules
     with identity.
 
-    Arguments:
+    Args:
         model: Model containing the modules to be fused
         modules_to_fuse: list of list of module names to fuse. Can also be a list
                          of strings if there is only a single list of modules to fuse.

@@ -1,8 +1,11 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -50,7 +53,7 @@ void IrPrinter::handle(const TensorDomain* td) {
     return;
   }
   os_ << "[ ";
-  for (size_t i = 0; i < td->nDims(); i++) {
+  for (const auto i : c10::irange(td->nDims())) {
     handle(td->axis(i));
     if (i != td->nDims() - 1)
       os_ << ", ";

@@ -22,7 +22,7 @@ class _server_process_global_profile(profile):
     only report runtime of PyTorch functions.
     Note: profiler is thread local and is automatically propagated into the async tasks
 
-    Arguments:
+    Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
             Default: ``True``.
 
@@ -116,6 +116,7 @@ class _server_process_global_profile(profile):
             profiler_kind,
             self.record_shapes,
             self.profile_memory,
+            False,
             False)
         _enable_server_process_global_profiler(profiler_config)
         return self
