@@ -5077,6 +5077,7 @@ class ModuleTest(object):
                 test_case.assertEqualIgnoreType(out, expected_out)
 
         if self.check_forward_only:
+            torch.set_num_threads(num_threads)
             return
 
         # === Check forward with a noncontiguous input. ===
