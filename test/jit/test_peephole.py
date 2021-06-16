@@ -529,3 +529,28 @@ class TestPeephole(JitTestCase):
         FileCheck().check("graph").check_next("return").run(foo.graph)
         self.assertEqual(foo(2), 2)
         self.assertEqual(foo(1), 1)
+
+    def test_peephole_len_list(self):
+        @torch.jit.script
+        def foo(x):
+            return len(x.size())
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("aten::len").run(foo.graph)
+        inputs = list(foo.graph.inputs())
+        inputs[0].setType(inputs[0].type().with_sizes([None, None]))
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("aten::len").run(foo.graph)
+        self.assertEqual(2, foo(torch.rand([3, 1])))
+
+        @torch.jit.script
+        def foo(x):
+            li = x.size()
+            li.append(4)
+            return len(li)
+
+        inputs = list(foo.graph.inputs())
+        inputs[0].setType(inputs[0].type().with_sizes([None, None]))
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("aten::len").run(foo.graph)
+        self.assertEqual(3, foo(torch.rand([3, 1])))

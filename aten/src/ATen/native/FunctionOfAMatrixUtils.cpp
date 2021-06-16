@@ -16,8 +16,6 @@ DEFINE_DISPATCH(_compute_linear_combination_stub);
 // This is relevant when scalar_t<T> == complex<T>.
 Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficients) {
   auto output_first_dim_size = coefficients.size(0);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto input_first_dim_size = coefficients.size(1);
 
   auto output_sizes = input.sizes().vec();
   output_sizes[0] = output_first_dim_size;
@@ -86,9 +84,9 @@ Tensor& _compute_linear_combination_out(const Tensor& input, const Tensor& coeff
     .set_check_mem_overlap(false)  // Output is intentionally 0 strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_borrowed_output(output_restrided)
-    .add_borrowed_input(input_restrided)
-    .add_borrowed_input(coefficients_restrided)
+    .add_output(output_restrided)
+    .add_input(input_restrided)
+    .add_input(coefficients_restrided)
     .build();
 
   // The dimension of size n is traversed inside the kernels,
