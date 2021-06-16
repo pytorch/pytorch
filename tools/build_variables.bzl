@@ -292,6 +292,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/operators/conv2d.cpp",
     "torch/csrc/jit/tensorexpr/operators/matmul.cpp",
+    "torch/csrc/jit/tensorexpr/operators/norm.cpp",
     "torch/csrc/jit/tensorexpr/operators/reduction.cpp",
     "torch/csrc/jit/tensorexpr/operators/softmax.cpp",
     "torch/csrc/jit/tensorexpr/reduction.cpp",

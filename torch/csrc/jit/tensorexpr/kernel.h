@@ -23,6 +23,17 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   }
   return sizes;
 }
+
+enum ElementType {
+  kAllTypes = 0,
+  kIntegralTypes = 1 << 0,
+  kFloatingPointTypes = 1 << 1,
+  kBoolType = 1 << 2,
+  kComplexTypes = 1 << 3,
+  kQintTypes = 1 << 4,
+  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+};
+
 using ArgNone = c10::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
 using IntList = std::vector<int64_t>;
@@ -54,6 +65,14 @@ ExprHandle constant(const ArgValue& v);
 std::vector<ExprHandle> computeIndicesToBroadcast(
     const std::vector<ExprHandle>& outputAxes,
     const std::vector<ExprHandle>& inputSizes);
+
+void promoteInputs(
+    std::vector<ExprHandle>& inputs,
+    const int typeConstraints = kAllTypes);
+
+ExprHandle demoteOutput(
+    const ExprHandle& e,
+    const c10::optional<ScalarType> type);
 
 inline std::string getArgValueName(const ArgValue& a) {
   if (c10::get_if<tensorexpr::BufHandle>(&a)) {
@@ -96,16 +115,6 @@ std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
 struct TensorInfo {
   std::vector<int64_t> dims;
   c10::ScalarType dtype;
-};
-
-enum ElementType {
-  kAllTypes = 0,
-  kIntegralTypes = 1 << 0,
-  kFloatingPointTypes = 1 << 1,
-  kBoolType = 1 << 2,
-  kComplexTypes = 1 << 3,
-  kQintTypes = 1 << 4,
-  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
 };
 
 TORCH_API Tensor* computeOperandValue(
