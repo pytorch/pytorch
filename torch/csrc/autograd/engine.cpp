@@ -809,8 +809,6 @@ void Engine::evaluate_function(
         for (auto& hook : capture.hooks_) {
           captured_grad = (*hook)(captured_grad);
         }
-        // We might only need to stash a leaf stream for this captured grad if
-        // needed_ is true, but why take the chance
         if (opt_parent_stream) {
           // No need to take graph_task->mutex_ here, we already hold it
           graph_task->leaf_streams.emplace(*opt_parent_stream);
