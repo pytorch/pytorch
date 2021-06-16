@@ -998,20 +998,18 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("code_dir") = ".data/ts_code/code/")
       .def(
           "has_storage",
-          [](ScriptModuleSerializer& m, const std::string& name) {
-            return m.storage_context().hasStorage(name);
+          [](ScriptModuleSerializer& m, c10::Storage& storage) {
+            return m.storage_context().hasStorage(storage);
           })
       .def(
-          "get_storage_id",
-          [](ScriptModuleSerializer& m, const std::string& name) {
-            return m.storage_context().getStorageID(name);
+          "get_id",
+          [](ScriptModuleSerializer& m, c10::Storage& storage) {
+            return m.storage_context().getId(storage);
           })
       .def(
-          "track_storage",
-          [](ScriptModuleSerializer& m,
-             const std::string& name,
-             const c10::Storage& storage) {
-            return m.storage_context().addStorage(name, storage);
+          "add_storage",
+          [](ScriptModuleSerializer& m, const c10::Storage& storage) {
+            return m.storage_context().addStorage(storage);
           });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
@@ -1692,7 +1690,8 @@ void initJitScriptBindings(PyObject* module) {
       "_import_ir_module_from_package",
       [](std::shared_ptr<CompilationUnit> cu,
          std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
-         std::shared_ptr<torch::jit::StorageContext> storage_context,
+         std::shared_ptr<torch::jit::DeserializationStorageContext>
+             storage_context,
          py::object map_location,
          std::string ts_id) {
         c10::optional<at::Device> optional_device;

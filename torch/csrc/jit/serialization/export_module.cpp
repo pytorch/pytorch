@@ -71,13 +71,11 @@ std::pair<IValue, IValue> getFunctionTuple(
   Inline(*graph);
 
   std::shared_ptr<MobileCode> code;
-  if (caffe2::serialize::kProducedBytecodeVersion == 6) {
-    code = std::make_shared<MobileCode>(
-        graph, func.name(), false /* emit_default_input_instructions */);
-  } else {
-    code = std::make_shared<MobileCode>(
-        graph, func.name(), true /* emit_default_input_instructions */);
-  }
+  code = std::make_shared<MobileCode>(
+      graph,
+      func.name(),
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::
+          is_enabled() /* emit_default_input_instructions */);
   auto instructions_copy = code->instructions();
 
   // operator names
@@ -173,11 +171,11 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    if (caffe2::serialize::kProducedBytecodeVersion == 6) {
+    if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
+      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    } else {
       operators.emplace_back(
           Tup({opname.name, opname.overload_name, num_args}));
-    } else {
-      operators.emplace_back(Tup({opname.name, opname.overload_name}));
     }
   }
 
@@ -436,7 +434,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*tensor_cdata_naming_scheme=*/true);
+        /*use_storage_context=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -458,13 +456,13 @@ void ScriptModuleSerializer::writeArchive(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
-    bool tensor_cdata_naming_scheme) {
+    bool use_storage_context) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
   std::vector<std::string> tensor_names;
-  // tensors which need their storages written in tensor_cdata_naming_scheme
-  std::unordered_set<std::string> tensors_to_serialize;
+  // tensors that are already serialized in use_storage_context
+  std::unordered_set<std::string> serialized_tensors;
   Pickler data_pickle(
       [&](const char* buf, size_t size) {
         data.insert(data.end(), buf, buf + size);
@@ -476,18 +474,15 @@ void ScriptModuleSerializer::writeArchive(
       &memoizedClassTypes,
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
-        if (tensor_cdata_naming_scheme) {
-          std::string cdata_str =
-              std::to_string(reinterpret_cast<std::intptr_t>(
-                  tensor.storage().unsafeGetStorageImpl()));
+        if (use_storage_context) {
           uint64_t id = 0;
-          if (storage_context_.hasStorage(cdata_str)) {
+          if (storage_context_.hasStorage(tensor.storage())) {
             // this case is hit when storage has been serialized already
             // from a torch.package context
-            id = storage_context_.getStorageID(cdata_str);
+            id = storage_context_.getId(tensor.storage());
+            serialized_tensors.insert(std::to_string(id) + ".storage");
           } else {
-            id = storage_context_.addStorage(cdata_str, tensor.storage());
-            tensors_to_serialize.insert(std::to_string(id) + ".storage");
+            id = storage_context_.addStorage(tensor.storage());
           }
           tensor_names.push_back(std::to_string(id) + ".storage");
         } else {
@@ -507,8 +502,8 @@ void ScriptModuleSerializer::writeArchive(
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string tensor_name = tensor_names[i++];
-    if (tensor_cdata_naming_scheme &&
-        !tensors_to_serialize.count(tensor_name)) {
+    if (use_storage_context &&
+        serialized_tensors.count(tensor_name)) {
       // storage has been serialzed already, skip
       continue;
     }
@@ -639,12 +634,12 @@ void ScriptModuleSerializer::writeByteCode(
     const bool save_mobile_debug_info) {
   std::vector<c10::IValue> elements;
   BackendDebugInfoRecorder debug_info_recorder;
-  elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
+
+  elements.emplace_back(static_cast<int64_t>(version_to_write));
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
-  debug_info_elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
   moduleMethodsTuple(
       module, elements, debug_info_elements, debug_info_recorder);
@@ -654,7 +649,7 @@ void ScriptModuleSerializer::writeByteCode(
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*use_storage_context=*/true);
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
@@ -764,7 +759,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "data",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*use_storage_context=*/true);
   // Then we serialize all code info.
   convertTypes(module.type());
   // The tensor constants from the code are written to a separate archive
@@ -776,13 +771,13 @@ void ScriptModuleSerializer::serialize_unified_format(
       "constants",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*tensor_cdata_naming_scheme=*/true);
+      /*use_storage_context=*/true);
 
   // Note: writeFiles() call needs to be made in addition to calling this
   // function to have the code actually saved (tensors are saved)
 }
 
-StorageContext& ScriptModuleSerializer::storage_context() {
+SerializationStorageContext& ScriptModuleSerializer::storage_context() {
   return storage_context_;
 }
 
@@ -861,6 +856,18 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   std::set<std::string> names;
   export_opnames(m, names);
   return std::vector<std::string>(names.begin(), names.end());
+}
+
+// Thread local flag (only happens in export, i.e. on server side)
+// to control if instructions for bytecode default inputs are emitted
+// or not. It's the major difference between bytecode v5 and v6.
+thread_local bool emitBytecodeDefaultInputs =
+    caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
+bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
+  return emitBytecodeDefaultInputs;
+}
+void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
+  emitBytecodeDefaultInputs = enabled;
 }
 
 } // namespace jit

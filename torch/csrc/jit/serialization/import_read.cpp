@@ -12,7 +12,7 @@ IValue readArchiveAndTensors(
     c10::optional<ObjLoader> obj_loader,
     c10::optional<at::Device> device,
     caffe2::serialize::PyTorchStreamReader& stream_reader,
-    std::shared_ptr<StorageContext> storage_context) {
+    std::shared_ptr<DeserializationStorageContext> storage_context) {
   std::string picklename = pickle_prefix + archive_name + ".pkl";
   at::DataPtr pickle_ptr;
   size_t pickle_size = 0;
