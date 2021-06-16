@@ -136,6 +136,8 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     params_vec.push_back(groups[0].item<int16_t>());
     // transpose does not exist in v1, so we fill in a default value
     params_vec.push_back(0);
+    // input_qrange_le_128 does not exist in v1, so we fill in a default value
+    params_vec.push_back(1);
     int64_t vec_size = params_vec.size();
     at::Tensor params_tensor = at::from_blob(params_vec.data(),
         {vec_size}, at::TensorOptions().dtype(at::kShort))
