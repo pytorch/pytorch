@@ -689,7 +689,7 @@ inline void parallel_reflection_pad3d(
   at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
-    for (int64_t plane = start; plane < end; plane++) {
+    for (int64_t k = start; k < end; k++) {
       for (int64_t op_z = 0; op_z < output_d; op_z++) {
         for (int64_t op_y = 0; op_y < output_h; op_y++) {
           for (int64_t op_x = 0; op_x < output_w; op_x++) {
@@ -720,7 +720,7 @@ inline void parallel_reflection_pad3d(
             }
             ip_z = ip_z - o_start_z + i_start_z;
 
-            f(plane, op_z, op_y, op_x, ip_z, ip_y, ip_x);
+            f(k, op_z, op_y, op_x, ip_z, ip_y, ip_x);
           }
         }
       }
@@ -747,16 +747,16 @@ static void reflection_pad3d_out_frame(
       pad_left,
       pad_top,
       pad_front,
-      [&](int64_t plane,
+      [&](int64_t k,
           int64_t op_z,
           int64_t op_y,
           int64_t op_x,
           int64_t ip_z,
           int64_t ip_y,
           int64_t ip_x) {
-        scalar_t* dest_p = output_p + plane * output_w * output_h * output_d +
+        scalar_t* dest_p = output_p + k * output_w * output_h * output_d +
             op_z * output_w * output_h + op_y * output_w + op_x;
-        scalar_t* src_p = input_p + plane * input_w * input_h * input_d +
+        scalar_t* src_p = input_p + k * input_w * input_h * input_d +
             ip_z * input_w * input_h + ip_y * input_w + ip_x;
         *dest_p = *src_p;
       });
@@ -772,11 +772,9 @@ static void reflection_pad3d_out_loop(
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
     for (int64_t p = start; p < end; p++) {
-      scalar_t* input_p_inner = input_p + p * nplane * input_w * input_h * input_d;
-      scalar_t* output_p_inner = output_p + p * nplane * output_w * output_h * output_d;
       reflection_pad3d_out_frame(
-          input_p_inner,
-          output_p_inner,
+          input_p + p * nplane * input_w * input_h * input_d,
+          output_p + p * nplane * output_w * output_h * output_d,
           nplane,
           input_w,
           input_h,
@@ -810,16 +808,16 @@ static void reflection_pad3d_backward_out_frame(
       pad_left,
       pad_top,
       pad_front,
-      [&](int64_t plane,
+      [&](int64_t k,
           int64_t op_z,
           int64_t op_y,
           int64_t op_x,
           int64_t ip_z,
           int64_t ip_y,
           int64_t ip_x) {
-        scalar_t* src_p = grad_output + plane * output_w * output_h * output_d +
+        scalar_t* src_p = grad_output + k * output_w * output_h * output_d +
             op_z * output_w * output_h + op_y * output_w + op_x;
-        scalar_t* dest_p = grad_input + plane * input_w * input_h * input_d +
+        scalar_t* dest_p = grad_input + k * input_w * input_h * input_d +
             ip_z * input_w * input_h + ip_y * input_w + ip_x;
         *dest_p += *src_p;
       });
@@ -835,11 +833,9 @@ static void reflection_pad3d_backward_out_loop(
 ) {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
     for (int64_t p = start; p < end; p++) {
-      scalar_t* grad_input_inner = grad_input + p * nplane * input_w * input_h * input_d;
-      scalar_t* grad_output_inner = grad_output + p * nplane * output_w * output_h * output_d;
-      reflection_pad3d_backward_out_frame(
-          grad_input_inner,
-          grad_output_inner,
+      reflection_pad3d_backward_out_frame<scalar_t>(
+          grad_input + p * nplane * input_w * input_h * input_d,
+          grad_output + p * nplane * output_w * output_h * output_d,
           nplane,
           input_w,
           input_h,
@@ -1066,31 +1062,44 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
     return;
   }
 
-  grad_input.zero_();
+  auto grad_input_ = grad_input.contiguous();
+  grad_input_.zero_();
 
   if (batch_mode) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
-      auto grad_input_p = grad_input.data_ptr<scalar_t>();
-      auto grad_output_p = grad_output.data_ptr<scalar_t>();
-      auto nbatch = input.size(0);
-      reflection_pad3d_backward_out_loop(
-          grad_input_p, grad_output_p,
-          nbatch, nplane,
-          input_w, input_h, input_d,
-          output_w, output_h, output_d,
-          pad_left, pad_top, pad_front);
-      });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+        input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+          reflection_pad3d_backward_out_loop<scalar_t>(
+              grad_input_.data_ptr<scalar_t>(),
+              grad_output_.data_ptr<scalar_t>(),
+              input.size(0),
+              nplane,
+              input_w,
+              input_h,
+              input_d,
+              output_w,
+              output_h,
+              output_d,
+              pad_left,
+              pad_top,
+              pad_front);
+        });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
-      auto grad_input_p = grad_input.data_ptr<scalar_t>();
-      auto grad_output_p = grad_output.data_ptr<scalar_t>();
-      reflection_pad3d_backward_out_frame(
-          grad_input_p, grad_output_p,
-          nplane,
-          input_w, input_h, input_d,
-          output_w, output_h, output_d,
-          pad_left, pad_top, pad_front);
-      });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+        input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+          reflection_pad3d_backward_out_frame<scalar_t>(
+              grad_input_.data_ptr<scalar_t>(),
+              grad_output_.data_ptr<scalar_t>(),
+              nplane,
+              input_w,
+              input_h,
+              input_d,
+              output_w,
+              output_h,
+              output_d,
+              pad_left,
+              pad_top,
+              pad_front);
+        });
   }
 }
 } // namespace native
