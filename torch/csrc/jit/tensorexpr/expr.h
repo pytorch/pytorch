@@ -251,6 +251,9 @@ class TORCH_API BufHandle : public ExprHandle {
   const Buf* node() const {
     return static_cast<const Buf*>(ExprHandle::node());
   }
+  Buf* node() {
+    return static_cast<Buf*>(ExprHandle::node());
+  }
 
   template <typename... Ts>
   inline ExprHandle load(const Ts&... ts) const;

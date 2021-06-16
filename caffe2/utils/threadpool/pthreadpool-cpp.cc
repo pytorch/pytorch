@@ -45,8 +45,17 @@ void PThreadPool::set_thread_count(const size_t thread_count) {
 void PThreadPool::run(
     const std::function<void(size_t)>& fn,
     const size_t range) {
+  // Run on same thread if _NoPThreadPoolGuard guard is enabled
+  if (caffe2::_NoPThreadPoolGuard::is_enabled()) {
+    for (size_t i = 0; i < range; ++i) {
+      fn(i);
+    }
+    return;
+  }
+
   std::lock_guard<std::mutex> lock{mutex_};
 
+  TORCH_INTERNAL_ASSERT(!caffe2::_NoPThreadPoolGuard::is_enabled(), "Inside a threadpool guard!");
   TORCH_INTERNAL_ASSERT(threadpool_.get(), "Invalid threadpool!");
 
   struct Context final {

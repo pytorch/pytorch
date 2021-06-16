@@ -61,7 +61,7 @@ inline void reduce_all_impl(
 static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
-      .add_borrowed_input(input)
+      .add_input(input)
       .build();
     bool result_data  = true;
     cpu_serial_kernel(iter, [&](const bool a) -> void {
@@ -86,7 +86,7 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
 static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
-      .add_borrowed_input(input)
+      .add_input(input)
       .build();
     bool result_data  = false;
     cpu_serial_kernel(iter, [&](const bool a) -> void {
@@ -167,7 +167,7 @@ static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
     const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
-      .add_borrowed_input(input)
+      .add_input(input)
       .build();
     bool min_result_data = true;
     bool max_result_data = false;
