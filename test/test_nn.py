@@ -318,62 +318,6 @@ class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    def _forward(self, module, input: _TensorOrTensors):
-        with freeze_rng_state():
-            if isinstance(input, tuple):
-                return module(*input)
-            else:
-                return module(input)
-
-    def _backward(self, module, input: _TensorOrTensors, output, grad_output, create_graph=False):
-        output.backward(grad_output, retain_graph=True, create_graph=create_graph)
-        if isinstance(input, tuple):
-            return tuple(i.grad.data if i.grad is not None else None for i in input)
-        else:
-            return input.grad.data if input.grad is not None else None
-
-    def _forward_criterion(self, criterion, input, target, extra_args=None):
-        if extra_args is None:
-            extra_args = tuple()
-        if isinstance(input, tuple):
-            args = input + (target,) + extra_args
-            output = criterion(*args)
-        else:
-            output = criterion(input, target, *extra_args)
-        return output
-
-    def _backward_criterion(self, criterion, input, output, target, gradOutput=None, extra_args=None):
-        if extra_args is None:
-            extra_args = tuple()
-        input_tuple = input if isinstance(input, tuple) else (input,)
-        output_tuple = output if isinstance(output, tuple) else (output,)
-        for i in input_tuple:
-            if i.grad is not None:
-                i.grad.data.zero_()
-        args = input_tuple + (target,) + extra_args
-        if gradOutput is None:
-            gradOutput = torch.ones(())
-        criterion(*args).backward(gradOutput.to(output_tuple[0]))
-        if isinstance(input, tuple):
-            return tuple(i.grad.data for i in input)
-        else:
-            return input.grad.data
-
-    def _zero_grad_parameters(self, module):
-        for p in module.parameters():
-            if p.grad is not None:
-                with torch.no_grad():
-                    p.grad.zero_()
-                p.grad.detach_()
-
-    def _get_parameters(self, module):
-        params = []
-        d_params = []
-        for p in module.parameters():
-            params.append(p)
-            d_params.append(p.grad)
-        return params, d_params
-
     def _create_basic_net(self):
         class Layer(nn.Module):
             def __init__(self):

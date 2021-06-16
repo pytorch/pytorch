@@ -4744,117 +4744,154 @@ module_tests.extend([
 ])
 
 
-class NNTestCase(TestCase):
-
-    # _forward is defined in classes inheriting from NNTestCase
-    @abstractmethod
-    def _forward(self, *args, **kwargs):
-        raise NotImplementedError
-
-    @abstractmethod
-    def _get_parameters(self, module: nn.Module) -> Tuple[List[nn.Parameter], List[nn.Parameter]]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def _zero_grad_parameters(self, module: nn.Module) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def _backward(self, module: nn.Module,
-                  input: _TensorOrTensors, output: torch.Tensor,
-                  grad_output: Union[torch.Tensor, Sequence[torch.Tensor]],
-                  create_graph: bool = False):
-        raise NotImplementedError
-
-    def _jacobian(self, input, num_out):
+# Lifted from TestNN.
+def _forward(module, input: _TensorOrTensors):
+    with freeze_rng_state():
         if isinstance(input, tuple):
-            return tuple(self._jacobian(elem, num_out) for elem in input)
-        elif isinstance(input, list):
-            return [self._jacobian(elem, num_out) for elem in input]
+            return module(*input)
         else:
-            return torch.zeros(input.nelement(), num_out)
+            return module(input)
 
-    def _flatten_tensors(self, x):
-        if isinstance(x, torch.Tensor):
-            if x.is_sparse:
-                return x.to_dense().view(-1)
-            else:
-                return x.view(-1)
+def _backward(module, input: _TensorOrTensors, output, grad_output, create_graph=False):
+    output.backward(grad_output, retain_graph=True, create_graph=create_graph)
+    if isinstance(input, tuple):
+        return tuple(i.grad.data if i.grad is not None else None for i in input)
+    else:
+        return input.grad.data if input.grad is not None else None
+
+def _forward_criterion(criterion, input, target, extra_args=None):
+    if extra_args is None:
+        extra_args = tuple()
+    if isinstance(input, tuple):
+        args = input + (target,) + extra_args
+        output = criterion(*args)
+    else:
+        output = criterion(input, target, *extra_args)
+    return output
+
+def _backward_criterion(criterion, input, output, target, gradOutput=None, extra_args=None):
+    if extra_args is None:
+        extra_args = tuple()
+    input_tuple = input if isinstance(input, tuple) else (input,)
+    output_tuple = output if isinstance(output, tuple) else (output,)
+    for i in input_tuple:
+        if i.grad is not None:
+            i.grad.data.zero_()
+    args = input_tuple + (target,) + extra_args
+    if gradOutput is None:
+        gradOutput = torch.ones(())
+    criterion(*args).backward(gradOutput.to(output_tuple[0]))
+    if isinstance(input, tuple):
+        return tuple(i.grad.data for i in input)
+    else:
+        return input.grad.data
+
+def _zero_grad_parameters(module):
+    for p in module.parameters():
+        if p.grad is not None:
+            with torch.no_grad():
+                p.grad.zero_()
+            p.grad.detach_()
+
+def _get_parameters(module):
+    params = []
+    d_params = []
+    for p in module.parameters():
+        params.append(p)
+        d_params.append(p.grad)
+    return params, d_params
+
+def _jacobian(input, num_out):
+    if isinstance(input, tuple):
+        return tuple(_jacobian(elem, num_out) for elem in input)
+    elif isinstance(input, list):
+        return [_jacobian(elem, num_out) for elem in input]
+    else:
+        return torch.zeros(input.nelement(), num_out)
+
+def _flatten_tensors(x):
+    if isinstance(x, torch.Tensor):
+        if x.is_sparse:
+            return x.to_dense().view(-1)
         else:
-            return tuple(self._flatten_tensors(a) for a in x)
+            return x.view(-1)
+    else:
+        return tuple(_flatten_tensors(a) for a in x)
 
-    def _zero_grad_input(self, input):
-        if isinstance(input, torch.Tensor):
-            if input.requires_grad and input.grad is not None:
-                input.grad.zero_()
-                input.grad.detach_()
-        else:
-            for i in input:
-                self._zero_grad_input(i)
+def _zero_grad_input(input):
+    if isinstance(input, torch.Tensor):
+        if input.requires_grad and input.grad is not None:
+            input.grad.zero_()
+            input.grad.detach_()
+    else:
+        for i in input:
+            _zero_grad_input(i)
 
-    def _analytical_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
-        output = self._forward(module, input)
-        output_size = output.nelement()
+def _analytical_jacobian(module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
+    output = _forward(module, input)
+    output_size = output.nelement()
 
-        if jacobian_input:
-            jacobian_inp = self._jacobian(input, output_size)
-            flat_jacobian_input = list(_iter_tensors(jacobian_inp))
+    if jacobian_input:
+        jacobian_inp = _jacobian(input, output_size)
+        flat_jacobian_input = list(_iter_tensors(jacobian_inp))
+
+    if jacobian_parameters:
+        num_param = sum(p.numel() for p in _get_parameters(module)[0])
+        jacobian_param = torch.zeros(num_param, output_size)
+
+    for i in range(output_size):
+        param, d_param = _get_parameters(module)
+        # make non grad zeros
+        d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
+
+        d_out = torch.zeros_like(output)
+        flat_d_out = d_out.view(-1)
+        flat_d_out[i] = 1
 
         if jacobian_parameters:
-            num_param = sum(p.numel() for p in self._get_parameters(module)[0])
-            jacobian_param = torch.zeros(num_param, output_size)
-
-        for i in range(output_size):
-            param, d_param = self._get_parameters(module)
-            # make non grad zeros
-            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
-
-            d_out = torch.zeros_like(output)
-            flat_d_out = d_out.view(-1)
-            flat_d_out[i] = 1
-
-            if jacobian_parameters:
-                self._zero_grad_parameters(module)
-            # Tensors will accumulate gradient from multiple steps
-            if jacobian_input:
-                self._zero_grad_input(input)
-            d_input = self._backward(module, input, output, d_out)
-
-            if jacobian_input:
-                for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input)):
-                    jacobian_x[:, i] = d_x.contiguous().view(-1)
-            if jacobian_parameters:
-                jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
-
-        res: Tuple[torch.Tensor, ...] = tuple()
+            _zero_grad_parameters(module)
+        # Tensors will accumulate gradient from multiple steps
         if jacobian_input:
-            res += jacobian_inp,
-        if jacobian_parameters:
-            res += jacobian_param,
+            _zero_grad_input(input)
+        d_input = _backward(module, input, output, d_out)
 
-        return res
-
-    def _numerical_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
-        def fw(*input):
-            return self._forward(module, input).detach()
-
-        res: Tuple[torch.Tensor, ...] = tuple()
         if jacobian_input:
-            res += _get_numerical_jacobian(fw, input, eps=1e-6),
+            for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input)):
+                jacobian_x[:, i] = d_x.contiguous().view(-1)
         if jacobian_parameters:
-            param, _ = self._get_parameters(module)
-            to_cat = []
-            for p in param:
-                jacobian = _get_numerical_jacobian(fw, input, target=p, eps=1e-6)
-                # get_numerical_jacobian returns a list of tuples but we require a tensor
-                to_cat.append(jacobian[0][0])
-            res += (torch.cat(to_cat, 0),)
-        return res
+            jacobian_param[:, i] = torch.cat(_flatten_tensors(d_param), 0)
 
+    res: Tuple[torch.Tensor, ...] = tuple()
+    if jacobian_input:
+        res += jacobian_inp,
+    if jacobian_parameters:
+        res += jacobian_param,
+
+    return res
+
+def _numerical_jacobian(module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
+    def fw(*input):
+        return _forward(module, input).detach()
+
+    res: Tuple[torch.Tensor, ...] = tuple()
+    if jacobian_input:
+        res += _get_numerical_jacobian(fw, input, eps=1e-6),
+    if jacobian_parameters:
+        param, _ = _get_parameters(module)
+        to_cat = []
+        for p in param:
+            jacobian = _get_numerical_jacobian(fw, input, target=p, eps=1e-6)
+            # get_numerical_jacobian returns a list of tuples but we require a tensor
+            to_cat.append(jacobian[0][0])
+        res += (torch.cat(to_cat, 0),)
+    return res
+
+
+class NNTestCase(TestCase):
     def check_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True):
-        jacobian_parameters = bool(self._get_parameters(module)[0])
-        analytical = self._analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        numerical = self._numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
+        jacobian_parameters = bool(_get_parameters(module)[0])
+        analytical = _analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
+        numerical = _numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
         analytical_t = list(_iter_tensors(analytical))
         numerical_t = list(_iter_tensors(numerical))
 
@@ -5027,15 +5064,15 @@ class ModuleTest(object):
         # === Check the forward output against the reference function. ===
         if self.reference_fn is not None:
             if self.is_criterion_test:
-                out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
+                out = _forward_criterion(module, input, target, extra_args=self.extra_args)
                 ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
                 expected_out = self.reference_fn(*ref_args)
                 test_case.assertEqual(out, expected_out)
             else:
-                out = test_case._forward(module, input)
+                out = _forward(module, input)
                 ref_input = deepcopy(input)
                 ref_module = deepcopy(module)
-                expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0], ref_module)
+                expected_out = self.reference_fn(ref_input, _get_parameters(module)[0], ref_module)
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 test_case.assertEqualIgnoreType(out, expected_out)
 
@@ -5050,11 +5087,11 @@ class ModuleTest(object):
         if self.should_test_pickle:
             # TODO: do this with in-memory files as soon as torch.save will support it
             with tempfile.TemporaryFile() as f:
-                test_case._forward(module, input)
+                _forward(module, input)
                 torch.save(module, f)
                 f.seek(0)
                 module_copy = torch.load(f)
-                test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
+                test_case.assertEqual(_forward(module, input), _forward(module_copy, input))
 
         # === Check in-place vs. out-of-place variant outputs. ===
         if self.check_inplace:
@@ -5108,19 +5145,19 @@ class ModuleTest(object):
                     inputs = (input,) + params + (target,)
 
                     def fn_to_gradcheck(input, target, *params):
-                        return module(input, target) + 0.1
+                        return module(input, target)
                 else:
                     inputs = input + params + (target,)
 
                     def fn_to_gradcheck(input1, input2, target, *params):  # type: ignore[misc]
-                        return module(input1, input2, target) + 0.1
+                        return module(input1, input2, target)
             else:
                 inputs = input_tuple + params
                 num_inputs = len(input_tuple)
 
                 def fn_to_gradcheck(*inputs_and_params, **kwargs):
                     assert not kwargs
-                    return test_case._forward(module, inputs_and_params[:num_inputs])
+                    return _forward(module, inputs_and_params[:num_inputs])
 
             test_case.assertTrue(
                 gradcheck(fn_to_gradcheck, inputs, check_batched_grad=self.check_batched_grad))
@@ -5249,14 +5286,14 @@ class ModuleTest(object):
         if any(i.dim() == 0 for i in input if isinstance(i, torch.Tensor)):
             return
 
-        test_case._zero_grad_parameters(module)
-        test_case._zero_grad_input(input)
+        _zero_grad_parameters(module)
+        _zero_grad_input(input)
         with freeze_rng_state():
-            output = test_case._forward(module, input)
+            output = _forward(module, input)
             grad_output = output.new(output.shape).normal_()
             output = output.clone()
-            d_input = deepcopy(test_case._backward(module, input, output, grad_output))
-            d_param = deepcopy(test_case._get_parameters(module)[1])
+            d_input = deepcopy(_backward(module, input, output, grad_output))
+            d_param = deepcopy(_get_parameters(module)[1])
 
         nc_input = noncontiguize(input)
         nc_grad_output = noncontiguize(grad_output)
@@ -5265,15 +5302,15 @@ class ModuleTest(object):
             # Some ops, e.g., nn.Flatten, return gradient that shares
             # storage with the grad_output. Hence we copy here.
             go = deepcopy(grad_output if contig_g else nc_grad_output)
-            test_case._zero_grad_parameters(module)
-            test_case._zero_grad_input(i)
+            _zero_grad_parameters(module)
+            _zero_grad_input(i)
             with freeze_rng_state():
-                out = test_case._forward(module, i)
-                grad = test_case._backward(module, i, out, go)
+                out = _forward(module, i)
+                grad = _backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)
                 test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
-                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
+                test_case.assertEqual(_get_parameters(module)[1], d_param)
 
     def _module_test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
@@ -5286,17 +5323,17 @@ class ModuleTest(object):
 
         cpu_module = self.constructor(*self.constructor_args)
         gpu_module = self.constructor(*self.constructor_args).float().cuda()
-        cpu_param = test_case._get_parameters(cpu_module)
-        gpu_param = test_case._get_parameters(gpu_module)
+        cpu_param = _get_parameters(cpu_module)
+        gpu_param = _get_parameters(gpu_module)
         for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
             gpu_p.data.copy_(cpu_p)
 
-        test_case._zero_grad_input(cpu_input_tuple)
-        test_case._zero_grad_input(gpu_input_tuple)
-        test_case._zero_grad_parameters(cpu_module)
-        test_case._zero_grad_parameters(gpu_module)
-        cpu_output = test_case._forward(cpu_module, cpu_input_tuple)
-        gpu_output = test_case._forward(gpu_module, gpu_input_tuple)
+        _zero_grad_input(cpu_input_tuple)
+        _zero_grad_input(gpu_input_tuple)
+        _zero_grad_parameters(cpu_module)
+        _zero_grad_parameters(gpu_module)
+        cpu_output = _forward(cpu_module, cpu_input_tuple)
+        gpu_output = _forward(gpu_module, gpu_input_tuple)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
 
@@ -5304,8 +5341,8 @@ class ModuleTest(object):
         for _ in range(5):
             cpu_gradOutput = cpu_output.clone().normal_()
             gpu_gradOutput = cpu_gradOutput.type_as(gpu_output)
-            cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
-            gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
+            cpu_gradInput = _backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
+            gpu_gradInput = _backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
             for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
@@ -5391,15 +5428,15 @@ class ModuleTest(object):
             # Loss modules with weights require consistent input/module weight types
             cpu_module = self.constructor(*self.constructor_args)
 
-        cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
-        gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
+        cpu_output = _forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
+        gpu_output = _forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
-        cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
-        gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
+        cpu_gradInput = _backward_criterion(cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
+        gpu_gradInput = _backward_criterion(gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
