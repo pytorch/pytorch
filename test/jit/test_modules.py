@@ -2,7 +2,6 @@ import torch
 import os
 import sys
 from torch.testing._internal.jit_utils import JitTestCase
-from typing import Final
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -23,7 +22,7 @@ class TestModules(JitTestCase):
         # torch.nn.Linear has a __constants__ attribute defined
         # and intialized to a list.
         class Net(torch.nn.Linear):
-            x: Final[int]
+            x: torch.jit.Final[int]
 
             def __init__(self):
                 super().__init__(5, 10)
