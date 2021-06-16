@@ -86,23 +86,88 @@ class TORCH_API LoopNest {
   //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
   std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(const Buf*) const;
 
-  static void vectorize(For*);
   Stmt* simplify();
 
   bool computeInline(Stmt* s);
   bool computeInline(const Buf* b);
   void inlineIntermediateBufs(bool allow_duplicated_work);
 
-  static void splitWithTail(For* f, int factor);
-  static void splitWithTail(
-      For* f,
-      int factor,
-      For** outer,
-      For** inner,
-      For** tail);
+  // Optimizes conditionals.
+  //
+  // Currently, only the following pattern of conditionals is optimized.
+  // This corresponds to the conditional format that is generated to handle
+  // `aten::cat` op.
+  //
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
+  //   }
+  //
+  // Constraints that must be satisfied for this optimization:
+  //   * All conditions should be of the form "var < expr".
+  //   * All conditions should have the same variable, say v.
+  //   * The condition variable found should be the same as the inner-most
+  //     loop variable. TODO: Remove this constraint.
+  //   * If there are multiple stores that contain conditionals using the same
+  //     loop variable, only the first conditional will be optimized.
+  //     TODO: Remove this constraint.
+  bool optimizeConditionals();
 
+  // Splits the given loop into 2 nested loops with the given factor as the
+  // inner loop bound. If the factor does not evenly divide the loop bound,
+  // then the remainining iterations are extracted into a tail loop that is
+  // added after the given loop.
+  //
+  // For example, consider the following code:
+  //   for (int i = 0; i < 100; ++i) {
+  //     A[i] =
+  //   }
+  //
+  // splitWithTail(i, 8, ...) will result in:
+  //   for (int i_outer = 0; i_outer < 12; ++i_outer) {
+  //     for (int i_inner = 0; i_inner < 8; ++i_inner) {
+  //       A[i_outer * 8 + i_inner] =
+  //     }
+  //   }
+  //   for (int i_tail = 0; i_tail < 4; ++i_tail) {
+  //     A[i_tail + 96] =
+  //   }
+  //
+  // The given loop will be transformed to the outer loop after splitting.
+  // So, the pointer to the input loop should be valid after splitting and
+  // will point to the outer loop. The `inner` and `tail` parameters will be
+  // set to point to the inner and tail loops that are generated.
+  static void splitWithTail(For* f, int factor, For** inner, For** tail);
+  // A convenience wrapper when the caller does not need to access the
+  // split loops.
+  static void splitWithTail(For* f, int factor);
+
+  // Splits the given loop into 2 nested loops with the given factor as the
+  // inner loop bound. If the factor does not evenly divide the loop bound,
+  // then a conditional is inserted into the body to handle the remaining
+  // iterations appropriately.
+  //
+  // For example, consider the following code:
+  //   for (int i = 0; i < 100; ++i) {
+  //     A[i] =
+  //   }
+  //
+  // splitWithMask(i, 8, ...) will result in:
+  //   for (int i_outer = 0; i_outer < 13; ++i_outer) {
+  //     for (int i_inner = 0; i_inner < 8; ++i_inner) {
+  //       if (i_outer * 8 + i_inner < 100) {
+  //         A[i_outer * 8 + i_inner] =
+  //       }
+  //     }
+  //   }
+  //
+  // The given loop will be transformed to the outer loop after splitting.
+  // So, the pointer to the input loop should be valid after splitting and
+  // will point to the outer loop. The `inner` parameter will be set to point
+  // to the inner loop that is generated.
+  static void splitWithMask(For* f, int factor, For** inner);
+  // A convenience wrapper when the caller does not need to access the
+  // split loops.
   static void splitWithMask(For* f, int factor);
-  static void splitWithMask(For* f, int factor, For** outer, For** inner);
 
   // The following methods support loop distribution.
   // For example, consider the following code. This will be used to
@@ -199,7 +264,7 @@ class TORCH_API LoopNest {
   //  * Fusing the loops does not violate or add any dependencies.
   static bool fuseLoops(const std::vector<For*>& loops, For** fused);
 
-  void reorderAxis(For* a, For* b);
+  static void reorderAxis(For* a, For* b);
 
   // Reorder the given list of loops according to the permutation specified.
   // Here permutation[i] represents the location of the loop i in the result.
@@ -232,7 +297,10 @@ class TORCH_API LoopNest {
 
   static void unroll(For* f, Stmt** unrolled);
   static void unroll(For* f);
+
   static bool normalize(For* f);
+  static bool isNormalized(For* f);
+
   static bool flatten(const std::vector<For*>& f, For** flattened);
   static bool flatten(const std::vector<For*>& f);
 
@@ -265,20 +333,17 @@ class TORCH_API LoopNest {
   static std::vector<For*> getLoopStmtsInLoopNest(For* f, size_t num);
 
   // LoopOptions are propagated to tail.
-  void sliceHead(For* f, int factor, For** head, For** tail);
-  void sliceHead(For* f, int factor);
+  static void sliceHead(For* f, int factor, For** head, For** tail);
+  static void sliceHead(For* f, int factor);
   // LoopOptions are propagated to head.
-  void sliceTail(For* f, int factor, For** head, For** tail);
-  void sliceTail(For* f, int factor);
-
-  void setGPUBlockIndex(For* f, int idx);
-  void setGPUThreadIndex(For* f, int idx);
+  static void sliceTail(For* f, int factor, For** head, For** tail);
+  static void sliceTail(For* f, int factor);
 
   using AccessResult = std::pair<const Buf*, Stmt*>;
   // Insert a cache for the consumer's usages of the buffer produced in
   // consumer, and redirect reads and writes in the consumer to that cache.
   // Returns a pair of the new cache buffer, and the new rewritten consumer.
-  AccessResult cacheAccesses(
+  static AccessResult cacheAccesses(
       const Buf* producer,
       const std::string& name,
       Stmt* consumer);
@@ -287,7 +352,7 @@ class TORCH_API LoopNest {
   // S is assumed to be a Store or a Block containing a Store. Along with the
   // computation itself, this transformation inserts Alloc/Free statements for
   // the temporary buffer used in the computation.
-  void computeAt(Stmt* s, For* at);
+  static void computeAt(Stmt* s, For* at);
 
   // Rfactor a reduction axis into a normal axis.
   //
@@ -331,19 +396,20 @@ class TORCH_API LoopNest {
   // S4:     for k           # reduction axis
   //           X_rfac[i,j] = ReduceOp(X_rfac[i,j] + Y[i,j,k], reduce_axis={k})
   //         X[i] = ReduceOp(X[i] + X_rfac[i,j], reduce_axis={j})
-  bool rfactor(Stmt* s, For* outer_reduction_for);
-  bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
+  static bool rfactor(Stmt* s, For* outer_reduction_for);
+  static bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
 
-  void setBufferMap(
-      For* f,
-      const std::unordered_map<std::string, const Buf*>& map);
-
-  void eliminateDeadStores();
-  void prepareForCodegen();
+  // Vectorize the given loop. This method requires that the given loop
+  // does not perform a reduction.
+  // It returns true if vectorization is successful and false otherwise.
+  static bool vectorize(For*);
 
   // Find the inner-most loops and vectorize them. Currently, this only works
   // for the LLVM backend, when no reductions are involved.
   void vectorizeInnerLoops();
+
+  void eliminateDeadStores();
+  void prepareForCodegen();
 
   const std::unordered_set<const Buf*> getInputBufs() const;
   const std::unordered_set<const Buf*> getOutputBufs() const {

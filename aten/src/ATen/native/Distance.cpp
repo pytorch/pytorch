@@ -239,6 +239,8 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 }
 
 Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
+  TORCH_CHECK(x1.sizes() == x2.sizes(), "cosine_similarity requires both inputs to have the same sizes, but x1 has ",
+              x1.sizes(), " and x2 has ", x2.sizes())
   // Follow scipy impl to improve numerical precision
   // Use x / sqrt(x * x) instead of x / (sqrt(x) * sqrt(x))
   Tensor w12 = at::sum(x1 * x2, dim);

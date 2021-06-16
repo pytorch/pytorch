@@ -106,6 +106,17 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy,
   return to_impl(self, options.memory_format(optional_memory_format), non_blocking, copy);
 }
 
+// This op is important primarily for lazy / graph-based backends.
+// While this vanilla implementation loops through each tensor and independently converts it to cpu,
+// a lazy backend like XLA might need to tell sync updates across tensors.
+std::vector<Tensor> _to_cpu(TensorList tensors) {
+    std::vector<Tensor> cpu_tensors;
+    for (const auto& t : tensors) {
+        cpu_tensors.push_back(t.cpu());
+    }
+    return cpu_tensors;
+}
+
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() != c10::kStrided);
   if (input_.layout() == c10::kSparse) {

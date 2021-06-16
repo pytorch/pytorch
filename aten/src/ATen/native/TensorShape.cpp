@@ -623,7 +623,6 @@ std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  std::vector<Tensor> result;
   const auto dim_size = self.size(dim);
   int64_t split_size = (dim_size + chunks - 1) / chunks;
 
@@ -1313,7 +1312,7 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
   auto result = at::native::split(self, split_size, dim);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
-    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+    if (!t.is_inference()) {
       t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
     }
   }
@@ -1364,7 +1363,7 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
   auto result = at::native::split_with_sizes(self, split_sizes, dim);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
-    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+    if (!t.is_inference()) {
       t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
     }
   }
@@ -2170,6 +2169,12 @@ Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
 
+Tensor detach(const Tensor& self) {
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  //AT_ERROR("detach is not implemented for Tensor");
+  return native::alias(self);
+}
+
 Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
   // some special handling to deal with allow dimension == 0 when self.dim() == 0
   dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
@@ -2390,6 +2395,33 @@ Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {
 
 Tensor& swapdims_(Tensor& self, int64_t dim0, int64_t dim1) {
   return self.transpose_(dim0, dim1);
+}
+
+Tensor flatten_dense_tensors(TensorList tensors) {
+  static auto flatten = [](const Tensor &t) { return t.contiguous().view({-1}); };
+  if (tensors.size() == 1)
+    return flatten(tensors[0]);
+  return at::cat(fmap(tensors, flatten));
+}
+
+std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tensors) {
+  std::vector<Tensor> outputs;
+  outputs.reserve(tensors.size());
+  size_t offset = 0;
+  for (const auto & tensor : tensors) {
+    auto numel = tensor.numel();
+    // If unflatten an empty tensor, create a new empty tensor using
+    // flat tensor Options.
+    // This can avoid the unflattened empty tensor to share the same storage
+    // with other unflatten tensors.
+    if (numel == 0) {
+      outputs.push_back(at::empty({0}, flat.options()));
+    } else {
+      outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
+      offset += numel;
+    }
+  }
+  return outputs;
 }
 
 }} // at::native

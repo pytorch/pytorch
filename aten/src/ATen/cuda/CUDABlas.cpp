@@ -321,12 +321,11 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
-  float falpha = alpha;
-  float fbeta = beta;
+  const float falpha = alpha;
+  const float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
                                     opa, opb, (int)m, (int)n, (int)k,
                                     (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
@@ -863,6 +862,35 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
       reinterpret_cast<rocblas_half*>(result)));
 #else
   AT_ERROR("Cublas_Hdot requires CUDA 8.0+");
+#endif
+}
+
+template <>
+void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
+#if CUDA_VERSION >= 11000
+  TORCH_CUDABLAS_CHECK(cublasDotEx(
+      handle,
+      n,
+      x,
+      CUDA_R_16BF,
+      incx,
+      y,
+      CUDA_R_16BF,
+      incy,
+      result,
+      CUDA_R_16BF,
+      CUDA_R_32F));
+#elif HIP_VERSION >= 210
+  TORCH_CUDABLAS_CHECK(rocblas_bfdot(
+      handle,
+      n,
+      reinterpret_cast<const rocblas_bfloat16*>(x),
+      incx,
+      reinterpret_cast<const rocblas_bfloat16*>(y),
+      incy,
+      reinterpret_cast<rocblas_bfloat16*>(result)));
+#else
+  AT_ERROR("Cublas_bfdot requires CUDA 11.0+");
 #endif
 }
 
