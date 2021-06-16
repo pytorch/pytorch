@@ -852,6 +852,26 @@ at::Tensor& AtenXlaType::t_(at::Tensor& self) {
   return self;
 }
 
+at::Tensor AtenXlaType::tanh(const at::Tensor& self) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::tanh(bridge::GetLtcTensor(self)));
+}
+
+at::Tensor& AtenXlaType::tanh_(at::Tensor& self) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::tanh_(self_tensor);
+  return self;
+}
+
+at::Tensor AtenXlaType::tanh_backward(const at::Tensor& grad_output,
+                                      const at::Tensor& output) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(LazyTensor::tanh_backward(
+      bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(output)));
+}
+
 at::Tensor AtenXlaType::transpose(const at::Tensor& self, int64_t dim0,
                                   int64_t dim1) {
   LTC_FN_COUNTER("xla::");
