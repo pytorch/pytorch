@@ -129,6 +129,11 @@ class TSNodeLowering : public NodeLowering {
       return LowerConstant(ir::NodeCast<ir::ops::Constant>(
           node, ir::OpKind(at::prim::Constant)));
     }
+    if (node->op().op == at::aten::bernoulli) {
+      std::vector<torch::jit::NamedValue> arguments;
+      arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+      return LowerBuiltin(node, arguments);
+    }
     if (node->op().op == at::aten::native_batch_norm) {
       return LowerBatchNorm(ir::NodeCast<ir::ops::TSNativeBatchNormForward>(
           node, ir::OpKind(at::aten::native_batch_norm)));
