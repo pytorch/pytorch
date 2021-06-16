@@ -374,24 +374,22 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
       output_arg{output, "output", 3};
   checkAllSameGPU("rrelu_with_noise_out_cuda", {self_arg, noise_arg, output_arg});
 
-  auto input = self.contiguous();
-  auto noise_ = noise.contiguous();
-  auto output_ = output.contiguous();
-
   if (training) {
+    auto input = self.contiguous();
+    auto noise_ = noise.contiguous();
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         self.scalar_type(), "rrelu_with_noise_out_cuda", [&] {
           _rrelu_with_noise_cuda_train<scalar_t>(
-              output_, input, noise_, lower, upper, generator);
+              output, input, noise_, lower, upper, generator);
         });
   }
   else {
     auto lower_tensor = lower.to<double>();
     auto upper_tensor = upper.to<double>();
     Scalar negative_slope = (lower_tensor + upper_tensor) / 2;
-    at::leaky_relu_out(output_, self, negative_slope);
+    at::leaky_relu_out(output, self, negative_slope);
   }
-  return output_;
+  return output;
 }
 
 Tensor rrelu_with_noise_cuda(
