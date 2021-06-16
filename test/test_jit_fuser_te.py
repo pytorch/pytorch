@@ -1871,6 +1871,15 @@ class TestTEFuser(JitTestCase):
 
         script = self.checkScript(eager, (1.0,))
 
+    def test_cat_2k_args(self):
+        with inline_fusion_groups():
+            def eager(x):
+                return torch.relu(torch.cat([x for _ in range(2000)]))
+            x = torch.randn(1)
+            trace = self.checkTrace(eager, (x,))
+            fusion_groups = self.findFusionGroups(trace.graph_for(x))
+            self.assertEqual(len(fusion_groups), 0)
+
 
 works_list = [
     '__radd__',
