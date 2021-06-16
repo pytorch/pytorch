@@ -67,7 +67,12 @@ def _check_complex_components_individually(
 
     @functools.wraps(check_tensors)
     def wrapper(
-        actual: Tensor, expected: Tensor, *, equal_nan: Union[str, bool], **kwargs: Any
+        actual: Tensor,
+        expected: Tensor,
+        *,
+        equal_nan: Union[str, bool],
+        msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]],
+        **kwargs: Any,
     ) -> Optional[_TestingErrorMeta]:
         if equal_nan == "relaxed":
             relaxed_complex_nan = True
@@ -76,7 +81,7 @@ def _check_complex_components_individually(
             relaxed_complex_nan = False
 
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
+            return check_tensors(actual, expected, equal_nan=equal_nan, msg=msg, **kwargs)  # type: ignore[call-arg]
 
         if relaxed_complex_nan:
             actual, expected = [
@@ -86,13 +91,33 @@ def _check_complex_components_individually(
                 for t in (actual, expected)
             ]
 
-        error_meta = check_tensors(actual.real, expected.real, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
+        error_meta = check_tensors(
+            actual.real,
+            expected.real,
+            equal_nan=equal_nan,
+            msg=msg
+            or functools.partial(
+                _make_mismatch_msg,
+                identifier=lambda default_identifier: f"Real components of {default_identifier.lower()}",
+            ),
+            **kwargs,
+        )
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the real part.")
+            return error_meta
 
-        error_meta = check_tensors(actual.imag, expected.imag, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
+        error_meta = check_tensors(
+            actual.imag,
+            expected.imag,
+            equal_nan=equal_nan,
+            msg=msg
+            or functools.partial(
+                _make_mismatch_msg,
+                identifier=lambda default_identifier: f"Imaginary components of {default_identifier.lower()}",
+            ),
+            **kwargs,
+        )
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the imaginary part.")
+            return error_meta
 
         return None
 
@@ -188,7 +213,9 @@ def _equalize_attributes(actual: Tensor, expected: Tensor) -> Tuple[Tensor, Tens
 DiagnosticInfo = SimpleNamespace
 
 
-def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> DiagnosticInfo:
+def _trace_mismatches(
+    actual: Tensor, expected: Tensor, mismatches: Tensor, *, rtol: float, atol: float
+) -> DiagnosticInfo:
     """Traces mismatches and returns diagnostic information.
 
     Args:
@@ -202,17 +229,17 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
 
             - ``number_of_elements`` (int): Number of elements in each tensor being compared.
             - ``total_mismatches`` (int): Total number of mismatches.
-            - ``mismatch_ratio`` (float): Total mismatches divided by number of elements.
             - ``max_abs_diff`` (Union[int, float]): Greatest absolute difference of the inputs.
             - ``max_abs_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+            - ``atol`` (float): Allowed absolute tolerance.
             - ``max_rel_diff`` (Union[int, float]): Greatest relative difference of the inputs.
             - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
+            - ``rtol`` (float): Allowed relative tolerance.
 
             For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
     """
     number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
-    mismatch_ratio = total_mismatches / number_of_elements
 
     dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
     a_flat = actual.flatten().to(dtype)
@@ -232,12 +259,56 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
     return SimpleNamespace(
         number_of_elements=number_of_elements,
         total_mismatches=cast(int, total_mismatches),
-        mismatch_ratio=mismatch_ratio,
         max_abs_diff=max_abs_diff.item(),
         max_abs_diff_idx=_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape),
+        atol=atol,
         max_rel_diff=max_rel_diff.item(),
         max_rel_diff_idx=_unravel_index(max_rel_diff_flat_idx.item(), mismatches.shape),
+        rtol=rtol,
     )
+
+
+def _make_mismatch_msg(
+    actual: Tensor,
+    expected: Tensor,
+    trace: DiagnosticInfo,
+    *,
+    identifier: Optional[Union[str, Callable[[str], str]]] = None,
+) -> str:
+    scalar_comparison = actual.size() == torch.Size([])
+
+    def append_difference(msg: str, *, type: str, difference: float, index: Tuple[int, ...], tolerance: float) -> str:
+        if scalar_comparison:
+            msg += f"{type.title()} difference: {difference}"
+        else:
+            msg += f"Greatest {type} difference: {difference} at index {index}"
+        if tolerance > 0:
+            msg += f" (up to {tolerance} allowed)"
+        msg += "\n"
+        return msg
+
+    default_identifier = "Scalars" if scalar_comparison else "Tensor-likes"
+    if identifier is None:
+        identifier = default_identifier
+    elif callable(identifier):
+        identifier = identifier(default_identifier)
+
+    msg = f"{identifier} are not {'equal' if trace.rtol == 0 and trace.atol == 0 else 'close'}!\n\n"
+
+    if not scalar_comparison:
+        msg += (
+            f"Mismatched elements: {trace.total_mismatches} / {trace.number_of_elements} "
+            f"({trace.total_mismatches / trace.number_of_elements:.1%})\n"
+        )
+
+    msg = append_difference(
+        msg, type="absolute", difference=trace.max_abs_diff, index=trace.max_abs_diff_idx, tolerance=trace.atol
+    )
+    msg = append_difference(
+        msg, type="relative", difference=trace.max_rel_diff, index=trace.max_rel_diff_idx, tolerance=trace.rtol
+    )
+
+    return msg
 
 
 @_check_complex_components_individually
@@ -258,7 +329,7 @@ def _check_values_close(
         rtol (float): Relative tolerance.
         atol (float): Absolute tolerance.
         equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message. Can be
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message. Can be
             passed as callable in which case it will be called with the inputs and the result of
             :func:`_trace_mismatches`.
 
@@ -270,15 +341,10 @@ def _check_values_close(
     if not torch.any(mismatches):
         return None
 
-    trace = _trace_mismatches(actual, expected, mismatches)
+    trace = _trace_mismatches(actual, expected, mismatches, rtol=rtol, atol=atol)
     if msg is None:
-        msg = (
-            f"Tensors are not close!\n\n"
-            f"Mismatched elements: {trace.total_mismatches} / {trace.number_of_elements} ({trace.mismatch_ratio:.1%})\n"
-            f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx} (up to {atol} allowed)\n"
-            f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx} (up to {rtol} allowed)"
-        )
-    elif callable(msg):
+        msg = _make_mismatch_msg
+    if callable(msg):
         msg = msg(actual, expected, trace)
     return _TestingErrorMeta(AssertionError, msg)
 
@@ -293,7 +359,7 @@ def _check_tensors_close(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
+    msg: Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]],
 ) -> Optional[_TestingErrorMeta]:
     r"""Checks that the values of :attr:`actual` and :attr:`expected` are close.
 
@@ -308,7 +374,7 @@ def _check_tensors_close(
     only considered close if and only if they are equal. ``NaN``'s are only considered equal to each other if
     :attr:`equal_nan` is ``True``.
 
-    For a description of the parameters see :func:`assert_equal`.
+    For a description of the parameters see :func:`assert_close`.
 
     Returns:
         Optional[_TestingErrorMeta]: If checks did not pass.
@@ -791,11 +857,12 @@ assert_equal.__doc__ = r"""Asserts that :attr:`actual` and :attr:`expected` are 
 
     - ``number_of_elements`` (int): Number of elements in each tensor being compared.
     - ``total_mismatches`` (int): Total number of mismatches.
-    - ``mismatch_ratio`` (float): Total mismatches divided by number of elements.
     - ``max_abs_diff`` (Union[int, float]): Greatest absolute difference of the inputs.
     - ``max_abs_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+    - ``atol`` (float): Allowed absolute tolerance.
     - ``max_rel_diff`` (Union[int, float]): Greatest relative difference of the inputs.
     - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
+    - ``rtol`` (float): Allowed relative tolerance.
 
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
 
