@@ -1062,14 +1062,13 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
     return;
   }
 
-  auto grad_input_ = grad_input.contiguous();
-  grad_input_.zero_();
+  grad_input.zero_();
 
   if (batch_mode) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
         input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_loop<scalar_t>(
-              grad_input_.data_ptr<scalar_t>(),
+              grad_input.data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),
               input.size(0),
               nplane,
@@ -1087,7 +1086,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
         input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_frame<scalar_t>(
-              grad_input_.data_ptr<scalar_t>(),
+              grad_input.data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),
               nplane,
               input_w,
