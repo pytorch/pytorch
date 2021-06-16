@@ -208,7 +208,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename accscalar_t>
 __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     scalar_t* output,
     scalar_t* total_weight,
@@ -219,14 +219,14 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     int64_t n_classes,
     int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  __shared__ scalar_t sh_inputs[N_THREADS], acc_weight[N_THREADS];
+  __shared__ accscalar_t sh_inputs[N_THREADS], acc_weight[N_THREADS];
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t i, t;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t cur_weight;
 
-  sh_inputs[threadIdx.x] = static_cast<scalar_t>(0);
-  acc_weight[threadIdx.x] = static_cast<scalar_t>(0);
+  sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
+  acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
   for (i = threadIdx.x; i < input.size(0); i += N_THREADS) {
     t = target[i];
     if (t != ignore_index) {
@@ -241,21 +241,21 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 
   if (threadIdx.x == 0) {
     *output = *total_weight = static_cast<scalar_t>(0);
-    scalar_t output_acc = 0;
-    scalar_t total_weight_acc = 0;
+    accscalar_t output_acc = 0;
+    accscalar_t total_weight_acc = 0;
     for (i = 0; i < N_THREADS; ++i) {
       output_acc += sh_inputs[i];
       total_weight_acc += acc_weight[i];
     }
-    *total_weight = total_weight_acc;
-    *output = output_acc;
+    *total_weight = static_cast<scalar_t>(total_weight_acc);
+    *output = static_cast<scalar_t>(output_acc);
     if (size_average) {
       if (input.size(0) == 0) {
         // Mean reduction on empty tensors produces NaN
         *output = std::numeric_limits<double>::quiet_NaN();
       }
       if (*total_weight != 0) {
-        *output = output_acc / total_weight_acc;
+        *output = static_cast<scalar_t>(output_acc / total_weight_acc);
       }
     }
   }
@@ -395,7 +395,7 @@ void nll_loss_forward_out_cuda_template(
             auto weight_ = weight.contiguous();
             weight_ptr = weight_.data_ptr<scalar_t>();
           }
-          nll_loss_forward_reduce_cuda_kernel_2d<scalar_t>
+          nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, float>
               <<<1, N_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
                   output.data_ptr<scalar_t>(),
                   total_weight.data_ptr<scalar_t>(),
