@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/ivalue.h>
 
+#include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/scope.h>
 
@@ -109,47 +110,31 @@ namespace jit {
  *  [M.forward, source range] -> [aten::mul's source range] We need to track
  *  mul's source range and inlined CS both.
  */
-using DebugHandleType = int64_t;
 
 using BackendDebugInfoMapType =
-    std::unordered_map<DebugHandleType, DebugInfoTuple>;
+    std::unordered_map<torch::jit::DebugHandleType, DebugInfoTuple>;
 
 /*
  * This class is used to generate debug info map.
- * It instantiates debug_handle_manager and initialize thread local pointer to
- * it. backend's preprocess will call generate_debug_handles, which uses
- * debug_handle_manager to generate debug handles. When lowering process
- * finishes, calling stopRecording will return debug info map from
- * debug_handle_manager
+ * backend's preprocess will call generate_debug_handles (see
+ * backend_detail.cpp), which uses debug_handle_manager to generate debug
+ * handles. When lowering process finishes, calling stopRecording will
+ * return debug info map from debug_handle_manager
  */
 class TORCH_API BackendDebugInfoRecorder {
  public:
   BackendDebugInfoRecorder() = default;
-
   int64_t getNextDebugHandle(const Node* node);
   // Reason this is not done as RAII is that work done in stopRecording
   // can throw, and throwing with dtor will call terminate and thus voids any
   // exception catching at a higher level.
   BackendDebugInfoMapType stopRecording();
+  NodeToDebugHandle generate_debug_handles(const std::shared_ptr<Graph>& graph);
 
  private:
   static std::atomic<DebugHandleType> unique_debug_handle_;
   BackendDebugInfoMapType handles_to_inlined_callstack_ptrs_;
 };
-
-// This is a RAII class that on ctor captures pointer to
-// BackendDebugInfoRecorder and initializes thread_local pointer
-// debug_info_recorder to it. Upon dtor it sets debug_info_recorder
-// pointer back to null. Note that this context manager always requires
-// that debug_info_recorder be nullptr when initializing the context.
-// This is because nested scopes with debug_info_recorder are not yet allowed.
-class WithBackendDebugInfoRecorder {
- public:
-  WithBackendDebugInfoRecorder(BackendDebugInfoRecorder* recorder) throw();
-  ~WithBackendDebugInfoRecorder();
-};
-
-BackendDebugInfoRecorder* getBackendDebugInfoRecorder();
 
 } // namespace jit
 } // namespace torch
