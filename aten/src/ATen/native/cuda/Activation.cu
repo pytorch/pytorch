@@ -279,7 +279,7 @@ __global__ void rrelu_with_noise_cuda_kernel(
     auto rand = random_func(&state);
 
     // ensure that (&rand.x)[ii] is safe
-    CUDA_KERNEL_ASSERT(sizeof(rand)/sizeof(rand.x) == unroll_factor);
+    static_assert(sizeof(rand)/sizeof(rand.x) == unroll_factor);
 
     #pragma unroll
     for (int ii = 0; ii < unroll_factor; ii++) {
