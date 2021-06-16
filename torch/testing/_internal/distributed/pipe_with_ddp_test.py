@@ -120,7 +120,7 @@ class PipeWithDDPTest(RpcAgentTestFixture):
         if find_unused_parameters:
             # Ensure inputs are different across ranks to verify that gradient
             # sync indeed occurs.
-            unused_param_input =  torch.rand(16, 16).cuda(2 * self.rank) * (self.rank + 1)
+            unused_param_input = torch.rand(16, 16).cuda(2 * self.rank) * (self.rank + 1)
             model(unused_param_input).local_value().sum().backward()
 
         # Run a few more iterations of fwd + bwd to ensure gradient synchronization
