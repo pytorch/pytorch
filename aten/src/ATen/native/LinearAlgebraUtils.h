@@ -116,8 +116,8 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .add_borrowed_output(b_linear_batch_idx)
-    .add_borrowed_input(a_linear_batch_idx)
+    .add_output(b_linear_batch_idx)
+    .add_input(a_linear_batch_idx)
     .build();
 
   auto m = a.size(-2);

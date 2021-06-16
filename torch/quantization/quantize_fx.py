@@ -3,7 +3,7 @@ from torch.fx import GraphModule
 from torch.fx._symbolic_trace import Tracer
 from torch.fx.node import Target, Node, Argument
 from .fx import Fuser  # noqa: F401
-from .fx import Quantizer  # noqa: F401
+from .fx import prepare, convert  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
@@ -183,8 +183,7 @@ forward graph of the parent module,
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
     graph_module = _fuse_fx(graph_module, prepare_custom_config_dict)
-    quantizer = Quantizer()
-    prepared = quantizer.prepare(
+    prepared = prepare(
         graph_module,
         qconfig_dict,
         tracer.node_name_to_scope,
@@ -289,7 +288,19 @@ def prepare_fx(
         ("foo.*bar.*conv[0-9]+", qconfig?)
         ...,
       ],
-      # priority (in increasing order): global, object_type, module_name_regex, module_name
+
+      # optional, used for matching object type invocations in a submodule by
+      # order
+      # TODO(future PR): potentially support multiple indices ('0,1') and/or
+      #   ranges ('0:3').
+      "module_name_object_type_order": [
+        # fully_qualified_name, object_type, index, qconfig
+        ("foo.bar", torch.nn.functional.linear, 0, qconfig?),
+      ],
+
+      # priority (in increasing order):
+      #   global, object_type, module_name_regex, module_name,
+      #   module_name_object_type_order
       # qconfig == None means fusion and quantization should be skipped for anything
       # matching the rule
       }
@@ -450,9 +461,9 @@ def _convert_fx(
     _check_is_graph_module(graph_module)
     check_is_valid_convert_custom_config_dict(convert_custom_config_dict)
 
-    quantizer = Quantizer()
-    quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict,
-                                  is_standalone_module, _remove_qconfig=_remove_qconfig)
+    quantized = convert(
+        graph_module, is_reference, convert_custom_config_dict,
+        is_standalone_module, _remove_qconfig_flag=_remove_qconfig)
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
     for attr_name in preserved_attributes:
