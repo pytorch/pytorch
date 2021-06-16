@@ -6957,46 +6957,38 @@ class DistributedTest:
                 model,
                 device_ids=[rank],
             )
-            inp = torch.randn(10, 2, device=rank)
-            if self.rank == 0:
-                with torch.no_grad():
-                    for _ in range(6):
-                        ddp_out = model(inp)
-                        local_out = local_model(inp)
-                        self.assertEqual(ddp_out, local_out)
-                    torch.cuda.synchronize()
-
-                model.eval()
-                for _ in range(6):
-                    ddp_out = model(inp)
-                    local_out = local_model(inp)
-                    self.assertEqual(ddp_out, local_out)
-                torch.cuda.synchronize()
-
-            self._barrier(timeout=30)
-
-            model = nn.SyncBatchNorm(
+            syncbn_model = nn.SyncBatchNorm(
                 2, momentum=0.99, track_running_stats=False
-            ).cuda(rank)
-            local_model = copy.deepcopy(model)
-            model = torch.nn.parallel.DistributedDataParallel(
+            ).cuda()
+            local_syncbn_model = copy.deepcopy(model)
+            syncbn_model = torch.nn.parallel.DistributedDataParallel(
                 model,
                 device_ids=[rank]
             )
-            inp = torch.randn(10, 2, 4, 4, device=rank)
-            self._barrier(timeout=30)
-            if self.rank == 0:
-                # Note that with SyncBN modules we need to set eval() to make
-                # syncBN behave as a regular BN layer.
-                model.eval()
-                local_model.eval()
-                with torch.no_grad():
-                    for _ in range(6):
-                        ddp_out = model(inp)
-                        local_out = local_model(inp)
-                        self.assertEqual(ddp_out, local_out)
-                    torch.cuda.synchronize()
+            inp = torch.randn(10, 2, device=rank)
+            inp_syncbn = torch.randn(10, 2, 4, 4, device=rank)
+            tests = [
+                    (model, local_model, inp), (syncbn_model, local_syncbn_model, inp_syncbn)
+            ]
+            for test in tests:
+                test_model, test_local_model, test_inp = test
+                if self.rank == 0:
+                    with torch.no_grad():
+                        for _ in range(6):
+                            self.assertEqual(
+                                test_model(test_inp),
+                                test_local_model(test_inp)
+                            )
 
+                    model.eval()
+                    for _ in range(6):
+                        self.assertEqual(
+                            test_model(test_inp),
+                            test_local_model(test_inp)
+                        )
+
+            # Barrier since only rank 0 runs inference. Test should be
+            # much faster than 30s, but this is to avoid flakiness.
             self._barrier(timeout=30)
 
 
