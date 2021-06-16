@@ -224,6 +224,10 @@ def node_supports_equalization(node: Node, modules) -> bool:
         return node.target == nn.functional.linear
     return False
 
+def is_equalization_observer(observer: nn.Module) -> bool:
+    return (isinstance(observer, _InputEqualizationObserver) or
+            isinstance(observer, _WeightEqualizationObserver))
+
 def get_weight_eq_obs(
     input_eq_obs_node: Node,
     model: GraphModule,
