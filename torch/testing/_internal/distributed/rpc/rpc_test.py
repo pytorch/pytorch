@@ -6045,19 +6045,19 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def _test_cuda_future_extraction(self, wrapper, unwrapper, sparse_tensor):
         # We check proper CUDA stream synchronization by adding to the tensor
         # in one stream to get the expected value, and reading it from another stream.
-        if sparse_tensor:
-            tensor = build_sparse_tensor().to("cuda:0")
-            add_tensor = build_sparse_tensor().to("cuda:0")
-            expected_tensor = (tensor + add_tensor).coalesce()
-        else:
-            tensor = torch.zeros((100,), device="cuda:0")
-            add_tensor = torch.ones((100,), device="cuda:0")
-            expected_tensor = tensor + add_tensor
         future = Future(devices=["cuda:0"])
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
+                if sparse_tensor:
+                    tensor = build_sparse_tensor().to("cuda:0")
+                    add_tensor = build_sparse_tensor().to("cuda:0")
+                    expected_tensor = (tensor + add_tensor).coalesce()
+                else:
+                    tensor = torch.zeros((100,), device="cuda:0")
+                    add_tensor = torch.ones((100,), device="cuda:0")
+                    expected_tensor = tensor + add_tensor
                 torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
                 tensor += add_tensor
                 if sparse_tensor:
@@ -6068,7 +6068,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 if sparse_tensor:
                     self.assertTrue(torch.eq(tensor.indices(), expected_tensor.indices()).all().item())
                     self.assertTrue(torch.eq(tensor.values(), expected_tensor.values()).all().item())
-                    self.assertTrue(torch.eq(torch.tensor(tensor.size()), torch.tensor(expected_tensor.size())).all().item())
+                    self.assertEqual(tensor.size(), expected_tensor.size())
                 else:
                     self.assertTrue(torch.eq(tensor, expected_tensor).all().item())
 

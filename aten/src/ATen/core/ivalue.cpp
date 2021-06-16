@@ -953,7 +953,7 @@ std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDa
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    auto num_data_ptrs = 0;
+    size_t num_data_ptrs = 0;
     for (const at::Tensor& tensor : tensors) {
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
