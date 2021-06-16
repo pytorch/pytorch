@@ -53,7 +53,6 @@ const static std::unordered_set<std::string> reserved_names = {
     "__torch__",
     // the python keywords
     "and",
-    "as",
     "assert",
     "async",
     "await",
@@ -84,7 +83,6 @@ const static std::unordered_set<std::string> reserved_names = {
     "return",
     "True",
     "try",
-    "with",
     "while",
     "with",
     "yield",
