@@ -467,11 +467,11 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_from_buffer(PyObject* self_, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "from_buffer(PyObject* buffer, ScalarType dtype=None, int64_t count=-1, int64_t offset=0, *, bool requires_grad=False)",
+    "frombuffer(PyObject* buffer, ScalarType dtype=None, int64_t count=-1, int64_t offset=0, *, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   PyObject* ret = nullptr;
@@ -671,7 +671,7 @@ static PyMethodDef torch_functions[] = {
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", castPyCFunctionWithKeywords(THPVariable_mm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
-  {"from_buffer", castPyCFunctionWithKeywords(THPVariable_from_buffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"frombuffer", castPyCFunctionWithKeywords(THPVariable_frombuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"hsmm", castPyCFunctionWithKeywords(THPVariable_hspmm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"linspace", castPyCFunctionWithKeywords(THPVariable_linspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

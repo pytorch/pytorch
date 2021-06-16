@@ -3441,9 +3441,9 @@ Example::
     array([-1,  2,  3])
 """)
 
-add_docstr(torch.from_buffer,
+add_docstr(torch.frombuffer,
            r"""
-from_buffer(buffer, dtype=None, count=-1, offset=0, *, requires_grad=False) -> Tensor
+frombuffer(buffer, dtype=None, count=-1, offset=0, *, requires_grad=False) -> Tensor
 
 Create a 1-dimensional :class:`Tensor` from an object that implements
 the Python buffer protocol.
@@ -3481,7 +3481,7 @@ Example::
 
     >>> import array
     >>> a = array.array('i', [1, 2, 3])
-    >>> t = torch.from_buffer(a, dtype=torch.int32)
+    >>> t = torch.frombuffer(a, dtype=torch.int32)
     >>> t
     tensor([ 1,  2,  3])
     >>> t[0] = -1

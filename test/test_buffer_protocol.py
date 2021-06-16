@@ -25,7 +25,7 @@ def get_dtype_size(dtype):
         bytes = torch.iinfo(dtype).bits / 8
     return int(bytes)
 
-# Tests for the `from_buffer` function (only work on CPU):
+# Tests for the `frombuffer` function (only work on CPU):
 #   Constructs tensors from Python objects that implement the buffer protocol,
 #   without copying data.
 class TestBufferProtocol(common.TestCase):
@@ -37,7 +37,7 @@ class TestBufferProtocol(common.TestCase):
         last = first + count if count > 0 else len(arr)
 
         pyarray = array.array(TORCH_TO_ARRAYTYPE[dtype], arr)
-        tensor = torch.from_buffer(pyarray, dtype=dtype, count=count, offset=offset, **kwargs)
+        tensor = torch.frombuffer(pyarray, dtype=dtype, count=count, offset=offset, **kwargs)
 
         self.assertSequenceEqual(pyarray[first:last], tensor)
         return (pyarray, tensor)
