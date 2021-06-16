@@ -963,7 +963,7 @@ def compare_with_reference(torch_fn, ref_fn, sample_input):
         msg = None
 
     if isinstance(actual, torch.Tensor):
-        torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype), msg=msg, check_device=False)
+        torch.testing.assert_close(actual.cpu(), torch.as_tensor(expected, dtype=actual.dtype), msg=msg)
     else:
         for x, y in zip(expected, actual):
             # Testing multi-outputs results
