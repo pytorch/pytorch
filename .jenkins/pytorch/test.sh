@@ -55,9 +55,13 @@ else
   export PYTORCH_TEST_SKIP_NOARCH=1
 fi
 
-if [[ -n "$IN_PULL_REQUEST" ]]; then
+if [[ -n "$IN_PULL_REQUEST" ]] && [[ -z "$RUN_MASTER_BUILD" ]]; then
+  echo "Skip CUDA mem leak check"
+  echo "env-var: IN_PULL_REQUEST:$IN_PULL_REQUEST and RUN_MASTER_BUILD:$RUN_MASTER_BUILD"
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
 else
+  echo "Not skipping CUDA mem leak check"
+  echo "env-var: IN_PULL_REQUEST:$IN_PULL_REQUEST and RUN_MASTER_BUILD:$RUN_MASTER_BUILD"
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
 fi
 

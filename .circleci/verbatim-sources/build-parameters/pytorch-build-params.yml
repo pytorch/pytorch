@@ -20,6 +20,7 @@ pytorch_params: &pytorch_params
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     BUILD_ONLY: << parameters.build_only >>
+    RUN_MASTER_ONLY: << pipeline.parameters.run_master_build >>
   resource_class: << parameters.resource_class >>
 
 pytorch_android_params: &pytorch_android_params
