@@ -39,14 +39,13 @@ Tensor addmm(
   params.OC = weight_.size(0);
   params.IC = weight_.size(1);
   params.KH = params.KW = 1, params.H = params.W = 1;
-  auto packedWeights =
-      permuteWeights(weight_.data_ptr<float>(), weight_.sizes().vec());
+  auto packedWeights = weight_.contiguous(c10::MemoryFormat::ChannelsLast);
   MetalTensorImplStorage mt{{params.N, params.OC}};
   SmallVector<int64_t, 4> textureSize = {params.N, params.OC, 1, 1};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input_);
   mt.texture()->allocateTemporaryStorage(textureSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
-  float* w = packedWeights.data();
+  float* w = packedWeights.data_ptr<float>();
   float* b = bias.data_ptr<float>();
   MPSCNNFullyConnectedOp* fc = [MPSCNNFullyConnectedOp linear:params
                                                       weights:w
