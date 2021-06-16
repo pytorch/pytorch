@@ -31,8 +31,7 @@ from .quantization_patterns import (
 from .quantization_types import Pattern
 
 from ._equalize import (
-    _InputEqualizationObserver,
-    _WeightEqualizationObserver,
+    is_equalization_observer,
     node_supports_equalization,
 )
 
@@ -166,7 +165,7 @@ def insert_observer(
     if model_device:
         observer.to(model_device)
     # add observer module as attribute
-    if isinstance(observer, _InputEqualizationObserver) or isinstance(observer, _WeightEqualizationObserver):
+    if is_equalization_observer(observer):
         prefix = node.name + '_equalization_process_'
     else:
         prefix = node.name + '_activation_post_process_'
@@ -977,13 +976,13 @@ def save_state(
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
     observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
 
-def _prepare(
+def prepare(
         model: GraphModule,
         qconfig_dict: Any,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        prepare_custom_config_dict: Optional[Dict[str, Any]],
-        equalization_qconfig_dict: Optional[Dict[str, Any]],
-        is_standalone_module: bool) -> ObservedGraphModule:
+        prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
+        equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+        is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
