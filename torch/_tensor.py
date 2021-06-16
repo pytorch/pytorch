@@ -3,7 +3,6 @@ import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
-import weakref
 
 import torch
 import torch._C as _C
@@ -86,8 +85,10 @@ class Tensor(torch._C._TensorBase):
                         self.requires_grad,
                         self._backward_hooks)
                 else:
-                    new_tensor = self.new()
+                    new_tensor = self.new_empty([])
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    if self.is_conj():
+                        new_tensor = new_tensor.conj_physical()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
@@ -354,33 +355,6 @@ class Tensor(torch._C._TensorBase):
     have forward mode AD gradients.
     """)
 
-    def retain_grad(self):
-        r"""Enables .grad attribute for non-leaf Tensors."""
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.retain_grad, (self,), self)
-        if not self.requires_grad:
-            raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
-        if self.is_leaf:  # no-op for leaves
-            return
-        if hasattr(self, 'retains_grad'):
-            return
-        weak_self = weakref.ref(self)
-
-        def retain_grad_hook(grad):
-            var = weak_self()
-            if var is None:
-                return
-            if var._grad is None:
-                if grad.is_sparse:
-                    var._grad = grad.clone()
-                else:
-                    var._grad = grad.clone(memory_format=torch.contiguous_format)
-            else:
-                var._grad = var._grad + grad
-
-        self.register_hook(retain_grad_hook)
-        self.retains_grad = True
-
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
 
@@ -554,6 +528,12 @@ class Tensor(torch._C._TensorBase):
     __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+
+    @_wrap_type_error_to_not_implemented
+    def __rmod__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmod__, (self, other), self, other)
+        return torch.remainder(other, self)
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
@@ -953,10 +933,14 @@ class Tensor(torch._C._TensorBase):
                 while i < row_indices.size()[0] and row_indices[i] == irow:
                     i += 1
                 ro.append(i)
-
-            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=row_indices.dtype),
-                                           coalesced_self.indices()[1], coalesced_self.values(),
-                                           size=coalesced_self.shape, dtype=coalesced_self.dtype)
+            device = coalesced_self.values().device
+            crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
+            return torch.sparse_csr_tensor(crow_indices,
+                                           coalesced_self.indices()[1].contiguous(),
+                                           coalesced_self.values(),
+                                           size=coalesced_self.shape,
+                                           dtype=coalesced_self.dtype,
+                                           device=device)
         elif self.is_sparse_csr:
             return self
         else:
@@ -984,12 +968,6 @@ class Tensor(torch._C._TensorBase):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
             return handle_torch_function(Tensor.grad.__get__, (self,), self)  # type: ignore[attr-defined]
 
-        if self.requires_grad and not hasattr(self, "retains_grad") and not self.is_leaf and self._grad is None:
-            warnings.warn("The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
-                          "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
-                          "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
-                          "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
-                          "github.com/pytorch/pytorch/pull/30531 for more information.", stacklevel=2)
         return self._grad
 
     @grad.setter

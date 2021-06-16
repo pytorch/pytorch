@@ -97,6 +97,10 @@ class no_grad(_DecoratorContextManager):
 
     Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
+    .. note::
+        No-grad is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
 
     Example::
 
@@ -136,6 +140,10 @@ class enable_grad(_DecoratorContextManager):
 
     Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
+    .. note::
+        enable_grad is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
 
     Example::
 
@@ -178,6 +186,10 @@ class set_grad_enabled(object):
                      (``False``). This can be used to conditionally enable
                      gradients.
 
+    .. note::
+        set_grad_enabled is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
 
     Example::
 
@@ -221,6 +233,11 @@ class inference_mode(_DecoratorContextManager):
     in other threads.
 
     Also functions as a decorator. (Make sure to instantiate with parenthesis.)
+
+    .. note::
+        Inference mode is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
 
     Args:
         mode (bool): Flag whether to enable or disable inference mode
