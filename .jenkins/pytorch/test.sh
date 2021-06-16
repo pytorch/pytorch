@@ -125,7 +125,7 @@ fi
 # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
 # CIRCLE_PULL_REQUEST comes from CircleCI
 # GITHUB_HEAD_REF comes from Github Actions
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
