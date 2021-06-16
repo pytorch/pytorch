@@ -296,6 +296,14 @@ class TestNamedTensor(TestCase):
             check_tuple_return(F.max_pool2d_with_indices, [named_tensor_2d, [2, 2]], named_tensor_2d.names)
             check_tuple_return(F.max_pool3d_with_indices, [named_tensor_3d, [2, 2, 2]], named_tensor_3d.names)
 
+    def test_max_pooling_without_names_does_not_warn(self):
+        tensor_2d = torch.zeros(2, 3, 5, 7, requires_grad=True)
+        with warnings.catch_warnings(record=True) as warns:
+            warnings.simplefilter("always")
+            result = F.max_pool2d(tensor_2d, [2, 2])
+            result.sum().backward()
+            self.assertEqual(len(warns), 0)
+
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
         buf = io.BytesIO()
