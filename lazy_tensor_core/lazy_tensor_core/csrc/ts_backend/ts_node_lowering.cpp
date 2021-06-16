@@ -17,11 +17,13 @@
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/softmax.h"
+#include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
+#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/permutation_util.h"
@@ -77,6 +79,10 @@ class TSNodeLowering : public NodeLowering {
         const ir::Output& argument = node->operand(0);
         return ir::ops::Permute::MakePermuteShape(argument.shape(),
                                                   permute->dims());
+      }
+      case at::aten::sum: {
+        return InferSum(
+            ir::NodeCast<ir::ops::Sum>(node, ir::OpKind(at::aten::sum)));
       }
       case at::aten::constant_pad_nd: {
         auto constant_pad_nd = ir::NodeCast<ir::ops::ConstantPadNd>(
@@ -163,6 +169,10 @@ class TSNodeLowering : public NodeLowering {
       return LowerSoftmaxBackward(ir::NodeCast<ir::ops::TSSoftmaxBackward>(
           node, ir::OpKind(at::aten::_softmax_backward_data)));
     }
+    if (node->op().op == at::aten::sum) {
+      return LowerSum(
+          ir::NodeCast<ir::ops::Sum>(node, ir::OpKind(at::aten::sum)));
+    }
     if (node->op().op == at::aten::unsqueeze) {
       return LowerUnsqueeze(ir::NodeCast<ir::ops::Unsqueeze>(
           node, ir::OpKind(at::aten::unsqueeze)));
@@ -238,18 +248,40 @@ class TSNodeLowering : public NodeLowering {
     return lazy_tensors::Shape(tensor1_shape.element_type(), {n, p});
   }
 
-  TSOpVector LowerBuiltin(
-      const ir::Node* node,
-      const std::vector<torch::jit::NamedValue>& arguments) {
-    return LowerBuiltin(node->op().op, arguments);
+  static lazy_tensors::Shape InferSum(const ir::ops::Sum* sum) {
+    const ir::Output& argument = sum->operand(0);
+    const lazy_tensors::Shape& argument_shape = argument.shape();
+    const auto argument_dimensions = argument_shape.dimensions();
+    std::vector<lazy_tensors::int64> output_dimensions;
+    const auto& sum_dimensions = sum->dimensions();
+    for (lazy_tensors::int64 i = 0; i < argument_shape.rank(); ++i) {
+      auto it = std::find(sum_dimensions.begin(), sum_dimensions.end(), i);
+      if (it == sum_dimensions.end()) {
+        output_dimensions.push_back(argument_dimensions[i]);
+      } else if (sum->keep_reduced_dimensions()) {
+        output_dimensions.push_back(1);
+      }
+    }
+    lazy_tensors::PrimitiveType element_type =
+        sum->dtype() ? torch_lazy_tensors::TensorTypeToLtcType(*sum->dtype())
+                     : argument_shape.element_type();
+    return lazy_tensors::Shape(element_type, output_dimensions);
   }
 
   TSOpVector LowerBuiltin(
-      c10::Symbol sym, const std::vector<torch::jit::NamedValue>& arguments) {
+      const ir::Node* node,
+      const std::vector<torch::jit::NamedValue>& arguments,
+      const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
+    return LowerBuiltin(node->op().op, arguments, kwarguments);
+  }
+
+  TSOpVector LowerBuiltin(
+      c10::Symbol sym, const std::vector<torch::jit::NamedValue>& arguments,
+      const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
     auto builtin =
         std::make_shared<torch::jit::BuiltinFunction>(sym, at::nullopt);
     auto magic_method = std::make_shared<torch::jit::MagicMethod>("", builtin);
-    auto ret = magic_method->call({}, *function_, arguments, {}, 0);
+    auto ret = magic_method->call({}, *function_, arguments, kwarguments, 0);
     auto sv = dynamic_cast<torch::jit::SimpleValue*>(ret.get());
     LTC_CHECK(sv);
     if (sv->getValue()->type()->kind() == c10::TypeKind::TupleType) {
@@ -392,6 +424,16 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(node->dim());
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
     return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerSum(const ir::ops::Sum* sum) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(sum->operand(0)));
+    arguments.emplace_back(sum->dimensions());
+    arguments.emplace_back(sum->keep_reduced_dimensions());
+    std::vector<torch::jit::NamedValue> kwarguments;
+    kwarguments.emplace_back("dtype", sum->dtype());
+    return LowerBuiltin(sum, arguments, kwarguments);
   }
 
   TSOpVector LowerUnsqueeze(const ir::ops::Unsqueeze* node) {
