@@ -844,6 +844,14 @@ void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
       .check_all_same_dtype(true));
 }
 
+void TensorIteratorBase::build_unary_comparison_op(const Tensor& out, const Tensor& a) {
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_owned_output(out)
+      .add_owned_input(a)
+      .check_all_same_dtype(false));
+}
+
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_binary_op(out, a, b);
@@ -902,6 +910,12 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
 TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
   TensorIterator iter;
   iter.build_unary_float_op(out, a);
+  return iter;
+}
+
+TensorIterator TensorIterator::unary_comparison_op(const Tensor& out, const Tensor& a) {
+  TensorIterator iter;
+  iter.build_unary_comparison_op(out, a);
   return iter;
 }
 

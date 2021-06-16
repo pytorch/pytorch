@@ -9531,15 +9531,19 @@
 
 - func: isposinf(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: isposinf.out
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: isposinf_out
 
 - func: isneginf(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: isneginf.out
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: isneginf_out
 
