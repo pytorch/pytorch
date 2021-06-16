@@ -316,8 +316,8 @@ def is_cascade_lake():
         info_cpu = re.sub('\s+', ' ', (subprocess.check_output("lscpu", shell=True).strip()).decode())
         cpu_family_6 = "family: 6" in info_cpu
         cpu_model_85 = "Model: 85" in info_cpu
-        cpu_stepping_5 = ("Stepping: 5" in info_cpu) or ("Stepping: 6" in info_cpu) or ("Stepping: 7" in info_cpu)
-        if cpu_family_6 and cpu_model_85 and cpu_stepping_5:
+        cpu_stepping = ("Stepping: 5" in info_cpu) or ("Stepping: 6" in info_cpu) or ("Stepping: 7" in info_cpu)
+        if cpu_family_6 and cpu_model_85 and cpu_stepping:
             return True
     else:
         return False
