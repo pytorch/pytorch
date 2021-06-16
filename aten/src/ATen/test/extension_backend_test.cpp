@@ -50,7 +50,6 @@ TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendExtensionTest, TestRegisterOp) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -66,7 +65,6 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   ASSERT_EQ(test_int, 2);
 
   // Ensure that non-MSNPU operator still works
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor d = empty({5, 5}, at::kCPU);
   ASSERT_EQ(d.device().type(), at::kCPU);
 }

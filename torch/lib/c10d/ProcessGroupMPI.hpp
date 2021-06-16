@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_MPI
+
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -7,6 +9,9 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#include <ATen/core/ivalue.h>
+#include <ATen/core/ivalue_inl.h>
 
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Types.hpp>
@@ -41,7 +46,7 @@ struct WorkEntry {
   // For input and output tensors (in-place), we will always use src
   std::vector<at::Tensor> src;
 
-  // Copy of user provided outputs, we also make a copy of it in
+  // Copy of user provided outputs.
   const std::vector<at::Tensor> dst;
 
   // src rank returned, for recv only
@@ -73,7 +78,7 @@ struct WorkEntry {
 //
 // CUDA tensor can be supported if the MPI used is CUDA-aware MPI, and
 // ProcessGroupMPI will automatically detect this support.
-class ProcessGroupMPI : public ProcessGroup {
+class TORCH_API ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
    public:
@@ -82,20 +87,24 @@ class ProcessGroupMPI : public ProcessGroup {
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
-        : ProcessGroup::Work(
-              -1,
-              OpType::UNKNOWN,
-              profilingTitle,
-              inputTensors),
-          outputTensors_(std::move(outputTensors)) {}
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+          outputTensors_(std::move(outputTensors)),
+          future_(c10::make_intrusive<at::ivalue::Future>(
+              c10::ListType::create(c10::TensorType::get()))) {}
 
     std::vector<at::Tensor> result() override;
+
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
    protected:
     friend class ProcessGroupMPI;
 
    private:
+    void finishWorkMPI();
+    void finishWorkMPIError(std::exception_ptr eptr);
+
     std::vector<at::Tensor> outputTensors_;
+    c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 
   class AsyncWork : public ProcessGroup::Work {
@@ -256,3 +265,5 @@ class ProcessGroupMPI : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_MPI

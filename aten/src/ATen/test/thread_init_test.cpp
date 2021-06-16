@@ -9,12 +9,10 @@
 // will throw an exception when multiple threads call
 // their first parallel construct.
 void test(int given_num_threads) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto t = at::ones({1000 * 1000}, at::CPU(at::kFloat));
   ASSERT_TRUE(given_num_threads >= 0);
   ASSERT_EQ(at::get_num_threads(), given_num_threads);
   auto t_sum = t.sum();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 1000; ++i) {
     t_sum = t_sum + t.sum();
   }
@@ -37,7 +35,6 @@ int main() {
   #endif
 
   // test inter-op settings
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::set_num_interop_threads(5);
   ASSERT_EQ(at::get_num_interop_threads(), 5);
   ASSERT_ANY_THROW(at::set_num_interop_threads(6));

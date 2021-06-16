@@ -168,7 +168,6 @@ struct Compound : public Tree {
 
 // tree pretty printer
 struct pretty_tree {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   pretty_tree(const TreeRef& tree, size_t col = 40) : tree(tree), col(col) {}
   const TreeRef& tree;
   size_t col;

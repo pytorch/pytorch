@@ -1,9 +1,12 @@
 #include <c10d/ProcessGroupMPI.hpp>
 
+#ifdef USE_C10D_MPI
+
 #include <limits>
 #include <map>
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/irange.h>
 
 #if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
@@ -18,7 +21,7 @@ namespace c10d {
       std::string err = "MPI error in: " + std::string(__FILE__) + ":" + \
           std::to_string(__LINE__) +                                     \
           ", with error code: " + std::to_string(mpiStatus);             \
-      throw std::runtime_error(err);                                     \
+      TORCH_CHECK(false, err);                                     \
     }                                                                    \
   } while (0)
 
@@ -60,13 +63,13 @@ bool cudaAwareMpiCheck() {
 // Checking the input tensor's validity
 void checkSingleTensorHelper(const at::Tensor& tensor) {
   if (!tensor.is_contiguous()) {
-    throw std::runtime_error("input tensor has to be contiguous");
+    TORCH_CHECK(false, "input tensor has to be contiguous");
   }
   if (tensor.is_sparse()) {
-    throw std::runtime_error("input tensor has to be dense");
+    TORCH_CHECK(false, "input tensor has to be dense");
   }
   if (tensor.is_cuda() && !cudaAwareMpiCheck()) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "CUDA tensor detected and the MPI used doesn't "
         "have CUDA-aware MPI support");
   }
@@ -74,7 +77,7 @@ void checkSingleTensorHelper(const at::Tensor& tensor) {
 
 void checkSingleTensor(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "MPI process group does not support multi-GPU collectives");
   }
   checkSingleTensorHelper(tensors[0]);
@@ -86,7 +89,7 @@ void checkSameSizeAndType(
   for (const auto& tensor : tensors) {
     if ((tensor.numel() != t_in.numel()) ||
         (tensor.scalar_type() != t_in.scalar_type())) {
-      throw std::runtime_error("Tensors are not equal in size or data type");
+      TORCH_CHECK(false, "Tensors are not equal in size or data type");
     }
     checkSingleTensorHelper(tensor);
   }
@@ -96,6 +99,20 @@ void checkSameSizeAndType(
 
 std::vector<at::Tensor> ProcessGroupMPI::WorkMPI::result() {
   return outputTensors_;
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupMPI::WorkMPI::getFuture() {
+  return future_;
+}
+
+void ProcessGroupMPI::WorkMPI::finishWorkMPIError(std::exception_ptr eptr) {
+  future_->setError(eptr);
+  finish(eptr);
+}
+
+void ProcessGroupMPI::WorkMPI::finishWorkMPI() {
+  future_->markCompleted(at::IValue(outputTensors_));
+  finish();
 }
 
 ProcessGroupMPI::AsyncWork::AsyncWork(
@@ -141,7 +158,7 @@ bool ProcessGroupMPI::AsyncWork::isCompleted() {
 
 bool ProcessGroupMPI::AsyncWork::isSuccess() const {
   if (request_ != MPI_REQUEST_NULL) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Invalid call to AsyncWork::isSuccess before work has completed");
   }
 
@@ -215,14 +232,14 @@ void ProcessGroupMPI::initMPIOnce() {
     MPI_CHECK(MPI_Init_thread(
         nullptr, nullptr, MPI_THREAD_SERIALIZED, &mpiThreadSupport_));
     if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Used MPI implementation doesn't have the "
           "minimum level of threading support: "
           "MPI_THREAD_SERIALIZED. This is required by "
           "c10d package");
     }
     if (std::atexit(ProcessGroupMPI::mpiExit)) {
-      throw std::runtime_error("Fail to register the MPI exit handler");
+      TORCH_CHECK(false, "Fail to register the MPI exit handler");
     }
   });
 }
@@ -251,7 +268,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       constexpr int kMaxNumRetries = 3;
       bool groupComm_updated = false;
       MPI_Barrier(MPI_COMM_WORLD);
-      for (int i = 0; i < kMaxNumRetries; ++i) {
+      for (const auto i : c10::irange(kMaxNumRetries)) {
         if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
           groupComm_updated = true;
           break;
@@ -268,7 +285,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       MPI_CHECK(MPI_Comm_size(groupComm, &size));
 
       if (rank < 0 || size < 0) {
-        throw std::runtime_error("Failed to get the world_size / rank");
+        TORCH_CHECK(false, "Failed to get the world_size / rank");
       }
     }
   }
@@ -286,7 +303,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
 ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
     : ProcessGroup(rank, size), stop_(false), pgComm_(pgComm) {
   if (pgComm_ == MPI_COMM_NULL) {
-    throw std::runtime_error("pgComm_ must not be MPI_COMM_NULL");
+    TORCH_CHECK(false, "pgComm_ must not be MPI_COMM_NULL");
   }
 
   // Start the worker thread accepting MPI calls
@@ -338,9 +355,9 @@ void ProcessGroupMPI::runLoop() {
 
     try {
       workEntry->run(workEntry);
-      work->finish();
+      work->finishWorkMPI();
     } catch (...) {
-      work->finish(std::current_exception());
+      work->finishWorkMPIError(std::current_exception());
     }
 
     lock.lock();
@@ -410,7 +427,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "allreduce_coalesced is currently not supported with MPI");
 }
 
@@ -450,12 +467,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
     const AllgatherOptions& opts) {
   checkSingleTensor(inputTensors);
   if (outputTensors.size() != 1) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "MPI process group only supports a single "
         "tensor op");
   }
   if (static_cast<size_t>(size_) != outputTensors[0].size()) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "All gather: number of output tensors should equal "
         "to the world size");
   }
@@ -479,7 +496,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
             mpiDatatype.at(data.scalar_type()),
             pgComm_));
 
-        for (size_t i = 0; i < outputDataVec.size(); ++i) {
+        for (const auto i : c10::irange(outputDataVec.size())) {
           outputDataVec[i].copy_(flatOutputTensor[i]);
         }
       };
@@ -495,7 +512,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "ProcessGroupMPI does not support allgather_coalesced");
 }
 
@@ -507,16 +524,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
 
   if (rank_ != opts.rootRank) {
     if (outputTensors.size() > 0) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Gather: number of output tensors should be 0 "
           "for non-root");
     }
   } else {
     if (outputTensors.size() != 1) {
-      throw std::runtime_error("Gather: multi-GPU collective is not supported");
+      TORCH_CHECK(false, "Gather: multi-GPU collective is not supported");
     }
     if (static_cast<size_t>(size_) != outputTensors[0].size()) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Gather: number of output tensors should equal "
           "to the world size");
     }
@@ -550,7 +567,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         if (rank_ == opts.rootRank) {
           const std::vector<at::Tensor>& outputDataVec = entry->dst;
           // copy the flattened output tensors to the outputs
-          for (size_t i = 0; i < outputDataVec.size(); ++i) {
+          for (const auto i : c10::irange(outputDataVec.size())) {
             outputDataVec.at(i).copy_(flatOutputTensor[i]);
           }
         }
@@ -581,17 +598,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 
   if (rank_ != opts.rootRank) {
     if (inputTensors.size() > 0) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Scatter: number of input tensors should be 0 "
           "for non-root");
     }
   } else {
     if (inputTensors.size() != 1) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Scatter: multi-GPU collective is not supported");
     }
     if (static_cast<size_t>(size_) != inputTensors[0].size()) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Scatter: number of input tensors should equal "
           "to the world size");
     }
@@ -610,7 +627,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
           sendbuf = flatInputTensor.data_ptr();
 
           // copy the input tensors to the flatten large send buffer
-          for (size_t i = 0; i < inputDataVec.size(); ++i) {
+          for (const auto i : c10::irange(inputDataVec.size())) {
             flatInputTensor[i].copy_(inputDataVec.at(i));
           }
         }
@@ -653,7 +670,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
-  throw std::runtime_error("ProcessGroupMPI does not support reduce_scatter");
+  TORCH_CHECK(false, "ProcessGroupMPI does not support reduce_scatter");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
@@ -769,7 +786,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
         at::Tensor dstFlatData = at::empty({dst_len}, dstdata[0].options());
         auto srcFlatDataSplits =
             srcFlatData.split_with_sizes(c10::IntArrayRef(send_lengthsL), 0);
-        for (int i = 0; i < size_; i++) {
+        for(const auto i : c10::irange(size_)) {
           srcFlatDataSplits[i].copy_(srcdata[i].view({-1}));
         }
         c10::DeviceGuard guard1(srcdata[0].device());
@@ -787,7 +804,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
 
         auto dstFlatDataSplits =
             dstFlatData.split_with_sizes(c10::IntArrayRef(recv_lengthsL), 0);
-        for (int i = 0; i < size_; i++) {
+        for(const auto i : c10::irange(size_)) {
           dstdata[i].view({-1}).copy_(dstFlatDataSplits[i]);
         }
       };
@@ -900,8 +917,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "no support for _allgather_base in MPI process group");
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_MPI

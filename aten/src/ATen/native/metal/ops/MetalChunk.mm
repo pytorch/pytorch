@@ -33,13 +33,12 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   auto outputSize2 = {input.size(0), last_split_size, input.size(2), input.size(3)};
   MetalTensorImplStorage mt1(outputSize1);
   MetalTensorImplStorage mt2(outputSize2);
-  mt1.texture()->allocateTemporaryTextureStorage(outputSize1, commandBuffer);
-  mt2.texture()->allocateTemporaryTextureStorage(outputSize2, commandBuffer);
+  mt1.texture()->allocateTemporaryStorage(outputSize1, commandBuffer);
+  mt2.texture()->allocateTemporaryStorage(outputSize2, commandBuffer);
   MPSImage* Y1 = mt1.texture()->image();
   MPSImage* Y2 = mt2.texture()->image();
-  NSString* kernelFunc = @"split_channels";
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:kernelFunc
+      specializedPipelineState:"split_channels"
                      Constants:@[
                          @(X.featureChannels),
                          @(Y1.featureChannels),
