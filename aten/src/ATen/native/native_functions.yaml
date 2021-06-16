@@ -9535,6 +9535,7 @@
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: isposinf_out
 
@@ -9544,6 +9545,7 @@
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: isneginf_out
 
