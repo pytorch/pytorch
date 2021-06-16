@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
-from torch.testing._internal.common_nn import NNTestCase, ModuleTest, \
+from torch.testing._internal.common_nn import ModuleTest, \
     module_tests, loss_reference_fns, \
     ctcloss_reference
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
@@ -314,7 +314,7 @@ class TestAvgPool(TestCase):
             self.assertTrue(not torch.isnan(y).any())
 
 
-class TestNN(NNTestCase):
+class TestNN(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -11592,7 +11592,7 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 # end TestNN.test_affine_* helpers
 
 
-class TestNNDeviceType(NNTestCase):
+class TestNNDeviceType(TestCase):
     def _test_dropout(self, cls, device, input, memory_format=torch.contiguous_format):
         p = 0.2
         input = input.to(device).fill_(1 - p)

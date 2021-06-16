@@ -4894,22 +4894,20 @@ def _convert_dtype(obj, dtype, requires_grad=False):
     else:
         return obj
 
+def _check_jacobian(test_case, module, input: _TensorOrTensors, jacobian_input=True):
+    jacobian_parameters = bool(_get_parameters(module)[0])
+    analytical = _analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
+    numerical = _numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
+    analytical_t = list(_iter_tensors(analytical))
+    numerical_t = list(_iter_tensors(numerical))
 
-class NNTestCase(TestCase):
-    def check_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True):
-        jacobian_parameters = bool(_get_parameters(module)[0])
-        analytical = _analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        numerical = _numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        analytical_t = list(_iter_tensors(analytical))
-        numerical_t = list(_iter_tensors(numerical))
-
-        differences = []
-        for a, n in zip(analytical_t, numerical_t):
-            if a.numel() != 0:
-                differences.append(a.add(n, alpha=-1).abs().max())
-            # TODO: compare structure (ensure analytic jacobian has correct shape)
-        if len(differences) > 0:
-            self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
+    differences = []
+    for a, n in zip(analytical_t, numerical_t):
+        if a.numel() != 0:
+            differences.append(a.add(n, alpha=-1).abs().max())
+        # TODO: compare structure (ensure analytic jacobian has correct shape)
+    if len(differences) > 0:
+        test_case.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
 def is_criterion_test(test_params):
@@ -5141,12 +5139,12 @@ class ModuleTest(object):
 
         # gradcheck doesn't support operators that take in dense inputs but
         # return sparse parameters. This only happens in the case of nn.Embedding
-        # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
+        # and nn.EmbeddingBag. Instead, we call `_check_jacobian`, which
         # is a slightly different version of gradcheck that can handle this.
         if self.has_sparse_gradients:
             assert len(input_tuple) == 1
             test_input_jacobian = torch.is_floating_point(input_tuple[0])
-            test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
+            _check_jacobian(test_case, module, input_tuple[0], test_input_jacobian)
         else:
             params = tuple(x for x in module.parameters())
             if self.is_criterion_test:
