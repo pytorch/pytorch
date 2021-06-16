@@ -616,7 +616,6 @@ Value* emitBuiltinCall(
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
-  std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
   schemas.reserve(variants.size());
   for (const std::shared_ptr<Operator>& op : variants) {

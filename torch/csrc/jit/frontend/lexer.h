@@ -168,7 +168,6 @@ struct TokenTrie {
 // once.
 struct TORCH_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
-    std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
       std::string str(1, *c);
       head->insert(str.c_str(), *c);

@@ -367,8 +367,6 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
   CellParamsSerializationType __getstate__() const override {
     // Boxed dispatch nonsense
     // This will be cleaned up in the subsequent PR
-    auto unpacked_ih = packed_w_ih->unpack();
-    auto unpacked_hh = packed_w_hh->unpack();
 
     std::vector<at::Tensor> tensors_to_serialize{
         /*b_ih=*/b_ih_,
@@ -381,11 +379,9 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
         {},
         {reduce_range_},
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
