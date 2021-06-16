@@ -802,9 +802,10 @@ class DistributedDataParallel(Module):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             self.reducer.save_thread_local_state()
             grad_enabled = torch.is_grad_enabled()
-            if grad_enabled and self.require_backward_grad_sync:
+            will_run_grad_reduction = grad_enabled and self.require_backward_grad_sync
+            if will_run_grad_reduction:
                 self.logger.set_runtime_stats_and_log()
-                self.reducer.prepare_for_forward()
+            self.reducer.prepare_for_forward(will_run_grad_reduction)
             if self.ddp_uneven_inputs_config.ddp_join_enabled:
                 ones = torch.ones(1, device=self.device)
                 work = dist.all_reduce(ones, group=self.process_group, async_op=True)
