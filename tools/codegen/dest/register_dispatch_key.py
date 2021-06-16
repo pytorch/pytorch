@@ -502,11 +502,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # operator; feeding it the output argument(s) if it is known
             if self.backend_index.dispatch_key is DispatchKey.Meta:
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
-                parent_class = f"at::meta::{meta.name(self.g)}"
+                parent_class = f"at::meta::structured_{meta.name(self.g)}"
             elif self.backend_index.dispatch_key is DispatchKey.CompositeExplicitAutograd:
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
-                parent_class = f"at::meta::{meta.name(self.g)}"
+                parent_class = f"at::meta::structured_{meta.name(self.g)}"
             else:
                 metadata = self.backend_index.get_kernel(self.g)
                 assert metadata is not None
