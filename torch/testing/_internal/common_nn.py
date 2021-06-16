@@ -4980,14 +4980,13 @@ class ModuleTest(object):
         self.check_inplace = kwargs.get('check_inplace', False)
         self.should_test_pickle = kwargs.get('pickle', not self.is_criterion_test)
         self.precision = kwargs.get('precision', 4e-4 if self.is_criterion_test else 2e-4)
+        self.cudnn = kwargs.get('cudnn', False)
+        self.FIXME_no_cuda_gradgrad_comparison = kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
         if self.is_criterion_test:
             self.check_half = kwargs.get('check_half', True)
             self.check_bfloat16 = kwargs.get('check_bfloat16', False)
             self.check_complex = kwargs.get('check_complex', False)
         else:
-            self.FIXME_no_cuda_gradgrad_comparison = \
-                kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
-            self.cudnn = kwargs.get('cudnn', False)
             self.skip_double = kwargs.get('skip_double', False)
             self.skip_half = kwargs.get('skip_half', False)
 
