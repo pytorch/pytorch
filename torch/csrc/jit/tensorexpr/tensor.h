@@ -85,7 +85,7 @@ class Placeholder {
   Placeholder(const std::vector<ExprHandle>& dims, const Dtype& dtype)
       : Placeholder(BufHandle("_", dims, dtype)) {}
 
-  Placeholder(const std::vector<ExprHandle>& dims)
+  explicit Placeholder(const std::vector<ExprHandle>& dims)
       : Placeholder(BufHandle("_", dims, kFloat)) {}
 
   const Buf* data() const {

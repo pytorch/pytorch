@@ -108,6 +108,14 @@ class TestTensorExprPyBind(JitTestCase):
             test_with_shape(8)
             test_with_shape(31)
 
+    def test_dtype_error(self):
+        with kernel_arena_scope():
+            one = te.ExprHandle.int(1)
+            te.Placeholder([one], torch.float32)  # ok
+            te.Placeholder([one])  # ok
+            self.assertRaises(TypeError,
+                              lambda: te.Placeholder([one], "float55"))
+
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_tensor_inputs(self):
         def f(a, b, c):
