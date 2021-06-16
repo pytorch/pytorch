@@ -11,7 +11,7 @@ namespace at {
 namespace vec {
 namespace {
 
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256))
+#ifdef CPU_CAPABILITY_AVX2
 
 struct Vectorizedi {
 protected:
@@ -33,9 +33,9 @@ public:
 
 struct Vectorizedi {};  // dummy definition to make Vectorizedi always defined
 
-#endif // #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256))
+#endif // #ifdef CPU_CAPABILITY_AVX2
 
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256))
+#ifdef CPU_CAPABILITY_AVX2 
 
 template <>
 class Vectorized<int64_t> : public Vectorizedi {

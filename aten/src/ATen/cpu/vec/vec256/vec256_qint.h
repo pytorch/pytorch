@@ -39,7 +39,7 @@ namespace at {
 namespace vec {
 namespace {
 
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 struct Vectorizedqi {
  protected:
@@ -1176,5 +1176,5 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
   return a.maximum(b);
 }
 
-#endif // (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
+#endif // if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 }}}

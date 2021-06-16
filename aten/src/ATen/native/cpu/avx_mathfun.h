@@ -33,7 +33,7 @@
 #include <ATen/native/cpu/Intrinsics.h>
 
 /* The original source of this file has been modified. */
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX512_256)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
 
 #if defined(__GNUC__)
 # define ALIGN32_BEG __attribute__((aligned(32)))

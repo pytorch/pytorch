@@ -8,7 +8,7 @@
 #include <limits>
 #include <mutex>
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX512_256)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
 #include <ATen/native/cpu/avx_mathfun.h>
 #endif
 
@@ -83,7 +83,7 @@ struct RandomKernel {
 
 // ==================================================== Normal ========================================================
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX512_256)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
 static void normal_fill_16_AVX2(float *data,
                          const __m256* two_pi,
                          const __m256* one,
@@ -119,9 +119,6 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG gener
   const __m256 std_v = _mm256_set1_ps(std);
 
   for (int64_t i = 0; i < size - 15; i += 16) {
-#ifdef __GNUC__
-    __builtin_prefetch(data + i + 32, 1, 1);
-#endif
     normal_fill_16_AVX2(data + i, &two_pi, &one, &minus_two, &mean_v, &std_v);
   }
 
@@ -135,7 +132,7 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG gener
     normal_fill_16_AVX2(data, &two_pi, &one, &minus_two, &mean_v, &std_v);
   }
 }
-#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512 or CPU_CAPABILITY_AVX512_256
+#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 #ifdef CPU_CAPABILITY_AVX512
 static void normal_fill_32_AVX512(float *data,
                          const __m512* two_pi,
@@ -173,9 +170,6 @@ void normal_fill_AVX512(Tensor& self, const float mean, const float std, RNG gen
 
   int64_t j = 0;
   for (; j < size - 31; j += 32) {
-#ifdef __GNUC__
-    __builtin_prefetch(data + j + 32, 1, 1);
-#endif
     normal_fill_32_AVX512(data + j, &two_pi, &one, &minus_two, &mean_v, &std_v);
   }
 
@@ -239,11 +233,11 @@ void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else // CPU_CAPABILITY_AVX512 is not defined
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)
+#ifdef CPU_CAPABILITY_AVX2
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
-#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512_256
+#endif // CPU_CAPABILITY_AVX2
 #endif // CPU_CAPABILITY_AVX512
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {

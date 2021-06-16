@@ -99,11 +99,11 @@
 #   BUILD_BINARY
 #     enables the additional binaries/ build
 #
-#   ATEN_AVX512=TRUE
-#     enables AVX512 ATen kernels if AVX512 is supported.
-#     ATen AVX512VL kernels with vector-width 256 would be compiled
-#     if supported by the machine, regardless of whether this environment
-#     variable is TRUE.
+#   ATEN_AVX512_256=TRUE
+#     ATen AVX2 kernels can use 32 ymm registers, instead of the default 16.
+#     This option can be used if AVX512 doesn't perform well on a machine.
+#     The FBGEMM library also uses AVX512_256 kernels on Xeon D processors,
+#     but it also has some (optimized) assembly code.
 #
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER

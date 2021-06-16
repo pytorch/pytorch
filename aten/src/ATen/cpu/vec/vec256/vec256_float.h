@@ -5,7 +5,7 @@
 
 #include <ATen/cpu/vec/vec256/intrinsics.h>
 #include <ATen/cpu/vec/vec256/vec256_base.h>
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -14,7 +14,7 @@ namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512_256)) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 template <> class Vectorized<float> {
 private:
