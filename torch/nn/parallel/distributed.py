@@ -863,7 +863,11 @@ class DistributedDataParallel(Module):
                 'find_unused': find_unused,
                 'num_iterations': self.num_iterations,
             }
-            output_tensor_list, treespec = tree_flatten(output)
+            output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
+            if output_is_rref:
+                output_tensor_list, treespec = tree_flatten(output.local_value())
+            else:
+                output_tensor_list, treespec = tree_flatten(output)
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
                 state_dict,
@@ -871,6 +875,8 @@ class DistributedDataParallel(Module):
             )
             # Reconstruct output data structure.
             output = tree_unflatten(passthrough_tensor_list, treespec)
+            if output_is_rref:
+                output = RRef(output)
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
