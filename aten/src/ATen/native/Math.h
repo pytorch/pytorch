@@ -220,6 +220,21 @@ static inline double zeta(double x, double q) {
   return s;
 }
 
+/*
+ * This function is derived from the implementation of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Evaluates polynomial of degree N:
+ *
+ *                     2          N
+ * y  =  C  + C x + C x  +...+ C x
+ *        0    1     2          N
+ *
+ * Coefficients are stored in reverse order:
+ *
+ * coef[0] = C  , ..., coef[N] = C  .
+ *            N                   0
+ */
 template <typename T>
 C10_HOST_DEVICE static inline T polevl(const T x, const T A[], size_t len) {
   T result = 0;
