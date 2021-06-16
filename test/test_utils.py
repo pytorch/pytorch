@@ -814,9 +814,9 @@ class TestStandaloneCPPJIT(TestCase):
                     # Windows prints "\r\n" for newlines.
                     textwrap.dedent(r.stdout.decode("utf-8")).replace("\r\n", "\n"),
                     textwrap.dedent("""\
-                     1  0  0
-                     0  1  0
-                     0  0  1
+                    tensor([[1., 0., 0.],
+                            [0., 1., 0.],
+                            [0., 0., 1.]])
                     [ CPUFloatType{3,3} ]
                     """)
                 )
