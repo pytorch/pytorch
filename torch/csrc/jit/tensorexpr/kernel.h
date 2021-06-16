@@ -36,6 +36,25 @@ using ArgValue = c10::variant<
     IntList,
     ArgNone>;
 
+// Get the dimensions of a value.
+std::vector<ExprHandle> valueShape(const ArgValue& v);
+
+// If v is a tensor, broadcast it to match the shape of axes, or return
+// directly if v is a constant.
+ExprHandle tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes);
+
+size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
+
+ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
+
+ExprHandle constant(const ArgValue& v);
+
+std::vector<ExprHandle> computeIndicesToBroadcast(
+    const std::vector<ExprHandle>& outputAxes,
+    const std::vector<ExprHandle>& inputSizes);
+
 inline std::string getArgValueName(const ArgValue& a) {
   if (c10::get_if<tensorexpr::BufHandle>(&a)) {
     return "BufHandle";
