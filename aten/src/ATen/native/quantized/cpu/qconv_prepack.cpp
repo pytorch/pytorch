@@ -25,7 +25,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         torch::List<int64_t> dilation,
         int64_t groups,
         bool transpose,
-        bool safe_on_fbgemm) {
+        bool input_qrange_le_128) {
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ",
@@ -167,7 +167,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
           dilation,
           groups,
           transpose,
-          safe_on_fbgemm,
+          input_qrange_le_128,
           col_offsets,
           kSpatialDim == 2 ? std::vector<int64_t>{kernel_h, kernel_w}
                            : std::vector<int64_t>{kernel_d, kernel_h, kernel_w},
@@ -195,8 +195,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
         torch::List<int64_t> dilation,
         int64_t groups,
         bool transpose,
-        bool safe_on_fbgemm) {
-  // TODO: save safe_on_fbgemm
+        bool input_qrange_le_128) {
+  // TODO: save input_qrange_le_128
   TORCH_CHECK(
       kSpatialDim == 2 || kSpatialDim == 3,  // 1D is packed as 2d, hence we don't need other checks
       "QNNPACK packing only supports 2D / 3D convolution.");
@@ -294,7 +294,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
               dilation,
               groups,
               transpose,
-              safe_on_fbgemm,
+              input_qrange_le_128,
               c10::nullopt, /* input_scale */
               {kernel_h, kernel_w},
               w_scales,
@@ -316,7 +316,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightsQnnp<
         torch::List<int64_t> dilation,
         int64_t groups,
         bool transpose,
-        bool safe_on_fbgemm);
+        bool input_qrange_le_128);
 #endif // USE_PYTORCH_QNNPACK
 
 namespace at {
@@ -333,17 +333,17 @@ class QConvPackWeightInt8 final {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      bool safe_on_fbgemm) {
+      bool input_qrange_le_128) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
     for (int idx = 0; idx < kSpatialDim; ++idx) {
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
-                /*transpose=*/false, safe_on_fbgemm);
+                /*transpose=*/false, input_qrange_le_128);
   }
 
-  // TODO: add safe_on_fbgemm here
+  // TODO: add input_qrange_le_128 here
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run_deconv(
       Tensor weight,
       c10::optional<Tensor> bias,
@@ -352,9 +352,9 @@ class QConvPackWeightInt8 final {
       torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      bool safe_on_fbgemm) {
+      bool input_qrange_le_128) {
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
-                /*transpose=*/true, safe_on_fbgemm);
+                /*transpose=*/true, input_qrange_le_128);
   }
 
  private:
@@ -367,13 +367,13 @@ class QConvPackWeightInt8 final {
       torch::List<int64_t> dilation,
       int64_t groups,
       bool transpose,
-      bool safe_on_fbgemm) {
+      bool input_qrange_le_128) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
-          transpose, safe_on_fbgemm);
+          transpose, input_qrange_le_128);
     }
 #endif
 
@@ -385,7 +385,7 @@ class QConvPackWeightInt8 final {
           "and Conv2d now.");
       return PackedConvWeightsQnnp<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
-          transpose, safe_on_fbgemm);
+          transpose, input_qrange_le_128);
     }
 #endif
 
@@ -407,10 +407,10 @@ class QConv1dPackWeightInt8 final {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      bool safe_on_fbgemm) {
+      bool input_qrange_le_128) {
     const torch::List<int64_t> output_padding({0});
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
-                /*transpose=*/false, safe_on_fbgemm);
+                /*transpose=*/false, input_qrange_le_128);
   }
 
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_deconv(
@@ -421,9 +421,9 @@ class QConv1dPackWeightInt8 final {
       torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      bool safe_on_fbgemm) {
+      bool input_qrange_le_128) {
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
-                /*transpose=*/true, safe_on_fbgemm);
+                /*transpose=*/true, input_qrange_le_128);
   }
 
  private:
@@ -436,7 +436,7 @@ class QConv1dPackWeightInt8 final {
       torch::List<int64_t> dilation,
       int64_t groups,
       bool transpose,
-      bool safe_on_fbgemm) {
+      bool input_qrange_le_128) {
     // TODO: use the flag
     auto& ctx = at::globalContext();
     if (weight.dim() == 3) {
@@ -450,7 +450,7 @@ class QConv1dPackWeightInt8 final {
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<2>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
-          transpose, safe_on_fbgemm);
+          transpose, input_qrange_le_128);
     }
 #endif
 
@@ -460,7 +460,7 @@ class QConv1dPackWeightInt8 final {
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return PackedConvWeightsQnnp<2>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
-          transpose, safe_on_fbgemm);
+          transpose, input_qrange_le_128);
     }
 #endif
     TORCH_CHECK(

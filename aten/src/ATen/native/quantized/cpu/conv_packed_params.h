@@ -22,5 +22,5 @@ struct ConvPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual torch::List<int64_t> dilation() const = 0;
   virtual int64_t groups() const = 0;
   virtual bool transpose() const = 0;
-  virtual bool safe_on_fbgemm() const = 0;
+  virtual bool input_qrange_le_128() const = 0;
 };

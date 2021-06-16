@@ -286,7 +286,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   //   specific and fix it, instead of always failing
   // TODO(before land): create a separate issue to describe the problem
   //   and the workarounds, and link to it from the error message
-  TORCH_CHECK(safe_on_fbgemm(), "This module is not safe to run on fbgemm.");
+  TORCH_CHECK(input_qrange_le_128(), "This module is not safe to run on fbgemm.");
 
   const int N = act.size(0);
   const int C = act.size(1);

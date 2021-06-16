@@ -37,8 +37,26 @@
  *  2. list of optional tensors
  *    0: bias
  *
- *  // TODO(before land): implement BC serialization for version 3, which
- *    will include the new flag, and default it to "safe" for previous versions
+ * Version 3
+ * // TODO(before land): should we repurpose `transpose` to be a bitmask
+ *      instead of adding a new short? Not sure if the size savings would
+ *      matter, currently going for simplicity.
+ *
+ * - Fields:
+ *  0. version (string)
+ *  1. list of non-optional tensors
+ *    0: packed parameters (int16_t)
+ *      - kSpatialDim
+ *      - stride x kSpatialDim
+ *      - padding x kSpatialDim
+ *      - dilation x kSpatialDim
+ *      - output_padding x kSpatialDim
+ *      - groups
+ *      - transpose (0 or 1)
+ *      - input_qrange_le_128 (0 or 1)
+ *    1: weight
+ *  2. list of optional tensors
+ *    0: bias
  *
  *  Note: version is a string and conv params are packed into a Tensor
  *    to make ONNX happy (ints and containers of ints are not supported).
@@ -72,6 +90,8 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
         // inputs
         if (version_str == "2") {
           version = 2;
+        } else if (version_str == "3") {
+          version = 3;
         }
       }
     }
@@ -127,11 +147,28 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     optional.emplace_back(std::move(bias));
 
     return std::tie(version, non_optional, optional);
-  } else if (version == 2) {
-    // version 2
+  } else if ((version == 2) || (version == 3)) {
+    // version 2 or 3
     auto elements = v.toTuple()->elements();
     std::vector<at::Tensor> non_optional = elements[1].toTensorList().vec();
     std::vector<c10::optional<at::Tensor>> optional;
+
+    // if we are in version 2, default input_qrange_le_128 to true
+    if (version == 2) {
+      // TODO(before land): the following code is pretty hacky, is there
+      //   a cleaner way to add a single element to the end of a tensor?
+      auto options = at::TensorOptions().dtype(at::kShort);
+      auto new_params = at::empty(
+          non_optional[0].sizes()[0] + 1, options);
+      memcpy(new_params.data_ptr<short>(), non_optional[0].data_ptr<short>(),
+          non_optional[0].sizes()[0] * sizeof(short));
+      const short default_input_qrange_le_128 = 1;
+      memcpy(
+          new_params.data_ptr<short>() + non_optional[0].sizes()[0],
+          &default_input_qrange_le_128,
+          sizeof(short));
+      non_optional[0] = new_params;
+    }
 
     if (elements[2].isTensorList()) {
       for (const auto& elem : elements[2].toTensorList()) {
@@ -143,8 +180,8 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
       }
     }
 
-    std::string version = "2";
-    return std::tie(version, non_optional, optional);
+    std::string version_str = version == 2 ? "2" : "3";
+    return std::tie(version_str, non_optional, optional);
   } else {
     TORCH_INTERNAL_ASSERT(false, "Unexpected serialized qconv version: ",
         version);
@@ -155,7 +192,7 @@ template <uint32_t kSpatialDim>
 ConvParamsSerializationType serialize_conv(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
 
-  std::string version = "2";
+  std::string version = "3";
   std::vector<at::Tensor> non_optional;
   std::vector<c10::optional<at::Tensor>> optional;
 
@@ -173,6 +210,7 @@ ConvParamsSerializationType serialize_conv(
                     output_padding.end());
   params_vec.push_back(params->groups());
   params_vec.push_back(params->transpose());
+  params_vec.push_back(params->input_qrange_le_128());
   int64_t vec_size = params_vec.size();
   at::Tensor params_tensor = at::from_blob(
       params_vec.data(), {vec_size},
@@ -231,13 +269,13 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   idx++;
   bool transpose = conv_params_packed[idx].item<bool>();
   idx++;
+  bool input_qrange_le_128 = conv_params_packed[idx].item<bool>();
+  idx++;
   TORCH_INTERNAL_ASSERT(idx == conv_params_packed.numel(),
       "Unexpected length of conv_params_packed, expected ",
       idx,
       " got ",
       conv_params_packed.numel());
-  // TODO: read safe_on_fbgemm from state instead of hardcoding
-  bool safe_on_fbgemm = true;
 
   auto& ctx = at::globalContext();
 
@@ -252,7 +290,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       dilation,
       groups,
       transpose,
-      safe_on_fbgemm
+      input_qrange_le_128
     );
   }
 #endif // USE_FBGEMM
@@ -271,7 +309,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       dilation,
       groups,
       transpose,
-      safe_on_fbgemm
+      input_qrange_le_128
     );
   }
 #endif // USE_PYTORCH_QNNPACK

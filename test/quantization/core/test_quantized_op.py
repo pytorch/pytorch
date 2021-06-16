@@ -2430,26 +2430,27 @@ class TestQuantizedOps(TestCase):
             torch.nn.Conv2d(1, 1, 1),
         ).eval()
 
-        # test that a conv with qnnpack (reduce_range=False) throws an error on fbgemm
-        torch.backends.quantized.engine = 'fbgemm'
-        m_copy = copy.deepcopy(m)
-        m_copy.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-        mp = torch.quantization.prepare(m_copy)
-        mc = torch.quantization.convert(mp)
-        with self.assertRaises(RuntimeError) as e:
-            mc(torch.randn(1, 1, 1, 1))
-        self.assertTrue("This module is not safe to run on fbgemm." == str(e.exception))
+        test_cases = itertools.product(('fbgemm', 'qnnpack'), ('fbgemm', 'qnnpack'))
+        for backend_qengine, qconfig_qengine in test_cases:
 
-        # test that a conv with fbgemm (reduce_range=True) does not throw an error on fbgemm
-        torch.backends.quantized.engine = 'fbgemm'
-        m_copy = copy.deepcopy(m)
-        m_copy.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-        mp = torch.quantization.prepare(m_copy)
-        mc = torch.quantization.convert(mp)
-        mc(torch.randn(1, 1, 1, 1))
+            if backend_qengine == 'fbgemm' and qconfig_qengine == 'qnnpack':
+                torch.backends.quantized.engine = backend_qengine
+                m_copy = copy.deepcopy(m)
+                m_copy.qconfig = torch.quantization.get_default_qconfig(qconfig_qengine)
+                mp = torch.quantization.prepare(m_copy)
+                mc = torch.quantization.convert(mp)
+                with self.assertRaises(RuntimeError) as e:
+                    mc(torch.randn(1, 1, 1, 1))
+                self.assertTrue("This module is not safe to run on fbgemm." == str(e.exception))
 
-        # TODO(before land): test the other two cases,
-        #   and better code reuse in this test
+            else:
+                torch.backends.quantized.engine = backend_qengine
+                m_copy = copy.deepcopy(m)
+                m_copy.qconfig = torch.quantization.get_default_qconfig(qconfig_qengine)
+                mp = torch.quantization.prepare(m_copy)
+                mc = torch.quantization.convert(mp)
+                # success = no error thrown on line below
+                mc(torch.randn(1, 1, 1, 1))
 
 
     @override_qengines

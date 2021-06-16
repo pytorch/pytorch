@@ -205,8 +205,8 @@ class _ConvNd(nn.Module):
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         # TODO(before land): also set this for all other conv modules and functionals
-        activation_safe_on_fbgemm = activation_post_process.reduce_range
-        qconv.set_weight_bias(qweight, mod.bias, activation_safe_on_fbgemm)
+        activation_input_qrange_le_128 = activation_post_process.reduce_range
+        qconv.set_weight_bias(qweight, mod.bias, activation_input_qrange_le_128)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
         return qconv
@@ -404,16 +404,16 @@ class Conv2d(_ConvNd):
         self,
         w: torch.Tensor,
         b: Optional[torch.Tensor],
-        safe_on_fbgemm: Optional[bool] = True,
+        input_qrange_le_128: Optional[bool] = True,
     ) -> None:
         if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups,
-                safe_on_fbgemm)
+                input_qrange_le_128)
         else:
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, _pair(0), self.dilation, self.groups,
-                safe_on_fbgemm)
+                input_qrange_le_128)
 
     def _weight_bias(self):
         return self._packed_params.unpack()
