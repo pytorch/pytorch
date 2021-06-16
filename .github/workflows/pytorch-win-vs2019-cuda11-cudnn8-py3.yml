@@ -16,7 +16,6 @@ env:
   CUDA_VERSION: "11.1"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
-  JOB_BASE_NAME: test
   PYTHON_VERSION: "3.8"
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
@@ -32,6 +31,8 @@ concurrency:
 jobs:
   build:
     runs-on: "windows.4xlarge"
+    env:
+      JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-build
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2

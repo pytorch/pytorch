@@ -18,7 +18,6 @@ env:
   CUDA_VERSION: "!{{ cuda_version }}"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
-  JOB_BASE_NAME: test
   PYTHON_VERSION: "3.8"
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
@@ -36,6 +35,8 @@ concurrency:
 jobs:
   build:
     runs-on: "windows.4xlarge"
+    env:
+      JOB_BASE_NAME: !{{ build_environment }}-build
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2

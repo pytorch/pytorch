@@ -422,9 +422,9 @@ def get_stripped_CI_job() -> str:
     job = os.environ.get("JOB_BASE_NAME", os.environ.get("CIRCLE_JOB", "")).rstrip('0123456789')
     if job.endswith('_slow_test'):
         job = job[:len(job) - len('_slow_test')]
-    elif job.endswith('_test'):
+    elif job.endswith('_test') or job.endswith('-test'):
         job = job[:len(job) - len('_test')]
-    elif job.endswith('_build'):
+    elif job.endswith('_build') or job.endswith('-build'):
         job = job[:len(job) - len('_build')]
     return job
 

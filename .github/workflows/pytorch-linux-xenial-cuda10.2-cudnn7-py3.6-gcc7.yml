@@ -100,6 +100,7 @@ jobs:
     needs: calculate-docker-image
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-build
     steps:
       - name: Log in to ECR
         run: |
@@ -125,6 +126,7 @@ jobs:
         run: |
           docker run \
             -e BUILD_ENVIRONMENT \
+            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
@@ -218,6 +220,7 @@ jobs:
       fail-fast: false
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
       NUM_TEST_SHARDS: 1
       TEST_CONFIG: ${{ matrix.test_config }}
     steps:
