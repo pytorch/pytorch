@@ -866,7 +866,11 @@ class DistributedDataParallel(Module):
                 'grad_enabled': grad_enabled,
                 'require_backward_grad_sync': self.require_backward_grad_sync,
             }
-            output_tensor_list, treespec = tree_flatten(output)
+            output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
+            if output_is_rref:
+                output_tensor_list, treespec = tree_flatten(output.local_value())
+            else:
+                output_tensor_list, treespec = tree_flatten(output)
             # Note: DDPSink helps to ensure that prepare_for_backward is called
             # immediately before the backwards pass, to support a variety of
             # features such as: enqueue delay allreduce for static graph, support
@@ -879,6 +883,8 @@ class DistributedDataParallel(Module):
             )
             # Reconstruct output data structure.
             output = tree_unflatten(passthrough_tensor_list, treespec)
+            if output_is_rref:
+                output = RRef(output)
             return output
 
     def scatter(self, inputs, kwargs, device_ids):
