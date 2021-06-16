@@ -85,7 +85,7 @@ class TORCH_API Reducer {
 
   // Called at the beginning of forward() inside DistributedDataParallel,
   // right now it caputures the starting time of forward in each iteration.
-  void prepare_for_forward(bool will_run_grad_reduction);
+  void prepare_for_forward(bool will_run_grad_reduction = true);
 
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The outer

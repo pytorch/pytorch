@@ -360,6 +360,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
+          py::arg("will_run_grad_reduction") = true,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
