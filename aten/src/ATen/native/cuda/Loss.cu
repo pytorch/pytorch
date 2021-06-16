@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
 constexpr float EPSILON = 1e-12;
