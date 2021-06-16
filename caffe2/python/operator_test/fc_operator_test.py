@@ -61,8 +61,8 @@ class TestFcOperator(serial.SerializedTestCase):
             op.arg.extend([a])
 
         # Check against numpy reference
-        # ReferenceChecks is flaky on rocm with threshold of 1e-4 for fp16. Relaxing to 1e-3.
-        threshold = 1e-3 if (gc.device_type == caffe2_pb2.HIP and dtype == np.float16) else 1e-4
+        # ReferenceChecks is flaky, Relaxing to 1e-3.
+        threshold = 1e-3
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
