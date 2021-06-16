@@ -40,7 +40,7 @@ ActionHook = Callable[["PackageExporter", str], None]
 
 
 class _ModuleProviderAction(Enum):
-    """Represents one of the actions that exporter can take on a module.
+    """Represents one of the actions that :class:`PackageExporter` can take on a module.
 
     See :meth:`PackageExporter.extern` and friends for a description of what the actions do.
     """
@@ -151,11 +151,11 @@ class PackageExporter:
 
     The importer for packages ensures that code in the module can only be loaded from
     within the package, except for modules explicitly listed as external using :meth:`extern`.
-    The file `extern_modules` in the zip archive lists all the modules that a package externally depends on.
+    The file ``extern_modules`` in the zip archive lists all the modules that a package externally depends on.
     This prevents "implicit" dependencies where the package runs locally because it is importing
     a locally-installed package, but then fails when the package is copied to another machine.
 
-    When source code is added to the package, the exporter optionally can scan it
+    When source code is added to the package, the exporter can optionally scan it
     for further code dependencies (``dependencies=True``). It looks for import statements,
     resolves relative references to qualified module names, and performs an action specified by the user
     (See: :meth:`extern`, :meth:`mock`, and :meth:`intern`).
@@ -176,7 +176,7 @@ class PackageExporter:
         Create an exporter.
 
         Args:
-            f: The location to export to. Can be a  ``string``/``Path`` object containing a filename,
+            f: The location to export to. Can be a  ``string``/``Path`` object containing a filename
                 or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
@@ -289,14 +289,14 @@ class PackageExporter:
         is_package: bool = False,
         dependencies: bool = True,
     ):
-        """Adds `src` as the source code for `module_name` in the exported package.
+        """Adds ``src`` as the source code for ``module_name`` in the exported package.
 
         Args:
-            module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
+            module_name (str): e.g. ``my_package.my_subpackage``, code will be saved to provide code for this package.
             src (str): The Python source code to save for this package.
-            is_package (bool, optional): If True, this module is treated as a package. Packages are allowed to have submodules
-                (e.g. my_package.my_subpackage.my_subsubpackage), and resources can be saved inside them. Defaults to ``False``.
-            dependencies (bool, optional): If True, we scan the source for dependencies.
+            is_package (bool, optional): If ``True``, this module is treated as a package. Packages are allowed to have submodules
+                (e.g. ``my_package.my_subpackage.my_subsubpackage``), and resources can be saved inside them. Defaults to ``False``.
+            dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
         self.dependency_graph.add_node(
             module_name,
@@ -421,7 +421,7 @@ node [shape=box];
         module object, and then using its ``__file__`` attribute to find the source code.
 
         Args:
-            module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code
+            module_name (str): e.g. ``my_package.my_subpackage``, code will be saved to provide code
                 for this package.
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
@@ -480,7 +480,7 @@ node [shape=box];
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
-        If `dependencies` is true, this method will also scan the pickled objects for which modules are required
+        If ``dependencies`` is true, this method will also scan the pickled objects for which modules are required
         to reconstruct them and save the relevant code.
 
         To be able to save an object where ``type(obj).__name__`` is ``my_module.MyObject``,
@@ -489,7 +489,7 @@ node [shape=box];
         for this to work.
 
         Args:
-            package (str): The name of module package this resource should go in (e.g. "my_package.my_subpackage")
+            package (str): The name of module package this resource should go in (e.g. ``"my_package.my_subpackage"``).
             resource (str): A unique name for the resource, used to identify it to load.
             obj (Any): The object to save, must be picklable.
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
@@ -533,7 +533,7 @@ node [shape=box];
         """Save text data to the package.
 
         Args:
-            package (str): The name of module package this resource should go it (e.g. "my_package.my_subpackage")
+            package (str): The name of module package this resource should go it (e.g. ``"my_package.my_subpackage"``).
             resource (str): A unique name for the resource, used to identify it to load.
             text (str): The contents to save.
         """
@@ -543,7 +543,7 @@ node [shape=box];
         """Save raw bytes to the package.
 
         Args:
-            package (str): The name of module package this resource should go it (e.g. "my_package.my_subpackage")
+            package (str): The name of module package this resource should go it (e.g. ``"my_package.my_subpackage"``).
             resource (str): A unique name for the resource, used to identify it to load.
             binary (str): The data to save.
         """
@@ -562,8 +562,8 @@ node [shape=box];
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
-                a handle that can be used to remove the added hook by calling
-                ``handle.remove()``
+                A handle that can be used to remove the added hook by calling
+                ``handle.remove()``.
         """
         handle = RemovableHandle(self._extern_hooks)
         self._extern_hooks[handle.id] = hook
@@ -581,8 +581,8 @@ node [shape=box];
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
-                a handle that can be used to remove the added hook by calling
-                ``handle.remove()``
+                A handle that can be used to remove the added hook by calling
+                ``handle.remove()``.
         """
         handle = RemovableHandle(self._mock_hooks)
         self._mock_hooks[handle.id] = hook
@@ -600,8 +600,8 @@ node [shape=box];
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
-                a handle that can be used to remove the added hook by calling
-                ``handle.remove()``
+                A handle that can be used to remove the added hook by calling
+                ``handle.remove()``.
         """
         handle = RemovableHandle(self._intern_hooks)
         self._intern_hooks[handle.id] = hook
@@ -614,7 +614,21 @@ node [shape=box];
         exclude: "GlobPattern" = (),
         allow_empty: bool = True,
     ):
-        """TODO DOC"""
+        """Specify modules that should be packaged. A module must match some ``intern`` pattern in order to be
+        included in the package and have its dependencies processed recursively.
+
+        Args:
+            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
+
+            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+
+            allow_empty (bool): An optional flag that specifies whether the intern modules specified by this call
+                to the ``intern`` method must be matched to some module during packaging. If an ``intern`` module glob
+                pattern is added with ``allow_empty=False``, and :meth:`close` is called (either explicitly or via ``__exit__``)
+                before any modules match that pattern, an exception is thrown. If ``allow_empty=True``, no such exception is thrown.
+
+        """
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
             _ModuleProviderAction.INTERN, allow_empty
         )
@@ -633,22 +647,27 @@ node [shape=box];
         Use this function to mock this functionality out without having to modify the original code.
 
         Args:
-            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
                 for the names of the modules to be mocked out. Strings can also be a glob-style pattern
                 string that may match multiple modules. Any required dependencies that match this pattern
                 string will be mocked out automatically.
 
-                Examples:
-                  'torch.**' -- matches torch and all submodules of torch, e.g. 'torch.nn' and torch.nn.functional'
-                  'torch.*' -- matches 'torch.nn' or 'torch.functional', but not 'torch.nn.functional'
+                Examples :
+                    ``'torch.**'`` -- matches ``torch`` and all submodules of torch, e.g. ``'torch.nn'``
+                    and ``'torch.nn.functional'``
+
+                    ``'torch.*'`` -- matches ``'torch.nn'`` or ``'torch.functional'``, but not
+                    ``'torch.nn.functional'``
 
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
-                e.g. include='torch.**', exclude='torch.foo' will mock all torch packages except 'torch.foo' Default: []
+                e.g. ``include='torch.**', exclude='torch.foo'`` will mock all torch packages except ``'torch.foo'``,
+                Default: is ``[]``.
 
             allow_empty (bool): An optional flag that specifies whether the mock implementation(s) specified by this call
-                to the `mock` method must be matched to some module during packaging. If a mock is added with allow_empty=False,
-                and `close` is called (either explicitly or via `__exit__`) and the mock has not been matched to a module
-                used by the package being exported, an exception is thrown. If allow_empty=True, no such exception is thrown.
+                to the :meth:`mock` method must be matched to some module during packaging. If a mock is added with
+                ``allow_empty=False``, and :meth:`close` is called (either explicitly or via ``__exit__``) and the mock has
+                not been matched to a module used by the package being exported, an exception is thrown.
+                If ``allow_empty=True``, no such exception is thrown.
 
         """
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
@@ -662,21 +681,24 @@ node [shape=box];
         exclude: "GlobPattern" = (),
         allow_empty: bool = True,
     ):
-        """Include `module` in the list of external modules the package can import.
+        """Include ``module`` in the list of external modules the package can import.
         This will prevent dependency discovery from saving
         it in the package. The importer will load an external module directly from the standard import system.
         Code for extern modules must also exist in the process loading the package.
 
         Args:
-            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
-                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`
+            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
+                for the names of the modules to be externed. This can also be a glob-style pattern, as
+                described in :meth:`mock`.
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the
+                include string.
 
             allow_empty (bool): An optional flag that specifies whether the extern modules specified by this call
-                to the `extern` method must be matched to some module during packaging. If an extern module glob pattern is added
-                with allow_empty=False, and `close` is called (either explicitly or via `__exit__`) before any modules match that
-                pattern, an exception is thrown. If allow_empty=True, no such exception is thrown.
+                to the ``extern`` method must be matched to some module during packaging. If an extern module glob
+                pattern is added with ``allow_empty=False``, and :meth:`close` is called (either explicitly or via
+                ``__exit__``) before any modules match that pattern, an exception is thrown. If ``allow_empty=True``,
+                no such exception is thrown.
 
         """
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
@@ -688,8 +710,8 @@ node [shape=box];
         If a dependency on any matching packages is found, a :class:`PackagingError` is raised.
 
         Args:
-            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
-                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`
+            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
+                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
 
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
         """

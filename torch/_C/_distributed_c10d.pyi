@@ -128,7 +128,7 @@ class Store:
     def wait(self, keys: List[str], timeout: timedelta): ...
 
 class FileStore(Store):
-    def __init__(self, path: str, numWorkers: int): ...
+    def __init__(self, path: str, numWorkers: int = ...): ...
 
 class HashStore(Store):
     def __init__(self): ...
@@ -276,6 +276,11 @@ class ProcessGroup:
         self,
         output_tensors: Tensor,
         input_tensor: List[Tensor],
+    ) -> Work: ...
+    def _reduce_scatter_base(
+        self,
+        outputTensor: Tensor,
+        inputTensor: Tensor,
     ) -> Work: ...
     @overload
     def alltoall_base(

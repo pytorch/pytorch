@@ -20,11 +20,11 @@ Source Code: [ProcessGroup.cpp](../lib/c10d/ProcessGroup.cpp) and  [ProcessGroup
 
 #### Process Group Backends
 
-We currently offer three backends for Process Groups: [ProcessGroupGloo.hpp](../lib/c10d/ProcessGroupGloo.hpp), [ProcessGroupMPI.hpp](../lib/c10d/ProcessGroupMPI.hpp) and [ProcessGroupNCCL.hpp](../torch/lib/c10d/ProcessGroupNCCL.hpp)
+We currently offer three backends for Process Groups: [ProcessGroupGloo.hpp](../lib/c10d/ProcessGroupGloo.hpp), [ProcessGroupMPI.hpp](../lib/c10d/ProcessGroupMPI.hpp) and [ProcessGroupNCCL.hpp](../lib/c10d/ProcessGroupNCCL.hpp)
 
 #### Store
 
-Processes discover each other through a rendezvous process on a common Store (See [Store.hpp](../torch/lib/c10d/Store.hpp) for the interface and [FileStore.hpp](../torch/lib/c10d/FileStore.hpp), [TCPStore.hpp](../torch/lib/c10d/TCPStore.hpp) and [PrefixStore.hpp](../torch/lib/c10d/PrefixStore.hpp) for implementations.)
+Processes discover each other through a rendezvous process on a common Store (See [Store.hpp](../lib/c10d/Store.hpp) for the interface and [FileStore.hpp](../lib/c10d/FileStore.hpp), [TCPStore.hpp](../lib/c10d/TCPStore.hpp) and [PrefixStore.hpp](../lib/c10d/PrefixStore.hpp) for implementations.)
 
 ### Distributed Data Parallel
 
@@ -52,7 +52,7 @@ The core C++ interface of the RPC framework can be found in [rpc_agent.h](../csr
 
 ### Remote Reference (RRef)
 
-Most of the APIs for RRefs can be found in [rpc/api.py](rpc/api.py). The C++ interface can be found in [rref_interface.h](../../aten/src/ATen/core/rref_interface.h) and implementations in [rref_impl.h](../torch/csrc/distributed/rpc/rref_impl.h) and [rref_context.h](../torch/csrc/distributed/rpc/rref_context.h).
+Most of the APIs for RRefs can be found in [rpc/api.py](rpc/api.py). The C++ interface can be found in [rref_interface.h](../../aten/src/ATen/core/rref_interface.h) and implementations in [rref_impl.h](../csrc/distributed/rpc/rref_impl.h) and [rref_context.h](../csrc/distributed/rpc/rref_context.h).
 
 ### Distributed Autograd
 
@@ -80,6 +80,9 @@ python test/distributed/test_c10d_nccl.py
 
 # Run the Store tests.
 python test/distributed/test_store.py
+
+# Run Process Group Wrapper tests.
+python test/distributed/test_pg_wrapper.py
 
 # Run distributed tests, including tests for Distributed Data Parallel.
 python test/run_test.py --verbose -i distributed/test_distributed_fork
