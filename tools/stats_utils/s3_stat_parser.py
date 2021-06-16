@@ -216,8 +216,8 @@ def get_previous_reports_for_branch(branch: str, ci_job_prefix: str = "") -> Lis
     return reports
 
 
-def get_previous_reports_for_pr(pr: str, ci_job_prefix: str = "") -> List[Report]:
-    reports: List[Tuple[str, Report]] = []
+def get_previous_reports_for_pr(pr: str, ci_job_prefix: str = "") -> List[Tuple[Report, str]]:
+    reports: List[Tuple[Report, str]] = []
     logger.info(f'Grabbing reports from PR: {[pr]}')
     summaries = get_test_stats_summaries_for_pr(pr=pr, job_prefix=ci_job_prefix)
     for _, summary in summaries.items():

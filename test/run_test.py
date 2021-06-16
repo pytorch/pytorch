@@ -1176,16 +1176,17 @@ def query_failure_test_module(reports: List[Tuple["Report", str]]) -> List[str]:
     files: Dict[str, Any] = report['files']
     for fname, file in files.items():
         contains_failure = any(
-            any(case['status'] == 'errored' or case['status'] == 'failed' 
+            any(case['status'] == 'errored' or case['status'] == 'failed'
                 for _, case in suite['cases'].items())
-                    for _, suite in file['suites'].items())
+            for _, suite in file['suites'].items())
         if contains_failure:
             test_modules.append(fname)
     return test_modules
 
 
 def reorder_tests(tests: List[str]) -> List[str]:
-    sorted_tests = tests
+    prioritized_tests = []
+    # Try using historic stats from PR.
     if ENABLE_PR_HISTORY_REORDERING and HAVE_BOTO3:
         pr_number = os.environ.get("CIRCLE_PR_NUMBER", "")
         if len(pr_number):
@@ -1193,9 +1194,9 @@ def reorder_tests(tests: List[str]) -> List[str]:
             s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(
                 pr_number, ci_job_prefix)
             prioritized_tests = query_failure_test_module(s3_reports)
-        else:
-            return tests
-    else:
+
+    # Using file changes priority if no stats found from previous PR.
+    if len(prioritized_tests) == 0:
         try:
             changed_files = query_changed_test_files()
         except Exception:
@@ -1215,12 +1216,14 @@ def reorder_tests(tests: List[str]) -> List[str]:
             bring_to_front.append(test)
         else:
             the_rest.append(test)
-    if len(bring_to_front) + len(the_rest) != len(tests):
-        sorted_tests = bring_to_front + the_rest
+    if len(tests) == len(bring_to_front) + len(the_rest):
+        print(f"reordering tests based on CI:\n"
+            f"prioritized: {bring_to_front}\n the rest: {the_rest}\n")
+        return bring_to_front + the_rest
     else:
-        print("Something went wrong in CI reordering, bail out without doing any sorting")
-
-    return sorted_tests
+        print(f"Something went wrong in CI reordering, expecting total of {len(tests)}:\n"
+            f"prioritized: {bring_to_front}\nthe rest: {the_rest}\n")
+        return tests
 
 
 def main():
@@ -1268,9 +1271,6 @@ def main():
 
     if IS_IN_CI:
         selected_tests = reorder_tests(selected_tests)
-    
-    print(selected_tests)
-    exit(0)
 
     has_failed = False
     failure_messages = []
