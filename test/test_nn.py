@@ -11215,36 +11215,36 @@ def add_test(test, decorator=None):
 
             def with_tf32_off(self, test=test, kwargs=kwargs):
                 with tf32_off():
-                    test.test_cuda(self, dtype=torch.float, **kwargs)
+                    test.test_cpu_gpu_parity(self, dtype=torch.float, **kwargs)
 
             add(cuda_test_name + '_fp32', with_tf32_off)
 
             def with_tf32_on(self, test=test, kwargs=kwargs):
                 with tf32_on(self, test.tf32_precision):
-                    test.test_cuda(self, dtype=torch.float, **kwargs)
+                    test.test_cpu_gpu_parity(self, dtype=torch.float, **kwargs)
 
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name + '_float', lambda self,
-                test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
+                test=test, kwargs=kwargs: test.test_cpu_gpu_parity(self, dtype=torch.float, **kwargs))
         add(cuda_test_name + '_double', lambda self,
-            test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
+            test=test, kwargs=kwargs: test.test_cpu_gpu_parity(self, dtype=torch.double, **kwargs))
 
         def test_half(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.half, **kwargs)
+            test.test_cpu_gpu_parity(self, dtype=torch.half, **kwargs)
         if getattr(test, 'check_half', True):
             add(cuda_test_name + '_half', test_half)
 
         def test_bfloat16(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.bfloat16, **kwargs)
+            test.test_cpu_gpu_parity(self, dtype=torch.bfloat16, **kwargs)
         if getattr(test, 'check_bfloat16', True):
             add(cuda_test_name + '_bfloat16', test_bfloat16)
 
         def test_cfloat(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.cfloat, **kwargs)
+            test.test_cpu_gpu_parity(self, dtype=torch.cfloat, **kwargs)
 
         def test_cdouble(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.cdouble, **kwargs)
+            test.test_cpu_gpu_parity(self, dtype=torch.cdouble, **kwargs)
         if getattr(test, 'check_complex', False):
             add(cuda_test_name + '_cfloat', test_cfloat)
             add(cuda_test_name + '_cdouble', test_cdouble)
@@ -11254,17 +11254,17 @@ def add_test(test, decorator=None):
 
             def with_tf32_off(self, test=test, kwargs=kwargs):
                 with tf32_off():
-                    test.test_cuda(self, **kwargs)
+                    test.test_cpu_gpu_parity(self, **kwargs)
 
             add(cuda_test_name + '_fp32', with_tf32_off)
 
             def with_tf32_on(self, test=test, kwargs=kwargs):
                 with tf32_on(self, test.tf32_precision):
-                    test.test_cuda(self, **kwargs)
+                    test.test_cpu_gpu_parity(self, **kwargs)
 
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
-            add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
+            add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cpu_gpu_parity(self, **kwargs))
 
 for test_params in module_tests:
     # TODO: CUDA is not implemented yet

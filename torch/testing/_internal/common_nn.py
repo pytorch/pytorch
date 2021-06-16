@@ -5279,7 +5279,7 @@ class ModuleTest(object):
                     module(*input_tuple)
                     assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
 
-    def test_cuda(self, test_case, dtype=torch.float, extra_args=None):
+    def test_cpu_gpu_parity(self, test_case, dtype=torch.float, extra_args=None):
         if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
 
