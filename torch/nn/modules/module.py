@@ -284,7 +284,8 @@ class Module:
         Args:
             name (string): name of the buffer. The buffer can be accessed
                 from this module using the given name
-            tensor (Tensor): buffer to be registered.
+            tensor (Tensor or None): buffer to be registered. If ``None``, then operations
+                that run on buffers, such as :attr:`cuda`, are ignored.
             persistent (bool): whether the buffer is part of this module's
                 :attr:`state_dict`.
 
@@ -327,7 +328,9 @@ class Module:
         Args:
             name (string): name of the parameter. The parameter can be accessed
                 from this module using the given name
-            param (Parameter): parameter to be added to the module.
+            param (Parameter or None): parameter to be added to the module. If
+                ``None``, then operations that run on parameters, such as :attr:`cuda`,
+                are ignored.
         """
         if '_parameters' not in self.__dict__:
             raise AttributeError(
@@ -856,7 +859,7 @@ class Module:
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
-        This function is deprecated in favor of :meth:`nn.Module.register_full_backward_hook` and
+        This function is deprecated in favor of :meth:`~torch.nn.Module.register_full_backward_hook` and
         the behavior of this function will change in future versions.
 
         Returns:
@@ -1238,6 +1241,7 @@ class Module:
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
+        Parameters and buffers set to ``None`` are not included.
 
         Returns:
             dict:
@@ -1651,6 +1655,9 @@ class Module:
 
         This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
 
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
+
         Returns:
             Module: self
         """
@@ -1665,6 +1672,9 @@ class Module:
 
         This method is helpful for freezing part of the module for finetuning
         or training parts of a model individually (e.g., GAN training).
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.requires_grad_()` and several similar mechanisms that may be confused with it.
 
         Args:
             requires_grad (bool): whether autograd should record operations on
