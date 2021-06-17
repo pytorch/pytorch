@@ -4,6 +4,7 @@
 name: Windows CI (pytorch-win-vs2019-cuda10-cudnn7-py3)
 
 on:
+  pull_request:
   push:
     branches:
       - master
@@ -79,7 +80,7 @@ jobs:
           path: C:\w\build-results
 
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
     runs-on: ubuntu-18.04
     env:
       NUM_TEST_SHARDS: 1
@@ -99,6 +100,7 @@ jobs:
           echo "::set-output name=matrix::${MATRIX}"
 
   test:
+    if: ${{ github.event_name == 'push' }}
     runs-on: windows.8xlarge.nvidia.gpu
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-test
@@ -172,7 +174,7 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
+    if:  ${{ github.event_name == 'push' && always() }}
     needs:
       - test
     runs-on: ubuntu-18.04
