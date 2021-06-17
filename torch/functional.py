@@ -350,7 +350,7 @@ def einsum(*args, optimize=None):
             if len(optimize) == 1 and len(optimize[0]) == 1:
                 optimize = [optimize[0][0]]
             else:
-                path = []
+                path: List[int] = []
                 for contraction in optimize:
                     if not isinstance(contraction, Sequence) or len(contraction) != 2:
                         raise RuntimeError("einsum(): contractions in the optimize path must be 2-tuple of ints")
