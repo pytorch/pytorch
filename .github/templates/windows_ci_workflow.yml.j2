@@ -110,7 +110,7 @@ jobs:
 
   test:
 {%- if only_build_on_pull_request %}
-    if: ${{ github.event_name = 'push' }}
+    if: ${{ github.event_name == 'push' }}
 {%- endif %}
     runs-on: !{{ test_runner_type }}
     env:
@@ -188,7 +188,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
 {%- if only_build_on_pull_request %}
-    if:  ${{ github.event_name = 'push' && always() }}
+    if:  ${{ github.event_name == 'push' && always() }}
 {%- else %}
     if: always()
 {%- endif %}
