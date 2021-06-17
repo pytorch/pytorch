@@ -1022,17 +1022,24 @@ class TestOldViewOps(TestCase):
             tensor.chunk(-2)
 
     def test_lab_chunk(self, device):
+        def check_output(tensor, dim, target_sizes, splits):
+            start = 0
+            for target_size, split in zip(target_sizes, splits):
+                self.assertEqual(split.size(), target_size)
+                self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split,
+                                 atol=0, rtol=0)
+                start = start + target_size[dim]
+
         tensor = torch.rand(4, 7)
         num_chunks = 3
         dim = 1
         target_sizes = ([4, 3], [4, 3], [4, 1])
         splits = tensor.lab_chunk(num_chunks, dim)
-        start = 0
-        for target_size, split in zip(target_sizes, splits):
-            self.assertEqual(split.size(), target_size)
-            self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split,
-                             atol=0, rtol=0)
-            start = start + target_size[dim]
+
+        check_output(tensor, dim, target_sizes, splits)
+
+        # checks that negative dim index is supported
+        check_output(tensor, dim - tensor.dim(), target_sizes, splits)
 
         # Invalid chunk sizes
         error_regex = 'chunk expects.*greater than 0'
