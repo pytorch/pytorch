@@ -109,12 +109,26 @@ class PipeWithDDPTest(RpcAgentTestFixture):
         model = DistributedDataParallel(model, find_unused_parameters=find_unused_parameters)
         if static_graph:
             model._set_static_graph()
-        out = model(torch.rand(16, 16).cuda(2 * self.rank)).local_value()
+
+        # Ensure inputs are different across ranks to verify that gradient
+        # sync indeed occurs.
+        model_input = torch.rand(16, 16).cuda(2 * self.rank) * (self.rank + 1)
+        out = model(model_input).local_value()
         out.sum().backward()
 
         # Run forward again for find_unused_parameters to trigger any potential errors.
         if find_unused_parameters:
-            model(torch.rand(16, 16).cuda(2 * self.rank))
+            # Ensure inputs are different across ranks to verify that gradient
+            # sync indeed occurs.
+            unused_param_input = torch.rand(16, 16).cuda(2 * self.rank) * (self.rank + 1)
+            model(unused_param_input).local_value().sum().backward()
+
+        # Run a few more iterations of fwd + bwd to ensure gradient synchronization
+        # occurs properly across iterations via delay_all_reduce/bucketized allreduce.
+        for _ in range(3):
+            model_input = torch.rand(16, 16).cuda(2 * self.rank) * (self.rank + 1)
+            out = model(model_input).local_value()
+            out.sum().backward()
 
         # Check grads
         output = [torch.empty_like(fc1.weight.grad), torch.empty_like(fc1.weight.grad)]
