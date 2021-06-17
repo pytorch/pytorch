@@ -14,7 +14,7 @@ class TestQuantizedOps(unittest.TestCase):
     def generic_test(self, model, sample_inputs, input_names=None, decimal=3, relaxed_check=False):
         torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
-        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        model.qconfig = torch.quantization.get_default_qconfig("qnnpack")
         q_model = torch.quantization.prepare(model, inplace=False)
         q_model = torch.quantization.convert(q_model, inplace=False)
 
@@ -174,7 +174,7 @@ class TestQuantizedOps(unittest.TestCase):
                 self.dequant = torch.quantization.DeQuantStub()
 
             def forward(self, x):
-                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode='nearest')
+                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode="nearest")
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")
@@ -318,14 +318,14 @@ class TestQuantizedOps(unittest.TestCase):
                 return x
 
         model = ModelWithClassifierHead().eval()
-        torch.quantization.fuse_modules(model, [['conv1', 'relu1'] ,
-                                                ['features.0.0', 'features.0.1', 'features.0.2'],
-                                                ['features.1.0', 'features.1.1', 'features.1.2'],
-                                                ['features.2.0', 'features.2.1', 'features.2.2']], inplace=True)
+        torch.quantization.fuse_modules(model, [["conv1", "relu1"] ,
+                                                ["features.0.0", "features.0.1", "features.0.2"],
+                                                ["features.1.0", "features.1.1", "features.1.2"],
+                                                ["features.2.0", "features.2.1", "features.2.2"]], inplace=True)
 
 
         x = np.random.rand(1, 3, 10, 10).astype("float32")
         self.generic_test(model, (x,), input_names=["x"], relaxed_check=True)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

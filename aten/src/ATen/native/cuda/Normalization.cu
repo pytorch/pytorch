@@ -100,12 +100,12 @@ void batch_norm_elementwise(
     auto invstd = as_nd(invstd_);
 
     auto iter = TensorIteratorConfig()
-        .add_borrowed_output(out)
-        .add_borrowed_input(self)
-        .add_borrowed_input(weight)
-        .add_borrowed_input(bias)
-        .add_borrowed_input(mean)
-        .add_borrowed_input(invstd)
+        .add_output(out)
+        .add_input(self)
+        .add_input(weight)
+        .add_input(bias)
+        .add_input(mean)
+        .add_input(invstd)
         .check_all_same_dtype(false)
         .promote_inputs_to_common_dtype(false)
         .build();
@@ -294,12 +294,12 @@ void batch_norm_update_stats(
     double momentum_, int64_t N) {
 
   auto iter = TensorIteratorConfig()
-      .add_borrowed_output(running_mean)
-      .add_borrowed_output(running_var)
-      .add_borrowed_input(save_mean)
-      .add_borrowed_input(save_var)
-      .add_borrowed_input(running_mean)
-      .add_borrowed_input(running_var)
+      .add_output(running_mean)
+      .add_output(running_var)
+      .add_input(save_mean)
+      .add_input(save_var)
+      .add_input(running_mean)
+      .add_input(running_var)
       .check_all_same_dtype(false)
       .promote_inputs_to_common_dtype(false)
       .build();
@@ -328,13 +328,13 @@ void batch_norm_update_stats_and_invert(
     double momentum_, double epsilon, int64_t N) {
 
   auto iter = TensorIteratorConfig()
-      .add_borrowed_output(running_mean)
-      .add_borrowed_output(running_var)
-      .add_borrowed_output(save_var)
-      .add_borrowed_input(save_mean)
-      .add_borrowed_input(save_var)
-      .add_borrowed_input(running_mean)
-      .add_borrowed_input(running_var)
+      .add_output(running_mean)
+      .add_output(running_var)
+      .add_output(save_var)
+      .add_input(save_mean)
+      .add_input(save_var)
+      .add_input(running_mean)
+      .add_input(running_var)
       .check_all_same_dtype(false)
       .promote_inputs_to_common_dtype(false)
       .build();
@@ -361,8 +361,8 @@ void batch_norm_update_stats_and_invert(
 
 void batch_norm_calc_invstd(const Tensor& out_invstd, const Tensor& running_var, double epsilon) {
   auto iter = TensorIteratorConfig()
-      .add_borrowed_output(out_invstd)
-      .add_borrowed_input(running_var)
+      .add_output(out_invstd)
+      .add_input(running_var)
       .check_all_same_dtype(false)
       .build();
 
