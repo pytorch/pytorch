@@ -2743,11 +2743,35 @@ Tensor _det_lu_based_helper_backward(
   det_expanded_sizes.push_back(n);
   auto d = at::diag_embed((det_grad * det.conj()).unsqueeze(-1).expand(det_expanded_sizes));
 
-  condition_diagonal(lu);
+  if (self.device().type() == at::kCPU) {
+    condition_diagonal(lu);
 
-  auto trans = self.is_complex() ? "C" : "T";
+    auto trans = self.is_complex() ? "C" : "T";
 
-  return at::_lu_solve_trans(d, lu, pivs, trans);
+    return at::_lu_solve_trans(d, lu, pivs, trans);
+  }
+  // lu_solve is less stable than two trinagular_solve for CUDA tensors.
+  else {
+    Tensor p, l, u;
+    std::tie(p, l, u) = at::lu_unpack(lu, pivs, /*unpack_data=*/true, /*unpack_pivots=*/true);
+
+    auto u_h = u.transpose(-2, -1).conj();
+    condition_diagonal(u_h);
+    auto l_h = l.transpose(-2, -1).conj();
+
+    auto permuted_grad = std::get<0>(
+      at::triangular_solve(
+        // note that d = c I for some scalar c, hence
+        // d u_h^{-1} = c I u_h^{-1} = u_h^{-1} c I = u_h^{-1} d,
+        // so, there is no need to explicitly transpose the solution below
+        std::get<0>(at::triangular_solve(d, u_h, /*upper=*/false)),
+        l_h
+      )
+    );
+
+    // multiply by p to restore the row order
+    return at::matmul(p, permuted_grad);
+  }
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
