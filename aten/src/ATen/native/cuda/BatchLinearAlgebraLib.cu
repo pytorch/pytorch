@@ -3,8 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDASolver.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -140,6 +138,74 @@ void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool u
   (void)infos; // unused
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
     apply_triangular_solve_batched<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
+  });
+}
+
+template <typename scalar_t>
+inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
+// AMD ROCm backend is implemented via rewriting all CUDA calls to HIP
+// rocBLAS does not implement BLAS-like extensions of cuBLAS, they're in rocSOLVER
+// rocSOLVER is currently not used in ATen, therefore we raise an error in this case
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "torch.linalg.lstsq: Batched version is supported only with cuBLAS backend.")
+#else
+  auto trans = CUBLAS_OP_N;
+  auto m = cuda_int_cast(A.size(-2), "m");
+  auto n = cuda_int_cast(A.size(-1), "n");
+
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
+  // cuBLAS from cuda10 and older doesn't work with nrhs == 0 (cuda11 works)
+  // so we need to put this early return
+  if (nrhs == 0) {
+    return;
+  }
+
+  auto batch_size = cuda_int_cast(batchCount(B), "batch_size");
+  auto lda = std::max<int>(1, m);
+  auto ldb = std::max<int>(1, m);
+
+  // cuBLAS's requirement
+  TORCH_CHECK(
+    m >= n,
+    "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA with cuBLAS backend.");
+
+  // cuBLAS documentation says:
+  // Matrices Aarray[i] should not overlap; otherwise, undefined behavior is expected.
+  // explicitly broadcast the batch dimensions of A
+  IntArrayRef A_batch_sizes(A.sizes().data(), A.dim() - 2);
+  IntArrayRef B_batch_sizes(B.sizes().data(), B.dim() - 2);
+  std::vector<int64_t> expand_batch_portion = at::infer_size(A_batch_sizes, B_batch_sizes);
+  expand_batch_portion.insert(expand_batch_portion.end(), {A.size(-2), A.size(-1)});
+  Tensor A_expanded = A.expand({expand_batch_portion});
+  Tensor A_broadcasted = cloneBatchedColumnMajor(A_expanded);
+
+  // cuBLAS batched gels requires input to be the device array of pointers to device single matrices
+  Tensor A_ptr_array = get_device_pointers<scalar_t>(A_broadcasted);
+  Tensor B_ptr_array = get_device_pointers<scalar_t>(B);
+  auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
+  auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
+
+  auto infos_data = infos.data_ptr<int>();
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  int info;
+
+  at::cuda::blas::gelsBatched<scalar_t>(
+    handle, trans, m, n, nrhs,
+    A_ptr_array_data, lda,
+    B_ptr_array_data, ldb,
+    &info,
+    infos_data,
+    batch_size);
+
+  // negative info indicates that an argument to gelsBatched call is invalid
+  TORCH_INTERNAL_ASSERT(info == 0);
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_gels_batched'
+void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "gels_batched_cublas", [&]{
+    apply_gels_batched<scalar_t>(a, b, infos);
   });
 }
 
@@ -424,12 +490,9 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 }
 
 
-// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used here.
-//     A loop of cusolverDnXpotrf is used in case MAGMA is not linked in the pytorch build.
-//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
-//     See https://github.com/pytorch/pytorch/issues/53879.
+// Implementation of Cholesky decomposition using looped cusolverDn<T>potrf or cusolverDnXpotrf (64-bit)
 template<typename scalar_t>
-inline static void apply_cholesky_cusolver(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
+inline static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int64_t n = self_working_copy.size(-1);
@@ -494,10 +557,41 @@ inline static void apply_cholesky_cusolver(const Tensor& self_working_copy, bool
 #endif // USE_CUSOLVER_64_BIT
 }
 
+// Implementation of Cholesky decomposition using batched cusolverDn<T>potrfBatched
+// Warning: cusolverDn<T>potrfBatched doesn't work quite well when matrix size or batch size is zero.
+// If you write your own C++ extension and use this function, make sure you do a zero numel check for the input.
+template<typename scalar_t>
+inline static void apply_cholesky_cusolver_potrfBatched(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  const int n = cuda_int_cast(self_working_copy.size(-1), "n");
+  const int lda = std::max<int>(1, n);
+
+  const int batch_size = cuda_int_cast(batchCount(self_working_copy), "batch_size");
+
+  // cusolver batched kernels require input be "device array of device pointers"
+  Tensor self_working_copy_array = get_device_pointers<scalar_t>(self_working_copy);
+
+  at::cuda::solver::potrfBatched<scalar_t>(
+    handle, uplo, n,
+    reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr()),
+    lda, infos.data_ptr<int>(), batch_size);
+}
+
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
-    apply_cholesky_cusolver<scalar_t>(input, upper, info);
-  });
+  if (input.numel() == 0) {
+    return;
+  }
+
+  if (use_cusolver_potrf_batched_ && batchCount(input) > 1) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
+      apply_cholesky_cusolver_potrfBatched<scalar_t>(input, upper, info);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
+      apply_cholesky_cusolver_potrf_looped<scalar_t>(input, upper, info);
+    });
+  }
 }
 
 

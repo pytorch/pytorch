@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -7,10 +9,11 @@
 #include <mutex>
 
 #include <nccl.h>
+#include <c10/util/Exception.h>
 
 namespace {
-  // Provides additional detail into NCCL error codes based on when these are
-  // thrown in the NCCL codebase.
+// Provides additional detail into NCCL error codes based on when these are
+// thrown in the NCCL codebase.
 const inline char* getNcclErrorDetailStr(ncclResult_t error) {
   switch (error) {
     case ncclUnhandledCudaError:
@@ -50,12 +53,12 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error) {
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd)                                                  \
   do {                                                                        \
-    ncclResult_t result = cmd; \
+    ncclResult_t result = cmd;                                                \
     if (result != ncclSuccess) {                                              \
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
           std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
           "\n" + getNcclErrorDetailStr(result);                               \
-      throw std::runtime_error(err);                                          \
+      TORCH_CHECK(false, err);                                          \
     }                                                                         \
   } while (0)
 
@@ -112,6 +115,7 @@ class NCCLComm {
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank));
     comm->ncclId_ = commId;
+    comm->rank_ = rank;
     return comm;
   }
 
@@ -139,7 +143,9 @@ class NCCLComm {
   ncclComm_t getNcclComm() {
     std::unique_lock<std::mutex> lock(mutex_);
     if (aborted_) {
-      throw std::runtime_error("NCCL communicator was aborted.");
+      TORCH_CHECK(false,
+          "NCCL communicator was aborted on rank " + std::to_string(rank_) +
+          ".");
     }
     return ncclComm_;
   }
@@ -192,6 +198,10 @@ class NCCLComm {
   bool aborted_;
   ncclResult_t ncclAsyncErr_;
   mutable std::mutex mutex_;
+  // Rank that this communicator corresponds to.
+  int rank_;
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL

@@ -12,7 +12,6 @@ static void quantize_per_channel_4d_contiguous(benchmark::State& state) {
   at::Tensor a = at::rand({batches, channels, height, width});
   at::Tensor scales = at::rand({channels});
   at::Tensor zero_points = at::randint(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0, 10, {channels}, at::TensorOptions().dtype(at::ScalarType::Int));
 
   at::Tensor qa;
@@ -33,7 +32,6 @@ static void quantize_per_channel_4d_channels_last(benchmark::State& state) {
       at::TensorOptions().memory_format(at::MemoryFormat::ChannelsLast));
   at::Tensor scales = at::rand({channels});
   at::Tensor zero_points = at::randint(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0, 10, {channels}, at::TensorOptions().dtype(at::ScalarType::Int));
 
   at::Tensor qa;
@@ -50,7 +48,6 @@ static void quantize_per_channel_2d(benchmark::State& state) {
   at::Tensor a = at::rand({channels, nelem});
   at::Tensor scales = at::rand({channels});
   at::Tensor zero_points = at::randint(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0, 10, {channels}, at::TensorOptions().dtype(at::ScalarType::Int));
 
   at::Tensor qa;
@@ -63,11 +60,8 @@ static void quantize_per_channel_2d(benchmark::State& state) {
 static void GenerateSizes4d(benchmark::internal::Benchmark* b) {
   b->ArgNames({"N", "C", "H", "W"});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t n = 16; n < 256; n *= 2) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t c = 4; c < 256; c *= 2) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (size_t hw = 4; hw < 256; hw *= 2) {
         b->Args({n, c, hw, hw});
       }
@@ -78,9 +72,7 @@ static void GenerateSizes4d(benchmark::internal::Benchmark* b) {
 static void GenerateSizes2d(benchmark::internal::Benchmark* b) {
   b->ArgNames({"C", "N"});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t c = 4; c < 512; c *= 2) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t n = 4; n < 512; n *= 2) {
       b->Args({c, n});
     }

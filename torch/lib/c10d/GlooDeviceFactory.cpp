@@ -1,11 +1,17 @@
 #include <c10d/GlooDeviceFactory.hpp>
 
+#ifdef USE_C10D_GLOO
+
 #include <stdlib.h>
 
 #include <c10/util/Exception.h>
 
 #if GLOO_HAVE_TRANSPORT_TCP
 #include <gloo/transport/tcp/device.h>
+#endif
+
+#if GLOO_HAVE_TRANSPORT_TCP_TLS
+#include <gloo/transport/tcp/tls/device.h>
 #endif
 
 #if GLOO_HAVE_TRANSPORT_UV
@@ -59,6 +65,35 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, LINUX, makeTCPDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
 #endif
 
+#if GLOO_HAVE_TRANSPORT_TCP_TLS
+static std::string cstr_to_std_string(const char* chars) {
+  return std::string (chars != nullptr ? chars : "");
+}
+
+static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
+    const std::string& interface,
+    const std::string& hostname) {
+  TORCH_CHECK(
+      !interface.empty() || !hostname.empty(),
+      "GlooDeviceFactory::makeTCPTLSDevice(): interface or hostname "
+      "can't be empty");
+
+  ::gloo::transport::tcp::attr attr;
+  if (!interface.empty()) {
+    attr.iface = interface;
+  } else {
+    attr.hostname = hostname;
+  }
+  const auto pkey = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY"));
+  const auto cert = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT"));
+  const auto caFile = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE"));
+  const auto caPath = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH"));
+  return ::gloo::transport::tcp::tls::CreateDevice(attr, pkey, cert, caFile, caPath);
+}
+
+C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP_TLS, makeTCPTLSDevice);
+#endif
+
 #if GLOO_HAVE_TRANSPORT_UV
 static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
     const std::string& interfaceName,
@@ -85,48 +120,49 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, WIN32, makeUVDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
 #endif
 
-static const char* glooDeviceTransport = getenv("GLOO_DEVICE_TRANSPORT");
-
-std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
-    makeDeviceForInterface(const std::string& interfaceName) {
-  if (glooDeviceTransport) {
-    return GlooDeviceRegistry()->Create(glooDeviceTransport, interfaceName, "");
+namespace {
+std::shared_ptr<::gloo::transport::Device>
+makeGlooDevice(const std::string& interfaceName, const std::string& hostName)
+{
+  static auto transportName = getenv("GLOO_DEVICE_TRANSPORT");
+  if (transportName) {
+    return GlooDeviceRegistry()->Create(transportName, interfaceName, hostName);
   }
 
 #ifdef __linux__
-  return GlooDeviceRegistry()->Create("LINUX", interfaceName, "");
+  return GlooDeviceRegistry()->Create("LINUX", interfaceName, hostName);
 #endif
 
 #ifdef __APPLE__
-  return GlooDeviceRegistry()->Create("APPLE", interfaceName, "");
+  return GlooDeviceRegistry()->Create("APPLE", interfaceName, hostName);
 #endif
 
 #ifdef _WIN32
-  return GlooDeviceRegistry()->Create("WIN32", interfaceName, "");
+  return GlooDeviceRegistry()->Create("WIN32", interfaceName, hostName);
 #endif
 
-  throw std::runtime_error("makeDeviceForInterface(): unsupported gloo device");
+  return nullptr;
+}
+} // anonymous namespace
+
+std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
+    makeDeviceForInterface(const std::string& interfaceName) {
+  auto device = makeGlooDevice(interfaceName, "");
+  if (!device) {
+    TORCH_CHECK(false, "makeDeviceForInterface(): unsupported gloo device");
+  }
+  return device;
 }
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForHostname(const std::string& hostname) {
-  if (glooDeviceTransport) {
-    return GlooDeviceRegistry()->Create(glooDeviceTransport, "", hostname);
+  auto device = makeGlooDevice("", hostname);
+  if (!device) {
+    TORCH_CHECK(false, "makeDeviceForHostname(): unsupported gloo device");
   }
-
-#ifdef __linux__
-  return GlooDeviceRegistry()->Create("LINUX", "", hostname);
-#endif
-
-#ifdef __APPLE__
-  return GlooDeviceRegistry()->Create("APPLE", "", hostname);
-#endif
-
-#ifdef _WIN32
-  return GlooDeviceRegistry()->Create("WIN32", "", hostname);
-#endif
-
-  throw std::runtime_error("makeDeviceForHostname(): unsupported gloo device");
+  return device;
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO

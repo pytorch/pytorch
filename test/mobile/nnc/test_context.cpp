@@ -80,22 +80,15 @@ TEST(Function, Serialization) {
   Function f;
   f.set_name("test_function");
   f.set_nnc_kernel_id("test_kernel");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f.set_input_specs({create_test_input_spec({1, 3, 224, 224})});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f.set_output_spec({create_test_output_spec({1000})});
   f.set_parameters({
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ones({1, 16, 3, 3}, at::kFloat),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ones({16, 32, 1, 1}, at::kFloat),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ones({32, 1, 3, 3}, at::kFloat)
   });
   f.set_memory_plan(create_test_memory_plan({
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sizeof(float) * 1024,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sizeof(float) * 2048,
   }));
 

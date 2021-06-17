@@ -15,7 +15,6 @@ namespace F = torch::nn::functional;
 // Generate test data with few bits of precision, to minimize error
 // accumulation from floating-point reordering.
 static at::Tensor genTestData(c10::IntArrayRef args) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::trunc(at::randn(args) * 256.0f) / 256.0f;
 }
 
@@ -210,9 +209,7 @@ TEST(Conv, Conv2D) {
         auto const& oh = v[2];
         auto const& ow = v[3];
         auto const& c = v[4];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto const& r = v[5];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto const& s = v[6];
         // FIXME: We have to use `call` and construct a `std::vector` here
         // because the `operator()` overload is only specialized for a small

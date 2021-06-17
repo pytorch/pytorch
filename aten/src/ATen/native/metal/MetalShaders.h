@@ -15,8 +15,10 @@ constant ushort ushort_arg_6[[function_constant(6)]];
 constant ushort ushort_arg_7[[function_constant(7)]];
 constant ushort ushort_arg_8[[function_constant(8)]];
 constant ushort ushort_arg_9[[function_constant(9)]];
-constant float float_arg_0 [[function_constant(10)]];
-constant float float_arg_1 [[function_constant(11)]];
+constant ushort ushort_arg_10[[function_constant(10)]];
+constant ushort ushort_arg_11[[function_constant(11)]];
+constant float float_arg_0 [[function_constant(12)]];
+constant float float_arg_1 [[function_constant(13)]];
 
 inline constexpr ushort divRoundUp(ushort x, ushort y) { return (x + (y - 1)) / y; }
 
@@ -525,6 +527,49 @@ kernel void hardswish_nonarray(texture2d<half, access::read> in[[texture(0)]],
     half4 mask2 = half4(value > -3.0);
     half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
     out.write(outval, gid);
+}
+
+constant bool out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
+constant bool out_is_tex = !out_is_arr;
+constant bool in_is_arr = (ushort_arg_7 > 1 || ushort_arg_6 > 4);
+constant bool in_is_tex = !in_is_arr;
+kernel void reflection_pad2d(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(in_is_arr)]],
+                             texture2d<half, access::read> in_tex[[texture(0),function_constant(in_is_tex)]],
+                             texture2d_array<half, access::write> out_arr[[texture(1), function_constant(out_is_arr)]],
+                             texture2d<half, access::write> out_tex[[texture(1), function_constant(out_is_tex)]],
+                             ushort3 gid[[thread_position_in_grid]]) {
+  const ushort H2 = ushort_arg_0;
+  const ushort W2 = ushort_arg_1;
+  if (gid.x >= W2 || gid.y >= H2) {
+      return;
+  }
+
+  const ushort pad_left = ushort_arg_8;
+  const ushort pad_right = ushort_arg_9;
+  const ushort pad_top = ushort_arg_10;
+  const ushort pad_bottom = ushort_arg_11;
+
+  const ushort2 out_size = ushort2(W2, H2);
+  const ushort xoff_pre  = 2*max(pad_left - gid.x, 0);
+  const ushort xoff_post = 2*max(gid.x - (out_size.x - 1 - pad_right), 0);
+  const ushort yoff_pre  = 2*max(pad_top - gid.y, 0);
+  const ushort yoff_post = 2*max(gid.y - (out_size.y - 1 - pad_bottom), 0);
+  ushort2 inpos = ushort2(
+      gid.x + xoff_pre - xoff_post - pad_left,
+      gid.y + yoff_pre - yoff_post - pad_top);
+
+  half4 intex;
+  if (in_is_arr) {
+    intex = in_arr.read(inpos, gid.z);
+  } else {
+    intex = in_tex.read(inpos);
+  }
+
+  if (out_is_arr) {
+      out_arr.write(intex, gid.xy, gid.z);
+  } else {
+      out_tex.write(intex, gid.xy);
+  }
 }
 
 kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]],

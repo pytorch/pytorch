@@ -82,8 +82,6 @@ class _HookMixin(object):
 
 
 class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
-    _is_legacy = False
-
     def apply(self, *args):
         # _forward_cls is defined by derived class
         return self._forward_cls.backward(self, *args)  # type: ignore[attr-defined]
@@ -93,29 +91,16 @@ class FunctionMeta(type):
     """Function metaclass.
 
     This metaclass sets up the following properties:
-        _is_legacy: True if forward is not defined as a static method.
         _backward_cls: The Function class corresponding to the differentiated
             version of this function (which is generated on the fly by this
             metaclass).
     """
-
     def __init__(cls, name, bases, attrs):
-        for super_cls in cls.mro():
-            forward = super_cls.__dict__.get('forward')
-            if forward is not None:
-                has_static_forward = isinstance(forward, staticmethod) or isinstance(forward, classmethod)
-                break
-
-        cls._is_legacy = not has_static_forward
-
-        # old-style functions
-        if not has_static_forward:
-            return super(FunctionMeta, cls).__init__(name, bases, attrs)
-
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
         cls._backward_cls = backward_fn
 
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
+
 
 # mypy doesn't understand `with_metaclass` from torch._six
 class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):  # type: ignore[misc]
@@ -154,6 +139,12 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>> #Use it by calling the apply method:
         >>> output = Exp.apply(input)
     """
+    def __init__(self, *args, **kwargs):
+        cls = self.__class__
+        warnings.warn(f"{cls} should not be instantiated. Methods on autograd functions"
+                      "are all static, so you should invoke them on the class itself. "
+                      "Instantiating an autograd function will raise an "
+                      "error in a future version of PyTorch.", DeprecationWarning)
 
     def __call__(self, *args, **kwargs):
         raise RuntimeError(

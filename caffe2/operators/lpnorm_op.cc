@@ -55,7 +55,6 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   } else if (p_ == 2) {
     EigenVectorMap<float>(dX->template mutable_data<float>(), X.numel())
         .array() =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ConstEigenVectorMap<float>(X.data<float>(), X.numel()).array() * 2.0f *
         ((dnorm.data<float>())[0] / size);
   }

@@ -1,6 +1,16 @@
 {% extends "!layout.html" %}
 <link rel="canonical" href="{{ theme_canonical_url }}{{ pagename }}.html" />
 
+{% block extrahead %}
+{% if release == "master" %}
+<!--
+  Search engines should not index the master version of documentation.
+  Stable documentation are built without release == 'master'.
+-->
+<meta name="robots" content="noindex">
+{% endif %}
+{% endblock %}
+
 {% block menu %}
 {% if release == "master" %}
 <div>

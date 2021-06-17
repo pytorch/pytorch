@@ -115,8 +115,13 @@ void MPSImageWrapper::prepare() {
     _buffer = [[MPSCNNContext sharedInstance].device
         newBufferWithLength:size_bytes
                     options:MTLResourceCPUCacheModeWriteCombined];
+    TORCH_CHECK(_buffer, "Allocate GPU memory failed!");
   }
   copyToMetalBuffer(_commandBuffer, _buffer, _image);
+  if (_image.isTemporaryImage && _image.readCount != 0) {
+    _image =
+        createStaticImage((MPSTemporaryImage*)_image, _commandBuffer, false);
+  }
 }
 
 void MPSImageWrapper::synchronize() {
@@ -126,14 +131,13 @@ void MPSImageWrapper::synchronize() {
 }
 
 void MPSImageWrapper::release() {
-  if ([_image isTemporaryImage]) {
-    [_image recycle];
-    [_commandBuffer remove:(MPSTemporaryImage*)_image];
-  }
+  [_image recycle];
+  [_commandBuffer remove:(MPSTemporaryImage*)_image];
   [_commandBuffer removeSubscriber:_delegate];
   _delegate = nil;
   _commandBuffer = nil;
   _image = nil;
+  _buffer = nil;
 }
 
 }
