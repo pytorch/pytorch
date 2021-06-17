@@ -222,7 +222,7 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   at::parallel_for(
       0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
+          fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<float>(
             weight_data + row * embedding_cols, 1,
               embedding_cols, output_data + row * output_columns);
         }
@@ -302,7 +302,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
     at::parallel_for(
       0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+          fbgemm::FloatOrHalfToFusedNBitRowwiseQuantizedSBHalf<float>(
             bit_width, weight_data + row * embedding_cols, 1,
             embedding_cols, output_data + row * output_shape[1]);
         }
