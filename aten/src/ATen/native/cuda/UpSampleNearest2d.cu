@@ -342,9 +342,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
 
   if (memory_format == at::MemoryFormat::ChannelsLast) {
     Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
-    // TORCH_INTERNAL_ASSERT(grad_input.is_contiguous(at::MemoryFormat::ChannelsLast), "output should also be channels-last memory format");
-    // ^^^ This fails
-    grad_input.unsafeGetTensorImpl()->empty_tensor_restride(at::MemoryFormat::ChannelsLast);
+    TORCH_INTERNAL_ASSERT(grad_input.is_contiguous(at::MemoryFormat::ChannelsLast), "grad_input should also be channels-last memory format");
 
     TORCH_CHECK(grad_input.numel() < std::numeric_limits<int>::max(),
       "upsample_nearest_nhwc only supports grad_input tensors with less than INT_MAX elements");
