@@ -85,9 +85,9 @@ void binomial_cuda_kernel(
     at::PhiloxCudaState philox_args) {
   using accscalar_t = at::acc_type<scalar_t, true>;
   at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_borrowed_output(ret)
-      .add_borrowed_input(count)
-      .add_borrowed_input(prob)
+      .add_output(ret)
+      .add_input(count)
+      .add_input(prob)
       .build();
 
   at::native::distribution_binary_kernel(iter, philox_args,
@@ -143,9 +143,9 @@ void dirichlet_scalar_cuda_kernel(
     const at::Tensor& gamma) {
   auto gamma_sum = gamma.sum(-1, true);
   at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_borrowed_output(ret)
-      .add_borrowed_input(gamma)
-      .add_borrowed_input(gamma_sum)
+      .add_output(ret)
+      .add_input(gamma)
+      .add_input(gamma_sum)
       .build();
   at::native::gpu_kernel(iter,
     [] GPU_LAMBDA (scalar_t gamma, scalar_t gamma_sum) {
@@ -227,9 +227,9 @@ Tensor _s_dirichlet_cuda(const Tensor& alpha, c10::optional<Generator> gen_) {
 Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
   TensorIterator iter = at::TensorIteratorConfig()
-      .add_borrowed_output(ret)
-      .add_borrowed_input(self)
-      .add_borrowed_input(output)
+      .add_output(ret)
+      .add_input(self)
+      .add_input(output)
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "_standard_gamma_grad_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
@@ -244,10 +244,10 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& total) {
   Tensor ret = at::empty(x.sizes(), x.options());
   TensorIterator iter = at::TensorIteratorConfig()
-      .add_borrowed_output(ret)
-      .add_borrowed_input(x)
-      .add_borrowed_input(alpha)
-      .add_borrowed_input(total)
+      .add_output(ret)
+      .add_input(x)
+      .add_input(alpha)
+      .add_input(total)
       .build();
   AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;

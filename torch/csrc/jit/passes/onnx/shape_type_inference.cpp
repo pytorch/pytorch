@@ -94,8 +94,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
       {});
   if (onnx_tensor_type.has_shape()) {
     std::vector<c10::ShapeSymbol> sizes;
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto onnx_shape = onnx_tensor_type.shape();
+    const auto& onnx_shape = onnx_tensor_type.shape();
 
     for (int i = 0; i < onnx_shape.dim_size(); ++i) {
       auto& dim = onnx_shape.dim(i);
@@ -108,8 +107,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
           // Search if this is already known,
           // and assign the same Symbol.
           GRAPH_UPDATE("Got dim_param:", dim.dim_param());
-          // NOLINTNEXTLINE(performance-for-range-copy)
-          for (auto pair : symbol_map) {
+          for (const auto& pair : symbol_map) {
             if (pair.second == dim.dim_param()) {
               sym = pair.first;
               break;
@@ -146,12 +144,10 @@ ListTypePtr TorchListTypeFromONNX(
     SymbolDimMap& symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto onnx_seq_elem_type = onnx_sequence_type.elem_type();
+    const auto& onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {
-      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-      auto onnx_tensor_type = onnx_seq_elem_type.tensor_type();
-      auto v_tensor_type =
+      const auto& onnx_tensor_type = onnx_seq_elem_type.tensor_type();
+      const auto v_tensor_type =
           TorchTensorTypeFromONNX(onnx_tensor_type, symbol_map);
       auto v_type = ListType::create(v_tensor_type);
       return v_type;
@@ -168,16 +164,15 @@ void UpdateTorchValueByOnnxValueInfo(
     return;
   }
 
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto p_type = p_info.type();
+  const auto& p_type = p_info.type();
   if (p_type.has_tensor_type()) {
-    auto torch_tensor_type =
+    const auto torch_tensor_type =
         TorchTensorTypeFromONNX(p_type.tensor_type(), symbol_map);
     if (torch_tensor_type) {
       v->setType(MergeInferredType(v->type(), torch_tensor_type));
     }
   } else if (p_type.has_sequence_type()) {
-    auto torch_list_type =
+    const auto torch_list_type =
         TorchListTypeFromONNX(p_type.sequence_type(), symbol_map);
     if (torch_list_type) {
       v->setType(MergeInferredType(v->type(), torch_list_type));
@@ -373,7 +368,7 @@ bool IsBlockReturnTypeSame(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == ::c10::onnx::If);
   auto then_block = n->blocks()[0];
   auto else_block = n->blocks()[1];
-  for (size_t i = 0; i < n->outputs().size(); i++) {
+  for (const auto i : c10::irange(n->outputs().size())) {
     // check the type
     auto then_block_type = then_block->outputs()[i]->type();
     auto else_block_type = else_block->outputs()[i]->type();
@@ -598,7 +593,7 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
     Node* lc_node) {
   auto rank = lc_node->inputs().size();
   std::vector<int64_t> shape_size;
-  for (size_t i = 0; i < rank; i++) {
+  for (const auto i : c10::irange(rank)) {
     if (TensorTypePtr shape_type =
             lc_node->input(i)->type()->cast<TensorType>()) {
       if (ConstantValueMap::HasValue(lc_node->input(i)->debugName())) {
@@ -1078,11 +1073,21 @@ bool IsListConstructIntType(const Value* v) {
   return false;
 }
 
+bool AllGraphInputsStatic(const Graph* g) {
+  for (auto n : g->inputs()) {
+    if (!n->isCompleteTensor()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void ProcessConstantValueMap(Node* n, int opset_version) {
   // Update ConstantValueMap on node outputs from onnx shape inference
   // For outputs, only update static shapes. For input, we update symbolic
   // shapes also. ONNX If can have different types on different branches, skip
   // here.
+  auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
   for (auto i = 0; i < n->outputs().size(); i++) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
@@ -1103,9 +1108,17 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
       if (input_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(input_type->dim().value());
         ConstantValueMap::SetRank(n->input(i)->debugName(), rank);
-        auto shape = input_type->symbolic_sizes();
-        if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
-          UpdateShape(n->input(i), shape);
+        // Only update shape if the input is onnx node.
+        // If it is aten operators, for example,
+        //   Float(20, 20, strides=[1, 0], requires_grad=0, device=cpu),
+        //     %399 : Float(20, 20, strides=[0, 1], requires_grad=0, device=cpu)
+        //     = prim::ListUnpack(%397)
+        // The tracer shape may not be correct when dynamic_axes is enabled.
+        if (n->input(i)->node()->kind().is_onnx() || static_input_shape) {
+          auto shape = input_type->symbolic_sizes();
+          if (!ConstantValueMap::HasShape(n->input(i)->debugName())) {
+            UpdateShape(n->input(i), shape);
+          }
         }
       }
     } else if (IsListConstructIntType(n->input(i))) {
@@ -1139,7 +1152,7 @@ void SpecialPostProcess(Node* n) {
       if (!IsBlockReturnTypeSame(n) && IsStaticConditionONNX(n)) {
         auto cond = ConditionValueONNX(n);
         auto block_idx = cond ? 0 : 1;
-        for (size_t i = 0; i < n->outputs().size(); i++) {
+        for (const auto i : c10::irange(n->outputs().size())) {
           n->outputs()[i]->setType(
               n->blocks()[block_idx]->outputs()[i]->type());
         }
@@ -1152,18 +1165,88 @@ void SpecialPostProcess(Node* n) {
       // If the list to insert is empty, we set the elem type by
       // looking at the tensor being inserted.
       auto list_node = n->input(0)->node();
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-      auto t_node = n->input(1)->node();
-      if (!list_node || list_node->kind() != prim::ListConstruct ||
-          list_node->inputs().size() != 0) {
-        break;
-      }
+      auto seq_node = n->input(0)->node();
+      auto t_type = n->input(1)->type()->cast<TensorType>();
 
-      if (TensorTypePtr t_type = n->input(1)->type()->cast<TensorType>()) {
-        if (t_type->scalarType()) {
+      auto update_sequence_empty_dtype = [](Node* n, TensorTypePtr t_type) {
+        TORCH_INTERNAL_ASSERT(n && n->kind() == ::c10::onnx::SequenceEmpty);
+        TORCH_INTERNAL_ASSERT(t_type && t_type->scalarType().has_value());
+        auto scalar_type = t_type->scalarType().value();
+        auto onnx_type = ATenTypeToOnnxType(scalar_type);
+        n->i_(attr::dtype, onnx_type);
+        n->output()->setType(ListType::create(t_type));
+      };
+
+      auto find_sequence_empty = [](Value* input,
+                                    TensorTypePtr t_type) -> Node* {
+        auto find_sequence_empty_impl =
+            [](Value* input,
+               TensorTypePtr t_type,
+               auto& find_sequence_empty_ref) -> Node* {
+          auto input_node = input->node();
+          TORCH_INTERNAL_ASSERT(input_node);
+
+          // 1. Input is from SequenceEmpty.
+          if (input_node->kind() == ::c10::onnx::SequenceEmpty) {
+            return input_node;
+          }
+
+          // 2. Input is subblock input of a Loop node, which takes outer block
+          // SequenceEmpty as input.
+          if (input_node->kind() == prim::Param) {
+            auto loop_n = input_node->owningBlock()->owningNode();
+            if (nullptr == loop_n || loop_n->kind() != ::c10::onnx::Loop) {
+              return nullptr;
+            }
+
+            auto it = std::find(
+                input_node->outputs().begin(),
+                input_node->outputs().end(),
+                input);
+            auto idx = std::distance(input_node->outputs().begin(), it);
+
+            auto outer_block_node = loop_n->input(idx)->node();
+            if (outer_block_node &&
+                outer_block_node->kind() == ::c10::onnx::SequenceEmpty) {
+              // Found SequenceEmpty
+              input->setType(ListType::create(t_type));
+              return outer_block_node;
+            } else {
+              // Outer block node still not SequenceEmpty, call recursively in
+              // case of nested loop.
+              auto found_n = find_sequence_empty_ref(
+                  loop_n->input(idx), t_type, find_sequence_empty_ref);
+              if (found_n) {
+                input->setType(ListType::create(t_type));
+              }
+              return found_n;
+            }
+          }
+
+          // Could not find source SequenceEmpty node.
+          return nullptr;
+        };
+        return find_sequence_empty_impl(
+            input, t_type, find_sequence_empty_impl);
+      };
+
+      if (seq_node && t_type && t_type->scalarType()) {
+        if (seq_node->kind() == prim::ListConstruct &&
+            seq_node->inputs().size() != 0) {
+          // When prim::ListConstruct is not yet converted to
+          // onnx::SequenceEmpty
           n->output()->setType(ListType::create(t_type));
+        } else if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
+          update_sequence_empty_dtype(seq_node, t_type);
+        } else if (seq_node->kind() == prim::Param) {
+          // Try to find original onnx::SequenceEmpty node in outer block.
+          auto seq_empty_n = find_sequence_empty(n->input(0), t_type);
+          if (seq_empty_n) {
+            update_sequence_empty_dtype(seq_empty_n, t_type);
+          }
         }
       }
+
       break;
     }
     case ::c10::onnx::Cast: {
@@ -1228,11 +1311,10 @@ void UpdateOutputTypeByONNXProto(
     Node* clone_node,
     const onnx::ModelProto& model_proto,
     SymbolDimMap& symbol_map) {
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto graph_proto = model_proto.graph();
+  const auto& graph_proto = model_proto.graph();
 
   // get data from value_info and updated original graph.
-  auto updateNodeOutputsByONNXValueInfo =
+  const auto updateNodeOutputsByONNXValueInfo =
       [&](const onnx::ValueInfoProto& v_info) {
         for (size_t i = 0; i < n->outputs().size(); ++i) {
           if (clone_node->output(i)->debugName() == v_info.name()) {
@@ -1398,10 +1480,9 @@ void ONNXSetDynamicInputShape(
           shape_ref.has_value(), "Input tensor shape should have value.");
       auto shape = shape_ref.value();
 
-      // NOLINTNEXTLINE(performance-for-range-copy)
-      for (auto pair : axes_names) {
-        auto axis = pair.first;
-        auto name = pair.second;
+      for (const auto& pair : axes_names) {
+        const auto axis = pair.first;
+        const auto name = pair.second;
         if (name_to_sym.find(name) == name_to_sym.end()) {
           name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
         }
@@ -1459,8 +1540,7 @@ size_t ONNXAssignOutputShape(
   index_check();
 
   if (THPVariable_Check(output_obj)) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    at::Tensor var = THPVariable_Unpack(output_obj);
+    const at::Tensor& var = THPVariable_Unpack(output_obj);
     ONNXUpdateTypeFromTensor(
         graph->outputs().at(outputs_index), var, onnx_shape_inference);
     outputs_index++;
@@ -1474,7 +1554,7 @@ size_t ONNXAssignOutputShape(
           onnx_shape_inference);
     }
   } else if (PyList_Check(output_obj)) {
-    size_t list_len = PyList_GET_SIZE(output_obj);
+    const auto list_len = PyList_GET_SIZE(output_obj);
     if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
       auto output_type = graph->outputs().at(outputs_index)->type();
       TORCH_CHECK(
