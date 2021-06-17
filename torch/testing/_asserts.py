@@ -9,7 +9,7 @@ from torch import Tensor
 
 from ._core import _unravel_index
 
-__all__ = ["assert_close", "assert_equal"]
+__all__ = ["assert_close"]
 
 
 # The UsageError should be raised in case the test function is not used correctly. With this the user is able to
@@ -633,10 +633,23 @@ def assert_close(
 
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
 
-    .. seealso::
+    .. note::
 
-        To assert that the values of corresponding scalars or tensor-likes are bitwise equal, use :func:`assert_equal`
-        instead.
+        :func:`~torch.testing.assert_close` is highly configurable with strict default settings. Users are encouraged
+        to :func:`~functools.partial` it to fit their use case. For example, if you an equality check is needed one
+        might define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
+
+        .. code:: python
+
+        >>> import functools
+        >>> import torch
+        >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
+        >>> assert_equal(1e-9, 1e-10)
+        AssertionError: Tensors are not close!
+
+        Mismatched elements: 1 / 1 (100.0%)
+        Greatest absolute difference: 8.999999703829253e-10 at 0 (up to 0 allowed)
+        Greatest relative difference: 8.999999583666371 at 0 (up to 0 allowed)
 
     Examples:
         >>> # tensor to tensor comparison
@@ -737,70 +750,3 @@ def assert_close(
     )
     if error_meta:
         raise error_meta.to_error()
-
-
-assert_equal = functools.partial(assert_close, rtol=0.0, atol=0.0)
-assert_equal.__doc__ = r"""Asserts that :attr:`actual` and :attr:`expected` are close.
-
-    If :attr:`actual` and :attr:`expected` are real-valued and finite, they are considered equal if there values are
-    bitwise equal and they have the same :attr:`~torch.Tensor.device` (if :attr:`check_device` is ``True``), same
-    ``dtype`` (if :attr:`check_dtype` is ``True``), and the same stride (if :attr:`check_stride` is ``True``).
-    ``NaN``'s are only considered equal to each other if :attr:`equal_nan` is ``True``.
-
-    If :attr:`actual` and :attr:`expected` are complex-valued, they are considered close if both their real and
-    imaginary components are considered close according to the definition above.
-
-    :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
-    from which :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. In addition, :attr:`actual` and
-    :attr:`expected` can be :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s in which case
-    they are considered close if their structure matches and all their elements are considered close according to the
-    above definition.
-
-    Args:
-        actual (Any): Actual input.
-        expected (Any): Expected input.
-        equal_nan (Union[bool, str]): If ``True``, two ``NaN`` values will be considered equal. If ``"relaxed"``,
-            complex values are considered as ``NaN`` if either the real **or** imaginary component is ``NaN``.
-        check_device (bool): If ``True`` (default), asserts that corresponding tensors are on the same
-            :attr:`~torch.Tensor.device`. If this check is disabled, tensors on different
-            :attr:`~torch.Tensor.device`'s are moved to the CPU before being compared.
-        check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
-            check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
-            :func:`torch.promote_types`) before being compared.
-        check_stride (bool): If ``True`` (default), asserts that corresponding tensors have the same stride.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message to use if
-            the values of corresponding tensors mismatch. Can be passed as callable in which case it will be called
-            with the mismatching tensors and a namespace of diagnostic info about the mismatches. See below for details.
-
-    Raises:
-        UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
-            future.
-        AssertionError: If corresponding array-likes have different types.
-        AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
-        AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
-        AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
-        AssertionError: If :attr:`check_device`, but corresponding tensors are not on the same
-            :attr:`~torch.Tensor.device`.
-        AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
-        AssertionError: If :attr:`check_stride`, but corresponding tensors do not have the same stride.
-        AssertionError: If the values of corresponding tensors are not equal.
-
-    The namespace of diagnostic information that will be passed to :attr:`msg` if its a callable has the following
-    attributes:
-
-    - ``number_of_elements`` (int): Number of elements in each tensor being compared.
-    - ``total_mismatches`` (int): Total number of mismatches.
-    - ``mismatch_ratio`` (float): Total mismatches divided by number of elements.
-    - ``max_abs_diff`` (Union[int, float]): Greatest absolute difference of the inputs.
-    - ``max_abs_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
-    - ``max_rel_diff`` (Union[int, float]): Greatest relative difference of the inputs.
-    - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
-
-    For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
-
-    .. seealso::
-
-        To assert that the values of corresponding scalars or tensor-likes are close but are not required to be
-        bitwise equal, use :func:`assert_close` instead.
-"""
