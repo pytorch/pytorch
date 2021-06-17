@@ -196,6 +196,7 @@ jobs:
     runs-on: ubuntu-18.04
     env:
       NUM_TEST_SHARDS: !{{ num_test_shards }}
+      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
@@ -223,8 +224,8 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      TEST_CONFIG: ${{ matrix.test_config }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      SHARD_NUMBER: ${{ matrix.shard }}
     steps:
       - name: Log in to ECR
         run: |
@@ -274,9 +275,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         run: |
-          if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
-            export SHARD_NUMBER=$TEST_CONFIG
-          else
+          if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
             export SHARD_NUMBER=0
           fi
           # TODO: Stop building test binaries as part of the build phase

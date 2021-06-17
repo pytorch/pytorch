@@ -108,8 +108,8 @@ jobs:
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      TEST_CONFIG: ${{ matrix.test_config }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      SHARD_NUMBER: ${{ matrix.shard }}
     needs:
       - build
       - generate-test-matrix
@@ -158,9 +158,7 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
-            if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
-              export SHARD_NUMBER=$TEST_CONFIG
-            else
+            if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
             fi
             .jenkins/pytorch/win-test.sh

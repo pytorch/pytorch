@@ -9,22 +9,31 @@ dictated by just sharding.
 
 import json
 import os
-from typing import List
-
-
-NUM_TEST_SHARDS = int(os.getenv('NUM_TEST_SHARDS', '1'))
-
-def generate_sharding_list() -> List[int]:
-    return list(range(1, NUM_TEST_SHARDS + 1))
 
 
 def main() -> None:
-    print(json.dumps(
-        {
-            'test_config': generate_sharding_list()
-        },
-        sort_keys=True,
-    ))
+    NUM_TEST_SHARDS = int(os.getenv('NUM_TEST_SHARDS', '1'))
+    shards_per_config = {}
+    if os.getenv('ENABLE_MULTIGPU_TEST'):
+        shards_per_config['multigpu'] = 1
+    print(json.dumps({
+        'include': [
+            {
+                'config': 'default',
+                'num_shards': NUM_TEST_SHARDS,
+                'shard': shard,
+            }
+            for shard in range(1, NUM_TEST_SHARDS + 1)
+        ] + [
+            {
+                'config': config,
+                'num_shards': num_shards,
+                'shard': shard,
+            }
+            for config, num_shards in shards_per_config.items()
+            for shard in range(1, num_shards + 1)
+        ]
+    }))
 
 
 if __name__ == "__main__":
