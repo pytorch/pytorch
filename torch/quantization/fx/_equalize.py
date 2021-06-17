@@ -4,8 +4,10 @@ import torch.nn as nn
 from torch.fx.graph import Node
 
 from ..observer import (
-    PerChannelMinMaxObserver, _with_args
+    PerChannelMinMaxObserver,
+    _with_args,
 )
+from ..utils import check_min_max_valid
 
 from collections import namedtuple
 import warnings
@@ -44,6 +46,7 @@ class _InputEqualizationObserver(nn.Module):
             raise TypeError("Input qscheme must be per-tensor")
 
         self.dtype = dtype
+        self.qscheme = qscheme
 
         self.input_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
                                                   qscheme=qscheme,
@@ -66,17 +69,16 @@ class _InputEqualizationObserver(nn.Module):
     def set_equalization_scale(self, equalization_scale):
         self.equalization_scale = equalization_scale
 
-    def calculate_qparams(self):
+    def calculate_scaled_minmax(self):
         r"""
-        Returns the scale/zero_point for the input and weight rows
+        Returns the scaled min/max inputs
         """
-
         if self.equalization_scale.nelement() == 0:
             warnings.warn(
                 "Must call calculate_scale before calling calculate_qparams.\
-                Returning default scale and zero point. "
+                Returning default min and max input."
             )
-            return torch.tensor([1.0]), torch.tensor([0]), torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([0]), torch.tensor([0])
 
         # Calculate qparams for the scaled min/max inputs
         # Scale the input by the equalization scale located at the same column
@@ -84,9 +86,8 @@ class _InputEqualizationObserver(nn.Module):
         (min_inputs, max_inputs) = self.get_input_minmax()
         min_input_scaled = torch.min(torch.mul(min_inputs, self.equalization_scale))
         max_input_scaled = torch.max(torch.mul(max_inputs, self.equalization_scale))
-        (scale_input, zero_point_input) = self.input_obs._calculate_qparams(min_input_scaled, max_input_scaled)
 
-        return scale_input, zero_point_input
+        return min_input_scaled, max_input_scaled
 
     with_args = classmethod(_with_args)
 
@@ -125,14 +126,10 @@ class _WeightEqualizationObserver(nn.Module):
         super(_WeightEqualizationObserver, self).__init__()
 
         self.dtype = dtype
+        self.qscheme = qscheme
+        self.ch_axis = 0
 
         self.weight_col_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
-                                                       qscheme=qscheme,
-                                                       quant_min=quant_min,
-                                                       quant_max=quant_max,
-                                                       factory_kwargs=factory_kwargs)
-
-        self.weight_row_obs = PerChannelMinMaxObserver(ch_axis=0, dtype=dtype,
                                                        qscheme=qscheme,
                                                        quant_min=quant_min,
                                                        quant_max=quant_max,
@@ -144,67 +141,13 @@ class _WeightEqualizationObserver(nn.Module):
         # TODO: Allow for convoluational layers
         if not (w_orig.ndim == 2):
             raise ValueError("WeightEqualizationObserver only supports Linear layers")
-
-        return self._forward(w_orig)
-
-    def _forward(self, w_orig):
-        r"""
-        Calculates the min/max values of each weight column and weight row.
-        """
-
-        w_orig = self.weight_col_obs(w_orig)
-        w_orig = self.weight_row_obs(w_orig)
-
-        # Calculate the column indices of the min/max weight in each row
-        num_row, _ = w_orig.shape
-        min_weights_ind = []
-        max_weights_ind = []
-        for i in range(num_row):
-            min_weights_ind.append(torch.nonzero(w_orig[i] == self.weight_row_obs.min_vals[i])[0][0])
-            max_weights_ind.append(torch.nonzero(w_orig[i] == self.weight_row_obs.max_vals[i])[0][0])
-        self.min_weights_ind = torch.tensor(min_weights_ind)
-        self.max_weights_ind = torch.tensor(max_weights_ind)
-
-        return w_orig
+        return self.weight_col_obs(w_orig)
 
     def get_weight_col_minmax(self):
         return (self.weight_col_obs.min_vals, self.weight_col_obs.max_vals)
 
-    def get_weight_row_minmax(self):
-        return (self.weight_row_obs.min_vals, self.weight_row_obs.max_vals)
-
     def set_equalization_scale(self, equalization_scale):
         self.equalization_scale = equalization_scale
-
-    def calculate_qparams(self):
-        r"""
-        Returns the scale/zero_point for the input and weight rows
-        """
-
-        if self.equalization_scale.nelement() == 0:
-            warnings.warn(
-                "Must call calculate_scale before calling calculate_qparams.\
-                Returning default scale and zero point. "
-            )
-            return torch.tensor([1.0]), torch.tensor([0]), torch.tensor([1.0]), torch.tensor([0])
-
-        if self.min_weights_ind is None or self.max_weights_ind is None:
-            warnings.warn(
-                "Must find the column indicies of the minimum of each row in the \
-                weights in order to calculate the qparams calculate the \
-                qparams. Returning default scale and zero point. "
-            )
-            return torch.tensor([1.0]), torch.tensor([0]), torch.tensor([1.0]), torch.tensor([0])
-
-        # Calculate the qparams for weights by using the rows
-        # Scale the weight rows by the reciprocal of the equalization scale
-        # located at the same column index
-        (min_weights, max_weights) = self.get_weight_row_minmax()
-        min_weights_scaled = torch.mul(min_weights, torch.reciprocal(self.equalization_scale[self.min_weights_ind]))
-        max_weights_scaled = torch.mul(max_weights, torch.reciprocal(self.equalization_scale[self.max_weights_ind]))
-        (scale_weight, zero_point_weight) = self.weight_row_obs._calculate_qparams(min_weights_scaled, max_weights_scaled)
-
-        return scale_weight, zero_point_weight
 
     with_args = classmethod(_with_args)
 
@@ -222,6 +165,9 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
     (min_inputs, max_inputs) = input_obs.get_input_minmax()
     (min_weights, max_weights) = weight_obs.get_weight_col_minmax()
 
+    if not (check_min_max_valid(min_inputs, max_inputs) and check_min_max_valid(min_weights, max_weights)):
+        return torch.tensor(1)
+
     if not (min_inputs.shape == min_weights.shape):
         raise ValueError(
             "Input and Weight must have the same column dimension. " +
@@ -229,7 +175,6 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
         )
 
     equalization_scale = torch.sqrt((max_weights - min_weights) / (max_inputs - min_inputs))
-
     return equalization_scale
 
 
