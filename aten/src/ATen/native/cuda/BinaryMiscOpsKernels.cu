@@ -4,6 +4,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/cuda/Math.cuh>
+#include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -71,7 +72,7 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
 void zeta_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t q) -> scalar_t {
-      return zeta(x, q);
+      return zeta<scalar_t, /*is_cuda=*/true>(x, q);
     });
   });
 }
