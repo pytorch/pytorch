@@ -2747,7 +2747,7 @@ Tensor _det_lu_based_helper_backward(
 
     return at::_lu_solve_trans(d, lu_clone, pivs, trans);
   }
-  // lu_solve is less stable than two trinagular_solve for CUDA tensors.
+  // lu_solve is less stable than two triangular_solve for CUDA tensors.
   else {
     Tensor p, l, u;
     std::tie(p, l, u) = at::lu_unpack(lu, pivs, /*unpack_data=*/true, /*unpack_pivots=*/true);
