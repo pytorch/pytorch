@@ -645,8 +645,6 @@ constexpr double QUARTER = 0.25;
 }
 
 static inline void mvlgamma_check(const Tensor& self, int64_t p) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-              "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > HALF * (p - 1)).all().item<bool>(),
               "All elements must be greater than (p-1)/2");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
@@ -654,11 +652,16 @@ static inline void mvlgamma_check(const Tensor& self, int64_t p) {
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
+  auto dtype = c10::scalarTypeToTypeMeta(self.scalar_type());
+  if (at::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    // int -> float promotion
+    dtype = c10::get_default_dtype();
+  }
   Tensor args = native::arange(
       -p * HALF + HALF,
       HALF,
       HALF,
-      optTypeMetaToScalarType(self.options().dtype_opt()),
+      optTypeMetaToScalarType(dtype),
       self.options().layout_opt(),
       self.options().device_opt(),
       self.options().pinned_memory_opt());
