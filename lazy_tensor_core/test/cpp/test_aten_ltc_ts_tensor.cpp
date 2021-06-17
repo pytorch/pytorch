@@ -10,6 +10,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/metrics.h"
+#include "lazy_tensors/computation_client/nnc_computation_client.h"
 #include "lazy_tensors/permutation_util.h"
 #include "torch_ltc_ts_test.h"
 
@@ -18,6 +19,10 @@ namespace cpp_test {
 namespace {
 
 class AtenLtcTsTensorTest : public AtenLtcTsTensorTestBase {};
+
+bool IsCuda() {
+  return lazy_tensors::NNCComputationClient::HardwareDeviceType() == at::kCUDA;
+}
 
 compiler::BackendRegistrar g_registrar(compiler::GetTSBackendImpl());
 
@@ -4246,6 +4251,9 @@ TEST_F(AtenLtcTsTensorTest, TestOneIndexPut) {
             : torch::randint(100, {3, 5, 6, 7},
                              torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       torch::Tensor result =
           torch::index_put(params, {indices}, values, accumulate);
       ForEachDevice([&](const torch::Device& device) {
@@ -4269,6 +4277,9 @@ TEST_F(AtenLtcTsTensorTest, TestOneIndexPutInPlace) {
     torch::Tensor values =
         torch::ones({3, 5, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       ForEachDevice([&](const torch::Device& device) {
         torch::Tensor params =
             isFloatingType(scalar_type)
@@ -4304,6 +4315,9 @@ TEST_F(AtenLtcTsTensorTest, TestOneIndexPutTransfer) {
     torch::Tensor values =
         torch::ones({3, 5, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       torch::Tensor result =
           torch::index_put(params, {indices}, values, accumulate);
       ForEachDevice([&](const torch::Device& device) {
@@ -4333,6 +4347,9 @@ TEST_F(AtenLtcTsTensorTest, TestMultiIndexPut) {
     torch::Tensor values =
         torch::ones({5, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       torch::Tensor result =
           torch::index_put(params, {indices_0, indices_1}, values, accumulate);
       ForEachDevice([&](const torch::Device& device) {
@@ -4365,6 +4382,9 @@ TEST_F(AtenLtcTsTensorTest, TestMultiIndexPutHeadNull) {
     torch::Tensor values =
         torch::ones({3, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       torch::Tensor result = torch::index_put(
           params, {indices_null, indices_0, indices_1}, values, accumulate);
       ForEachDevice([&](const torch::Device& device) {
@@ -4398,6 +4418,9 @@ TEST_F(AtenLtcTsTensorTest, TestMultiIndexPutMiddleNull) {
     torch::Tensor values =
         torch::ones({3, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       torch::Tensor result = torch::index_put(
           params, {indices_0, indices_null, indices_1}, values, accumulate);
       ForEachDevice([&](const torch::Device& device) {
@@ -4431,6 +4454,9 @@ TEST_F(AtenLtcTsTensorTest, TestMultiIndexPutTailNull) {
     torch::Tensor values =
         torch::ones({3, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       torch::Tensor result = torch::index_put(
           params, {indices_0, indices_1, indices_null}, values, accumulate);
       ForEachDevice([&](const torch::Device& device) {
@@ -4463,6 +4489,9 @@ TEST_F(AtenLtcTsTensorTest, TestMultiIndexPutMiddleBroadcast) {
     torch::Tensor values =
         torch::ones({5, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       torch::Tensor result =
           torch::index_put(params, {indices_0, indices_1}, values, accumulate);
       ForEachDevice([&](const torch::Device& device) {
@@ -4494,6 +4523,9 @@ TEST_F(AtenLtcTsTensorTest, TestMultiIndexPutTailBroadcast) {
     torch::Tensor values =
         torch::ones({5, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       torch::Tensor result =
           torch::index_put(params, {indices_0, indices_1}, values, accumulate);
       ForEachDevice([&](const torch::Device& device) {
@@ -4545,6 +4577,9 @@ TEST_F(AtenLtcTsTensorTest, TestIndexPutImpl) {
     torch::Tensor values =
         torch::ones({3, 5, 6, 7}, torch::TensorOptions(scalar_type));
     for (bool accumulate : {false, true}) {
+      if (accumulate && IsCuda()) {
+        GTEST_SKIP();
+      }
       ForEachDevice([&](const torch::Device& device) {
         torch::Tensor params =
             isFloatingType(scalar_type)
@@ -4841,6 +4876,9 @@ TEST_F(AtenLtcTsTensorTest, TestIndexCopy) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestIndexCopyInPlace) {
+  if (IsCuda()) {
+    GTEST_SKIP();
+  }
   int index_size = 10;
   int rank = 3;
   for (torch::ScalarType scalar_type :
@@ -8327,6 +8365,9 @@ TEST_F(AtenLtcTsTensorTest, TestAvgPool3DNoBatchBackward) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestAdaptiveAvgPool3DNoBatchBackward) {
+  if (IsCuda()) {
+    GTEST_SKIP();
+  }
   for (int64_t output_size : {7, 4}) {
     auto testfn =
         [&](const std::vector<torch::Tensor>& inputs) -> torch::Tensor {
@@ -8344,6 +8385,9 @@ TEST_F(AtenLtcTsTensorTest, TestAdaptiveAvgPool3DNoBatchBackward) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestAdaptiveAvgPool3DBackward) {
+  if (IsCuda()) {
+    GTEST_SKIP();
+  }
   for (int64_t output_size : {7, 4}) {
     auto testfn =
         [&](const std::vector<torch::Tensor>& inputs) -> torch::Tensor {
