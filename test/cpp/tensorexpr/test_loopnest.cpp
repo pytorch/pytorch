@@ -789,8 +789,8 @@ TEST(LoopNest, TileInMiddle) {
 # CHECK:         for (int l_inner
 # CHECK:           for (int k
 # CHECK:             f[
-# CHECK:     for (int n_inner
-# CHECK:       for (int l_tail
+# CHECK:     for (int l_tail
+# CHECK:       for (int n_inner
 # CHECK:         for (int k
 # CHECK:           f[
 # CHECK:   for (int n_tail)IR");

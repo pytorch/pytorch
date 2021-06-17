@@ -294,7 +294,7 @@ class TORCH_API LoopNest {
   // points in the block.
   // Note that if x dim % x_factor or y dim % y_factor does not equal to 0, the
   // loop body will generate corresponding tailing loops.
-  // Returns: {xo, yo, xi, yi, xtail, ytail}
+  // The transformation is in-place and returns 'xtail'.
   //
   // For example, consider the following code:
   //   for i: [0, 64)
@@ -302,7 +302,7 @@ class TORCH_API LoopNest {
   //       for k: [0, 32)
   //         A[i, j] = B[i, k] + C[j, k]
   //
-  // tile(i, j, 4, 8) will return the following nested loop:
+  // tile(i, j, 4, 8) will transform "i" for-stmt into the following nested loop:
   //   for i_outer: [0, 16)
   //     for j_outer: [0, 8)
   //       for i_inner: [0, 4)
@@ -311,7 +311,7 @@ class TORCH_API LoopNest {
   //             A[i_outer * 4 + i_inner, j_outer * 8 + j_inner] =
   //             B[i_outer * 4 + i_inner, k] + C[j_outer * 8 + j_inner, k]
   //
-  // tile(i, j, 4, 9) will return the following nested loop:
+  // tile(i, j, 4, 9) will transform "i" for-stmt into the following nested loop:
   //   for i_outer: [0, 16)
   //     for j_outer: [0, 7)
   //       for i_inner: [0, 4)
@@ -319,12 +319,12 @@ class TORCH_API LoopNest {
   //           for k: (0, 32)
   //             A[i_outer * 4 + i_inner, j_outer * 9 + j_inner] =
   //             B[i_outer * 4 + i_inner, k] + C[j_outer * 9 + j_inner, k]
-  //     for i_inner: [0, 4)
-  //       for j_tail: [0, 1)
+  //     for j_tail: [0, 1)
+  //       for i_inner: [0, 4)
   //         for k: (0, 32)
   //           A[i_outer * 4 + i_inner, 7 * 9 + j_tail] =
   //           B[i_outer * 4 + i_inner, k] + C[7 * 9 + j_tail, k]
-  std::vector<For*> tile(For* x, For* y, int x_factor, int y_factor);
+  For* tile(For* x, For* y, int x_factor, int y_factor);
 
   // Returns true if the given loops are perfectly nested, i.e., every loop
   // (except the innermost) should have exactly one statement in its body
