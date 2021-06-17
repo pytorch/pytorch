@@ -2011,57 +2011,42 @@ class TestBinaryUfuncs(TestCase):
                          torch.bitwise_xor(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
 
-    def test_bitwise_left_shift(self, device):
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_bitwise_shift(self, device, dtype):
+        ops = [
+            (torch.bitwise_left_shift, np.left_shift),
+            (operator.lshift, operator.lshift),
+            (torch.bitwise_right_shift, np.right_shift),
+            (operator.rshift, operator.rshift),
+        ]
+        for torch_op, numpy_op in ops:
             a = torch.tensor([19, -20, -21, 22], dtype=dtype, device=device)
             b = torch.tensor([2, 1, 3, 1], dtype=dtype, device=device)
-            expected_res = torch.tensor(np.left_shift(a.cpu().numpy(), b.cpu().numpy()), device=device)
-            b_scalar = 2
-            expected_res_scalar = torch.tensor(np.left_shift(a.cpu().numpy(), b_scalar), device=device)
+            a_np = a.cpu().numpy()
+            b_np = b.cpu().numpy()
 
-            # standard version
-            self.assertEqual(torch.bitwise_left_shift(a, b), expected_res)
-            self.assertEqual(torch.bitwise_left_shift(a, b_scalar), expected_res_scalar)
+            # Tensor x Tensor
+            self.assertEqual(torch_op(a, b), torch.tensor(numpy_op(a_np, b_np), device=device))
+            # Tensor x int scalar
+            self.assertEqual(torch_op(a, 2), torch.tensor(numpy_op(a_np, 2), device=device))
 
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.bitwise_left_shift(a, b, out=c)
-            self.assertEqual(c, expected_res)
-            torch.bitwise_left_shift(a, b_scalar, out=c)
-            self.assertEqual(c, expected_res_scalar)
-
-            # in-place
-            a1 = a.clone()
-            a1.bitwise_left_shift_(b)
-            self.assertEqual(a1, expected_res)
-            a.bitwise_left_shift_(b_scalar)
-            self.assertEqual(a, expected_res_scalar)
-
-    def test_bitwise_right_shift(self, device):
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.tensor([19, -20, -21, 22], dtype=dtype, device=device)
-            b = torch.tensor([2, 1, 3, 1], dtype=dtype, device=device)
-            expected_res = torch.tensor(np.right_shift(a.cpu().numpy(), b.cpu().numpy()), device=device)
-            b_scalar = 2
-            expected_res_scalar = torch.tensor(np.right_shift(a.cpu().numpy(), b_scalar), device=device)
-
-            # standard version
-            self.assertEqual(torch.bitwise_right_shift(a, b), expected_res)
-            self.assertEqual(torch.bitwise_right_shift(a, b_scalar), expected_res_scalar)
-
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.bitwise_right_shift(a, b, out=c)
-            self.assertEqual(c, expected_res)
-            torch.bitwise_right_shift(a, b_scalar, out=c)
-            self.assertEqual(c, expected_res_scalar)
-
-            # in-place
-            a1 = a.clone()
-            a1.bitwise_right_shift_(b)
-            self.assertEqual(a1, expected_res)
-            a.bitwise_right_shift_(b_scalar)
-            self.assertEqual(a, expected_res_scalar)
+    def test_bitwise_shift_float(self, device):
+        ops = [
+            (torch.bitwise_left_shift, lambda x, y: x * 2. ** y),
+            (operator.lshift, lambda x, y: x * 2. ** y),
+            (torch.bitwise_right_shift, lambda x, y: x / 2. ** y),
+            (operator.rshift, lambda x, y: x / 2. ** y),
+        ]
+        for torch_op, expected_op in ops:
+            # int tensor x float
+            a = torch.tensor([19, -20, -21, 22], dtype=torch.int64, device=device)
+            self.assertEqual(torch_op(a, 1.8), torch.floor(expected_op(a, 1)).to(a.dtype))
+            # float tensor x int scalar
+            a = torch.tensor([19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device)
+            self.assertEqual(torch_op(a, 2), expected_op(a, 2))
+            # float tensor x float scalar
+            a = torch.tensor([19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device)
+            self.assertEqual(torch_op(a, 2.2), expected_op(a, 2.2))
 
     @onlyOnCPUAndCUDA
     @dtypes(*list(product(torch.testing.get_all_dtypes(include_complex=False),
