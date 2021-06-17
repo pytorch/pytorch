@@ -236,8 +236,8 @@ def get_weight_eq_obs(
     """ Gets the following weight equalization observer. There should always
     exsist a weight equalization observer after an input equalization observer.
 
-    Returns the node containing the weight equalization observer, and the weight
-    equalization observer if it has been newly created
+    Returns the operation node that follows the input equalizatoin observer node
+    and the weight equalization observer
     """
 
     # Find the op node that comes directly after the input equaliation observer
@@ -269,11 +269,31 @@ def get_weight_eq_obs(
         for weight_node in weight_observer_nodes:
             if weight_node.op == 'call_module' and isinstance(weight_node.target, str) and \
                isinstance(modules[weight_node.target], _WeightEqualizationObserver):
-                return weight_node, None
+                weight_eq_obs = modules[weight_node.target]
+
+                assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
+                return op_node, weight_eq_obs
 
         return None, None
-
     return None, None
+
+def get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
+    """ Given the operation node, we want to find its previous weight
+    equalization observer node
+    """
+    assert(op_node.op == 'call_function')
+    assert(isinstance(op_node.args[1], Node))
+    weight_observer_nodes = collect_producer_nodes(op_node.args[1])
+
+    if weight_observer_nodes is None:
+        return None
+
+    for weight_node in weight_observer_nodes:
+        if weight_node.op == 'call_module' and isinstance(weight_node.target, str) and \
+           isinstance(modules[weight_node.target], _WeightEqualizationObserver):
+            return weight_node
+
+    return None
 
 def get_next_input_obs(node: Node, modules: Dict[str, nn.Module]):
     """ Gets the following input observer. We can use this function for both
@@ -371,19 +391,13 @@ def scale_weight_node(
     scaled_bias = torch.mul(bias, next_equalization_scale)
     modules[node.target].bias = nn.Parameter(scaled_bias)
 
-def scale_weight_functional(node: Node, model: GraphModule, equalization_scale: torch.Tensor):
+def scale_weight_functional(op_node: Node, model: GraphModule, equalization_scale: torch.Tensor) -> None:
     """ Scales the weight value for functional layers
     """
 
     # Find the next functional node so that we can construct the weight observer nodes
-    while node.op != 'output' and node.op != 'call_function':
-        node = node.next
-
-    if node.op == 'output':
-        return
-
-    assert(isinstance(node.args[1], Node))
-    weight_observer_nodes = collect_producer_nodes(node.args[1])
+    assert(isinstance(op_node.args[1], Node))
+    weight_observer_nodes = collect_producer_nodes(op_node.args[1])
     if weight_observer_nodes is None:
         return
 
@@ -404,6 +418,7 @@ def scale_weight_functional(node: Node, model: GraphModule, equalization_scale: 
             # get rid of the last two characters to retrieve the path to the
             # submodule containing the weight
             model.get_submodule(weight_node.target[:-2]).w = scaled_weight
+            assert(torch.allclose(model.get_buffer(weight_node.target), scaled_weight))
 
 def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module]) -> Dict[str, _WeightEqualizationObserver]:
     """ Update all of the observer's equalization scale. For each
@@ -411,34 +426,31 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
     WeightEqualizationObserver, create it, and calculate the equalization scale
     based on the two observers.
 
-    We will then return a dictionary mapping node names to the newly created
-    WeightEqualizationObserver.
+    We will then return a dictionary mapping operation node names to
+    the corresponding WeightEqualizationObservers for that operation.
     """
     weight_eq_obs_dict = {}
     for node in model.graph.nodes:
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
             input_eq_obs = modules[node.target]
             assert(isinstance(input_eq_obs, _InputEqualizationObserver))
-            next_node, weight_eq_obs = get_weight_eq_obs(node, model, modules)
+            op_node, weight_eq_obs = get_weight_eq_obs(node, model, modules)
 
-            if next_node is None:
+            if op_node is None or weight_eq_obs is None:
                 continue
 
-            assert(isinstance(next_node.target, str))
-            if weight_eq_obs is None:
-                # If the equalization observer has already been created, then we
-                # can extract the observer from the node itself
-                weight_eq_obs = modules[next_node.target]  # type: ignore[assignment]
-                assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
-            else:
-                weight_eq_obs(modules[next_node.target].weight)
+            if op_node.op == 'call_module':
+                # Calibrate the weight equalization observer since it has just
+                # been created
+                assert(isinstance(op_node.target, str))
+                weight_eq_obs(modules[op_node.target].weight)
 
             # Calculate and set the equalization scale values
             equalization_scale = calculate_equalization_scale(input_eq_obs, weight_eq_obs)
             input_eq_obs.set_equalization_scale(equalization_scale)
             weight_eq_obs.set_equalization_scale(equalization_scale)
 
-            weight_eq_obs_dict[next_node.name] = weight_eq_obs
+            weight_eq_obs_dict[op_node.name] = weight_eq_obs
 
     return weight_eq_obs_dict
 
@@ -522,28 +534,25 @@ def convert_eq_obs(
         elif weight_eq_obs_dict.get(node.name, None) is not None:
             weight_eq_obs = weight_eq_obs_dict.get(node.name)
             assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
-            assert(isinstance(node.target, str))
-
-            if (modules[node.target] == weight_eq_obs):
-                # If the WeightEqualizationObserver is already in the node
-                # itself, this implies we are using functional layers(?) so we
-                # need to scale the weights differently
-                equalization_scale = weight_eq_obs.equalization_scale
-                scale_weight_functional(node, model, equalization_scale)
-
-                # Erase the weight equalization observer node
-                prev_node = node.args[0]
-                orig_users = list(node.users.keys())
-                for user_node in orig_users:
-                    user_node.replace_input_with(node, prev_node)
-                model.graph.erase_node(node)
-                continue
-
             equalization_scale = weight_eq_obs.equalization_scale
 
-            # Scales the weights and runs the weight quantization observers
-            maybe_next_equalization_scale = maybe_get_next_equalization_scale(node, modules)
-            scale_weight_node(node, modules, equalization_scale, maybe_next_equalization_scale)
+            # Scale the weight nodes
+            if node.op == 'call_module':
+                maybe_next_equalization_scale = maybe_get_next_equalization_scale(node, modules)
+                scale_weight_node(node, modules, equalization_scale, maybe_next_equalization_scale)
+            elif node.op == 'call_function':
+                scale_weight_functional(node, model, equalization_scale)
+
+                weight_eq_obs_node = get_weight_eq_obs_node(node, modules)
+                if weight_eq_obs_node is None:
+                    return
+
+                # Erase the weight equalization observer node
+                prev_node = weight_eq_obs_node.args[0]
+                orig_users = list(weight_eq_obs_node.users.keys())
+                for user_node in orig_users:
+                    user_node.replace_input_with(weight_eq_obs_node, prev_node)
+                model.graph.erase_node(weight_eq_obs_node)
 
 def _convert_equalization_ref(model: GraphModule):
     """ Reference function which applies changes needed for equalization, but
