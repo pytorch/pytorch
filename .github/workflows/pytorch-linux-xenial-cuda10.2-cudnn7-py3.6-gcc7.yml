@@ -287,6 +287,7 @@ jobs:
             -e GITHUB_ACTIONS \
             -e IN_CI \
             -e SHARD_NUMBER \
+            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
