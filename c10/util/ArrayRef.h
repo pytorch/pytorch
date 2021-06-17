@@ -72,13 +72,15 @@ class ArrayRef final {
   constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct an ArrayRef from a pointer and length.
-  constexpr ArrayRef(const T* data, size_t length)
+  /// CUDA 9.2 fails to compile constexpr that throws exception
+  C10_CONSTEXPR_EXCEPT_CUDA92 ArrayRef(const T* data, size_t length)
       : Data(data), Length(length) {
     debugCheckNullptrInvariant();
   }
 
   /// Construct an ArrayRef from a range.
-  constexpr ArrayRef(const T* begin, const T* end)
+  /// CUDA 9.2 fails to compile constexpr that throws exception
+  C10_CONSTEXPR_EXCEPT_CUDA92 ArrayRef(const T* begin, const T* end)
       : Data(begin), Length(end - begin) {
     debugCheckNullptrInvariant();
   }
