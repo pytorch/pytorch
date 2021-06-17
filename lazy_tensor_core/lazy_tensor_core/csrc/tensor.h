@@ -524,6 +524,12 @@ class LazyTensor {
                                              lazy_tensors::int64 padding_idx,
                                              bool scale_grad_by_freq);
 
+  static LazyTensor ts_embedding_dense_backward(const LazyTensor& grad_output,
+                                                const LazyTensor& indices,
+                                                lazy_tensors::int64 num_weights,
+                                                lazy_tensors::int64 padding_idx,
+                                                bool scale_grad_by_freq);
+
   static LazyTensor eq(const LazyTensor& input, const at::Scalar& other);
   static void eq_(LazyTensor& input, const at::Scalar& other);
 

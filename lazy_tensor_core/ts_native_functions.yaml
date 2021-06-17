@@ -17,6 +17,7 @@ supported:
   - div_.Tensor_mode
   - div.Scalar
   - div_.Scalar
+  - embedding_dense_backward
   - empty.memory_format
   - empty_strided
   - expand
