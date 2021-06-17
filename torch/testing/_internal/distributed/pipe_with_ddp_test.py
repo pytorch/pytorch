@@ -78,7 +78,7 @@ class PipeWithDDPTest(RpcAgentTestFixture):
 
     def _run_basic_test(self, backend, checkpoint, find_unused_parameters=False, static_graph=False):
         dist.init_process_group(
-            backend="nccl",
+            backend=backend,
             init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
