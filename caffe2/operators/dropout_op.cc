@@ -26,7 +26,6 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     bool* mask_data = mask->template mutable_data<bool>();
     auto* gen = context_.RandGenerator();
     for (int i = 0; i < X.numel(); ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       mask_data[i] = dist(gen) > 0.5;
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       Ydata[i] = Xdata[i] * scale * mask_data[i];

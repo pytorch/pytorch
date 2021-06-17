@@ -183,6 +183,8 @@ void dot<float>(CUDABLAS_DOT_ARGTYPES(float));
 template <>
 void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half));
 template <>
+void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16));
+template <>
 void dot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
 template <>
 void dot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
@@ -254,6 +256,23 @@ template<>
 void getriBatched<c10::complex<double>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<double>));
 template<>
 void getriBatched<c10::complex<float>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<float>));
+
+#define CUDABLAS_GELS_BATCHED_ARGTYPES(Dtype)  \
+  cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, Dtype** dA_array, int ldda, Dtype** dC_array, int lddc, int* info, int *devInfoArray, int batchSize
+
+template <class Dtype>
+void gelsBatched(CUDABLAS_GELS_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::blas::gelsBatched: not implemented for ", typeid(Dtype).name());
+}
+
+template<>
+void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double));
+template<>
+void gelsBatched<float>(CUDABLAS_GELS_BATCHED_ARGTYPES(float));
+template<>
+void gelsBatched<c10::complex<double>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<double>));
+template<>
+void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
 
 #endif // CUDART_VERSION
 

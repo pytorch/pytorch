@@ -25,7 +25,6 @@ namespace fbgemm_utils {
 namespace {
 
 bool IsChannelsLast3d(const Tensor& tensor) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (tensor.dim() != 5) {
     return false;
   }

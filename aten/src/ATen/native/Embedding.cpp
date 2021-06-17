@@ -15,7 +15,7 @@ namespace at { namespace native {
 
 Tensor embedding(const Tensor & weight, const Tensor & indices,
                  int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-  TORCH_CHECK(weight.dim() >= 1, "'weight' must be at least 1-D");
+  TORCH_CHECK(weight.dim() == 2,  "'weight' must be 2-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
@@ -158,7 +158,6 @@ Tensor & embedding_renorm_cpu_(
       auto row = self[sorted_indices[i]];
       auto norm = row.norm(norm_type).item<double>();
       if (norm > max_norm) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto scale = max_norm / (norm + 1e-7);
         row *= scale;
       }

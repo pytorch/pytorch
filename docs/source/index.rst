@@ -82,6 +82,7 @@ Features described in this documentation are classified by release status:
    torch.random <random>
    sparse
    storage
+   torch.testing <testing>
    torch.utils.benchmark <benchmark_utils>
    torch.utils.bottleneck <bottleneck>
    torch.utils.checkpoint <checkpoint>

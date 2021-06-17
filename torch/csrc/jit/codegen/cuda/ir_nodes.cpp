@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
+#include <c10/util/irange.h>
+
 #include <sstream>
 
 namespace torch {
@@ -1262,7 +1264,7 @@ void ConcretizeDomain::concretizePwOp(Expr* e) {
         TensorDomain::noReductions(i->getMaybeRFactorDomain());
     TORCH_INTERNAL_ASSERT(ii.size() == io.size());
 
-    for (size_t it = 0; it < ii.size(); it++) {
+    for (const auto it : c10::irange(ii.size())) {
       if (!canConcretize(io[it]))
         continue;
 

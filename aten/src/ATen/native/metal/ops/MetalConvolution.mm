@@ -29,14 +29,9 @@ Tensor conv2d(
   TORCH_INTERNAL_ASSERT(weight.dim() == 4, "Expected 4-dimensional weight");
   TORCH_CHECK(weight.device().type() == kCPU);
   MPSImage* X = imageFromTensor(input);
-  const int64_t oC = weight.sizes()[0];
-  const int64_t iC = weight.sizes()[1];
-  const int64_t kH = weight.sizes()[2];
-  const int64_t kW = weight.sizes()[3];
-  auto packedWeights = at::native::metal::permuteWeights(
-      weight.data_ptr<float>(), {oC, iC, kH, kW});
+  auto packedWeights = weight.contiguous(c10::MemoryFormat::ChannelsLast);
   // MPSCNN Convolution
-  float* w = packedWeights.data();
+  float* w = packedWeights.data_ptr<float>();
   float* b = bias.has_value() ? bias->data_ptr<float>() : nullptr;
   MPSCNNConvOp* op = [MPSCNNConvOp conv2d:params
                                   weights:w
@@ -63,7 +58,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
                       context.dilation,
                       context.groups};
   MPSCNNConvOp* op = (__bridge MPSCNNConvOp*)(context.conv2dOp);
-  NeuronType nt = neuronType(context);
+  NeuronType nt = neuronType(context.output_min, context.output_max);
   if (!op) {
     float* w = context.weight.data_ptr<float>();
     float* b = context.bias.has_value() ? ((*context.bias).data_ptr<float>())

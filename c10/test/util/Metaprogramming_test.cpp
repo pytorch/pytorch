@@ -116,13 +116,10 @@ class MyClass {};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, ExtractArgByFilteredIndex) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a1 = extract_arg_by_filtered_index<std::is_integral, 0>(
       3, "bla", MyClass(), 4, nullptr, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a2 = extract_arg_by_filtered_index<std::is_integral, 1>(
       3, "bla", MyClass(), 4, nullptr, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a3 = extract_arg_by_filtered_index<std::is_integral, 2>(
       3, "bla", MyClass(), 4, nullptr, 5);
   EXPECT_EQ(3, a1);
@@ -207,7 +204,6 @@ struct map_to_double {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, FilterMap) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = filter_map<double, std::is_integral>(
       map_to_double(), 3, "bla", MyClass(), 4, nullptr, 5);
   static_assert(std::is_same<array<double, 3>, decltype(result)>::value, "");
@@ -240,7 +236,6 @@ TEST(MetaprogrammingTest, FilterMap_movableOnly_byRValue) {
     }
   };
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = filter_map<MovableOnly, is_my_movable_only_class>(
       map_movable_by_rvalue(),
       MovableOnly(5),
@@ -262,7 +257,6 @@ TEST(MetaprogrammingTest, FilterMap_movableOnly_byValue) {
     }
   };
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = filter_map<MovableOnly, is_my_movable_only_class>(
       map_movable_by_lvalue(),
       MovableOnly(5),
@@ -366,20 +360,16 @@ namespace test_tuple_elements {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleElements_subsetSelection) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = std::make_tuple(0, "HEY", 2.0);
   auto y = tuple_elements(x, std::index_sequence<0, 2>());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto z = std::make_tuple(0, 2.0);
   EXPECT_EQ(y, z);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleElements_reorderSelection) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = std::make_tuple(0, "HEY", 2.0);
   auto y = tuple_elements(x, std::index_sequence<0, 2, 1>());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto z = std::make_tuple(0, 2.0, "HEY");
   EXPECT_EQ(y, z);
 }
@@ -390,7 +380,6 @@ namespace test_tuple_take {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleTake_nonemptyPrefix) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = std::make_tuple(0, "HEY", 2.0);
   auto y = tuple_take<decltype(x), 2>(x);
   auto z = std::make_tuple(0, "HEY");
@@ -399,7 +388,6 @@ TEST(MetaprogrammingTest, TupleTake_nonemptyPrefix) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleTake_fullPrefix) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = std::make_tuple(0, "HEY", 2.0);
   auto y = tuple_take<decltype(x), 3>(x);
   EXPECT_EQ(x, y);
@@ -407,10 +395,8 @@ TEST(MetaprogrammingTest, TupleTake_fullPrefix) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleTake_negative) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = std::make_tuple(0, "HEY", 2.0);
   auto y = tuple_take<decltype(x), -2>(x);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto z = std::make_tuple("HEY", 2.0);
   EXPECT_EQ(y, z);
 }
@@ -419,17 +405,14 @@ TEST(MetaprogrammingTest, TupleTake_negative) {
 namespace test_tuple_slice {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleSlice_middle) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = std::make_tuple(0, "HEY", 2.0, false);
   auto y = tuple_slice<decltype(x), 1, 2>(x);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto z = std::make_tuple("HEY", 2.0);
   EXPECT_EQ(y, z);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleSlice_full) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = std::make_tuple(0, "HEY", 2.0);
   auto y = tuple_slice<decltype(x), 0, 3>(x);
   EXPECT_EQ(x, y);
@@ -439,7 +422,6 @@ TEST(MetaprogrammingTest, TupleSlice_full) {
 namespace test_tuple_map {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleMap_simple) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
       [](int32_t a) -> int16_t { return a + 1; });
@@ -454,7 +436,6 @@ TEST(MetaprogrammingTest, TupleMap_simple) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
       [](int64_t a) -> int16_t { return a + 1; });
@@ -469,7 +450,6 @@ TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleMap_mapperTakesConstRef) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
       [](const int32_t& a) -> int16_t { return a + 1; });
@@ -524,7 +504,6 @@ TEST(MetaprogrammingTest, TupleMap_differentiatesLRValueReferences) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleMap_canWorkWithMovableOnlyType) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_map(
       std::tuple<MovableOnly>(MovableOnly(7)), [](MovableOnly a) { return a; });
   static_assert(
@@ -560,7 +539,6 @@ TEST(MetaprogrammingTest, TupleMap_doesntUnecessarilyMoveValues) {
 TEST(MetaprogrammingTest, TupleMap_canBeUsedWithAutoLambdas) {
   struct A final {
     int32_t func() {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 5;
     }
   };
@@ -601,7 +579,6 @@ TEST(MetaprogrammingTest, TupleConcat_onenonemptytuple) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleConcat_twotuples) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_concat(
       std::tuple<int64_t, std::string>(3, "4"),
       std::tuple<double, int16_t>(2.3, 15));
@@ -618,7 +595,6 @@ TEST(MetaprogrammingTest, TupleConcat_twotuples) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleConcat_threetuples) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_concat(
       std::tuple<int64_t, std::string>(3, "4"),
       std::tuple<double, int16_t>(2.3, 15),
@@ -638,7 +614,6 @@ TEST(MetaprogrammingTest, TupleConcat_threetuples) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleConcat_emptytupleatbeginning) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_concat(
       std::tuple<>(),
       std::tuple<double, int16_t>(2.3, 15),
@@ -656,7 +631,6 @@ TEST(MetaprogrammingTest, TupleConcat_emptytupleatbeginning) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleConcat_emptytupleinmiddle) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_concat(
       std::tuple<double, int16_t>(2.3, 15),
       std::tuple<>(),
@@ -674,7 +648,6 @@ TEST(MetaprogrammingTest, TupleConcat_emptytupleinmiddle) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleConcat_emptytupleatend) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = tuple_concat(
       std::tuple<double, int16_t>(2.3, 15),
       std::tuple<std::string, float>("5", 3.2),
@@ -692,12 +665,9 @@ TEST(MetaprogrammingTest, TupleConcat_emptytupleatend) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MetaprogrammingTest, TupleConcat_workswithreferencesandpointers) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double val1 = 2.3;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int16_t val2 = 15;
   std::string val3 = "hello";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float val4 = 3.2;
   auto result = tuple_concat(
       std::tuple<double&, const int16_t&>(val1, val2),
@@ -797,7 +767,6 @@ static_assert(
             index_sequence<4, 2>,
             index_sequence<>>>::value,
     "");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(
     std::is_same<
         index_sequence<4, 2, 9>,
@@ -807,7 +776,6 @@ static_assert(
             index_sequence<9>>>::value,
     "");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(
     std::is_same<
         integer_sequence<int8_t, -5, -3>,

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -188,7 +189,7 @@ class ContigIDs : public OptInDispatch {
 
     const auto gpu_lower = GpuLower::current();
 
-    for (size_t i = 0; i < root_domain_.size(); i++) {
+    for (const auto i : c10::irange(root_domain_.size())) {
       if (root_contiguity_[i]) {
         auto kir_root_domain_i =
             gpu_lower->lowerValue(root_domain_[i])->as<kir::IterDomain>();
@@ -1062,7 +1063,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
 
   // Global striding
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     // If the domain is derived from a trivial reduction, no indexing
     // to create.
     if (root_dom[i]->isReduction() ||
@@ -1337,7 +1338,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   }
 
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     if (skip_indexing.count(root_dom[i])) {
       continue;
     }
@@ -1529,7 +1530,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
 
   // Global striding
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     // See a comment in indexing to root domains in getGlobalProducerIndex.
     if (root_dom[i]->isReduction() ||
         root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
@@ -1658,7 +1659,7 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   // and use them.
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
-  for (size_t i = 0; i < root_dom.size(); i++) {
+  for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
       continue;
@@ -1925,7 +1926,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
   const auto zero = ir_builder.create<kir::Int>(0);
   std::vector<kir::Val*> root_inds(root_domain.size(), zero);
 
-  for (size_t i = 0; i < root_domain.size(); i++) {
+  for (const auto i : c10::irange(root_domain.size())) {
     if (root_domain[i]->isBroadcast() ||
         gpu_lower->trivialReductionInfo().isDerived(root_domain[i])) {
       continue;

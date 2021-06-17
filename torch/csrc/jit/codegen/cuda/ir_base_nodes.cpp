@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -193,7 +194,7 @@ bool Expr::sameAs(const Statement* other) const {
       outputs().size() != other_expr->outputs().size()) {
     return false;
   }
-  for (size_t i = 0; i < inputs().size(); i++) {
+  for (const auto i : c10::irange(inputs().size())) {
     if (!input(i)->sameAs(other_expr->input(i))) {
       return false;
     }

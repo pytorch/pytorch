@@ -30,7 +30,7 @@ Tensor copy_to_host(const Tensor& input) {
       [commandBuffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
-                                   X, @"copy", @"copy_nonarray")
+                                   X, "copy", "copy_nonarray")
                      Constants:@[
                        @(X.featureChannels),
                        @(X.height),
