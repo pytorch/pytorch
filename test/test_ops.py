@@ -720,7 +720,7 @@ class TestGradients(TestCase):
 #   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
 #   functionality with original test_jit.py method operator tests
-class TestJitOps(JitCommonTestCase):
+class TestJit(JitCommonTestCase):
     exact_dtype = True
 
     # Tests that the forward and backward passes of operations produce the
@@ -920,7 +920,7 @@ class TestJitOps(JitCommonTestCase):
 
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestGradients, globals())
-instantiate_device_type_tests(TestJitOps, globals())
+instantiate_device_type_tests(TestJit, globals())
 
 if __name__ == '__main__':
     run_tests()

@@ -4817,7 +4817,7 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_triangular_input,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
-               # cholesky_inverse throws an error in forward when requires_grad=True
+               # TODO: FIXME: cholesky_inverse throws an error in forward when requires_grad=True
                #   for complex tensors
                SkipInfo('TestCommon', 'test_dtypes'),
                # cholesky_inverse does not correctly warn when resizing out= inputs
@@ -4838,7 +4838,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            skips=(
                # JIT has issue when op is passed as lambda
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
     OpInfo('symeig',
@@ -4890,7 +4890,7 @@ op_db: List[OpInfo] = [
                                                     torch.bfloat16, torch.half),
                    supports_forward_ad=True,
                    skips=(
-                       SkipInfo('TestJitOps', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
+                       SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
                    )),
     OpInfo('resolve_conj',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -5035,7 +5035,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/59174
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            assert_autodiffed=True),
     OpInfo('div',
@@ -5047,7 +5047,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/59174
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            assert_autodiffed=True),
     OpInfo('true_divide',
@@ -5081,7 +5081,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_expand,
            skips=(
                # Because expand does not have a function variant.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_forward_ad=True,
            supports_out=False),
     OpInfo('expand_as',
@@ -5091,7 +5091,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_expand_as,
            skips=(
                # Because expand_as does not have a function variant.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_out=False),
     OpInfo('diag',
            dtypes=all_types_and_complex_and(torch.bool),
@@ -5371,7 +5371,7 @@ op_db: List[OpInfo] = [
            skips=(
                # following tests give a runtime error with undefined value tensor
                # see discussion : https://github.com/pytorch/pytorch/issues/56660
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),
            ),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient),
@@ -5418,7 +5418,7 @@ op_db: List[OpInfo] = [
                         dtypes=(torch.float64,), active_if=TEST_WITH_ROCM),
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda',
                         dtypes=(torch.float64,), active_if=TEST_WITH_ROCM),
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit', device_type='cuda',
+               SkipInfo('TestJit', 'test_variant_consistency_jit', device_type='cuda',
                         dtypes=(torch.float64, torch.float32), active_if=TEST_WITH_ROCM),
            )),
     OpInfo('linalg.cholesky',
@@ -5497,7 +5497,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
@@ -5674,7 +5674,7 @@ op_db: List[OpInfo] = [
            skips=(
                # we skip jit tests because lu_backward is impelemented as autograd.Function,
                # which does not support autograd with scripting
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
                # Skip operator schema test because this is a functional and not an operator
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
@@ -5791,7 +5791,7 @@ op_db: List[OpInfo] = [
                # TODO: FIXME: complex inputs requiring grad error in forward
                SkipInfo('TestCommon', 'test_dtypes'),
                # TODO: review with var_mean tests in test_autograd.py
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
                SkipInfo('TestGradients', 'test_fn_grad'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
@@ -5808,7 +5808,7 @@ op_db: List[OpInfo] = [
                # TODO: FIXME: complex inputs requiring grad error in forward
                SkipInfo('TestCommon', 'test_dtypes'),
                # TODO: fix along with var_mean autograd tests
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
                SkipInfo('TestGradients', 'test_fn_grad'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
@@ -6179,7 +6179,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
-           skips=(SkipInfo('TestJitOps', 'test_variant_consistency_jit',),),
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=['aten::add'],),
@@ -6188,7 +6188,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
-           skips=(SkipInfo('TestJitOps', 'test_variant_consistency_jit',),),
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::mul', 'aten::reciprocal'],),
     OpInfo('__rmul__',
@@ -6196,7 +6196,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
-           skips=(SkipInfo('TestJitOps', 'test_variant_consistency_jit',),),
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=['aten::mul'],),
@@ -6210,7 +6210,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
            skips=(
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit',),
+               SkipInfo('TestJit', 'test_variant_consistency_jit',),
            )),
     OpInfo('__rmod__',
            op=torch.Tensor.__rmod__,
@@ -6219,7 +6219,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
-           skips=(SkipInfo('TestJitOps', 'test_variant_consistency_jit',),),
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit',),),
            # Support autograd after torch.remainder(Tensor, Tensor) supports
            # autograd of the second argument.
            # https://github.com/pytorch/pytorch/pull/58476/files#r637167630
@@ -6235,7 +6235,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit',),),
+               SkipInfo('TestJit', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::pow'],),
     OpInfo('__rsub__',
@@ -6243,7 +6243,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
-           skips=(SkipInfo('TestJitOps', 'test_variant_consistency_jit',),),
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::rsub'],),
     OpInfo('rsub',
@@ -6254,7 +6254,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
                # JIT doesn't understand complex literals
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit',
+               SkipInfo('TestJit', 'test_variant_consistency_jit',
                         dtypes=[torch.cfloat, torch.cdouble]),
            ),
            sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
@@ -6267,7 +6267,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
                # JIT doesn't understand complex literals
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit',
+               SkipInfo('TestJit', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
            assert_autodiffed=True,),
     OpInfo('select',
@@ -6566,7 +6566,7 @@ op_db: List[OpInfo] = [
            skips=(
                # test does not work with passing lambda for op
                # there's a test `test_einsum` in `test_jit.py` to handle this case
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('svd',
            op=torch.svd,
@@ -6627,7 +6627,7 @@ op_db: List[OpInfo] = [
                        # def the_method(i0):
                        #     return torch.polygamma(i0, 1)
                        #            ~~~~~~~~~~~~~~~ <--- HERE
-                       SkipInfo('TestJitOps', 'test_variant_consistency_jit'),),
+                       SkipInfo('TestJit', 'test_variant_consistency_jit'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
@@ -6641,7 +6641,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Redundant tests
                        SkipInfo('TestGradients'),
-                       SkipInfo('TestJitOps'),
+                       SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
@@ -6729,7 +6729,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_view_as_reshape_as,
            skips=(
                # Because reshape_as does not have a function variant.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_out=False,
            ),
     OpInfo('view',
@@ -6738,7 +6738,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(
                # Because view does not have a function variant.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            sample_inputs_func=sample_inputs_view_reshape,
            ),
     OpInfo('view_as',
@@ -6747,7 +6747,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(
                # Because view_as does not have a function variant.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            sample_inputs_func=sample_inputs_view_as_reshape_as,
            ),
     OpInfo('pinverse',
@@ -6797,7 +6797,7 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            op=torch.Tensor.__getitem__,
            sample_inputs_func=sample_inputs_getitem,
-           skips=(SkipInfo('TestJitOps', 'test_variant_consistency_jit'),)),
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('index_put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -6805,7 +6805,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_index_put,
            skips=(
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
@@ -6877,7 +6877,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            skips=(
                # torch.unfold does not exist so we get a RuntimeError.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit',
+               SkipInfo('TestJit', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
                # Skip operator schema test because this is a functional and not an operator
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
@@ -6901,7 +6901,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Expected a value of type 'int' for argument 'source'
                #   but instead found type 'list'.
-               SkipInfo('TestJitOps', 'test_jit_alias_remapping'),
+               SkipInfo('TestJit', 'test_jit_alias_remapping'),
            )),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -6913,7 +6913,7 @@ op_db: List[OpInfo] = [
                   supports_out=False,
                   skips=(
                       # torch.repeat does not exist so we get a RuntimeError.
-                      SkipInfo('TestJitOps', 'test_variant_consistency_jit',
+                      SkipInfo('TestJit', 'test_variant_consistency_jit',
                                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
                   ),
                   sample_inputs_func=sample_repeat_tile),
@@ -6930,7 +6930,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(
                # JIT has issue when op is passed as lambda
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_fill_),
     OpInfo('resize_',
@@ -6942,7 +6942,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            skips=(
                # JIT has issue when op is passed as lambda
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
@@ -6954,7 +6954,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            skips=(
                # JIT has issue when op is passed as lambda
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
@@ -6999,7 +6999,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(
                # JIT has issue when op is passed as lambda
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_zero_),
     OpInfo('special.xlog1py',
@@ -7054,7 +7054,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Currently failing due to an INTERNAL_ASSERT_FAILED error.
                # Reference: https://github.com/pytorch/pytorch/issues/56314
-               SkipInfo("TestJitOps", "test_variant_consistency_jit", dtypes=[torch.float32]),
+               SkipInfo("TestJit", "test_variant_consistency_jit", dtypes=[torch.float32]),
                # Skip operator schema test because this is a functional and not an operator.
                # Reference: https://github.com/pytorch/pytorch/issues/54574
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
@@ -7073,7 +7073,7 @@ op_db: List[OpInfo] = [
                # TODO: FIXME: complex inputs requiring grad error in forward
                SkipInfo('TestCommon', 'test_dtypes'),
                # JIT has issue when op is passed as lambda
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            )
            ),
     OpInfo('logcumsumexp',
@@ -7237,7 +7237,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(
                # test does not work with passing lambda for op
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
     # `torch.norm` has multiple code paths depending on the value of `p`.
@@ -7265,11 +7265,11 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
                # RuntimeError:
                # Arguments for call are not valid.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit', dtypes=(torch.complex64,)),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.complex64,)),
                # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":157,
                # please report a bug to PyTorch.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
            )
            ),
     OpInfo('norm',
@@ -7283,11 +7283,11 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
                # RuntimeError:
                # Arguments for call are not valid.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit', dtypes=(torch.complex64,)),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.complex64,)),
                # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":157,
                # please report a bug to PyTorch.
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
                # t = torch.randn((2, 2), dtype=torch.float16)
                # torch.norm(t) # Works
                # torch.norm(t, 'fro', [0, 1]) # Errors
@@ -7301,7 +7301,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            skips=(
                # following 3 tests failed intermittenly
-               SkipInfo('TestJitOps', 'test_variant_consistency_jit',
+               SkipInfo('TestJit', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=(torch.complex64,)),
                SkipInfo('TestGradients', 'test_fn_grad',
                         device_type='cpu', dtypes=(torch.complex128,)),
