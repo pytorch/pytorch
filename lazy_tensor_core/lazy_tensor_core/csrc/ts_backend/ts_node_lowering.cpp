@@ -13,6 +13,7 @@
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
+#include "lazy_tensor_core/csrc/ops/index_select.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
@@ -59,6 +60,10 @@ class TSNodeLowering : public NodeLowering {
         const ir::Output& argument = node->operand(0);
         return lazy_tensors::Shape(argument.shape().element_type(),
                                    expand->size());
+      }
+      case at::aten::index_select: {
+        return InferIndexSelect(ir::NodeCast<ir::ops::IndexSelect>(
+            node, ir::OpKind(at::aten::index_select)));
       }
       case at::aten::matmul: {
         // Only used from bmm currently.
@@ -170,6 +175,10 @@ class TSNodeLowering : public NodeLowering {
       return LowerExpand(
           ir::NodeCast<ir::ops::Expand>(node, ir::OpKind(at::aten::expand)));
     }
+    if (node->op().op == at::aten::index_select) {
+      return LowerIndexSelect(ir::NodeCast<ir::ops::IndexSelect>(
+          node, ir::OpKind(at::aten::index_select)));
+    }
     if (node->op().op == at::aten::permute) {
       return LowerPermute(
           ir::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute)));
@@ -245,6 +254,22 @@ class TSNodeLowering : public NodeLowering {
     LTC_CHECK_EQ(tensor2_shape.dimensions(1), m1);
     lazy_tensors::int64 p = tensor2_shape.dimensions(2);
     return lazy_tensors::Shape(tensor1_shape.element_type(), {b, n, p});
+  }
+
+  static lazy_tensors::Shape InferIndexSelect(
+      const ir::ops::IndexSelect* node) {
+    const ir::Output& input = node->operand(0);
+    const ir::Output& index = node->operand(1);
+    const lazy_tensors::Shape& index_shape = index.shape();
+    LTC_CHECK_EQ(index_shape.rank(), 1);
+    const lazy_tensors::Shape& input_shape = input.shape();
+    const auto input_dimensions = input_shape.dimensions();
+    std::vector<lazy_tensors::int64> output_dimensions(input_dimensions.begin(),
+                                                       input_dimensions.end());
+    LTC_CHECK_GE(node->dim(), 0);
+    LTC_CHECK_LT(node->dim(), input_shape.rank());
+    output_dimensions[node->dim()] = index_shape.dimensions(0);
+    return lazy_tensors::Shape(input_shape.element_type(), output_dimensions);
   }
 
   static lazy_tensors::Shape InferMm(const ir::Node* node) {
@@ -405,6 +430,14 @@ class TSNodeLowering : public NodeLowering {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->size());
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerIndexSelect(const ir::ops::IndexSelect* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.emplace_back(node->dim());
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
     return LowerBuiltin(node, arguments);
   }
 

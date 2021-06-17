@@ -78,6 +78,7 @@ supported:
   - lt.Tensor
   - lt_.Scalar
   - lt_.Tensor
+  - index_select
   - addcmul
   - addcmul_
   - alias

@@ -570,6 +570,13 @@ at::Tensor& AtenXlaType::gt_(at::Tensor& self, const at::Tensor& other) {
   return self;
 }
 
+at::Tensor AtenXlaType::index_select(const at::Tensor& self, int64_t dim,
+                                     const at::Tensor& index) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(LazyTensor::index_select(
+      bridge::GetLtcTensor(self), dim, bridge::GetLtcTensor(index)));
+}
+
 at::Tensor AtenXlaType::le(const at::Tensor& self, const at::Scalar& other) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
