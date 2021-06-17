@@ -581,6 +581,18 @@ BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
     nest.splitWithMask(loops[0], 4);
     loops = nest.getLoopStmtsFor(b);
     nest.reorderAxis(loops[1], loops[2]);
+  } else if (sch == 3) {
+    auto loops = nest.getLoopStmtsFor(b);
+    te::For *mi, *mo;
+    te::Buf *rf;
+    nest.splitWithMask(loops[1], kChunkSize, &mi);
+    loops = nest.reorder({loops[1], mi}, {1, 0});
+    TORCH_CHECK(nest.rfactor(nest.getLoopBodyFor(b), loops[0], &rf));
+    nest.reorderAxis(loops[0], loops[1]);
+    te::LoopNest::compressBuffer(rf, nest.root_stmt());
+    for (auto const& loop : nest.getAllInnermostLoopsWritingToBuf(rf)) {
+      nest.vectorize(loop);
+    }
   }
 
   nest.prepareForCodegen();
@@ -593,7 +605,7 @@ BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
 }
 BENCHMARK_REGISTER_F(Reduce2DRow, OpSchedule)->Apply(//CustomArgs);
     [](benchmark::internal::Benchmark* b) {
-      for (auto sch : {0, 1, 2}) {
+      for (auto sch : {0, 1, 2, 3}) {
         for (auto rows : {3, 6, 12, 18}) {
           auto cols = 24 - rows;
           b->Args({1 << rows, 1 << cols, sch});
