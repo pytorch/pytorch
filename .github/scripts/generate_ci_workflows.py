@@ -135,6 +135,7 @@ LINUX_WORKFLOWS = [
         build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        on_pull_request=True,
     ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
