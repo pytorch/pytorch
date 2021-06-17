@@ -140,14 +140,24 @@ def cpp_string(s: str) -> str:
 # to be generated.  This pattern makes it convenient to use map, concatMap
 # and similar functional combinators.
 
-def static_dispatch_extra_headers(backend: Optional[BackendIndex]) -> str:
+def static_dispatch_keys(backend: Optional[BackendIndex]) -> List[DispatchKey]:
     if backend is None:
-        return ''
-    return f"""
-#include <ATen/{backend.dispatch_key}Functions.h>
-#include <ATen/CompositeExplicitAutogradFunctions.h>
-#include <ATen/CompositeImplicitAutogradFunctions.h>
-"""
+        return []
+    else:
+        return [
+            backend.dispatch_key,
+            DispatchKey.CompositeImplicitAutograd,
+            DispatchKey.CompositeExplicitAutograd
+        ]
+
+def static_dispatch_extra_headers(backend: Optional[BackendIndex], skip_tensor_include: bool = False) -> str:
+    if skip_tensor_include:
+        # See Note [Avoiding Include Cycles In Static Dispatch]
+        maybe_inl = '_inl'
+    else:
+        maybe_inl = ''
+    return '\n'.join([
+        f'#include <ATen/{dispatch_key}Functions{maybe_inl}.h>' for dispatch_key in static_dispatch_keys(backend)])
 
 def static_dispatch(
     f: NativeFunction, cpp_sig: CppSignature,
@@ -187,23 +197,7 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        schema_str = cpp_string(str(f.func))
-        schema_str = '"' + "aten::" + schema_str[1:]
-        return f'm.def({schema_str});\n'
-
-
-def _num_leading_spaces(line: str) -> int:
-    return len(line) - len(line.lstrip())
-
-
-# Unindents all lines in code. Each line gets unindented the same amount;
-# that amount is equal to the smallest number of leading spaces across all lines
-def deindent(code: str) -> str:
-    lines = code.split('\n')
-    min_leading_spaces = min(map(_num_leading_spaces, lines))
-    lines = [line[min_leading_spaces:] for line in lines]
-    return '\n'.join(lines)
-
+        return f'm.def({cpp_string(str(f.func))});\n'
 
 # Generates Operators.h and Operators.cpp.
 # These provide macros that, given an operator and overload name, allow users
@@ -219,141 +213,119 @@ class ComputeOperators:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        # NB: requires_grad is the only exception to the rule because
-        # its const correctness is questionable.
-        if str(f.func.name) in set(['requires_grad_']):
-            return None
+        sig = DispatcherSignature.from_schema(f.func)
+        name = f.func.name.unambiguous_name()
+        call_method_name = 'call'
+        redispatch_method_name = 'redispatch'
 
         if self.target is Target.DECLARATION:
-            return self.gen_declaration(f)
-        if self.target is Target.DEFINITION:
-            return self.gen_definition(f)
+            # Note [The ATen Operators API]
+            # The ATen Operators API lives in the at::_ops namespace, and contains compile-time
+            # metadata about each operator + entry points into the Dispatcher.
+            # The C++ function, method, and redispatch API's are all implemented as wrappers
+            # into various bits of the structs defined here.
+            #
+            # Important characteristics about the Operators API:
+            # (1) It follows the Dispatcher API.
+            #     This is kind of necessary to avoid overhead.
+            #     For example: if it followed the C++ API, then all of the faithful C++ factory functions
+            #     would need to wrap their arguments into TensorOptions only to unwrap them again.
+            # (2) Overload names are disambiguated.
+            #     This is helpful for pytorch extenders who would like to decltype() an aten operator,
+            #     that has overloads, e.g. decltype(at::_ops::mul_Tensor::call)
+            # (3) No argument defaulting is allowed.
+            #     This is more of an implementation detail to avoid #include cycles,
+            #     since TensorBody.h (which defines the Tensor class) needs to include this file.
+            # (4) manual_cpp_bindings and faithful names are not included in the API.
+            #     This applies to stuff like __dispatch__is_complex(), and add_outf().
+            #     These aren't "real aten ops", they're just additional functions provided by the C++ API.
+            #     They're implemented as wrappers in Functions.h that call into the actual operators
+            #     defined here, i.e. at::_ops::is_complex::call() and at::_ops::add_out::call().
+            #     This means that ATEN_OP(is_complex) will not fastpath, and will go through the dispatcher.
+            return f"""
+struct TORCH_API {name} {{
+  using schema = {sig.type()};
+  using ptr_schema = schema*;
+  static constexpr const char* name = "aten::{str(f.func.name.name)}";
+  static constexpr const char* overload_name = "{f.func.name.overload_name}";
+  static constexpr const char* schema_str = {cpp_string(str(f.func))};
+  static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
+  static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
+}};"""
+        elif self.target is Target.DEFINITION:
+            defns = ''
+            for is_redispatching_fn in [False, True]:
+                if is_redispatching_fn:
+                    dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.name for a in sig.arguments()])
+                    dispatcher_call = 'redispatch'
+                    method_name = f'{name}::{redispatch_method_name}'
+                else:
+                    dispatcher_exprs_str = ', '.join([a.name for a in sig.arguments()])
+                    dispatcher_call = 'call'
+                    method_name = f'{name}::{call_method_name}'
+
+                defns += f"""
+// aten::{f.func}
+{sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow(name, overload_name)
+        .typed<schema>();
+    return op.{dispatcher_call}({dispatcher_exprs_str});
+}}
+"""
+            return defns
         else:
             assert_never(self.target)
 
-    # NB: This must be synchronized with the naming scheme in
-    # aten/src/ATen/templates/Operators.h
-    # Given a function schema "aten::op.overload(...)",
-    # If there is no overload name, this returns f"{op}"
-    # If there is an overload name, this returns f"{op}_{overload}"
-    def unambiguous_function_name(self, f: NativeFunction) -> str:
-        base_name = str(f.func.name.name)
-        overload_name = f.func.name.overload_name
-        if overload_name:
-            return f'{base_name}_{overload_name}'
-        return base_name
 
-    def gen_declaration(self, f: NativeFunction) -> str:
-        unambiguous_name = self.unambiguous_function_name(f)
-        sig = DispatcherSignature.from_schema(f.func)
-        return f"TORCH_API {sig.decl(unambiguous_name)};"
-
-    def most_faithful_name(self, f: NativeFunction) -> str:
-        sig_group = CppSignatureGroup.from_native_function(f, method=False)
-        sig = sig_group.most_faithful_signature()
-        return sig.name()
-
-    def invocation(self, f: NativeFunction) -> str:
-        faithful_op_name = self.most_faithful_name(f)
-        args = tuple(arg.name for arg in dispatcher.arguments(f.func))
-        # Method only
-        if Variant.function not in f.variants:
-            return f"{args[0]}.{faithful_op_name}({', '.join(args[1:])})"
-        return f"at::{faithful_op_name}({', '.join(args)})"
-
-    def gen_definition(self, f: NativeFunction) -> str:
-        unambiguous_name = self.unambiguous_function_name(f)
-        args = dispatcher.arguments(f.func)
-        sig = DispatcherSignature.from_schema(f.func)
-
-        return deindent(f"""\
-            {sig.defn(unambiguous_name)} {{
-              return {self.invocation(f)};
-            }}\
-        """)
-
-
-# Generates Function.cpp and Function.h.  These files provide the
-# functional public C++ API, and the scaffolding to call into
-# the dispatcher from these functions.  See also compute_tensor_method.
+# Generates Function.h, which provides the functional public C++ API,
+# and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeFunction:
-    target: Union[
-        Literal[Target.DECLARATION],
-        Literal[Target.DEFINITION]
-    ]
     static_dispatch_backend_index: Optional[BackendIndex]
-    is_redispatching_fn: bool
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        # We unconditionally generate function variants of the redispatch API.
-        # This is mainly because we can namespace functions separately, but not methods,
-        if Variant.function not in f.variants and not self.is_redispatching_fn:
+        if Variant.function not in f.variants:
             return None
-
-        with native_function_manager(f):
-            return self.callImpl(f)
-
-    def callImpl(self, f: NativeFunction) -> str:
-        name = cpp.name(f.func)
 
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
 
-        if self.target is Target.DECLARATION:
-            sig_str = sig_group.signature.decl(is_redispatching_fn=self.is_redispatching_fn)
-            result = f"TORCH_API {sig_str};\n"
-            if sig_group.faithful_signature is not None:
-                sig_str = sig_group.faithful_signature.decl(is_redispatching_fn=self.is_redispatching_fn)
-                result += f"TORCH_API {sig_str};\n"
-            return result
-
-        if self.target is not Target.DEFINITION:
-            assert_never(self.target)
-
         def generate_defn(faithful: bool) -> str:
-            dispatcher_sig = DispatcherSignature.from_schema(f.func)
-
-            if faithful and sig_group.faithful_signature is not None:
+            if faithful:
                 sig = sig_group.faithful_signature
+                assert sig is not None
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
-            if self.is_redispatching_fn:
-                dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in dispatcher_exprs])
-                dispatcher_call = 'redispatch'
-            else:
-                dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
-                dispatcher_call = 'call'
+            # See Note [The ATen Operators API]
+            target_sig = DispatcherSignature.from_schema(f.func)
+            exprs = translate(sig.arguments(), target_sig.arguments())
+            exprs_str = ', '.join([e.expr for e in exprs])
 
             static_dispatch_block = static_dispatch(f, sig, method=False, backend_index=self.static_dispatch_backend_index)
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}
-{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_sig.type()}>();
-    return op.{dispatcher_call}({dispatcher_exprs_str});
+TORCH_API inline {sig.decl()} {{
+    return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
             else:
                 return f"""
 // aten::{f.func}
-{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
+TORCH_API inline {sig.decl()} {{
     {static_dispatch_block}
 }}
 """
-        result = generate_defn(sig_group.faithful_signature is None)
+        result = generate_defn(False)
         if sig_group.faithful_signature is not None:
             result += generate_defn(True)
 
         return result
 
-# Generates TensorBody.h (sic) and TensorMethods.cpp.  These files provide the
-# object-oriented (method-based) public C++ API, and the scaffolding to call into
-# the dispatcher from these functions.  See also compute_function.
+# Generates TensorBody.h. This file provides the object-oriented (method-based)
+# public C++ API, and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeTensorMethod:
     target: Union[
@@ -370,8 +342,6 @@ class ComputeTensorMethod:
         assert not f.func.is_out_fn()
         assert f.func.arguments.self_arg is not None
 
-        name = cpp.name(f.func)
-
         sig_group = CppSignatureGroup.from_native_function(f, method=True, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
@@ -384,32 +354,28 @@ class ComputeTensorMethod:
             assert_never(self.target)
 
         def generate_defn(faithful: bool) -> str:
-            dispatcher_sig = DispatcherSignature.from_schema(f.func)
-
             if faithful:
                 sig = sig_group.faithful_signature
                 assert sig is not None
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments(), method=True)
-            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
+            target_sig = DispatcherSignature.from_schema(f.func)
+            exprs = translate(sig.arguments(), target_sig.arguments(), method=True)
+            exprs_str = ', '.join([e.expr for e in exprs])
 
             static_dispatch_block = static_dispatch(f, sig, method=True, backend_index=self.static_dispatch_backend_index)
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}
-{sig.defn(prefix="Tensor::")} const {{
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_sig.type()}>();
-    return op.call({dispatcher_exprs_str});
+inline {sig.defn(prefix="Tensor::")} const {{
+    return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
             else:
                 return f"""
 // aten::{f.func}
-{sig.defn(prefix="Tensor::")} const {{
+inline {sig.defn(prefix="Tensor::")} const {{
     {static_dispatch_block}
 }}
 """
@@ -419,6 +385,42 @@ class ComputeTensorMethod:
             result += generate_defn(faithful=True)
 
         return result
+
+# Generates RedispatchFunctions.h.
+# This is similar to the C++ API defined in Functions.h, but provides access
+# to the dispatcher's redispatch API.
+@dataclass(frozen=True)
+class ComputeRedispatchFunction:
+
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> Optional[str]:
+        # We unconditionally generate function variants of the redispatch API.
+        # This is mainly because we can namespace functions separately, but not methods,
+        sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
+
+        def generate_defn(faithful: bool) -> str:
+            if faithful:
+                sig = sig_group.faithful_signature
+                assert sig is not None
+            else:
+                sig = sig_group.signature
+
+            target_sig = DispatcherSignature.from_schema(f.func)
+            exprs = translate(sig.arguments(), target_sig.arguments())
+            exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in exprs])
+
+            return f"""
+// aten::{f.func}
+TORCH_API inline {sig.decl(is_redispatching_fn=True)} {{
+    return at::_ops::{f.func.name.unambiguous_name()}::redispatch({exprs_str});
+}}
+"""
+        result = generate_defn(False)
+        if sig_group.faithful_signature is not None:
+            result += generate_defn(True)
+
+        return result
+
 
 # Generates ATenOpList.cpp, a runtime accessible list of all aten
 # operators.
@@ -504,8 +506,8 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 C10_ALWAYS_INLINE
 {sig.defn(name)} {{
   static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-    .typed<{dispatcher_sig.type()}>();
+    .findSchemaOrThrow(at::_ops::{f.func.name.unambiguous_name()}::name, at::_ops::{f.func.name.unambiguous_name()}::overload_name)
+    .typed<at::_ops::{f.func.name.unambiguous_name()}::schema>();
   {compute_dk}
   return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
@@ -1050,7 +1052,17 @@ def main() -> None:
         })
 
         if dispatch_key in functions_keys:
+            if dispatch_key in static_dispatch_keys(static_dispatch_idx):
+                # See Note [Avoiding Include Cycles In Static Dispatch]
+                inl_headers = ''
+            else:
+                inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+
             fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+                'dispatch_key': str(dispatch_key),
+                'inline_headers_for_nonstatic_build': inl_headers,
+            })
+            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
                 'dispatch_namespace': dispatch_key.lower(),
                 'dispatch_namespaced_declarations': list(concatMap(
                     dest.RegisterDispatchKey(
@@ -1094,35 +1106,27 @@ def main() -> None:
     })
 
     cpu_fm.write('Functions.h', lambda: {
-        'function_declarations': list(mapMaybe(ComputeFunction(
-            Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx, is_redispatching_fn=False), native_functions)),
-    })
-    cpu_fm.write('Functions.cpp', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         'function_definitions': list(mapMaybe(ComputeFunction(
-            Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx, is_redispatching_fn=False), native_functions)),
+            static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
-    cpu_fm.write('RedispatchFunctions.h', lambda: {
-        'function_redispatch_declarations': list(mapMaybe(ComputeFunction(
-            Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx, is_redispatching_fn=True), native_functions)),
-    })
-    cpu_fm.write('RedispatchFunctions.cpp', lambda: {
-        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
-        'function_redispatch_definitions': list(mapMaybe(ComputeFunction(
-            Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx, is_redispatching_fn=True), native_functions)),
-    })
+
     core_fm.write('TensorBody.h', lambda: {
-        'tensor_method_declarations': list(mapMaybe(
-            ComputeTensorMethod(Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
+        'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(
+            target=Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
+        'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
+            target=Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
-    core_fm.write('TensorMethods.cpp', lambda: {
-        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
-        'tensor_method_definitions': list(mapMaybe(
-            ComputeTensorMethod(Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
+
+    cpu_fm.write('RedispatchFunctions.h', lambda: {
+        'function_redispatch_definitions': list(mapMaybe(ComputeRedispatchFunction(), native_functions)),
     })
+
     core_fm.write('ATenOpList.cpp', lambda: {
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
     })
+
     cpu_fm.write('NativeFunctions.h', lambda: {
         'native_function_declarations': list(concatMap(
             # Convert to a set first to remove duplicate kernel names.
