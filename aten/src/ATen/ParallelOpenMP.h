@@ -99,7 +99,9 @@ inline scalar_t parallel_reduce(
     for (int64_t id = 0; id < num_results; id++) {
       int64_t i = begin + id * grain_size;
       try {
+        #ifdef _OPENMP
         internal::ThreadIdGuard tid_guard(omp_get_thread_num());
+        #endif
         results_data[id] = f(i, i + std::min(end - i, grain_size), ident);
       } catch (...) {
         if (!err_flag.test_and_set()) {
