@@ -155,8 +155,8 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
-def einsum(*args):
-    r"""einsum(equation, *operands) -> Tensor
+def einsum(*args, optimize=None):
+    r"""einsum(equation, *operands, *, optimize=None) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
     based on the Einstein summation convention.
@@ -167,7 +167,7 @@ def einsum(*args):
     with some subscript and define which subscripts are part of the output. The output is then computed by summing
     the product of the elements of the :attr:`operands` along the dimensions whose subscripts are not part of the
     output. For example, matrix multiplication can be computed using einsum as `torch.einsum("ij,jk->ik", A, B)`.
-    Here, j is the summation subscript and i and k the output subscripts (see section below for more details on why).
+    Here, j is the summation subscript and i and k the output subscripts (see section below for more details).
 
     Equation:
 
@@ -207,7 +207,8 @@ def einsum(*args):
 
         This function does not optimize the given expression, so a different formula for the same computation may
         run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
-        can optimize the formula for you.
+        can optimize the formula for you. The path output by `opt_einsum.contract_path` which is a list of tuples can
+        be passed at the :attr:`optimize` parameter to be used when performing the contractions.
 
     .. note::
 
@@ -220,6 +221,16 @@ def einsum(*args):
     Args:
         equation (string): The subscripts for the Einstein summation.
         operands (List[Tensor]): The tensors to compute the Einstein summation of.
+
+    Keyword Args:
+        optimize (List[int] or List[Tuple[int, int]]): The contraction path to use when performing the contractions.
+            Each tuple in the list specifies the index of the two tensors to be contracted next, with the result
+            of the contraction being appended to the list of operands. e.g. given 3 input operands and
+            `optimize=[(1, 2), (0, 1)]` the second and third operands will be contracted first and the result will
+            have index `1` since contracted operands are removed from the list. If provided in `List[int]` format
+            every two consecutive indices form a contraction, e.g. `optimize=[1, 2, 0, 1]` is the same path as
+            in the previous example. If there is only one input operand, then the contraction path should be `[(0,)]`.
+            If `None`, tensors will be contracted from left to right. Defaults to `None`.
 
     Examples::
 
@@ -277,6 +288,11 @@ def einsum(*args):
         >>> torch.einsum('bn,anm,bm->ba', l, A, r)
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
+
+        # custom contraction path
+        >>> torch.einsum('bn,anm,bm->ba', l, A, r, optimize=[(1, 2), (0, 1)])
+        tensor([[-0.3430, -5.2405,  0.4494],
+                [ 0.3311,  5.5201, -3.0356]])
     """
     if len(args) < 2:
         raise ValueError('einsum(): must specify the equation string and at least one operand, '
@@ -313,14 +329,35 @@ def einsum(*args):
         operands = args[1:]
 
     if has_torch_function(operands):
-        return handle_torch_function(einsum, operands, equation, *operands)
+        return handle_torch_function(einsum, operands, equation, *operands, optimize=optimize)
 
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
         # recurse incase operands contains value that has torch function
         # in the original implementation this line is omitted
-        return einsum(equation, *_operands)
+        return einsum(equation, *_operands, optimize=optimize)
+
+    # Process contraction path
+    if optimize is not None:
+        if not isinstance(optimize, Sequence):
+            raise ValueError("einsum(): optimize must be a Sequence[int] or Sequence[Tuple[int, int]]")
+
+        # Convert List[Tuple[int, int]] to List[int] for the C++ API. Every 2 consecutive
+        # integers form a contraction.
+        if len(optimize) > 0 and isinstance(optimize[0], Sequence):
+            # For a single operand, optimize should be [(0,)]
+            if len(optimize) == 1 and len(optimize[0]) == 1:
+                optimize = [optimize[0][0]]
+            else:
+                path = []
+                for contraction in optimize:
+                    if not isinstance(contraction, Sequence) or len(contraction) != 2:
+                        raise RuntimeError("einsum(): contractions in the optimize path must be 2-tuple of ints")
+                    path.extend(contraction)
+                optimize = path
+
+        return _VF.einsum(equation, operands, optimize=optimize)  # type: ignore[attr-defined]
 
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 

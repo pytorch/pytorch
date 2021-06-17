@@ -13,7 +13,7 @@ from itertools import product
 from functools import reduce
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
+    (TestCase, run_tests, TEST_SCIPY, TEST_OPT_EINSUM, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
      iter_indices, gradcheck, gradgradcheck, skipIfRocm)
 from torch.testing._internal.common_device_type import \
@@ -4483,7 +4483,15 @@ class TestLinalg(TestCase):
             np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
         res = torch.einsum(*args)
         ref = np.einsum(*np_args)
-        self.assertEqual(torch.from_numpy(np.array(ref)), res)
+        self.assertEqual(res, torch.from_numpy(np.array(ref)))
+
+        # Get optimized contraction path to test optimize parameter
+        if TEST_OPT_EINSUM:
+            import opt_einsum as oe
+            path = oe.contract_path(*np_args)[0]
+            ref = np.einsum(*np_args, optimize=('einsum_path', *path))
+            res = torch.einsum(*args, optimize=path)
+            self.assertEqual(res, torch.from_numpy(np.array(ref)))
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
@@ -4502,15 +4510,15 @@ class TestLinalg(TestCase):
 
         # Vector operations
         self._check_einsum('i->', x)                     # sum
-        self._check_einsum('i,i->', x, x)                # dot
-        self._check_einsum('i,i->i', x, x)               # vector element-wisem mul
+        self._check_einsum('i,i->', x, x.clone())        # dot
+        self._check_einsum('i,i->i', x, x.clone())       # vector element-wisem mul
         self._check_einsum('i,j->ij', x, y)              # outer
 
         # Matrix operations
         self._check_einsum("ij->ji", A)                  # transpose
         self._check_einsum("ij->j", A)                   # row sum
         self._check_einsum("ij->i", A)                   # col sum
-        self._check_einsum("ij,ij->ij", A, A)            # matrix element-wise mul
+        self._check_einsum("ij,ij->ij", A, A.clone())    # matrix element-wise mul
         self._check_einsum("ij,j->i", A, x)              # matrix vector multiplication
         self._check_einsum("ij,kj->ik", A, B)            # matmul
         self._check_einsum("ij,ab->ijab", A, E)          # matrix outer product
@@ -4575,6 +4583,22 @@ class TestLinalg(TestCase):
         self._check_einsum(l, [40, 41], w, [2, 41, 50], r, [40, 50], [40, 2])
 
     @dtypes(torch.double, torch.cdouble)
+    def test_einsum_contraction_path(self, device, dtype):
+        def check(equation, *operands, path=None):
+            np_ops = [op.cpu().numpy() for op in operands]
+            res = torch.einsum(equation, *operands, optimize=path)
+            ref = np.einsum(equation, *np_ops, optimize=('einsum_path', *path))
+            self.assertEqual(res, torch.from_numpy(np.array(ref)))
+
+        x = make_tensor((2, 3), device, dtype)
+        y = make_tensor((3, 2), device, dtype)
+        z = make_tensor((2, 1, 1), device, dtype)
+
+        check('...', x, path=[(0,)])
+        check('ij,jk', x, y, path=[(0, 1)])
+        check('ij,jk,bik->bik', x, y, z, path=[(0, 2), (0, 1)])
+
+    @dtypes(torch.double, torch.cdouble)
     def test_einsum_random(self, device, dtype):
         def convert_label(label):
             if label == ...:
@@ -4589,7 +4613,7 @@ class TestLinalg(TestCase):
 
         def test(n=10,                       # how many tests to generate
                  n_labels=5,                 # how many labels available
-                 min_ops=1, max_ops=3,       # min and max number of operands per test
+                 min_ops=1, max_ops=4,       # min and max number of operands per test
                  min_dims=1, max_dims=3,     # min and max number of dimensions per operand
                  min_size=1, max_size=8,    # min and max size of each dimension
                  max_out_dim=3,              # max number of dimensions for the output
@@ -4680,7 +4704,7 @@ class TestLinalg(TestCase):
                 args.append(out_sublist)
                 self._check_einsum(*args, np_args=(equation, *np_operands))
 
-        test(100)
+        test(1000)
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
@@ -4723,33 +4747,34 @@ class TestLinalg(TestCase):
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
     def test_einsum_error_cases(self, device):
-        def check(*args, regex, exception=RuntimeError):
+        def check(*args, regex, exception=RuntimeError, optimize=None):
             with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
-                torch.einsum(*args)
+                torch.einsum(*args, optimize=optimize)
 
         x = make_tensor((2,), device, torch.float32)
         y = make_tensor((2, 3), device, torch.float32)
 
         check('', [], regex=r'at least one operand', exception=ValueError)
-        check('. ..', [x], regex=r'found \'.\' for operand 0 that is not part of any ellipsis')
-        check('... ...', [x], regex=r'found \'.\' for operand 0 for which an ellipsis was already found')
-        check('1', [x], regex=r'invalid subscript given at index 0')
-        check(',', [x], regex=r'fewer operands were provided than specified in the equation')
-        check('', [x, x], regex=r'more operands were provided than specified in the equation')
-        check('', [x], regex=r'the number of subscripts in the equation \(0\) does not match the number '
-              r'of dimensions \(1\) for operand 0 and no ellipsis was given')
-        check('ai', [x], regex=r'the number of subscripts in the equation \(2\) does not match the number '
-              r'of dimensions \(1\) for operand 0 and no ellipsis was given')
-        check('ai...', [x], regex=r'the number of subscripts in the equation \(2\) is more than the number '
-              r'of dimensions \(1\) for operand 0')
-        check('a->... .', [x], regex=r'found \'.\' for output but an ellipsis \(...\) was already found')
-        check('a->..', [x], regex=r'found \'.\' for output that is not part of any ellipsis \(...\)')
-        check('a->1', [x], regex=r'invalid subscript given at index 3')
-        check('a->aa', [x], regex=r'output subscript a appears more than once in the output')
-        check('a->i', [x], regex=r'output subscript i does not appear in the equation for any input operand')
-        check('aa', [y], regex=r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
-        check('a, ba', [x, y], regex=r'operands do not broadcast with remapped shapes \[original->remapped\]: '
-              r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
+        check('?', [x], regex=r'expected subscripts to be in range')
+        check('. ..', [x], regex=r'not part of an ellipsis')
+        check('... ...', [x], regex=r'at most one ellipsis')
+        check(',', [x], regex=r'number of operands specified')
+        check('', [x], regex=r'number of subscripts')
+        check('ab', [x], regex=r'number of subscripts')
+        check('...ab', [x], regex=r'number of subscripts')
+        check('a->?', [x], regex=r'expected subscripts to be in range')
+        check('a->aa', [x], regex=r'more than once for the output')
+        check('a->x', [x], regex=r'does not appear for any operand')
+        check('a->. ..', [x], regex=r'not part of an ellipsis')
+        check('a->... ...', [x], regex=r'at most one ellipsis')
+        check('...,...', [x, y], regex=r'does not broadcast')
+        check('a,a', [x, make_tensor((3,), device, torch.float32)], regex=r'does not broadcast')
+        check('aa', [y], regex=r'sizes don\'t match')
+
+        check('a', [x], regex=r'size 1 but got 0', optimize=[])
+        check('a', [x], regex=r'size 1 but got 2', optimize=[(0, 1)])
+        check('a,ab', [x, y], regex=r'cannot contract an operand with itself', optimize=[(0, 0)])
+        check('a,ab', [x, y], regex=r'out of bounds', optimize=[(1, 2)])
 
         check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
         check(x, [52], regex=r'not within the valid range \[0, 52\)', exception=ValueError)

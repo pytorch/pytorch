@@ -3016,6 +3016,11 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     inputs.append(SampleInput([H], args=("i...->...",)))
     inputs.append(SampleInput([C, x], args=('...ik, ...j -> ij',)))
 
+    # Test optimize kwarg
+    x = make_tensor((2, 3), device, dtype, requires_grad=requires_grad)
+    y = make_tensor((3, 2), device, dtype, requires_grad=requires_grad)
+    inputs.append(SampleInput([x, y], args=('ij,jk',), kwargs={'optimize': [(0, 1)]}))
+
     return inputs
 
 
@@ -6520,7 +6525,7 @@ op_db: List[OpInfo] = [
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
            # TODO(@heitorschueroff) update SampleInput to handle such cases
-           op=lambda tensors, equation: torch.einsum(equation, tensors),
+           op=lambda tensors, equation, optimize=None: torch.einsum(equation, tensors, optimize=optimize),
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half),

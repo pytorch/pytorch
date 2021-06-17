@@ -1746,6 +1746,9 @@ graph(%Ra, %Rb):
         def sublist_format(x, y):
             return torch.einsum(x, [0], y, [1], [0, 1])
 
+        def optimize_kwarg(x, y):
+            return torch.einsum('i,j->ij', (x, y), optimize=[0, 1])
+
         # Sublist format cannot be scripted because it is
         # a NumPy API only feature
         with self.assertRaises(RuntimeError):
@@ -1757,6 +1760,8 @@ graph(%Ra, %Rb):
         check(equation_format, torch.jit.script(equation_format), x, y)
         check(equation_format, torch.jit.trace(equation_format, (x, y)), x, y)
         check(sublist_format, torch.jit.trace(sublist_format, (x, y)), x, y)
+        check(optimize_kwarg, torch.jit.script(optimize_kwarg), x, y)
+        check(optimize_kwarg, torch.jit.trace(optimize_kwarg, (x, y)), x, y)
 
     def test_python_ivalue(self):
         # Test if pure python object can be hold as IValue and conversion
