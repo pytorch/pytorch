@@ -38,7 +38,7 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
       if (self.is_quantized()) {
         r = at::empty_quantized(self.sizes(), self, options);
       } else {
-        auto r = at::empty_strided(
+        r = at::empty_strided(
             self.sizes(),
             self.strides(),
             options.memory_format(c10::nullopt).pinned_memory(pin_out));
