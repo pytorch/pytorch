@@ -9,6 +9,7 @@
 
 #include <ATen/core/ivalue_inl.h>
 #include <ATen/ThreadLocalState.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Utils.hpp>
@@ -30,7 +31,7 @@ constexpr int kDDPRuntimeLoggingSampleRate = 100;
 // Forward declaration
 class Logger;
 
-class Timer {
+class TORCH_API Timer {
  public:
   enum class Event {
     kForwardStart,
@@ -52,7 +53,7 @@ class Timer {
 
 C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
-class Reducer {
+class TORCH_API Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
   // The bucket assignment for this reducer is specified as a list of
@@ -492,7 +493,7 @@ class Reducer {
 // The index of tensors[i] assigned to bucket is tensor_indices[i],
 // when tensor_indices is empty, the index of tensors[i] assigned to
 // bucket is i.
-std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+TORCH_API std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
@@ -500,7 +501,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
-void verify_replica0_across_processes(
+TORCH_API void verify_replica0_across_processes(
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<at::Tensor>> model_replicas);
 } // namespace c10d
