@@ -138,6 +138,7 @@ Tensor _segment_reduce_cuda_kernel(
                   segment_count,
                   initial.has_value(),
                   initial_value);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       });
 

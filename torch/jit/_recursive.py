@@ -198,7 +198,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         added_names.add(name)
 
     # populate constants_set
-    constants_set = getattr(nn_module, "__constants__", set())
+    constants_set = set(getattr(nn_module, "__constants__", ()))
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
     for name, ann in class_annotations.items():
