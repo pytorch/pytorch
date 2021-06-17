@@ -27,23 +27,26 @@ Tensor view(const Tensor& input, IntArrayRef size) {
       "not compatible with input tensor's size and stride (at least one dimension"
       " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
+  if(input.numel() == 0) {
+    return makeTensor({inferred_size, stride_value}, input.options());
+  }
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   MetalTensorImplStorage mt{inferred_size, stride_value};
   mt.texture()->allocateTemporaryStorage(inferred_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:"reshape"
-                     Constants:@[
-                       @(Y.height),
-                       @(Y.width),
-                       @(Y.featureChannels),
-                       @(Y.numberOfImages),
-                       @(X.height),
-                       @(X.width),
-                       @(X.featureChannels),
-                       @(X.numberOfImages),
-                     ]];
+  id<MTLComputePipelineState> state =
+      [[MPSCNNContext sharedInstance] specializedPipelineState:"reshape"
+                                                     Constants:@[
+                                                       @(Y.height),
+                                                       @(Y.width),
+                                                       @(Y.featureChannels),
+                                                       @(Y.numberOfImages),
+                                                       @(X.height),
+                                                       @(X.width),
+                                                       @(X.featureChannels),
+                                                       @(X.numberOfImages),
+                                                     ]];
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
@@ -95,7 +98,13 @@ Tensor flatten_using_ints(
   return input.reshape(shape);
 }
 
+Tensor detach(const Tensor& input) {
+  TORCH_CHECK(input.is_metal());
+  return input;
+}
+
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
+  m.impl("detach", TORCH_FN(detach));
   m.impl("view", TORCH_FN(view));
   m.impl("reshape", TORCH_FN(reshape));
   m.impl("flatten.using_ints", TORCH_FN(flatten_using_ints));
