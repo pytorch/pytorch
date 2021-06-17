@@ -1,3 +1,4 @@
+#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -15,7 +16,6 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
-    std::unique_ptr<RequestCallback> cb,
     const std::vector<std::string>& messagesToFail,
     const std::unordered_map<std::string, float>& messageTypesToDelay,
     int failNumSends)
@@ -25,7 +25,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
           std::move(pg),
           numSendRecvThreads,
           rpcTimeout,
-          std::move(cb)),
+          std::make_unique<RequestCallbackImpl>()),
       failNumSends_(failNumSends),
       messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
       messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}
