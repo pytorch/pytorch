@@ -269,6 +269,8 @@ static void upsample_bilinear2d_out_cuda_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
     if (memory_format == at::MemoryFormat::ChannelsLast) {
+      TORCH_INTERNAL_ASSERT(output.is_contiguous(at::MemoryFormat::ChannelsLast),
+        "output is not contiguous in channels_last");
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
@@ -365,7 +367,6 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   const auto memory_format = grad_output_.suggest_memory_format();
 
   Tensor grad_output = grad_output_.contiguous(memory_format);
-  grad_input.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   // initialization to zero is required here. As we launch one thread per output
   // element, and atomicAdd to input gradient. Given a sparse sampling case, our
@@ -384,6 +385,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
     if (memory_format == at::MemoryFormat::ChannelsLast) {
+      TORCH_INTERNAL_ASSERT(grad_input.is_contiguous(at::MemoryFormat::ChannelsLast),
+        "grad_input is not contiguous in channels_last");
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       auto idata = grad_input.data_ptr<scalar_t>();
