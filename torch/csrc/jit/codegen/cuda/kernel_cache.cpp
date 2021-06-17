@@ -634,9 +634,10 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
                                        : single_kernel_fusion_.get();
   SchedulerRuntimeInfo runtime_info(complete_fusion, inputs, true);
 
+  c10::optional<FusionKernelRuntime::HeuristicsPtr> ret;
   // Segmented case, need to iterate over all segmented groups
   if (is_segmented_) {
-    auto heuristics = std::make_unique<FusionHeuristics>();
+    ret = std::make_unique<FusionHeuristics>();
     size_t total_groups = segmented_fusion_->groups().size();
     for (size_t group_index = 0; group_index < total_groups; group_index++) {
       auto group = segmented_fusion_->groups()[group_index];
@@ -650,10 +651,10 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
               heuristics_->heuristicsList()[group_index].get())) {
         return c10::nullopt;
       }
-      heuristics->emplaceBack(std::move(scheduler_entry));
+      ret.value()->emplaceBack(std::move(scheduler_entry));
     }
 
-    return heuristics;
+    return ret;
   }
 
   // Un-segmented case, just check the complete fusion
@@ -664,9 +665,10 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
     return c10::nullopt;
   }
 
-  auto ret = std::make_unique<FusionHeuristics>(
+  ret = std::make_unique<FusionHeuristics>(
       complete_fusion_heuristic, runtime_info);
-  if (!complete_fusion_scheduler->sameAs(ret->heuristicsList()[0].get())) {
+  if (!complete_fusion_scheduler->sameAs(
+          ret.value()->heuristicsList()[0].get())) {
     return c10::nullopt;
   }
 
