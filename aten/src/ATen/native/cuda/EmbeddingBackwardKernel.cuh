@@ -7,7 +7,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCAtomics.cuh>
 

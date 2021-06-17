@@ -1,8 +1,9 @@
+#include <c10/util/Logging.h>
 #include <c10d/reducer.hpp>
 
 namespace c10d {
 
-class Logger {
+class TORCH_API Logger {
  public:
   explicit Logger(std::shared_ptr<c10d::Reducer> reducer);
   // Set logging data that can be got during DistributedDataParallel
@@ -40,18 +41,12 @@ class Logger {
 
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.
-  void calculate_avg_cpu_time(
+  void calculate_avg_time(
       int64_t& avg_time,
       int64_t& time_duration,
-      int64_t cpu_start_time,
-      int64_t cpu_end_time);
-#ifdef USE_CUDA
-  void calculate_avg_gpu_time(
-      int64_t& avg_time,
-      int64_t& time_duration,
-      at::cuda::CUDAEvent& gpu_start,
-      at::cuda::CUDAEvent& gpu_end);
-#endif
+      Timer& timer,
+      Timer::Event start_event,
+      Timer::Event end_event);
   // Set stats that can be collected only during
   // training loop. It is called at the beginning of forward call
   // to record the run time stats of sampled iterations that previouly ran.
@@ -60,6 +55,20 @@ class Logger {
   // TODO to support single process multiple devices and multi device modules,
   // events need to be created and recorded on multiple devices.
   void set_runtime_stats_and_log();
+
+  // Called when DDP/reducer is failing with an error. The
+  // logging data structure will have two fields filled: "has_error" indicating
+  // that this iteration encountered an error and other fields are not valid,
+  // and "error", a string which contains the error message that DDP failed
+  // with.
+  template <typename... Args>
+  void set_error_and_log(const std::string& ddp_error, const Args&... args) {
+    ddp_logging_data_->ints_map["has_error"] = 1;
+    auto err = c10::str(ddp_error, args...);
+    ddp_logging_data_->strs_map["error"] = err;
+    at::LogPyTorchDDPUsage(*ddp_logging_data_);
+  }
+
 
  private:
   // ddp_logging_data_ is used to hold all the ddp related logging

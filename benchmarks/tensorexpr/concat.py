@@ -1,5 +1,6 @@
 from . import benchmark
 import numpy as np
+import torch
 
 class Concat2D2InputBench(benchmark.Benchmark):
     def __init__(self, mode, device, dtype, I1_D1, I1_D2, I2_D1, I2_D2, concat_dim):
@@ -70,6 +71,8 @@ class ConcatGraphOptBench(benchmark.Benchmark):
         self.input1 = self.randn([I1_D1, I1_D2], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.input2 = self.randn([I2_D1, I2_D2], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.inputs = [self.input1, self.input2]
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_cat_wo_conditionals(True)
 
     def forward(self, input1, input2):
         x1 = self.add(input1, 0.00001)

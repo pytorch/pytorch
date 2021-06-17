@@ -436,7 +436,7 @@ class profile(object):
                 use_gpu_fallback = False
                 if self.use_cuda:
                     if (ProfilerActivity.CUDA not in
-                            torch.autograd.supported_kineto_activities()):
+                            torch.autograd._supported_kineto_activities()):
                         warn("CUPTI tracing is not available, falling back to legacy CUDA profiling")
                         use_gpu_fallback = True
                     else:
