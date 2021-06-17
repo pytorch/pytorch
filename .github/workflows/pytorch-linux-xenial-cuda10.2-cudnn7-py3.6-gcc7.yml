@@ -272,6 +272,11 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         run: |
+          if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
+            export SHARD_NUMBER=$TEST_CONFIG
+          else
+            export SHARD_NUMBER=0
+          fi
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
@@ -281,8 +286,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
-            -e NUM_TEST_SHARDS \
-            -e TEST_CONFIG \
+            -e SHARD_NUMBER \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \

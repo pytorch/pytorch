@@ -74,13 +74,13 @@ run_tests() {
           export PYTORCH_COLLECT_COVERAGE=1
           export COVERAGE_RCFILE=$PWD/.coveragerc # coverage config file needed for plug-ins and settings to work
         fi
-        if [[ "${JOB_BASE_NAME}" == *-test1 || ( $NUM_TEST_SHARDS -gt 1 && "${TEST_CONFIG}" == 1 )]]; then
+        if [[ "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
             "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then
               "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
             fi
-        elif [[ "${JOB_BASE_NAME}" == *-test2 || ( $NUM_TEST_SHARDS -gt 1 && "${TEST_CONFIG}" == 2 )]]; then
+        elif [[ "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
             "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
             "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
