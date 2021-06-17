@@ -102,7 +102,7 @@ C10_HOST_DEVICE inline T normal(T val, T mean, T std) {
 template <typename T>
 C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
   // https://en.wikipedia.org/wiki/Cauchy_distribution#Cumulative_distribution_function
-  return median + sigma * at::tan(c10::pi<T> * (val - static_cast<T>(0.5)));
+  return median + sigma * ::tan(c10::pi<T> * (val - static_cast<T>(0.5)));
 }
 
 /**
