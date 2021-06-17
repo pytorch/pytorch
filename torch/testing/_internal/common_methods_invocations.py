@@ -155,23 +155,21 @@ class SampleInput(object):
     def numpy(self):
         # Returns the NumPy version of the input
         # Only supports torch.Tensor objects, if an arg is a scalar - a TypeError will be raised
-        sample_torch_input, sample_args, sample_kwargs = self.splat()
+        def to_numpy(torch_inp):
+            # Local function to convert input of tensor/tensors to numpy array/arrays
+            if isinstance(torch_inp, torch.Tensor):
+                numpy_inp = torch_inp.cpu().numpy()
+            else is_iterable_of_tensors(torch_inp):
+                numpy_inp = [sample_inp.cpu().numpy() for t_inp in torch_input]
+            else:
+                raise TypeError(f"Only torch.Tensor types supported but got {type(torch_inp)}")
+            return numpy_inp
 
-        numpy_args = list()
-
-        for sample_arg in sample_args:
-            if not isinstance(sample_arg, torch.Tensor):
-                raise TypeError(f"Only torch.Tensor types supported but got {type(sample_arg)}")
-            numpy_args.append(sample_arg.cpu().numpy())
-
-        if isinstance(sample_torch_input, torch.Tensor):
-            sample_numpy_input = sample_torch_input.cpu().numpy()
-        elif is_iterable_of_tensors(sample_torch_input):
-            sample_numpy_input = [sample_input.cpu().numpy() for sample_input in sample_torch_input]
-        else:
-            raise TypeError(f"Only torch.Tensor types support but got {type(sample_torch_input)}")
-
-        return (sample_numpy_input, numpy_args, sample_kwargs)
+        sample_torch_input, torch_args, torch_kwargs = self.splat()
+        sample_numpy_input, numpy_args, numpy_kwargs = to_numpy(sample_torch_input), \
+                                                                        to_numpy(torch_args), \
+                                                                        to_numpy(torch_kwargs)
+        return (sample_numpy_input, numpy_args, numpy_kwargs)
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
@@ -4463,8 +4461,6 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cdouble]),
                    )),
     OpInfo('add',
-           ref=np.add,
-           variant_test_name='test_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
@@ -4479,8 +4475,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_binary_pwise),
     OpInfo('sub',
-           ref=np.subtract,
-           variant_test_name='test_subtract',
            aliases=('subtract',),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            assert_autodiffed=True,
