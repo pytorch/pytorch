@@ -26,16 +26,19 @@ executors:
     machine:
       resource_class: windows.gpu.nvidia.medium
       image: windows-server-2019-nvidia:previous
+      docker_layer_caching: true
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
       image: windows-server-2019-vs2019:stable
+      docker_layer_caching: true
       shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.medium
       image: windows-server-2019-vs2019:stable
+      docker_layer_caching: true
       shell: bash.exe

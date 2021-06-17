@@ -326,7 +326,6 @@ tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | head -c 32)"
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
 # it's no longer needed.
 docker build \
-       --no-cache \
        --progress=plain \
        --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
