@@ -38,13 +38,8 @@ Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
   for (auto inp : cat_inputs) {
     auto new_cat_input = subgraph->createClone(
         user, [&](Value* k) { return (k == cat->output()) ? inp : k; });
-    // The type of new input should be same as the type of the user. This is
-    // necessary to handle cases where the user could be doing some type
-    // promotion.
-    // new_cat_input->output()->setType(user->output()->type());
-
     // Since we are cloning user, its result should be the same scalar type
-    // as the user. But the dims should correspond to that of input.
+    // as the user. But the dims should correspond to that of the input.
     auto input_tensor_type = inp->type()->cast<c10::TensorType>();
     TORCH_INTERNAL_ASSERT(input_tensor_type);
     auto new_input_type =
@@ -59,7 +54,6 @@ Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
   auto new_cat = subgraph->createClone(cat, [&](Value* k) {
     return (k == cat_list->output()) ? new_cat_list->output() : k;
   });
-  // TODO: Set the cat output to the scalar type of user.
   new_cat->output()->setType(user_tensor_type);
   new_cat->insertBefore(cat);
 
