@@ -3524,7 +3524,7 @@ def skips_mvlgamma(skip_redundant=False):
         # Redundant tests
         skips = skips + (  # type: ignore[assignment]
             SkipInfo('TestGradients'),
-            SkipInfo('TestOpInfo'),
+            SkipInfo('TestJit'),
             SkipInfo('TestCommon'),
         )
     return skips
@@ -5065,9 +5065,6 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                       # some test samples works for ROCM backward but not all
-                       SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
-                                dtypes=(torch.bfloat16,), active_if=TEST_WITH_ROCM),
                    ),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -5300,10 +5297,6 @@ op_db: List[OpInfo] = [
     OpInfo('floor_divide',
            dtypes=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_floor_divide,
-           skips=(
-               # `test_duplicate_method_tests` doesn't raise any warning, as it doesn't actually
-               # call the operator.
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            supports_autograd=False,
            ),
     UnaryUfuncInfo('frexp',
@@ -5516,11 +5509,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_multi_dot,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           skips=(
-               # some test samples works for ROCM backward but not all
-               SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
-                        dtypes=(torch.bfloat16,), active_if=TEST_WITH_ROCM),
-           )),
+           ),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -5934,9 +5923,6 @@ op_db: List[OpInfo] = [
            skips=(
                # mm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
-               # some test samples works for ROCM backward but not all
-               SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
-                        dtypes=(torch.bfloat16,), active_if=TEST_WITH_ROCM),
            )),
     OpInfo('mode',
            op=torch.mode,
@@ -6637,7 +6623,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Redundant tests
                        SkipInfo('TestGradients'),
-                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
@@ -6658,7 +6644,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Redundant tests
                        SkipInfo('TestGradients'),
-                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
@@ -6680,7 +6666,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Redundant tests
                        SkipInfo('TestGradients'),
-                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
@@ -6745,7 +6731,6 @@ op_db: List[OpInfo] = [
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_index_fill),
@@ -7265,10 +7250,6 @@ op_db: List[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":157,
                # please report a bug to PyTorch.
                SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-               # t = torch.randn((2, 2), dtype=torch.float16)
-               # torch.norm(t) # Works
-               # torch.norm(t, 'fro', [0, 1]) # Errors
-               SkipInfo('TestOpInfo', 'test_unsupported_dtypes'),
            )
            ),
     OpInfo('norm',
