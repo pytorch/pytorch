@@ -259,7 +259,7 @@ class Timer(object):
         """
         with common.set_torch_threads(self._task_spec.num_threads):
             # Warmup
-            self._timer.timeit(number=max(int(number // 100), 1))
+            self._timer.timeit(number=max(int(number // 100), 2))
 
             return common.Measurement(
                 number_per_run=number,
@@ -443,7 +443,7 @@ class Timer(object):
         jitter from the Python interpreter.) This makes them ideal for detailed
         performance analysis. This method runs `stmt` in a separate process
         so that Valgrind can instrument the program. Performance is severely
-        degraded due to the instrumentation, howevever this is ameliorated by
+        degraded due to the instrumentation, however this is ameliorated by
         the fact that a small number of iterations is generally sufficient to
         obtain good measurements.
 

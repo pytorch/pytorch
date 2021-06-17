@@ -1,5 +1,5 @@
 import cimodel.lib.miniutils as miniutils
-from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
+from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN, NON_PR_BRANCH_LIST
 from cimodel.data.simple.util.versions import CudaVersion
 
 
@@ -12,7 +12,8 @@ class WindowsJob:
         force_on_cpu=False,
         multi_gpu=False,
         master_only=False,
-        nightly_only=False
+        nightly_only=False,
+        master_and_nightly=False
     ):
         self.test_index = test_index
         self.vscode_spec = vscode_spec
@@ -21,6 +22,7 @@ class WindowsJob:
         self.multi_gpu = multi_gpu
         self.master_only = master_only
         self.nightly_only = nightly_only
+        self.master_and_nightly = master_and_nightly
 
     def gen_tree(self):
 
@@ -38,11 +40,13 @@ class WindowsJob:
 
         target_arch = self.cuda_version.render_dots() if self.cuda_version else "cpu"
 
+        python_version = "3.8"
+
         base_name_parts = [
             "pytorch",
             "windows",
             self.vscode_spec.render(),
-            "py36",
+            "py" + python_version.replace(".", ""),
             target_arch,
         ]
 
@@ -63,7 +67,7 @@ class WindowsJob:
             ["pytorch", "win"]
             + self.vscode_spec.get_elements()
             + arch_env_elements
-            + ["py3"]
+            + ["py" + python_version.split(".")[0]]
         )
 
         is_running_on_cuda = bool(self.cuda_version) and not self.force_on_cpu
@@ -73,7 +77,7 @@ class WindowsJob:
         else:
             props_dict = {
                 "build_environment": build_environment_string,
-                "python_version": miniutils.quote("3.6"),
+                "python_version": miniutils.quote(python_version),
                 "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
                 "vc_year": miniutils.quote(str(self.vscode_spec.year)),
                 "vc_product": self.vscode_spec.get_product(),
@@ -89,6 +93,10 @@ class WindowsJob:
             props_dict[
                 "filters"
             ] = gen_filter_dict(branches_list=["nightly"], tags_list=RC_PATTERN)
+        elif self.master_and_nightly:
+            props_dict[
+                "filters"
+            ] = gen_filter_dict(branches_list=NON_PR_BRANCH_LIST + ["nightly"], tags_list=RC_PATTERN)
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [numbered_phase]
 
@@ -139,18 +147,11 @@ _VC2019 = VcSpec(2019)
 WORKFLOW_DATA = [
     # VS2019 CUDA-10.1
     WindowsJob(None, _VC2019, CudaVersion(10, 1), master_only=True),
-    WindowsJob(1, _VC2019, CudaVersion(10, 1), master_only=True),
-    WindowsJob(2, _VC2019, CudaVersion(10, 1), master_only=True),
-    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(10, 1), multi_gpu=True, nightly_only=True),
-    # VS2019 CUDA-11.1
-    WindowsJob(None, _VC2019, CudaVersion(11, 1)),
-    WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only=True),
-    WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only=True),
-    # VS2019 CPU-only
-    WindowsJob(None, _VC2019, None),
-    WindowsJob(1, _VC2019, None),
-    WindowsJob(2, _VC2019, None),
+    # VS2019 CUDA-10.1 force on cpu
     WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only=True),
+
+    # TODO: This test is disabled due to https://github.com/pytorch/pytorch/issues/59724
+    # WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(11, 1), multi_gpu=True, master_and_nightly=True),
 ]
 
 

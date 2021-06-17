@@ -37,8 +37,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
-elif [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
-  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xla"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
@@ -126,7 +124,8 @@ fi
 
 # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
 # CIRCLE_PULL_REQUEST comes from CircleCI
-# GITHUB_HEAD_REF comes from Github Actions
+# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
+#       see https://github.com/pytorch/pytorch/issues/60111
 IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
@@ -173,10 +172,10 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
     aten/tools/run_tests.sh build/bin
@@ -339,23 +338,9 @@ test_torch_function_benchmark() {
 }
 
 test_xla() {
-  export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
-  # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
-  XLA_PORT=$(shuf -i 40701-40999 -n 1)
-  export XRT_WORKERS="localservice:0;grpc://localhost:$XLA_PORT"
-  pushd xla
-  echo "Running Python Tests"
-  ./test/run_tests.sh
-
-  # Disabled due to MNIST download issue.
-  # See https://github.com/pytorch/pytorch/issues/53267
-  # echo "Running MNIST Test"
-  # python test/test_train_mnist.py --tidy
-
-  echo "Running C++ Tests"
-  pushd test/cpp
-  CC=clang-9 CXX=clang++-9 ./run_tests.sh
-  popd
+  # shellcheck disable=SC1091
+  source "./xla/.circleci/common.sh"
+  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
 
@@ -452,7 +437,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1 ]]; then
     test_torch_deploy
   fi
   test_without_numpy

@@ -1,7 +1,7 @@
 import itertools
 from typing import Any
 import torch
-from torch.autograd import DeviceType
+from torch.autograd import DeviceType, ProfilerActivity, ProfilerState
 from torch.futures import Future
 
 from collections import defaultdict, namedtuple
@@ -58,7 +58,7 @@ class EventList(list):
 
     def _remove_dup_nodes(self):
         while True:
-            to_delete = []
+            to_delete = set()
             for idx in range(len(self)):
                 if (self[idx].cpu_parent is not None and
                         self[idx].cpu_parent.name == self[idx].name and
@@ -67,7 +67,7 @@ class EventList(list):
                     self[idx].cpu_parent.kernels = self[idx].kernels  # lift kernels up
                     for ch in self[idx].cpu_children:
                         ch.cpu_parent = self[idx].cpu_parent
-                    to_delete.append(idx)
+                    to_delete.add(idx)
             if len(to_delete) == 0:
                 break
             new_evts = [ev for ind, ev in enumerate(self) if ind not in to_delete]
@@ -247,10 +247,10 @@ class EventList(list):
                                                evt.thread, next_id))
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
-
-            # remove trailing whitespace and comma
-            f.seek(f.tell() - 2, os.SEEK_SET)
-            f.truncate()
+            if len(self) > 0:
+                # remove trailing whitespace and comma
+                f.seek(f.tell() - 2, os.SEEK_SET)
+                f.truncate()
             f.write("]")
 
     def supported_export_stacks_metrics(self):
@@ -423,18 +423,27 @@ class profile(object):
         if not self.use_cpu:
             assert use_kineto, \
                 "Device-only events supported only with Kineto (use_kineto=True)"
+        if self.use_cuda and not torch.cuda.is_available():
+            warn("CUDA is not available, disabling CUDA profiling")
+            self.use_cuda = False
 
         self.profiler_kind = None
         self.kineto_activities = set()
         if use_kineto:
             if torch.autograd.kineto_available():
-                self.profiler_kind = torch.autograd.ProfilerState.KINETO
                 if self.use_cpu:
-                    self.kineto_activities.add(torch.autograd.ProfilerActivity.CPU)
+                    self.kineto_activities.add(ProfilerActivity.CPU)
+                use_gpu_fallback = False
                 if self.use_cuda:
-                    self.kineto_activities.add(
-                        # uses CUPTI
-                        torch.autograd.ProfilerActivity.CUDA)
+                    if (ProfilerActivity.CUDA not in
+                            torch.autograd._supported_kineto_activities()):
+                        warn("CUPTI tracing is not available, falling back to legacy CUDA profiling")
+                        use_gpu_fallback = True
+                    else:
+                        self.kineto_activities.add(ProfilerActivity.CUDA)
+                self.profiler_kind = ProfilerState.KINETO if not use_gpu_fallback else \
+                    ProfilerState.KINETO_GPU_FALLBACK
+
                 assert len(self.kineto_activities) > 0, \
                     "No activities specified for Kineto profiler"
             else:
@@ -443,9 +452,9 @@ class profile(object):
         if not self.kineto_activities:
             if self.use_cuda:
                 # legacy CUDA mode
-                self.profiler_kind = torch.autograd.ProfilerState.CUDA
+                self.profiler_kind = ProfilerState.CUDA
             else:
-                self.profiler_kind = torch.autograd.ProfilerState.CPU
+                self.profiler_kind = ProfilerState.CPU
 
     def config(self):
         assert self.profiler_kind is not None
@@ -483,7 +492,7 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        if torch.cuda.is_available():
+        if self.use_cuda:
             torch.cuda.synchronize()
         if self.kineto_activities:
             self.kineto_results = torch.autograd._disable_profiler()
@@ -733,7 +742,7 @@ class emit_nvtx(object):
         torch.cuda.synchronize()
         torch.autograd._enable_profiler_legacy(
             torch.autograd.ProfilerConfig(
-                torch.autograd.ProfilerState.NVTX,
+                ProfilerState.NVTX,
                 self.record_shapes,
                 False,
                 False,
@@ -1164,6 +1173,15 @@ def parse_kineto_results(result):
             device_index=kineto_event.device_index(),
             flops=kineto_event.flops(),
         )
+        if fe.device_type == DeviceType.CPU and not fe.is_async:
+            # Check if we have CUDA time as a fallback
+            cuda_time = kineto_event.cuda_elapsed_us()
+            if cuda_time > 0:
+                fe.append_kernel(
+                    fe.name,
+                    fe.device_index,
+                    cuda_time)
+                fe.is_legacy = True
         function_events.append(fe)
         corr_id = kineto_event.linked_correlation_id()
         if corr_id > 0:
@@ -1186,7 +1204,6 @@ def parse_kineto_results(result):
                     # with the 'thread' of the corresponding linked PyTorch event to properly track
                     # parents and children
                     f_evt.thread = fe.thread
-
 
     # output top-level memory events
     for mem_record in mem_records:
@@ -1464,10 +1481,11 @@ def build_table(
     name_column_width = max([len(evt.key) for evt in events]) + 4
     name_column_width = min(name_column_width, MAX_NAME_COLUMN_WIDTH)
 
-    DEFAULT_COLUMN_WIDTH = 12
+    MAX_SHAPES_COLUMN_WIDTH = 80
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
-    shapes_column_width = min(shapes_column_width, 45)
+    shapes_column_width = min(shapes_column_width, MAX_SHAPES_COLUMN_WIDTH)
 
+    DEFAULT_COLUMN_WIDTH = 12
     flops_column_width = DEFAULT_COLUMN_WIDTH
 
     src_column_width = None

@@ -17,6 +17,7 @@ import sys
 import builtins
 import io
 import pickle
+import functools
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -67,6 +68,11 @@ def createResolutionCallbackFromEnv(lookup_base):
         i = 0
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
+
+        # Special case logic for the empty Tuple as a subscript (used
+        # in the type annotation `Tuple[()]`)
+        if expr[:i] == '()':
+            return (), i
 
         base = lookupInModule(expr[:i].strip(), module)
         assert base is not None, f"Unresolvable type {expr[:i]}"
@@ -548,6 +554,14 @@ def unused(fn):
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
+# No op context manager from python side
+class _IgnoreContextManager(contextlib.AbstractContextManager):
+    def __init__(self, **kwargs):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
+
 def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
@@ -655,6 +669,10 @@ def module_has_exports(mod):
                     return True
     return False
 
+
+# WARNING: should_drop is currently being used by our JIT code coverage plug-in to mark JIT'd code as covered. If you
+# rename this function, please update references in tools/coverage_plugins_package/src/coverage_plugins/jit_plugin.py to
+# allow JIT'd code to still be covered.
 def should_drop(fn) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:
@@ -862,6 +880,14 @@ if torch.distributed.rpc.is_available():
             )
         return getattr(ann, "__origin__", None) is RRef
 
+    def is_rref_instance(obj) -> bool:
+        return isinstance(obj, RRef)
+
+else:
+    def is_rref_instance(obj) -> bool:
+        # If the RPC module doesn't exist then RRefs don't exist either.
+        return False
+
 def is_final(ann) -> bool:
     return ann.__module__ in {'typing', 'typing_extensions'} and \
         (getattr(ann, '__origin__', None) is Final or isinstance(ann, type(Final)))
@@ -969,7 +995,11 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
+        self.filename = filename
 
+@functools.lru_cache(maxsize=None)
+def make_source_context(*args):
+    return SourceContext(*args)
 
 def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
@@ -1147,6 +1177,10 @@ class _TensorExtractor(pickle.Pickler):
         # even if a type isn't listed here this won't block users, since thet
         # can just add a __getstate__ or __reduce__ method to their class.
         if isinstance(obj, LockType):
+            return ""
+        # RRefs (and in fact Futures too) don't technically contain a value,
+        # they just contain the means to access a value.
+        if is_rref_instance(obj):
             return ""
         return None
 
