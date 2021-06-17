@@ -201,7 +201,7 @@ class Vectorized<float> {
   const float& operator[](int idx) const = delete;
   float& operator[](int idx) = delete;
 
-  Vectorized<float> map(float (*f)(float)) const {
+  Vectorized<float> map(float (*const f)(float)) const {
     Vectorized<float> ret;
     for (int i = 0; i < size() / 2; i++) {
       ret._vec0[i] = f(_vec0[i]);
@@ -212,7 +212,7 @@ class Vectorized<float> {
     return ret;
   }
 
-  Vectorized<float> mapbi(float (*f)(float, float), const Vectorized<float>& other)
+  Vectorized<float> mapbi(float (*const f)(float, float), const Vectorized<float>& other)
       const {
     Vectorized<float> ret;
     for (int i = 0; i < size() / 2; i++) {
