@@ -118,6 +118,10 @@ void MPSImageWrapper::prepare() {
     TORCH_CHECK(_buffer, "Allocate GPU memory failed!");
   }
   copyToMetalBuffer(_commandBuffer, _buffer, _image);
+  if (_image.isTemporaryImage && _image.readCount != 0) {
+    _image =
+        createStaticImage((MPSTemporaryImage*)_image, _commandBuffer, false);
+  }
 }
 
 void MPSImageWrapper::synchronize() {
