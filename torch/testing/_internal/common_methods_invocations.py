@@ -7001,7 +7001,7 @@ op_db: List[OpInfo] = [
            safe_casts_outputs=True,
            skips=(
                # Lambda doesn't work in JIT test
-               SkipInfo("TestCommon", "test_variant_consistency_jit"),
+               SkipInfo("TestJit", "test_variant_consistency_jit"),
            ),
            sample_inputs_func=sample_inputs_zeta),
     OpInfo('logsumexp',
