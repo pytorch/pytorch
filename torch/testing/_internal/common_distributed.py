@@ -536,21 +536,24 @@ class MultiProcessTestCase(TestCase):
                 try:
                     pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
                     pipes.append((i, pipe))
-                except BrokenPipeError as e:
+                except ConnectionError as e:
                     logger.error(f'Encountered error while trying to get traceback for process {i}: {e}')
 
         # Wait for results.
         for rank, pipe in pipes:
-            # Wait for traceback
-            if pipe.poll(5):
-                if pipe.closed:
-                    logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
-                    continue
+            try:
+                # Wait for traceback
+                if pipe.poll(5):
+                    if pipe.closed:
+                        logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
+                        continue
 
-                traceback = pipe.recv()
-                logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
-            else:
-                logger.error(f'Could not retrieve traceback for timed out process: {rank}')
+                    traceback = pipe.recv()
+                    logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
+                else:
+                    logger.error(f'Could not retrieve traceback for timed out process: {rank}')
+            except ConnectionError as e:
+                logger.error(f'Encountered error while trying to get traceback for process {rank}: {e}')
 
     def _join_processes(self, fn) -> None:
         timeout = get_timeout(self.id())
