@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from torch.fx.graph import Node
+
 from ..observer import (
     PerChannelMinMaxObserver, _with_args
 )
@@ -40,6 +42,8 @@ class _InputEqualizationObserver(nn.Module):
 
         if qscheme not in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
             raise TypeError("Input qscheme must be per-tensor")
+
+        self.dtype = dtype
 
         self.input_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
                                                   qscheme=qscheme,
@@ -119,6 +123,8 @@ class _WeightEqualizationObserver(nn.Module):
     def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine, quant_min=None,
                  quant_max=None, factory_kwargs=None) -> None:
         super(_WeightEqualizationObserver, self).__init__()
+
+        self.dtype = dtype
 
         self.weight_col_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
                                                        qscheme=qscheme,
@@ -259,3 +265,17 @@ weight_equalization_observer = _WeightEqualizationObserver.with_args(
     dtype=torch.qint8, qscheme=torch.per_channel_symmetric)
 default_equalization_qconfig = EqualizationQConfig(input_activation=input_equalization_observer,
                                                    weight=weight_equalization_observer)
+
+def node_supports_equalization(node: Node, modules) -> bool:
+    """ Checks if the current node supports equalization
+    Currently we only support nn.Linear and F.Linear layers
+    """
+    if node.op == 'call_module':
+        return isinstance(modules[node.target], nn.Linear)
+    elif node.op == 'call_function':
+        return node.target == nn.functional.linear
+    return False
+
+def is_equalization_observer(observer: nn.Module) -> bool:
+    return (isinstance(observer, _InputEqualizationObserver) or
+            isinstance(observer, _WeightEqualizationObserver))
