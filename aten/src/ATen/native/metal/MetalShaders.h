@@ -874,7 +874,6 @@ kernel void split_channels(texture2d_array<half, access::read> in_arr[[texture(0
     }
 }
 
-
 constant bool ra_has_in_arr = (ushort_arg_3 > 1 ||  ushort_arg_2 > 4);
 constant bool ra_has_out_arr = (ushort_arg_4 > 1 || ushort_arg_2 > 4);
 constant bool ra_has_in_tex = (!ra_has_in_arr);
@@ -885,7 +884,7 @@ kernel void roi_align(texture2d_array<half, access::sample> ina[[texture(0), fun
                       texture2d<half, access::write> out[[texture(1), function_constant(ra_has_out_tex)]],
                       constant half4* rois[[buffer(0)]],
                       ushort3 gid[[thread_position_in_grid]]) {
-    
+
     ushort out_width, out_height;
     if (ra_has_out_arr) {
         out_width = outa.get_width();
@@ -904,28 +903,28 @@ kernel void roi_align(texture2d_array<half, access::sample> ina[[texture(0), fun
     const ushort ph = gid.y;
     const ushort n = gid.z / divRoundUp(C, 4);
     const ushort c = gid.z % divRoundUp(C, 4);
-    
+
     const half4 roi_scaled = rois[n] * spatial_scale;
     const half roi_start_w = roi_scaled[0];
     const half roi_start_h = roi_scaled[1];
     const half roi_end_w = roi_scaled[2];
     const half roi_end_h = roi_scaled[3];
-    
+
     // Force malformed ROIs to be 1x1
     const half roi_width = max(roi_end_w - roi_start_w, (half)1.);
     const half roi_height = max(roi_end_h - roi_start_h, (half)1.);
-    
+
     const half bin_size_h = static_cast<half>(roi_height) / static_cast<half>(out_height);
     const half bin_size_w = static_cast<half>(roi_width) / static_cast<half>(out_width);
-    
+
     const ushort roi_bin_grid_h = sampling_ratio > 0 ? sampling_ratio : ceil(roi_height / static_cast<half>(out_height));
     const ushort roi_bin_grid_w = sampling_ratio > 0 ? sampling_ratio : ceil(roi_width / static_cast<half>(out_width));
-        
+
     const half count = roi_bin_grid_h * roi_bin_grid_w;
     half4 output_val = 0.0;
-    
+
     constexpr sampler s2(coord::pixel, address::clamp_to_edge, filter::linear);
-    
+
     for (int iy = 0; iy < roi_bin_grid_h; iy++) {
         for (int ix = 0; ix < roi_bin_grid_w; ix++) {
             // Shift the pixel by 0.5. This is critical to achieve high accuracy.
