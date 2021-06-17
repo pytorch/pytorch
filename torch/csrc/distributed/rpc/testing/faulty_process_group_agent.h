@@ -39,6 +39,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
       c10::intrusive_ptr<c10d::ProcessGroup> pg,
       int numSendRecvThreads,
       std::chrono::milliseconds rpcTimeout,
+      std::unique_ptr<RequestCallback> cb,
       const std::vector<std::string>& messagesToFail,
       const std::unordered_map<std::string, float>& messageTypesToDelay,
       int failNumSends = 0);
