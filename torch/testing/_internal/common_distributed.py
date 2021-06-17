@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 import faulthandler
+import multiprocessing
 from multiprocessing import Manager
 from io import StringIO
 import os
@@ -465,16 +466,18 @@ class MultiProcessTestCase(TestCase):
         GET_TRACEBACK = 1
 
     @staticmethod
-    def _event_listener(pipe, rank: int):
+    def _event_listener(parent_pipe, signal_pipe, rank: int):
         logger.info(f'Starting event listener thread for {rank}')
         while True:
-            if pipe.poll(None):
+            ready_pipes = multiprocessing.connection.wait([parent_pipe, signal_pipe])
 
-                if pipe.closed:
+            if parent_pipe in ready_pipes:
+
+                if parent_pipe.closed:
                     logger.info(f'Pipe closed for process {rank}, stopping event listener thread')
                     return
 
-                event = pipe.recv()
+                event = parent_pipe.recv()
                 logger.info(f'Received event {event} on process {rank}')
 
                 if event == MultiProcessTestCase.Event.GET_TRACEBACK:
@@ -484,30 +487,33 @@ class MultiProcessTestCase(TestCase):
                         # Flush buffers and seek to read from the beginning
                         tmp_file.flush()
                         tmp_file.seek(0)
-                        pipe.send(tmp_file.read())
+                        parent_pipe.send(tmp_file.read())
 
                         logger.info(f'Process {rank} sent traceback')
 
+            if signal_pipe in ready_pipes:
+                return
+
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
         self = cls(test_name)
 
         # Start event listener thread.
+        signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(duplex=False)
         event_listener_thread = threading.Thread(
             target=MultiProcessTestCase._event_listener,
-            args=(pipe, rank))
+            args=(parent_pipe, signal_recv_pipe, rank),
+            daemon=True)
         event_listener_thread.start()
 
         self.rank = rank
         self.file_name = file_name
-        self.run_test(test_name, pipe)
-
-        event_listener_thread.join()
+        self.run_test(test_name, parent_pipe, signal_send_pipe, event_listener_thread)
 
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
-    def run_test(self, test_name: str, pipe) -> None:
+    def run_test(self, test_name: str, parent_pipe, signal_pipe, event_listener_thread) -> None:
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
@@ -518,14 +524,18 @@ class MultiProcessTestCase(TestCase):
         try:
             getattr(self, test_name)()
             # Close pipe after done with test.
-            pipe.close()
+            signal_pipe.send(None)
+            event_listener_thread.join()
+            parent_pipe.close()
         except Exception as e:
             logger.error(
                 f'Caught exception: \n{traceback.format_exc()} exiting '
                 'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
             # Send error to parent process.
-            pipe.send(traceback.format_exc())
-            pipe.close()
+            signal_pipe.send(None)
+            event_listener_thread.join()
+            parent_pipe.send(traceback.format_exc())
+            parent_pipe.close()
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
     def _get_timedout_process_traceback(self) -> None:
