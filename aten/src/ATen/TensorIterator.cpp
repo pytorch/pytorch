@@ -862,7 +862,7 @@ TensorIterator TensorIterator::binary_float_op(Tensor& out, const Tensor& a, con
   return iter;
 }
 
-TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
+TensorIterator TensorIterator::comparison_op(const Tensor& out, const Tensor& a,
     const Tensor& b) {
   // Note [special-case bool outputs]
   // We explicitly don't call `cast_common_dtype_to_outputs` when the output tensor

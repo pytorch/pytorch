@@ -11,6 +11,33 @@
 #include <torch/library.h>
 
 namespace at {
+namespace native {
+
+// These are still needed because we don't have C++ conversions from number
+// types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
+// to Python.
+
+static void check_convert(const Scalar& scalar, ScalarType scalarType) {
+  // Validate that is possible to convert scalar to tensor dtype without
+  // overflow
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      at::ScalarType::Bool,
+      at::ScalarType::BFloat16,
+      at::ScalarType::Half,
+      scalarType,
+      "check_convert",
+      [&] { scalar.to<scalar_t>(); });
+}
+
+static Tensor wrapped_scalar_tensor_and_check_convert(
+    const Scalar& scalar,
+    Tensor tensor) {
+  check_convert(scalar, tensor.scalar_type());
+  return at::native::wrapped_scalar_tensor(scalar);
+}
+
+} // namespace native
+
 namespace meta {
 
 TORCH_META_FUNC2(add, Tensor) (
@@ -117,6 +144,32 @@ TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
 TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
     TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
+}
+
+void comparison_op_check_for_meta(impl::MetaBase& meta, const Tensor& self, const Tensor& other) {
+  // Validate that is possible to convert zero-dim tensor's dtype to other dtype
+  // without overflow
+  if (self.scalar_type() != other.scalar_type()) {
+    if (self.dim() != 0 && other.dim() == 0) {
+      native::check_convert(other.item(), self.scalar_type());
+    } else if (self.dim() == 0 && other.dim() != 0) {
+      native::check_convert(self.item(), other.scalar_type());
+    }
+  }
+
+  const auto& result = meta.maybe_get_output();
+  if (!result.defined()) {
+    meta.set_output({0}, self.options().dtype(kBool));
+  }
+}
+
+TORCH_META_FUNC2(eq, Tensor)(const Tensor& self, const Tensor& other) {
+  comparison_op_check_for_meta(*this, self, other);
+}
+
+TORCH_META_FUNC2(eq, Scalar)(const Tensor& self, const Scalar& other) {
+  auto other_tensor = native::wrapped_scalar_tensor_and_check_convert(other, self);
+  comparison_op_check_for_meta(*this, self, other_tensor);
 }
 
 } // namespace meta
@@ -587,22 +640,6 @@ Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::sub(other, self, alpha); // redispatch!
 }
 
-// These are still needed because we don't have C++ conversions from number
-// types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
-// to Python.
-
-static void check_convert(const Scalar& scalar, ScalarType scalarType) {
-  // Validate that is possible to convert scalar to tensor dtype without overflow
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
-    scalar.to<scalar_t>();
-  });
-}
-
-static Tensor wrapped_scalar_tensor_and_check_convert(const Scalar& scalar, Tensor tensor) {
-  check_convert(scalar, tensor.scalar_type());
-  return wrapped_scalar_tensor(scalar);
-}
-
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
 
@@ -942,6 +979,19 @@ Tensor& greater_equal_(Tensor& self, const Tensor& other) { return self.ge_(othe
 Tensor& greater_equal_out(const Tensor& self, const Scalar& other, Tensor& result) { return at::ge_out(result, self, other); }
 Tensor greater_equal(const Tensor& self, const Scalar& other) { return self.ge(other); }
 Tensor& greater_equal_(Tensor& self, const Scalar& other) { return self.ge_(other); }
+
+TORCH_IMPL_FUNC(eq_Tensor_out)
+(const Tensor& self, const Tensor& other, const Tensor& result) {
+  auto iter = TensorIterator::comparison_op(result, self, other);
+  eq_stub(iter.device_type(), iter);
+}
+
+TORCH_IMPL_FUNC(eq_Scalar_out)
+(const Tensor& self, const Scalar& other, const Tensor& result) {
+  auto other_tensor = wrapped_scalar_tensor_and_check_convert(other, self);
+  auto iter = TensorIterator::comparison_op(result, self, other_tensor);
+  eq_stub(iter.device_type(), iter);
+}
 
 Tensor& eq_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, eq_stub); }
 Tensor eq(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::eq_out)); }
