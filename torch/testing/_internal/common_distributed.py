@@ -493,14 +493,16 @@ class MultiProcessTestCase(TestCase):
         self = cls(test_name)
 
         # Start event listener thread.
-        threading.Thread(
+        event_listener_thread = threading.Thread(
             target=MultiProcessTestCase._event_listener,
-            args=(pipe, rank),
-            daemon=True).start()
+            args=(pipe, rank)).start()
 
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, pipe)
+
+        event_listener_thread.join()
+
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
