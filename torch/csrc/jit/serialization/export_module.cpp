@@ -502,8 +502,7 @@ void ScriptModuleSerializer::writeArchive(
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string tensor_name = tensor_names[i++];
-    if (use_storage_context &&
-        serialized_tensors.count(tensor_name)) {
+    if (use_storage_context && serialized_tensors.count(tensor_name)) {
       // storage has been serialzed already, skip
       continue;
     }

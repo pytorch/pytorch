@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-// Used in torch.package and TorchScript serialization to coordinate 
+// Used in torch.package and TorchScript serialization to coordinate
 // sharing of storages between models. Also used to create deterministic
 // naming for storages.
 class TORCH_API SerializationStorageContext {
@@ -43,7 +43,7 @@ class TORCH_API SerializationStorageContext {
       storage_id_map_;
 };
 
-// Used in torch.package and TorchScript deserialization to coordinate 
+// Used in torch.package and TorchScript deserialization to coordinate
 // sharing of storages between models.
 class TORCH_API DeserializationStorageContext {
  public:

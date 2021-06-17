@@ -101,7 +101,8 @@ class TORCH_API ScriptModuleSerializer {
   OrderedDict<std::string, PythonPrint> file_streams_;
   // Used to keep references of storages around during serialization to solve
   // for ABA memory reuse problem hit when storages are created/destroyed
-  // during serializaiton process.
+  // during serializaiton process. Also used to coordinate sharing of storages
+  // between Script and eager modules in torch.package.
   SerializationStorageContext storage_context_;
 
   // Uniquely identifies a SourceRange in a model.

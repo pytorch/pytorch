@@ -988,7 +988,9 @@ void initJitScriptBindings(PyObject* module) {
             pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
       });
 
-  // Used by torch.Package to save TS objects in unified format
+  // Used by torch.package to save ScriptModule objects in unified format and
+  // to coordinate sharing of storages between eager and ScriptModules with
+  // ScriptModuleSerializer's inner SerializationStorageContext.
   py::class_<ScriptModuleSerializer>(m, "ScriptModuleSerializer")
       .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
       .def("serialize", &ScriptModuleSerializer::serialize_unified_format)
