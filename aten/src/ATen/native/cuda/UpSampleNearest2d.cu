@@ -188,7 +188,7 @@ static void upsample_nearest2d_out_cuda_template(
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
 
- if (input_.numel() == 0) {
+  if (input_.numel() == 0) {
     return;
   }
 
