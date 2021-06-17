@@ -10,6 +10,26 @@
 #endif
 
 namespace at {
+namespace detail {
+
+TORCH_API void set_thread_num(int);
+
+class ThreadIdGuard {
+public:
+  ThreadIdGuard(int new_id):
+    old_id_(at::get_thread_num()) {
+    set_thread_num(new_id);
+  }
+
+  ~ThreadIdGuard() {
+    set_thread_num(old_id_);
+  }
+
+private:
+  int old_id_;
+};
+
+} // namespace detail
 
 template <class F>
 inline void parallel_for(
@@ -29,6 +49,7 @@ inline void parallel_for(
     numiter > grain_size && numiter > 1 &&
     omp_get_max_threads() > 1 && !omp_in_parallel());
   if (!use_parallel) {
+    detail::ThreadIdGuard tid_guard(0);
     f(begin, end);
     return;
   }
@@ -54,6 +75,7 @@ inline void parallel_for(
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {
+        detail::ThreadIdGuard tid_guard(tid);
         f(begin_tid, std::min(end, chunk_size + begin_tid));
       } catch (...) {
         if (!err_flag.test_and_set()) {
@@ -66,6 +88,7 @@ inline void parallel_for(
     std::rethrow_exception(eptr);
   }
 #else
+  detail::ThreadIdGuard tid_guard(0);
   f(begin, end);
 #endif
 }
@@ -84,6 +107,7 @@ inline scalar_t parallel_reduce(
     return ident;
   } else if ((end - begin) <= grain_size || in_parallel_region() ||
              get_num_threads() == 1) {
+    detail::ThreadIdGuard tid_guard(0);
     return f(begin, end, ident);
   } else {
     const int64_t num_results = divup((end - begin), grain_size);
@@ -95,6 +119,7 @@ inline scalar_t parallel_reduce(
     for (int64_t id = 0; id < num_results; id++) {
       int64_t i = begin + id * grain_size;
       try {
+        detail::ThreadIdGuard tid_guard(omp_get_thread_num());
         results_data[id] = f(i, i + std::min(end - i, grain_size), ident);
       } catch (...) {
         if (!err_flag.test_and_set()) {
