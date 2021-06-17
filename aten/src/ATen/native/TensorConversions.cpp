@@ -33,7 +33,7 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
                   (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_non_overlapping_and_dense()) {
+    if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
       Tensor r;
       if (self.is_quantized()) {
         r = at::empty_quantized(self.sizes(), self, options);

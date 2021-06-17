@@ -1277,9 +1277,6 @@
   dispatch:
     CompositeExplicitAutograd: count_nonzero
 
-- func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
-  variants: function, method
-
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
@@ -2251,6 +2248,36 @@
 
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   variants: function, method
+
+- func: isin.Tensor_Tensor_out(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Tensor_Tensor_out
+
+- func: isin.Tensor_Tensor(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Tensor_Tensor_out
+
+- func: isin.Tensor_Scalar_out(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Tensor_Scalar_out
+
+- func: isin.Tensor_Scalar(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Tensor_Scalar_out
+
+- func: isin.Scalar_Tensor_out(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: isin_Scalar_Tensor_out
+
+- func: isin.Scalar_Tensor(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
+  variants: function
+  structured_delegate: isin.Scalar_Tensor_out
 
 - func: isnan(Tensor self) -> Tensor
   variants: function, method
@@ -5106,6 +5133,11 @@
   dispatch:
     CPU, CUDA: quantize_per_tensor
 
+- func: quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: quantize_per_tensor_tensor_qparams
+
 - func: quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, ScalarType dtype) -> Tensor[]
   variants: function
   dispatch:
@@ -5226,22 +5258,22 @@
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
-- func: to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
+- func: to.dtype_layout(Tensor(a) self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
 
-- func: to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
+- func: to.device(Tensor(a) self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
 
-- func: to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
+- func: to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
 
-- func: to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
+- func: to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -9428,6 +9460,22 @@
   variants: function
 
 - func: special_exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_psi(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_psi.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_digamma(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   variants: function
 
