@@ -495,7 +495,8 @@ class MultiProcessTestCase(TestCase):
         # Start event listener thread.
         event_listener_thread = threading.Thread(
             target=MultiProcessTestCase._event_listener,
-            args=(pipe, rank)).start()
+            args=(pipe, rank))
+        event_listener_thread.start()
 
         self.rank = rank
         self.file_name = file_name
