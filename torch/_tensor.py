@@ -1062,19 +1062,32 @@ class Tensor(torch._C._TensorBase):
         of the consumer library.
 
         Args:
-            stream (integer or None): Object that represents a stream and provides
-                a `synchronize` method. Optional.
+            stream (integer or None): A Python integer representing a pointer
+            to a stream. `stream` is provided by the consumer to the producer
+            to instruct the producer to ensure that operations can safely be
+            performed on the array. The pointer must be a positive integer or
+            -1 . If stream is -1 , the value may be used by the consumer to
+            signal "producer must not perform any synchronization. Optional.
         """
-        if isinstance(stream, torch.cuda.Stream) or hasattr(stream, 'synchronize'):
-            stream.synchronize()
-        elif stream is not None and type(stream) is int:
+        if stream is not None and type(stream) is not int:
             # currently in pytorch is not possible to create a stream
             # from a given pointer
-            raise TypeError('Can\'t create a stream from an integer in PyTorch')
-
+            raise TypeError('stream must be ``int`` or ``none``')
+        elif stream is not None and stream != -1:
+            if self.device.type in ('cuda', 'rocm'):
+                stream = torch.cuda.streams.ExternalStream(stream)
+                # Only synchronize on different streams
+                if stream != torch.cuda.current_stream:
+                    event = torch.cuda.Event()
+                    event.record(stream)
+                    torch.cuda.current_stream().wait_event(event)
         return torch.utils.dlpack.to_dlpack(self)
 
-    def __dlpack_device__(self) -> Tuple[Int, Int]:
+    def __dlpack_device__(self) -> Tuple[int, int]:
+        # TODO(ecastill)
+        # Add support for the following devices
+        # CPU = 1 CPU_PINNED = 3 OPENCL = 4 VULKAN = 7
+        # METAL = 8 VPI = 9
         dlpack_ids = {'cpu': 1, 'cuda': 2, 'rocm': 10}
         idx = self.device.index if self.device.index is not None else 0
         # TODO(ecastill) detect HIP or CUDA
