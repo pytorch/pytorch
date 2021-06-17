@@ -86,7 +86,7 @@ jobs:
 
   generate-test-matrix:
 {%- if only_build_on_pull_request %}
-    if: ${{ github.repository_owner == 'pytorch' && github.event_name = 'push' }}
+    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
 {%- else %}
     if: ${{ github.repository_owner == 'pytorch' }}
 {%- endif %}

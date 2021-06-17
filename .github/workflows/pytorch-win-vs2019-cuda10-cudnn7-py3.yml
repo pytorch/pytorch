@@ -80,7 +80,7 @@ jobs:
           path: C:\w\build-results
 
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' && github.event_name = 'push' }}
+    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
     runs-on: ubuntu-18.04
     env:
       NUM_TEST_SHARDS: 1
