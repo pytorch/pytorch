@@ -4582,8 +4582,11 @@ op_db: List[OpInfo] = [
     OpInfo('baddbmm',
            dtypes=floating_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128, *[torch.bfloat16] if CUDA11OrLater else []),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if SM53OrLater else [], torch.complex64, torch.complex128),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16,
+                                                    *[torch.bfloat16] if SM53OrLater else [],
+                                                    torch.complex64, torch.complex128),
            supports_forward_ad=True,
            skips=(
                # baddbmm does not correctly warn when resizing out= inputs
