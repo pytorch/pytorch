@@ -8,6 +8,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 
@@ -19,6 +20,13 @@ from .fake_quantize import (
     default_symmetric_fixed_qparams_fake_quant,
 )
 from .utils import get_combined_dict
+
+# Default map for swapping float module to reference quantized modules
+DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
+    nn.Conv1d: nnqr.Conv1d,
+    nn.Conv2d: nnqr.Conv2d,
+    nn.Conv3d: nnqr.Conv3d,
+}
 
 # Default map for swapping float module to quantized ones
 DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
@@ -134,13 +142,14 @@ def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
 
 def get_static_quant_module_class(
         float_module_class: Callable,
-        additional_static_quant_mapping: Optional[Dict[Callable, Any]] = None) -> Any:
+        additional_static_quant_mapping: Optional[Dict[Callable, Any]] = None,
+        is_reference: bool = False) -> Any:
     r"""n Get the statically quantized module class corresponding to
     the floating point module class
     """
     if additional_static_quant_mapping is None:
         additional_static_quant_mapping = {}
-    all_mappings = get_combined_dict(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
+    all_mappings = get_combined_dict(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS if is_reference else DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
     static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
         "Floating point module class {}".format(str(float_module_class)) + \
