@@ -25,6 +25,20 @@ from ..modules import Module
 from ._functions import _get_stream
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
 
+def _tree_flatten_with_rref(output):
+    output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
+    if output_is_rref:
+        output_tensor_list, treespec = tree_flatten(output.local_value())
+    else:
+        output_tensor_list, treespec = tree_flatten(output)
+    return output_tensor_list, treespec, output_is_rref
+
+def _tree_unflatten_with_rref(output, treespec, output_is_rref):
+    output = tree_unflatten(output, treespec)
+    if output_is_rref:
+        output = RRef(output)
+    return output
+
 
 def _find_tensors(obj):
     r"""
@@ -866,11 +880,9 @@ class DistributedDataParallel(Module):
                 'grad_enabled': grad_enabled,
                 'require_backward_grad_sync': self.require_backward_grad_sync,
             }
-            output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
-            if output_is_rref:
-                output_tensor_list, treespec = tree_flatten(output.local_value())
-            else:
-                output_tensor_list, treespec = tree_flatten(output)
+            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
+                output
+            )
             # Note: DDPSink helps to ensure that prepare_for_backward is called
             # immediately before the backwards pass, to support a variety of
             # features such as: enqueue delay allreduce for static graph, support
@@ -882,9 +894,9 @@ class DistributedDataParallel(Module):
                 *output_tensor_list,
             )
             # Reconstruct output data structure.
-            output = tree_unflatten(passthrough_tensor_list, treespec)
-            if output_is_rref:
-                output = RRef(output)
+            output = _tree_unflatten_with_rref(
+                passthrough_tensor_list, treespec, output_is_rref
+            )
             return output
 
     def scatter(self, inputs, kwargs, device_ids):
