@@ -24,13 +24,15 @@ def PyTorchWindowsWorkflow(
     build_environment: str,
     test_runner_type: str,
     cuda_version: str,
-    on_pull_request: bool = False
+    on_pull_request: bool = False,
+    num_test_shards: int = 1,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
         "test_runner_type": test_runner_type,
         "cuda_version": cuda_version,
         "on_pull_request": on_pull_request,
+        "num_test_shards": num_test_shards,
     }
 
 
@@ -45,6 +47,7 @@ def PyTorchLinuxWorkflow(
     test_runner_type: str,
     on_pull_request: bool = False,
     enable_doc_jobs: bool = False,
+    num_test_shards: int = 1,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
@@ -52,6 +55,7 @@ def PyTorchLinuxWorkflow(
         "test_runner_type": test_runner_type,
         "on_pull_request": on_pull_request,
         "enable_doc_jobs": enable_doc_jobs,
+        "num_test_shards": num_test_shards,
     }
 
 
@@ -74,7 +78,7 @@ WINDOWS_WORKFLOWS = [
         build_environment="pytorch-win-vs2019-cpu-py3",
         cuda_version="cpu",
         test_runner_type=WINDOWS_CPU_TEST_RUNNER,
-        on_pull_request=True
+        on_pull_request=True,
     ),
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cuda10-cudnn7-py3",
@@ -95,6 +99,7 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         enable_doc_jobs=True,
+        num_test_shards=2,
     ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4",

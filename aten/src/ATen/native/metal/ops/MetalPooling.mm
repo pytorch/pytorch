@@ -39,6 +39,14 @@ Tensor max_pool2d(
   const int64_t pW = padding[1];
   const int64_t dH = dilation[0];
   const int64_t dW = dilation[1];
+  int64_t oN = iN;
+  int64_t oC = iC;
+  int64_t oH = pooling_output_shape(iH, kH, pH, sH, dH, ceil_mode);
+  int64_t oW = pooling_output_shape(iW, kW, pW, sW, dW, ceil_mode);
+  SmallVector<int64_t, 4>outputSize{oN, oC, oH, oW};
+  if(input.numel() == 0){
+    return makeTensor({IntArrayRef(outputSize).vec()}, input.options());
+  }
   MPSImage* X = imageFromTensor(input);
   MPSCNNPoolingMax* pool = [[MPSCNNPoolingMax alloc]
        initWithDevice:[MPSCNNContext sharedInstance].device
@@ -51,12 +59,6 @@ Tensor max_pool2d(
       setOffset:{.x = mpscnn::computeMPSAlignOffset(kernel_size[0], padding[0]),
                  .y = mpscnn::computeMPSAlignOffset(kernel_size[1], padding[1]),
                  .z = 0}];
-  int64_t oN = iN;
-  int64_t oC = iC;
-  int64_t oH = pooling_output_shape(iH, kH, pH, sH, dH, ceil_mode);
-  int64_t oW = pooling_output_shape(iW, kW, pW, sW, dW, ceil_mode);
-
-  SmallVector<int64_t, 4>outputSize{oN, oC, oH, oW};
   MetalTensorImplStorage mt{IntArrayRef(outputSize).vec()};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
@@ -73,6 +75,11 @@ Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   // averages across the width and height, and outputs a 1x1xC image.
   TORCH_CHECK(output_size[0] == 1 && output_size[1] == 1);
   TORCH_CHECK(input.is_metal());
+  SmallVector<int64_t, 4> outputSize{
+      input.sizes()[0], input.sizes()[1], output_size[0], output_size[1]};
+  if(input.numel() == 0){
+      return makeTensor({IntArrayRef(outputSize).vec()}, input.options());
+  }
   MPSImage* X = imageFromTensor(input);
   MPSCNNPoolingAverage* pool = [[MPSCNNPoolingAverage alloc]
        initWithDevice:[MPSCNNContext sharedInstance].device
@@ -84,8 +91,7 @@ Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   [pool setOffset:{.x = static_cast<NSInteger>(X.width / 2),
                    .y = static_cast<NSInteger>(X.height / 2),
                    .z = 0}];
-  SmallVector<int64_t, 4> outputSize{
-      input.sizes()[0], input.sizes()[1], output_size[0], output_size[1]};
+
   MetalTensorImplStorage mt{IntArrayRef(outputSize).vec()};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
