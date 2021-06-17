@@ -82,6 +82,12 @@ class Placeholder {
       const std::vector<ExprHandle>& dims)
       : Placeholder(BufHandle(name, dims, dtype)) {}
 
+  Placeholder(const std::vector<ExprHandle>& dims, const Dtype& dtype)
+      : Placeholder(BufHandle("_", dims, dtype)) {}
+
+  explicit Placeholder(const std::vector<ExprHandle>& dims)
+      : Placeholder(BufHandle("_", dims, kFloat)) {}
+
   const Buf* data() const {
     return data_;
   }
@@ -155,8 +161,11 @@ inline void unpack_dim_args(
   dims->clear();
   vars->clear();
   for (const DimArg& dim_arg : dim_args) {
-    dims->push_back(dim_arg.dim().node());
-    vars->push_back(new Var(dim_arg.name_hint(), kInt));
+    const Expr* expr = dim_arg.dim().node();
+    dims->push_back(expr);
+    vars->push_back(new Var(
+        dim_arg.name_hint(),
+        expr->dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
   }
 }
 
@@ -176,6 +185,16 @@ Tensor* Reduce(
   std::vector<const Expr*> reduce_dims;
   std::vector<const Var*> reduce_vars;
   unpack_dim_args(reduce_args, &reduce_dims, &reduce_vars);
+
+  // If reduce_vars is empty, then it's not a reduction, but rather a simple
+  // copy
+  if (reduce_vars.empty()) {
+    const Expr* body =
+        Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(vars))
+            .node();
+    Buf* func_result = new Buf(func_name, dims, body->dtype());
+    return new Tensor(func_result, vars, body);
+  }
 
   std::vector<const Var*> all_vars;
   all_vars.insert(all_vars.end(), vars.begin(), vars.end());
