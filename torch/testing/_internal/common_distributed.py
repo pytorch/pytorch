@@ -513,7 +513,7 @@ class MultiProcessTestCase(TestCase):
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
-    def run_test(self, test_name: str, parent_pipe, signal_pipe, event_listener_thread) -> None:
+    def run_test(self, test_name: str, parent_pipe, signal_pipe = None, event_listener_thread = None) -> None:
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
@@ -524,16 +524,20 @@ class MultiProcessTestCase(TestCase):
         try:
             getattr(self, test_name)()
             # Close pipe after done with test.
-            signal_pipe.send(None)
-            event_listener_thread.join()
+            if signal_pipe is not None:
+                signal_pipe.send(None)
+            if event_listener_thread is not None:
+                event_listener_thread.join()
             parent_pipe.close()
         except Exception as e:
             logger.error(
                 f'Caught exception: \n{traceback.format_exc()} exiting '
                 'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
             # Send error to parent process.
-            signal_pipe.send(None)
-            event_listener_thread.join()
+            if signal_pipe is not None:
+                signal_pipe.send(None)
+            if event_listener_thread is not None:
+                event_listener_thread.join()
             parent_pipe.send(traceback.format_exc())
             parent_pipe.close()
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
