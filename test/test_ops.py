@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
 
@@ -7,7 +8,7 @@ from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck)
+     gradcheck, gradgradcheck, IS_PYTORCH_CI)
 from torch.testing._internal.common_methods_invocations import \
     (op_db,)
 from torch.testing._internal.common_device_type import \
@@ -17,12 +18,27 @@ from torch.testing._internal.common_jit import JitCommonTestCase, check_against_
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
-from collections.abc import Sequence
+import torch.testing._internal.opinfo_helper as opinfo_helper
 
 
 # Tests that apply to all operators
 class TestOpInfo(TestCase):
     exact_dtype = True
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+
+        if IS_PYTORCH_CI:
+            err_msg = ("The operator(s) below is(are) using dynamic_dtypes in the OpInfo entries."
+                       "This is OK for testing, but be sure to set the dtypes manually before landing your PR!")
+            # Assure no opinfo entry has dynamic_dtypes
+            filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
+            for op in filtered_ops:
+                fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
+                err_msg += "\n" + fmt_str
+
+            assert len(filtered_ops) == 0, err_msg
 
     # Verifies that ops have their unsupported dtypes
     #   registered correctly by testing that each claimed unsupported dtype
