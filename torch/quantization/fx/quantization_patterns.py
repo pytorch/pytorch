@@ -623,6 +623,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        if convert_custom_config_dict is None:
+            convert_custom_config_dict = {}
         # Supported combinations are:
         # quant_type | activation (compute_type) | weight
         #  static       quint8                      qint8
@@ -671,14 +673,17 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 self.linear.activation_post_process = output_activation_post_process
 
             # 2. select corresponding quantized linear class for the float linear class
-            if type(self.linear) in [torch.nn.Linear, torch.nn.qat.Linear]:
-                qlinear = nnq.Linear if activation_int8_quantized else nnqd.Linear
-            elif type(self.linear) in [torch.nn.intrinsic.LinearReLU, torch.nn.intrinsic.qat.LinearReLU]:
-                assert activation_int8_quantized, \
-                    'Only int8 static quantization is supported for LinearReLU'
-                qlinear = torch.nn.intrinsic.quantized.LinearReLU
+            if activation_int8_quantized:
+                additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
+                qlinear = get_static_quant_module_class(type(self.linear), additional_static_quant_mapping)
             else:
-                raise Exception("unhandled linear type:", type(self.linear))
+                assert dtypes in [
+                    (torch.float32, torch.qint8, torch.quint8),
+                    (torch.float32, torch.float16, None),
+                ], f"dtype {dtypes} not supported yet"
+                additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
+                qlinear = get_dynamic_quant_module_class(type(self.linear), additional_dynamic_quant_mapping)
+
             quantized = qlinear.from_float(self.linear)
             parent_name, name = _parent_name(self.linear_node.target)
             setattr(modules[parent_name], name, quantized)
