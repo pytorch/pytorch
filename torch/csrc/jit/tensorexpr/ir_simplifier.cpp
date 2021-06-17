@@ -2314,10 +2314,12 @@ Block* TermExpander::fuseConditions(Block* v) {
 
     // avoid unflattening this Cond if we can.
     if (true_block->empty()) {
+      delete true_block;
       true_block = nullptr;
     }
 
     if (false_block->empty()) {
+      delete false_block;
       false_block = nullptr;
     }
 
