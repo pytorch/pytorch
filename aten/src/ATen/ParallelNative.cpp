@@ -37,7 +37,7 @@ void _set_in_parallel_region(bool in_region) {
 }  // namespace (anonymous)
 
 namespace internal {
-void _set_thread_num(size_t thread_num) {
+void set_thread_num(size_t thread_num) {
   thread_num_ = thread_num;
 }
 }
@@ -110,7 +110,7 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
 // RAII guard helps to support in_parallel_region() and get_thread_num() API.
 struct ParallelRegionGuard {
   ParallelRegionGuard(int64_t task_id) {
-    _set_thread_num(task_id);
+    internal::set_thread_num(task_id);
     _set_in_parallel_region(true);
   }
 
