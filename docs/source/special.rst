@@ -33,3 +33,4 @@ Functions
 .. autofunction:: logit
 .. autofunction:: ndtr
 .. autofunction:: xlog1py
+.. autofunction:: zeta
