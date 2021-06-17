@@ -743,7 +743,8 @@ inline py::object toPyObject(IValue ivalue) {
           fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
 
       return py::module::import("torch._jit_internal")
-          .attr("_create_named_tuple")(t, unqualName, fieldNames, defaults);
+          .attr("_create_named_tuple")(
+              t, unqualName, fieldNames, make_tuple(defaults));
     } else {
       return std::move(t);
     }
