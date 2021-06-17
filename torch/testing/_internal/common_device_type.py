@@ -177,7 +177,7 @@ def _construct_test_name(test_name, op, device_type, dtype):
 
     test_name += "_" + device_type
 
-    if dtype is not None:
+    if dtype is not None and dtype is not _NO_DTYPES:
         if isinstance(dtype, (list, tuple)):
             for d in dtype:
                 test_name += "_" + str(d).split('.')[1]
@@ -185,6 +185,12 @@ def _construct_test_name(test_name, op, device_type, dtype):
             test_name += "_" + str(dtype).split('.')[1]
 
     return test_name
+
+
+# Marker class to signify an absense of dtypes
+class _NO_DTYPES(object):
+    pass
+
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = 'generic_device_type'
@@ -319,6 +325,8 @@ class DeviceTypeTestBase(TestCase):
                         dtypes = op.supported_dtypes(cls.device_type)
                     elif test.opinfo_dtypes == OpDTypes.basic:
                         dtypes = op.default_test_dtypes(cls.device_type)
+                    elif test.opinfo_dtypes == OpDTypes.none:
+                        dtypes = _NO_DTYPES
                     else:
                         raise RuntimeError(f"Unknown OpDType: {test.opinfo_dtypes}")
 
@@ -328,12 +336,19 @@ class DeviceTypeTestBase(TestCase):
                     assert test.allowed_dtypes is None, "ops(allowed_dtypes=[...]) and the dtypes decorator are incompatible"
                     assert test.opinfo_dtypes == OpDTypes.basic, "ops(dtypes=...) and the dtypes decorator are incompatible"
 
-                for dtype in dtypes:
+                if dtypes is _NO_DTYPES:
                     instantiate_test_helper(cls,
                                             name,
                                             test=test,
-                                            dtype=dtype,
+                                            dtype=_NO_DTYPES,
                                             op=op)
+                else:
+                    for dtype in dtypes:
+                        instantiate_test_helper(cls,
+                                                name,
+                                                test=test,
+                                                dtype=dtype,
+                                                op=op)
         else:
             # Handles tests that don't use the ops decorator
             dtypes = cls._get_dtypes(test)
@@ -569,6 +584,7 @@ class OpDTypes(Enum):
     unsupported = 2  # Test only unsupported dtypes
     supported_backward = 3  # Test all supported backward dtypes
     unsupported_backward = 4  # Test only unsupported backward dtypes
+    none = 5  # Instantiate no dtype variants (the dtype kwarg will be None)
 
 
 # Decorator that defines the ops a test should be run with
@@ -578,6 +594,37 @@ class OpDTypes(Enum):
 # @ops(unary_ufuncs)
 # def test_numerics(self, device, dtype, op):
 #   <test_code>
+#
+# This will instantiate variants of test_numerics for each given operator,
+# on each device that operator supports, and for every dtype supported by
+# that operator. There are a few caveats to the dtype rule, explained below.
+#
+# First, if the OpInfo defines "default_test_dtypes" then then the test
+# is instantiated for the intersection of default_test_dtypes and the
+# dtypes the operator supports. Second, the @ops decorator can accept two
+# additional arguments, "dtypes" and "allowed_dtypes". If "dtypes" is specified
+# then the test variants are instantiated for those dtypes, regardless of
+# what the operator supports. If given "allowed_dtypes" then test variants
+# are instantiated only for the intersection of allowed_dtypes and the dtypes
+# they would otherwise be instantiated with. That is, allowed_dtypes composes
+# with the options listed above and below.
+#
+# The "dtypes" argument can also accept additional values (see OpDTypes above):
+#   OpDTypes.supported - the test is instantiated for all dtypes the operator
+#     supports
+#   OpDTypes.unsupported - the test is instantiated for all dtypes the operator
+#     doesn't support
+#   OpDTypes.supported_backward - the test is instantiated for all dtypes the
+#     operator's gradient formula supports
+#   OpDTypes.unsupported_backward - the test is instantiated for all dtypes the
+#     operator's gradient formula doesn't support
+#   OpDTypes.none - the test is instantied without any dtype. The dtype
+#     arg will be set to _NO_DTYPES.
+#
+# These options allow tests to have considerable control over the dtypes
+#   they're instantiated for. Finally, the @dtypes decorator composes with the
+#   @ops decorator, and works the same as the "dtypes" argument to @ops.
+
 class ops(object):
     def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):

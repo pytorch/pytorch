@@ -21,7 +21,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import qengine_is_qnnpack
@@ -1837,6 +1837,23 @@ class TestQuantizedOps(TestCase):
         qY = torch.mean(qX, dim)
 
         self.assertEqual(Y, qY.dequantize())
+
+    @skipIfNoQNNPACK
+    @given(keep=st.booleans())
+    def test_quantized_mean_qnnpack(self, keep):
+        with override_quantized_engine("qnnpack"):
+            # using multiple of 4 sizes to satisfy pytorch_q8gavgpool_ukernel_up8xm__sse2() 4-byte alignment demand under ASAN
+            in_dim = (4, 4, 4, 4)
+            if keep:
+                out_dim = (4, 4, 1, 1)
+            else:
+                out_dim = (4, 4)
+            X = torch.ones(in_dim)
+            Y = torch.ones(out_dim)
+            XQ = torch.quantize_per_tensor(X, scale=0.2, zero_point=0, dtype=torch.quint8)
+            YQ = torch.quantize_per_tensor(Y, scale=0.2, zero_point=0, dtype=torch.quint8)
+            MQ = XQ.mean((2, 3), keepdim=keep)
+            self.assertTrue(torch.equal(MQ, YQ))
 
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),

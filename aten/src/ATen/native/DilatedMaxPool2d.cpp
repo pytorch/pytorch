@@ -66,14 +66,15 @@ bool ceil_mode) {
     outputHeight, outputWidth, memory_format);
 
   /* resize output and indices */
+  DimnameList maybe_names = input.has_names() ? input.names() : DimnameList{};
   if (input.ndimension() == 3) {
-    set_output(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), input.names());
+    set_output(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
     /* indices will contain the locations for each output point */
-    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), input.names());
+    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), maybe_names);
   } else {
-    set_output(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), input.names());
+    set_output(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
     /* indices will contain the locations for each output point */
-    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), input.names());
+    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), maybe_names);
   }
 }
 
@@ -148,7 +149,8 @@ const Tensor& indices) {
     outputHeight_for_shape_check, outputWidth_for_shape_check,
     memory_format);
 
-  set_output(0, input.sizes(), {}, input.options().memory_format(memory_format), input.names());
+  set_output(0, input.sizes(), {}, input.options().memory_format(memory_format),
+             input.has_names() ? input.names() : DimnameList{});
 }
 } // namespace meta
 
