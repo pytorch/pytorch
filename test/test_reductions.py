@@ -2086,7 +2086,8 @@ class TestReductions(TestCase):
                 return
             self.fail("Failed to hit RuntimeError!")
 
-        self.assertEqual(torch_result, numpy_result, exact_dtype=False)
+        exact_dtype = input.dtype != torch.bfloat16
+        self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_var_vs_numpy(self, device, dtype):
@@ -2137,17 +2138,6 @@ class TestReductions(TestCase):
             numpy_res = np.asarray(np.var(array, **numpy_kwargs))
             torch_res = torch.var(tensor, dim=dim, correction=correction, keepdim=keepdim)
 
-            # Result should never be complex (gh-56627), but for now just test the
-            # imaginary component is 0 or an allowed non-finite value
-            if torch_res.is_complex():
-                imag = torch_res.imag
-                torch_res = torch_res.real
-                finite = imag.isfinite()
-                # All finite imaginary components are zero
-                self.assertEqual(finite, imag == 0)
-                # All non-finite imaginary components coincide with non-finite real components
-                self.assertTrue(torch.all(finite | ~torch_res.isfinite()))
-
             # inf vs. nan results are sensitive to machine precision,
             # just treat them as equivalent
             numpy_res[np.isinf(numpy_res)] = np.nan
@@ -2181,17 +2171,6 @@ class TestReductions(TestCase):
 
             numpy_res = np.asarray(np.std(array, **numpy_kwargs))
             torch_res = torch.std(tensor, dim=dim, correction=correction, keepdim=keepdim)
-
-            # Result should never be complex (gh-56627), but for now just test the
-            # imaginary component is 0 or an allowed non-finite value
-            if torch_res.is_complex():
-                imag = torch_res.imag
-                torch_res = torch_res.real
-                finite = imag.isfinite()
-                # All finite imaginary components are zero
-                self.assertEqual(finite, imag == 0)
-                # All non-finite imaginary components coincide with non-finite real components
-                self.assertTrue(torch.all(finite | ~torch_res.isfinite()))
 
             # inf vs. nan results are sensitive to machine precision,
             # just treat them as equivalent
@@ -2449,19 +2428,21 @@ class TestReductions(TestCase):
         test_functions = [
             ('argmax', torch.argmax, {'dtype': torch.int64}, np.argmax),
             ('argmin', torch.argmin, {'dtype': torch.int64}, np.argmin),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,
-             {}, lambda *args, **kwargs: np.partition(*args, 1, **kwargs))
+            ('kthvalue', lambda *args, k=1, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,
+             {}, lambda *args, k=1, axis=None, **kwargs: np.partition(*args, k, **kwargs).take(k - 1, axis=axis))
         ]
 
         for name, fn, dtype, np_function in test_functions:
             error_msg = f"test function: {name}"
             self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2), msg=error_msg)
-            self.assertEqual(np_function(np_input, axis=2),
-                             fn(master_input, dim=2).cpu().numpy(), msg=error_msg)
+            self.assertEqual(
+                np_function(np_input, axis=2), fn(master_input, dim=2).cpu().numpy(), msg=error_msg, exact_dtype=False
+            )
 
             self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=-1), msg=error_msg)
-            self.assertEqual(np_function(np_input, axis=-1),
-                             fn(master_input, dim=-1).cpu().numpy(), msg=error_msg)
+            self.assertEqual(
+                np_function(np_input, axis=-1), fn(master_input, dim=-1).cpu().numpy(), msg=error_msg, exact_dtype=False
+            )
 
             # keepdim variant does not exist for numpy
             self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True),

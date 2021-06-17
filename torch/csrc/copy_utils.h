@@ -42,10 +42,9 @@ inline PyObject * THPStorageCopyMethod(const THPCopyList& v, PyObject *self, PyO
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *src;
   int non_blocking = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char *kwlist[] = {"source", "non_blocking", nullptr};
+  static std::array<char*, 3> kwlist = {"source", "non_blocking", nullptr};
   // use int as parse type because bool not available in python2.
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:copy_", kwlist, &src, &non_blocking)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:copy_", kwlist.data(), &src, &non_blocking)) {
     return nullptr;
   }
 

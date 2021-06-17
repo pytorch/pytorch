@@ -67,6 +67,7 @@ private:
 };
 
 TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
+TORCH_API const CUDAStubs* cudaStubs();
 
 constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
@@ -397,6 +398,7 @@ enum class C10_API_ENUM ProfilerState {
   CUDA, // CPU + CUDA events
   NVTX,  // only emit NVTX markers
   KINETO, // use libkineto
+  KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   NUM_PROFILER_STATES, // must be the last one
 };
 
