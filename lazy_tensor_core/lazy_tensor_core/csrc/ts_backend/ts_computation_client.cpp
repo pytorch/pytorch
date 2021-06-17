@@ -3,6 +3,7 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensors/computation_client/nnc_computation_client.h"
+#include "torch/csrc/jit/runtime/graph_executor.h"
 
 namespace lazy_tensors {
 namespace {
@@ -47,8 +48,7 @@ std::vector<ComputationClient::DataPtr> TSComputationClient::ExecuteComputation(
           torch_lazy_tensors::compiler::ts_backend::GenericComputationTS*>(
           computation.computation())
           ->graph();
-  torch::jit::Code function(graph, "");
-  torch::jit::InterpreterState interp(function);
+  torch::jit::GraphExecutor interp(graph, "");
   std::vector<torch::jit::IValue> stack;
   for (auto argument : arguments) {
     const auto ts_data =
