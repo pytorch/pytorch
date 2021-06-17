@@ -160,7 +160,7 @@ class EnumerableShardingSpec(ShardingSpec):
 
     Args:
         shards(List[ShardMetadata]): List of :class:`ShardMetadata` objects representing
-            each shard.
+            each shard. Note that none of the shards should overlap.
     """
 
     shards: List[ShardMetadata]
@@ -208,12 +208,12 @@ class EnumerableShardingSpec(ShardingSpec):
 
         return True
 
-    def check_tensor(self, tensor: torch.Tensor) -> None:
+    def check_tensor(self, tensor_dims) -> None:
         """
-        Checks if the sharding spec is compatible with the provided tensor.
+        Checks if the sharding spec is compatible with the provided tensor dims.
 
         Args:
-            tensor(torch.Tensor): Tensor to verify.
+            tensor_dims(Sequence of int): Dimensions of tensor to verify
         Raises:
             ``ValueError`` if not compatible.
         """
@@ -222,20 +222,19 @@ class EnumerableShardingSpec(ShardingSpec):
         # all shard boundaries are within tensor dims, we have a compatible
         # sharding spec for this tensor. Note that we have already verified
         # we don't have overlapping shards.
-        tensor_rank = len(tensor.size())
+        tensor_rank = len(tensor_dims)
         shards_rank = len(self.shards[0].shard_offsets)
         if tensor_rank != shards_rank:
             raise ValueError(f'Rank of tensor is {tensor_rank}, but shards rank is {shards_rank}')
 
         total_shard_volume = 0
-        tensor_dims = tensor.size()
         for shard in self.shards:
             shard_volume = 1
             for i, shard_length in enumerate(shard.shard_lengths):
                 shard_volume *= shard_length
                 if shard.shard_offsets[i] + shard.shard_lengths[i] > tensor_dims[i]:
                     raise ValueError(
-                        f'Shard offset {shard.shard_offsets[i]} and length'
+                        f'Shard offset {shard.shard_offsets[i]} and length '
                         f'{shard.shard_lengths[i]} exceeds tensor dim: {tensor_dims[i]} for shard {shard}')
             total_shard_volume += shard_volume
 
