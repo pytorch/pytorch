@@ -161,8 +161,11 @@ inline void unpack_dim_args(
   dims->clear();
   vars->clear();
   for (const DimArg& dim_arg : dim_args) {
-    dims->push_back(dim_arg.dim().node());
-    vars->push_back(new Var(dim_arg.name_hint(), kInt));
+    const Expr* expr = dim_arg.dim().node();
+    dims->push_back(expr);
+    vars->push_back(new Var(
+        dim_arg.name_hint(),
+        expr->dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
   }
 }
 
