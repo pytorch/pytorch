@@ -1924,7 +1924,7 @@ For* LoopNest::getLoopAt(For* root, const std::vector<int>& indicies) const {
       if (i<0 || curr->body()->nstmts()<=i){
           return nullptr;
       }
-      std::list<Stmt*>::iterator stmtp = curr->body()->begin();
+      std::list<Stmt*>::iterator stmtp = curr->body()->stmts().begin();
       std::advance(stmtp, i);
       curr = dynamic_cast<For*>(*stmtp);
       if (curr == nullptr){
