@@ -141,10 +141,12 @@ class QuantizationTracer(Tracer):
 
 def _prepare_fx(model: torch.nn.Module, qconfig_dict: Any,
                 prepare_custom_config_dict: Dict[str, Any] = None,
+                equalization_qconfig_dict: Dict[str, Any] = None,
                 is_standalone_module: bool = False) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
-      `model`, `qconfig_dict`, `prepare_custom_config_dict`: see docs for :func:`~torch.quantization.prepare_fx`
+      `model`, `qconfig_dict`, `prepare_custom_config_dict`, `equalization_qonfig_dict`:
+      see docs for :func:`~torch.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
       quantizing a standalone module or not, a standalone module
       is a submodule of the parent module that is not inlined in the
@@ -154,9 +156,12 @@ forward graph of the parent module,
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
+    if equalization_qconfig_dict is None:
+        equalization_qconfig_dict = {}
 
     check_is_valid_qconfig_dict(qconfig_dict)
     check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict)
+    check_is_valid_qconfig_dict(equalization_qconfig_dict)
 
     skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
     skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
@@ -188,6 +193,7 @@ forward graph of the parent module,
         qconfig_dict,
         tracer.node_name_to_scope,
         prepare_custom_config_dict=prepare_custom_config_dict,
+        equalization_qconfig_dict=equalization_qconfig_dict,
         is_standalone_module=is_standalone_module)
 
     for attr_name in preserved_attributes:
@@ -259,7 +265,8 @@ def fuse_fx(model: torch.nn.Module,
 
 def prepare_fx(
         model: torch.nn.Module, qconfig_dict: Any,
-        prepare_custom_config_dict: Dict[str, Any] = None) -> ObservedGraphModule:
+        prepare_custom_config_dict: Dict[str, Any] = None,
+        equalization_qconfig_dict: Dict[str, Any] = None) -> ObservedGraphModule:
     r""" Prepare a model for post training static quantization
 
     Args:
@@ -381,6 +388,10 @@ def prepare_fx(
         # not used in the code, these attributes will also persist through deepcopy
         "preserved_attributes": ["preserved_attr"],
       }
+      `equalization_qconfig_dict`: equalization_qconfig_dict is a dictionary
+      with a similar structure as qconfig_dict except it will contain
+      configurations specific to equalization techniques such as input-weight
+      equalization.
 
 
     Return:
@@ -409,7 +420,7 @@ def prepare_fx(
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
     assert not model.training, 'prepare_fx only works for models in ' + \
         'eval mode'
-    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
+    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, equalization_qconfig_dict)
 
 def prepare_qat_fx(
         model: torch.nn.Module, qconfig_dict: Any,
