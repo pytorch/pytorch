@@ -2723,14 +2723,16 @@ Tensor _det_lu_based_helper_backward(
 
   auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
   auto n = self.size(-1);
-
-  auto lu_diag = lu.diagonal(0, -2, -1);
-  auto lu_diag_conditioned = at::where(
-    lu_diag == 0.0,
-    at::tensor(eps, self.options()),
-    lu_diag
-  );
-  lu_diag.copy_(lu_diag_conditioned);
+  auto eps_tensor = at::tensor(eps, self.options());
+  auto condition_diagonal = [&](const Tensor& x) {
+    auto x_diag = x.diagonal(0, -2, -1);
+    auto x_diag_conditioned = at::where(
+      x_diag == 0.0,
+      eps_tensor,
+      x_diag
+    );
+    x_diag.copy_(x_diag_conditioned);
+  };
 
   // create a matrix d := (det_grad * det.conj()) I
   // NOTE: we do not use the shorter version
@@ -2740,6 +2742,8 @@ Tensor _det_lu_based_helper_backward(
   auto det_expanded_sizes = det.sizes().vec();
   det_expanded_sizes.push_back(n);
   auto d = at::diag_embed((det_grad * det.conj()).unsqueeze(-1).expand(det_expanded_sizes));
+
+  condition_diagonal(lu);
 
   auto trans = self.is_complex() ? "C" : "T";
 

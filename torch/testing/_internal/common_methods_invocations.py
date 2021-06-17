@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      make_fullrank_matrices_with_distinct_singular_values,
      random_symmetric_pd_matrix, make_symmetric_matrices,
-     make_symmetric_pd_matrices,
+     make_symmetric_pd_matrices, random_square_matrix_of_rank,
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN,
@@ -541,12 +541,9 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
         random_symmetric_psd_matrix(S, **kw),  # symmetric_psd
         random_symmetric_pd_matrix(S, **kw),  # symmetric_pd
 
-        # dim2_null, rank1 and rank2 are disabled because of
-        # https://github.com/pytorch/pytorch/issues/53364
-        # we should re-enable them once the issue is solved
-        # random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
-        # random_square_matrix_of_rank(S, 1, **kw),  # rank1
-        # random_square_matrix_of_rank(S, 2, **kw),  # rank2
+        random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
+        random_square_matrix_of_rank(S, 1, **kw),  # rank1
+        random_square_matrix_of_rank(S, 2, **kw),  # rank2
 
         random_fullrank_matrix_distinct_singular_value(S, **kw),  # distinct_singular_value
         make_tensor((3, 3, S, S), **kw),  # batched
