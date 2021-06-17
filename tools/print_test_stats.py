@@ -632,25 +632,19 @@ class TestFile:
         self.total_time = 0.0
         self.test_suites: Dict[str, TestSuite] = dict()
 
-    def append(self, test_case: TestCase) -> None:
-        suite_name = test_case.class_name
+    def append(self, test_case: TestCase, test_type: str) -> None:
+        if self.name == 'test_cpp_extensions_aot' or \
+            self.name == 'distributed/test_distributed_fork' or \
+            self.name == 'distributed/test_distributed_spawn' or \
+            self.name == 'distributed/test_c10d_gloo' or \
+            self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
+            suite_name = test_case.class_name + '__' + test_type
+        else:
+            suite_name = test_case.class_name
         if suite_name not in self.test_suites:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
-            # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork,
-            # and distributed/test_distributed_spawn and test_c10d_gloo.
-            # In these cases, we store the test case that took the longest,
-            # as in these jobs, the duplicate tests are run in parallel.
-            # For other unexpected cases, we should raise a warning.
-            if self.name == 'test_cpp_extensions_aot' or \
-               self.name == 'distributed/test_distributed_fork' or \
-               self.name == 'distributed/test_distributed_spawn' or \
-               self.name == 'distributed/test_c10d_gloo' or \
-               self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
-                time_difference = self.test_suites[suite_name].replace(test_case)
-                self.total_time += time_difference
-            else:
-                raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
+            raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
         else:
             self.test_suites[suite_name].append(test_case)
             self.total_time += test_case.time
@@ -670,11 +664,16 @@ def parse_reports(folder: str) -> Dict[str, TestFile]:
     reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
     tests_by_file = dict()
     for report in reports:
-        test_filename = re.sub(r'\.', '/', os.path.basename(os.path.dirname(report)))
+        report_path = Path(report)
+        # basename of the directory of test-report is the test filename
+        test_filename = re.sub(r'\.', '/', report_path.parent.name)
+        # test type is the parent directory (only applies to dist-*)
+        # See: CUSTOM_HANDLERS in test/run_test.py
+        test_type = report_path.parent.parent.name
         if test_filename not in tests_by_file:
             tests_by_file[test_filename] = TestFile(test_filename)
         for test_case in parse_report(report):
-            tests_by_file[test_filename].append(test_case)
+            tests_by_file[test_filename].append(test_case, test_type)
     return tests_by_file
 
 def build_info() -> ReportMetaMeta:
