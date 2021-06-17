@@ -237,7 +237,7 @@ class TestShapeOps(TestCase):
     @dtypes(torch.float)
     def test_lab_diagonal_multidim(self, device, dtype):
         x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
-        xn = x.numpy()
+        xn = x.cpu().numpy()
         for args in [(2, 2, 3),
                      (2,),
                      (-2, 1, 2),
@@ -249,7 +249,7 @@ class TestShapeOps(TestCase):
         # test non-continguous
         xp = x.permute(1, 2, 3, 0)
         result = torch.lab_diagonal(xp, 0, -2, -1)
-        expected = xp.numpy().diagonal(0, -2, -1)
+        expected = xp.cpu().numpy().diagonal(0, -2, -1)
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 

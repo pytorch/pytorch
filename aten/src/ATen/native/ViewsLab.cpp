@@ -1,4 +1,6 @@
 #include <ATen/ATen.h>
+#include <ATen/core/DimVector.h>
+#include <c10/util/SmallBuffer.h>
 
 #include <vector>
 
@@ -17,8 +19,10 @@ std::vector<Tensor> lab_chunk(const Tensor& self, int64_t chunks, int64_t _dim) 
     const int64_t chunk_size = (self.size(dim) + chunks - 1) / chunks;
 
     std::vector<Tensor> out;
+    out.reserve((self.size(dim) + chunk_size - 1) / chunk_size);
 
-    std::vector<int64_t> sizes = self.sizes().vec();
+    SmallBuffer<int64_t, kDimVectorStaticSize> sizes(self.dim());
+    std::copy(self.sizes().begin(), self.sizes().end(), sizes.begin());
 
     for (int64_t offset = 0; offset < self.size(dim); offset += chunk_size) {
         /* The last chunk will be smaller if the tensor size along dimension dim
@@ -40,7 +44,7 @@ Tensor lab_diagonal(const Tensor& self, int64_t offset, int64_t _dim1, int64_t _
     TORCH_CHECK(dim1 != dim2, "torch.lab_diagonal: dim1 and dim2 must be distinct,"
         " but got dim1 ", _dim1, " dim2 ", _dim2);
 
-    std::vector<int64_t> sizes = self.sizes().vec();
+    DimVector sizes(self.sizes());
 
     /* Negative offsets are below the main diagonal, adjusting the coordinates in dim1.
      * Positive offsets are above the main diagonal, adjusting the coordinates in dim2.
