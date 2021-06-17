@@ -22,7 +22,7 @@ class TestSaveLoad(PackageTestCase):
 
     @skipIf(
         IS_FBCODE or IS_SANDCASTLE,
-        "Tests that use temporary files are disabled in fbcode"
+        "Tests that use temporary files are disabled in fbcode",
     )
     def test_saving_source(self):
         filename = self.temp()

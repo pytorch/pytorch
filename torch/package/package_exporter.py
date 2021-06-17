@@ -226,13 +226,13 @@ class PackageExporter:
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
     ):
-        """Adds the local file system `file_or_directory` to the source package to provide the code
-        for `module_name`.
+        """Adds the local file system ``file_or_directory`` to the source package to provide the code
+        for ``module_name``.
 
         Args:
-            module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
+            module_name (str): e.g. ``"my_package.my_subpackage"``, code will be saved to provide code for this package.
             file_or_directory (str): the path to a file or directory of code. When a directory, all python files in the directory
-                are recursively copied using :meth:`save_source_file`. If a file is named "/__init__.py" the code is treated
+                are recursively copied using :meth:`save_source_file`. If a file is named ``"/__init__.py"`` the code is treated
                 as a package.
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
