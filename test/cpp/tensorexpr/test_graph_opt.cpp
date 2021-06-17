@@ -14,10 +14,24 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+class GraphOpt : public ::testing::Test {
+ public:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  void SetUp() {
+    old_cat_wo_conditionals_ = getCatWoConditionals();
+    getCatWoConditionals() = true;
+  }
+
+  void TearDown() {
+    getCatWoConditionals() = old_cat_wo_conditionals_;
+  }
+
+ private:
+  bool old_cat_wo_conditionals_;
+};
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(GraphOpt, OptimizeCat) {
-  bool old_flag = getCatWoConditionals();
-  getCatWoConditionals() = true;
+TEST_F(GraphOpt, OptimizeCat) {
   const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -43,9 +57,9 @@ TEST(GraphOpt, OptimizeCat) {
       ->check_not("aten::log")
       ->run(*kernel.graph());
 
-  auto x = at::rand({10}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto y = at::rand({20}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto z = at::rand({30}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto x = at::rand({10}, at::kFloat);
+  auto y = at::rand({20}, at::kFloat);
+  auto z = at::rand({30}, at::kFloat);
   auto ref = at::log(at::cat({x, y, z}, 0));
 
   std::vector<at::Tensor> inputs = {x, y, z};
@@ -55,14 +69,10 @@ TEST(GraphOpt, OptimizeCat) {
   ASSERT_EQ(out.sizes(), ref.sizes());
   ASSERT_EQ(out.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(out, ref));
-
-  getCatWoConditionals() = old_flag;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(GraphOpt, OptimizeCat2) {
-  bool old_flag = getCatWoConditionals();
-  getCatWoConditionals() = true;
+TEST_F(GraphOpt, OptimizeCat2) {
   const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -94,9 +104,9 @@ TEST(GraphOpt, OptimizeCat2) {
       ->check_not("aten::tanh")
       ->run(*kernel.graph());
 
-  auto x = at::rand({10}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto y = at::rand({20}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto z = at::rand({30}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto x = at::rand({10}, at::kFloat);
+  auto y = at::rand({20}, at::kFloat);
+  auto z = at::rand({30}, at::kFloat);
   auto ref = at::tanh(at::log(at::cat({x, y, z}, 0)));
 
   std::vector<at::Tensor> inputs = {x, y, z};
@@ -106,14 +116,10 @@ TEST(GraphOpt, OptimizeCat2) {
   ASSERT_EQ(out.sizes(), ref.sizes());
   ASSERT_EQ(out.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(out, ref));
-
-  getCatWoConditionals() = old_flag;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(GraphOpt, OptimizeCat3) {
-  bool old_flag = getCatWoConditionals();
-  getCatWoConditionals() = true;
+TEST_F(GraphOpt, OptimizeCat3) {
   const auto graph_string = R"IR(
     graph(%a : Float(60, strides=[1], device=cpu),
           %x : Float(10, strides=[1], device=cpu),
@@ -144,10 +150,10 @@ TEST(GraphOpt, OptimizeCat3) {
       ->check_not("aten::tanh")
       ->run(*kernel.graph());
 
-  auto a = at::rand({60}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto x = at::rand({10}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto y = at::rand({20}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto z = at::rand({30}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto a = at::rand({60}, at::kFloat);
+  auto x = at::rand({10}, at::kFloat);
+  auto y = at::rand({20}, at::kFloat);
+  auto z = at::rand({30}, at::kFloat);
   auto ref = at::tanh(at::cat({x, y, z}, 0)) * a;
 
   std::vector<at::Tensor> inputs = {a, x, y, z};
@@ -157,14 +163,10 @@ TEST(GraphOpt, OptimizeCat3) {
   ASSERT_EQ(out.sizes(), ref.sizes());
   ASSERT_EQ(out.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(out, ref));
-
-  getCatWoConditionals() = old_flag;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(GraphOpt, OptimizeCatWithTypePromotionInUser) {
-  bool old_flag = getCatWoConditionals();
-  getCatWoConditionals() = true;
+TEST_F(GraphOpt, OptimizeCatWithTypePromotionInUser) {
   const auto graph_string = R"IR(
     graph(%x : Int(10, strides=[1], device=cpu),
           %y : Int(20, strides=[1], device=cpu),
@@ -192,18 +194,9 @@ TEST(GraphOpt, OptimizeCatWithTypePromotionInUser) {
       ->check_not("aten::tanh")
       ->run(*kernel.graph());
 
-  auto x = at::randint(
-      std::numeric_limits<int>::max(),
-      {10},
-      TensorOptions(kCPU).dtype(at::kInt));
-  auto y = at::randint(
-      std::numeric_limits<int>::max(),
-      {20},
-      TensorOptions(kCPU).dtype(at::kInt));
-  auto z = at::randint(
-      std::numeric_limits<int>::max(),
-      {30},
-      TensorOptions(kCPU).dtype(at::kInt));
+  auto x = at::randint(std::numeric_limits<int>::max(), {10}, at::kInt);
+  auto y = at::randint(std::numeric_limits<int>::max(), {20}, at::kInt);
+  auto z = at::randint(std::numeric_limits<int>::max(), {30}, at::kInt);
   auto ref = at::tanh(at::cat({x, y, z}, 0));
 
   std::vector<at::Tensor> inputs = {x, y, z};
@@ -213,14 +206,10 @@ TEST(GraphOpt, OptimizeCatWithTypePromotionInUser) {
   ASSERT_EQ(out.sizes(), ref.sizes());
   ASSERT_EQ(out.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(out, ref));
-
-  getCatWoConditionals() = old_flag;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(GraphOpt, OptimizeCatWithTypePromotionInCat) {
-  bool old_flag = getCatWoConditionals();
-  getCatWoConditionals() = true;
+TEST_F(GraphOpt, OptimizeCatWithTypePromotionInCat) {
   const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -245,14 +234,10 @@ TEST(GraphOpt, OptimizeCatWithTypePromotionInCat) {
       ->check_not("aten::cat")
       ->check_not("aten::log")
       ->run(*kernel.graph());
-
-  getCatWoConditionals() = old_flag;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
-  bool old_flag = getCatWoConditionals();
-  getCatWoConditionals() = true;
+TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
   const auto graph_string = R"IR(
     graph(%0 : Float(60, strides=[1], device=cpu),
           %x : Float(10, strides=[1], device=cpu),
@@ -278,13 +263,10 @@ TEST(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
       ->check_not("aten::cat")
       ->check_not("aten::mul")
       ->run(*kernel.graph());
-  getCatWoConditionals() = old_flag;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
-  bool old_flag = getCatWoConditionals();
-  getCatWoConditionals() = true;
+TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
   const auto graph_string = R"IR(
     graph(%0 : Float(60, strides=[1], device=cpu),
           %1 : Float(60, strides=[1], device=cpu),
@@ -315,7 +297,6 @@ TEST(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
       ->check_not("aten::mul")
       ->check_not("aten::add")
       ->run(*kernel.graph());
-  getCatWoConditionals() = old_flag;
 }
 
 } // namespace jit
