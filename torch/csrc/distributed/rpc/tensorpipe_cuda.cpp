@@ -1,7 +1,8 @@
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 
-#if defined(USE_TENSORPIPE) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_TENSORPIPE) && defined(USE_CUDA_NOT_ROCM)
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
