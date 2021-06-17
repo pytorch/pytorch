@@ -6968,7 +6968,8 @@ class DistributedTest:
             inp = torch.randn(10, 2, device=rank)
             inp_syncbn = torch.randn(10, 2, 4, 4, device=rank)
             tests = [
-                    (model, local_model, inp), (syncbn_model, local_syncbn_model, inp_syncbn)
+                (model, local_model, inp),
+                (syncbn_model, local_syncbn_model, inp_syncbn),
             ]
             for test in tests:
                 test_model, test_local_model, test_inp = test
