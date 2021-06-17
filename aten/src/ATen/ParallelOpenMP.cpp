@@ -86,7 +86,7 @@ int get_thread_num() {
   return this_thread_id;
 }
 
-namespace detail {
+namespace internal {
 void set_thread_num(int id) {
   this_thread_id = id;
 }
