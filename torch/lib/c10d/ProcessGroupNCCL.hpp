@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <chrono>
 #include <iostream>
 #include <list>
@@ -68,7 +70,7 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 //   work->wait()
 //
 //   // Now continue on other work in the current stream.
-class ProcessGroupNCCL : public ProcessGroup {
+class TORCH_API ProcessGroupNCCL : public ProcessGroup {
  public:
   class WorkNCCL : public ProcessGroup::Work,
     public std::enable_shared_from_this<WorkNCCL> {
@@ -272,6 +274,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
@@ -555,3 +562,5 @@ class ProcessGroupNCCL : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL

@@ -47,6 +47,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Mapping of batch sizes to shape infos
   std::unordered_map<int, ShapeInfoMap> shape_hints_per_bs;
+
+  // Whether to read batch size from Onnxifi.
+  bool use_onnxifi_batch_size{false};
 };
 
 class TORCH_API OnnxifiOptionHelper final {

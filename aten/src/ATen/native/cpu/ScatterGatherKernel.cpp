@@ -113,13 +113,6 @@ struct cpu_scatter_gather_base_kernel {
 
     dim = maybe_wrap_dim(dim, self.dim());
 
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, self);
-    }
-    else {
-      gather_shape_check(self, dim, index, self);
-    }
-
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto index_strides = ensure_nonempty_vec(index.strides().vec());
 
@@ -135,8 +128,8 @@ struct cpu_scatter_gather_base_kernel {
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_borrowed_output(self)
-      .add_borrowed_input(index)
+      .add_output(self)
+      .add_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -147,8 +140,8 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = self_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Bool, ScalarType::Half, iter.dtype(),
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_gather_scalar_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
@@ -215,10 +208,7 @@ struct cpu_scatter_gather_base_kernel {
     dim = maybe_wrap_dim(dim, self.dim());
 
     scatter_gather_dtype_check(method_name, self, index, src);
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, src);
-    }
-    else {
+    if (!is_scatter_like) {
       gather_shape_check(self, dim, index, src);
     }
 
@@ -227,9 +217,9 @@ struct cpu_scatter_gather_base_kernel {
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_borrowed_output(self)
-      .add_borrowed_input(src)
-      .add_borrowed_input(index)
+      .add_output(self)
+      .add_input(src)
+      .add_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -243,8 +233,8 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Bool, ScalarType::Half, iter.dtype(),
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_gather_tensor_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
