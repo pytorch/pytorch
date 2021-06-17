@@ -428,7 +428,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 FunctionalConv1d,
                 (conv1d_weight,),
                 (conv1d_input,),
-                ns.call_function(torch.ops.quantized.conv1d),
+                ns.call_function(torch.nn.functional.conv1d if is_reference else torch.ops.quantized.conv1d) ,
                 ns.call_function(torch.ops.quantized.conv1d_prepack),
             ),
             (
@@ -436,7 +436,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 FunctionalConv2d,
                 (conv2d_weight,),
                 (conv2d_input,),
-                ns.call_function(torch.ops.quantized.conv2d),
+                ns.call_function(torch.nn.functional.conv2d if is_reference else torch.ops.quantized.conv2d),
                 ns.call_function(torch.ops.quantized.conv2d_prepack),
             ),
             (
@@ -444,7 +444,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 FunctionalConv3d,
                 (conv3d_weight,),
                 (conv3d_input,),
-                ns.call_function(torch.ops.quantized.conv3d),
+                ns.call_function(torch.nn.functional.conv3d if is_reference else torch.ops.quantized.conv3d),
                 ns.call_function(torch.ops.quantized.conv3d_prepack),
             ),
             (
@@ -476,7 +476,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Linear,
                 (linear_weight,),
                 (linear_input,),
-                ns.call_function(torch.ops.quantized.linear_dynamic),
+                None if is_reference else ns.call_function(torch.ops.quantized.linear_dynamic),
                 ns.call_function(torch.ops.quantized.linear_prepack),
             ),
             (
@@ -484,7 +484,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Linear,
                 (linear_weight,),
                 (linear_input,),
-                ns.call_function(torch.ops.quantized.linear),
+                ns.call_function(torch.nn.functional.linear if is_reference else torch.ops.quantized.linear),
                 ns.call_function(torch.ops.quantized.linear_prepack),
             ),
             (
@@ -538,10 +538,10 @@ class TestQuantizeFx(QuantizationTestCase):
             node_occurrence = dict()
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
-                node_occurrence[quantized_node] = 0
             self.checkGraphModeFxOp(
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
+                expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 is_reference=True)
 
