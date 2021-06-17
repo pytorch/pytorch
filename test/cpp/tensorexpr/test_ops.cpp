@@ -1,8 +1,8 @@
-#include <torch/torch.h>
+#include <gtest/gtest.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
-#include <gtest/gtest.h>
+#include <torch/torch.h>
 
 using namespace torch::jit::tensorexpr;
 
