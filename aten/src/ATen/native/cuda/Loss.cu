@@ -195,8 +195,8 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     int64_t ignore_index) {
   CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 & threadIdx.z == 0);
 
-  int64_t t = static_cast<int64_t>(*target);
-  if (t != static_cast<int64_t>(ignore_index)) {
+  int64_t t = *target;
+  if (t != ignore_index) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     scalar_t cur_weight =
         weights != nullptr ? weights[t] : scalar_cast<scalar_t>(1);
@@ -212,10 +212,12 @@ template <typename scalar_t, typename accscalar_t>
 __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     scalar_t* output,
     scalar_t* total_weight,
-    PackedTensorAccessor64<scalar_t, 2> input,
+    scalar_t* input,
     int64_t* target,
     scalar_t* weights,
     bool size_average,
+    int64_t nframe,
+    int64_t ndim,
     int64_t n_classes,
     int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -227,12 +229,12 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
-  for (i = threadIdx.x; i < input.size(0); i += N_THREADS) {
+  for (i = threadIdx.x; i < nframe; i += N_THREADS) {
     t = target[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       cur_weight = weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
-      sh_inputs[threadIdx.x] -= input[i][t] * cur_weight;
+      sh_inputs[threadIdx.x] -= input[i * ndim + t] * cur_weight;
       acc_weight[threadIdx.x] += cur_weight;
     }
   }
@@ -250,7 +252,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     *total_weight = static_cast<scalar_t>(total_weight_acc);
     *output = static_cast<scalar_t>(output_acc);
     if (size_average) {
-      if (input.size(0) == 0) {
+      if (nframe == 0) {
         // Mean reduction on empty tensors produces NaN
         *output = std::numeric_limits<double>::quiet_NaN();
       }
@@ -399,10 +401,12 @@ void nll_loss_forward_out_cuda_template(
               <<<1, N_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
                   output.data_ptr<scalar_t>(),
                   total_weight.data_ptr<scalar_t>(),
-                  input_.packed_accessor64<scalar_t, 2>(),
+                  input_.data_ptr<scalar_t>(),
                   target_.data_ptr<int64_t>(),
                   weight_ptr,
                   reduction == at::Reduction::Mean,
+                  input.size(0),
+                  input.size(1),
                   n_classes,
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
