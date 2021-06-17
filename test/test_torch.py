@@ -2975,6 +2975,15 @@ class TestTorchDeviceType(TestCase):
             with self.assertWarnsOnceRegex(UserWarning, "torch.is_deterministic is deprecated"):
                 torch.is_deterministic()
 
+    # Validates that mathematical constants are defined properly, as required by
+    # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
+    @onlyCPU
+    def test_constants(self, device):
+        self.assertEqual(torch.e, math.e, atol=0, rtol=0)
+        self.assertEqual(torch.pi, math.pi, atol=0, rtol=0)
+        self.assertEqual(torch.nan, math.nan, equal_nan=True)
+        self.assertEqual(torch.inf, math.inf)
+
     @dtypes(torch.float32, torch.complex64)
     def test_storage(self, device, dtype):
         v = torch.randn(3, 5, dtype=dtype, device=device)
@@ -8067,24 +8076,6 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
                     self.assertEqual(expect, res2)
         finally:
             torch.set_num_threads(num_threads)
-
-# Test Python Array API Constants
-class TestConstants(TestCase):
-    def test_e(self):
-        self.assertIsInstance(torch.e, float)
-        torch.testing.assert_close(torch.e, math.e)
-
-    def test_pi(self):
-        self.assertIsInstance(torch.pi, float)
-        torch.testing.assert_close(torch.pi, math.pi)
-
-    def test_nan(self):
-        self.assertIsInstance(torch.nan, float)
-        torch.testing.assert_close(torch.nan, math.nan, equal_nan=True)
-
-    def test_inf(self):
-        self.assertIsInstance(torch.inf, float)
-        torch.testing.assert_close(torch.inf, math.inf)
 
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
