@@ -196,7 +196,7 @@ class CompileCache3 {
     CodeGen* cg = cached_compile(key);
     cg->call_raw(args)
 
-    int64_t n = a.sizes()[0];
+        int64_t n = a.sizes()[0];
     int64_t shapes[] = {n};
     int64_t strides[] = {1};
     at::Tensor out = at::empty_strided(shapes, strides);
@@ -213,11 +213,8 @@ class CompileCache3 {
 template <NARGS>
 class CompileCache2 {
  public:
-  CompileCache2(py::handle compile_fn) :
-    cache2(compile_fn),
-    cache4(compile_fn),
-    cache8(compile_fn)
-    {}
+  CompileCache2(py::handle compile_fn)
+      : cache2(compile_fn), cache4(compile_fn), cache8(compile_fn) {}
 
   at::Tensor call(const st::array<at::Tensor*, NARGS>& args) {
     // fan out and and specialize on number of dimension buckets
@@ -239,12 +236,11 @@ class CompileCache2 {
 
 class CompileCache : public KernelScopedObject {
  public:
-  CompileCache(py::handle compile_fn) :
-    cache1(compile_fn),
-    cache2(compile_fn),
-    cache3(compile_fn),
-    cache4(compile_fn)
-    {}
+  CompileCache(py::handle compile_fn)
+      : cache1(compile_fn),
+        cache2(compile_fn),
+        cache3(compile_fn),
+        cache4(compile_fn) {}
 
   at::Tensor call(py::args, py::kwargs) {
     // fan out an specialize on arg counts
@@ -282,8 +278,10 @@ class CompileCache : public KernelScopedObject {
   CompileCache2<4> cache4;
 };
 
-at::Tensor
-call_jansel(CodeGen& self, const at::Tensor& a, const at::Tensor& b) {
+at::Tensor call_jansel(
+    CodeGen& self,
+    const at::Tensor& a,
+    const at::Tensor& b) {
   typedef SpecializationKey<2> K2;
   typedef std::array<K2, 2> A;
 
