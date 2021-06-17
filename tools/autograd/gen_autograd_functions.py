@@ -324,7 +324,6 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 (type == BaseCType(scalarT) and is_output):
             saved_variables.append(f'SavedVariable {name}_;')
             release_variables.append(f'{name}_.reset_data();')
-            release_variables.append(f'{name}_.reset_grad_function();')
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(

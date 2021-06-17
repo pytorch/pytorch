@@ -52,7 +52,9 @@ from .utils import (
     assert_and_get_unique_device,
     node_bool_tensor_arg_indexes,
     get_new_attr_name_with_prefix,
+    NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
+    FUNCTIONAL_OPS_WITH_BIAS,
 )
 
 from ..quantization_mappings import (
@@ -88,6 +90,9 @@ def node_arg_is_weight(node: Node, arg: Any) -> bool:
             if arg is node_arg and i in \
                     WEIGHT_INDEX_DICT[node.target]:  # type: ignore[index]
                 return True
+        for kwarg_name, kwarg_value in node.kwargs.items():
+            if kwarg_name == 'weight' and arg is kwarg_value:
+                return True
     return False
 
 CONV_OPS_WITH_BIAS = {
@@ -103,7 +108,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
             for i, node_arg in enumerate(node.args):
                 if arg is node_arg and i == CONV_BIAS_ARG_INDEX:
                     return True
-        elif node.target is torch.nn.functional.linear:
+        elif node.target in FUNCTIONAL_OPS_WITH_BIAS:
             for kwarg_name, kwarg_value in node.kwargs.items():
                 if kwarg_name == 'bias' and arg is kwarg_value:
                     return True
@@ -277,7 +282,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             qconfig.activation
         is_bias = node_arg_is_bias(node, arg)
         is_activation = not (is_weight or is_bias)
-        weight_needs_obs = is_weight and weight_is_quantized(qconfig)
+        weight_needs_obs = is_weight and weight_is_quantized(qconfig) and node.target not in NON_QUANTIZABLE_WEIGHT_OPS
         bias_needs_obs = \
             (is_bias and activation_dtype(qconfig) == torch.float16) and \
             weight_dtype(qconfig) == torch.float16
@@ -432,58 +437,43 @@ def maybe_insert_output_observer_for_node(
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
 
-    if qhandler is not None:
-        assert qconfig is not None
+    if qhandler is None:
+        return None
 
-        is_standalone_module = qhandler is not None and \
-            isinstance(qhandler, StandaloneModuleQuantizeHandler)
+    assert qconfig is not None
+    assert node.op != 'output', 'observer insertion for outputs is handled elsewhere'
 
-        should_insert_observer = \
-            qhandler.should_insert_observer_for_output(
-                qconfig, model.training)
-        # TODO(future PR): move the following logic to
-        # should_insert_observer_for_output
-        should_insert_observer = should_insert_observer and \
-            activation_is_statically_quantized(qconfig)
+    is_standalone_module = qhandler is not None and \
+        isinstance(qhandler, StandaloneModuleQuantizeHandler)
 
-        # we never insert observers to output of standalone module, we assume
-        # if needed, they are inserted inside the standalone module
-        should_insert_observer = should_insert_observer and \
-            (not is_standalone_module)
+    should_insert_observer = \
+        qhandler.should_insert_observer_for_output(
+            qconfig, model.training)
+    # TODO(future PR): move the following logic to
+    # should_insert_observer_for_output
+    should_insert_observer = should_insert_observer and \
+        activation_is_statically_quantized(qconfig)
 
-        if should_insert_observer:
-            act_post_process_ctr = qconfig.activation
-            if activation_is_int8_quantized(qconfig):
-                act_post_process_ctr = \
-                    get_default_output_activation_post_process_map().get(
-                        matched_pattern,
-                        act_post_process_ctr)
-            observer = act_post_process_ctr()
-            new_obs = insert_observer(node, observer, model, modules, graph)
-            # set the type, so the next node can read it
-            node_name_to_target_dtype[new_obs.name] = \
-                node_name_to_target_dtype[node.name]
-            return new_obs
+    # we never insert observers to output of standalone module, we assume
+    # if needed, they are inserted inside the standalone module
+    should_insert_observer = should_insert_observer and \
+        (not is_standalone_module)
 
-    elif node.op == 'output':
-        prev_node = node.args[0]
-        assert isinstance(prev_node, Node)
-        prev_node_dtype = node_name_to_target_dtype[prev_node.name]
-        node_dtype = node_name_to_target_dtype[node.name]
-        should_insert_observer = (
-            prev_node_dtype == torch.float and
-            node_dtype != torch.float
-        )
-        if should_insert_observer:
-            assert qconfig is not None
-            observer = qconfig.activation()
-            new_obs = insert_observer(
-                prev_node, observer, model, modules, graph)
-            # set the type, so the next node can read it
-            node_name_to_target_dtype[new_obs.name] = node_dtype
-            return new_obs
-
-    return None
+    if should_insert_observer:
+        act_post_process_ctr = qconfig.activation
+        if activation_is_int8_quantized(qconfig):
+            act_post_process_ctr = \
+                get_default_output_activation_post_process_map().get(
+                    matched_pattern,
+                    act_post_process_ctr)
+        observer = act_post_process_ctr()
+        new_obs = insert_observer(node, observer, model, modules, graph)
+        # set the type, so the next node can read it
+        node_name_to_target_dtype[new_obs.name] = \
+            node_name_to_target_dtype[node.name]
+        return new_obs
+    else:
+        return None
 
 def maybe_insert_observers_before_graph_output(
     graph_output_node: Node,
@@ -928,12 +918,12 @@ def save_state(
         prepare_custom_config_dict  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
 
-def _prepare(
+def prepare(
         model: GraphModule,
         qconfig_dict: Any,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        prepare_custom_config_dict: Optional[Dict[str, Any]],
-        is_standalone_module: bool) -> ObservedGraphModule:
+        prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
+        is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 

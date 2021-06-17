@@ -36,7 +36,7 @@ struct TCPStoreOptions {
   bool multiTenant = false;
 };
 
-class TCPStore : public Store {
+class TORCH_API TCPStore : public Store {
  public:
   explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
 
