@@ -35,6 +35,7 @@ const CUDAHooksInterface& getCUDAHooks() {
   // for an example where we relax this restriction (but if you try to avoid
   // needing a lock, be careful; it doesn't look like Registry.h is thread
   // safe...)
+#if !defined C10_MOBILE
   static std::once_flag once;
   std::call_once(once, [] {
     cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{}).release();
@@ -42,6 +43,11 @@ const CUDAHooksInterface& getCUDAHooks() {
       cuda_hooks = new CUDAHooksInterface();
     }
   });
+#else
+  if (cuda_hooks == nullptr) {
+    cuda_hooks = new CUDAHooksInterface();
+  }
+#endif
   return *cuda_hooks;
 }
 } // namespace detail

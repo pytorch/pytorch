@@ -14,7 +14,7 @@ _registry: Dict[Tuple[str, int], Dict] = {}
 _symbolic_versions: Dict[Union[int, str], Any] = {}
 from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
 for opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
-    module = importlib.import_module('torch.onnx.symbolic_opset{}'.format(opset_version))
+    module = importlib.import_module("torch.onnx.symbolic_opset{}".format(opset_version))
     _symbolic_versions[opset_version] = module
 
 
@@ -28,14 +28,14 @@ def register_version(domain, version):
 def register_ops_helper(domain, version, iter_version):
     version_ops = get_ops_in_version(iter_version)
     for op in version_ops:
-        if op[0] == '_len':
-            op = ('len', op[1])
-        if op[0] == '_list':
-            op = ('list', op[1])
-        if op[0] == '_any':
-            op = ('any', op[1])
-        if op[0] == '_all':
-            op = ('all', op[1])
+        if op[0] == "_len":
+            op = ("len", op[1])
+        if op[0] == "_list":
+            op = ("list", op[1])
+        if op[0] == "_any":
+            op = ("any", op[1])
+        if op[0] == "_all":
+            op = ("all", op[1])
         if isfunction(op[1]) and not is_registered_op(op[0], domain, version):
             register_op(op[0], op[1], domain, version)
 

@@ -12,6 +12,15 @@
 #define USE_CUSOLVER
 #endif
 
+// cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,
+// (which is cusolver version 11101 in the header), so we only use cusolver potrf batched
+// if cuda version is >= 11.3
+#if CUSOLVER_VERSION >= 11101
+  constexpr bool use_cusolver_potrf_batched_ = true;
+#else
+  constexpr bool use_cusolver_potrf_batched_ = false;
+#endif
+
 namespace at {
 namespace native {
 
@@ -19,6 +28,7 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau);
 
 void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
 void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
+void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
 
 #ifdef USE_CUSOLVER
 

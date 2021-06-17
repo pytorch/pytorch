@@ -80,9 +80,7 @@ Tanh<T>::Tanh(double max_abs_err) : max_abs_err_(max_abs_err) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int i;
   for (i = x_pq_index_; i < in_pos_qmax; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     double y_begin = tanh((i - 0.5) * in_qparams_.scale);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     double y_end = tanh((i + 0.5) * in_qparams_.scale);
 
     int y_avg_q = nearbyint((y_begin + y_end) / 2 / out_qparams_.scale);

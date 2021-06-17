@@ -15,7 +15,6 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
   // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self.scalar_type(), "int_repr", [&]() {
     if (bit_width == 4) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       int64_t out_size = std::ceil(self.numel() * 0.5);
       dst = at::empty(
           {out_size},
