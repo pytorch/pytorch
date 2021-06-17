@@ -20,9 +20,10 @@ def generate_sharding_list() -> List[int]:
 
 def main() -> None:
     print(json.dumps(
-        {'test_config': generate_sharding_list()},
+        {
+            'test_config': generate_sharding_list()
+        },
         sort_keys=True,
-        indent=4,
     ))
 
 
