@@ -619,6 +619,7 @@ void Unpickler::readGlobal(
         "'");
   } else {
     AT_ASSERT(type_resolver_);
+    std::cout << "module_name: " << module_name << " class_name: " << class_name << std::endl;
     at::StrongTypePtr type =
         type_resolver_(c10::QualifiedName(module_name, class_name));
     if (auto enum_type = type.type_->cast<c10::EnumType>()) {
@@ -639,7 +640,9 @@ void Unpickler::readGlobal(
       globals_.emplace_back([this, type] {
         auto val = stack_.back();
         stack_.pop_back();
+        auto attr_nums = type.type_->expect<at::ClassType>()->numAttributes();
         auto obj = obj_loader_(type, val);
+        std::cout << "obj name: " << obj->name() << " attr number: " << attr_nums << std::endl;
         stack_.emplace_back(std::move(obj));
       });
     }

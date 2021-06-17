@@ -438,7 +438,7 @@ void set_train_recurse(ObjectPtr obj, bool on) {
     obj->setSlot(*slot, on);
     std::cout << "jit success recurse at . " << obj->name() << std::endl;
   } else {
-    std::cout << "jit fail recurse. " << std::endl;
+    std::cout << "jit fail recurse at. " << obj->name() << std::endl;
   }
   int i = 0;
   for (const auto& slot : obj->slots()) {
@@ -454,7 +454,7 @@ void Module::train(bool on) {
   std::cout << "number of modules in jit: " << modules().size() << std::endl;
   int i = 0;
   for (Module m : modules()) {
-    std::cout << "module: " << i++ << std::endl;
+//    std::cout << "module: " << i++ << std::endl;
 //    m.dump(true, true, true);
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
       m._ivalue()->setSlot(*slot, on);
@@ -463,8 +463,8 @@ void Module::train(bool on) {
     }
   }
 
-  auto obj = _ivalue();
-  set_train_recurse(obj, true);
+//  auto obj = _ivalue();
+//  set_train_recurse(obj, true);
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {

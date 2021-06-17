@@ -138,6 +138,23 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     auto cls = type.type_->expect<at::ClassType>();
     auto qn = cls->name();
     size_t n = cls->numAttributes();
+
+
+    auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
+      auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
+      if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
+        return custom_class_type;
+      }
+      return nullptr;
+    };
+
+//    auto custom_class_type = find_custom_class_with_setstate();
+    if (auto custom_class_type = find_custom_class_with_setstate()) {
+      std::cout << "obj is custom with setstate" << std::endl;
+    } else {
+      std::cout << "obj is not custom with setstate" << std::endl;
+    }
+
     if (checkHasValidSetGetState(cls)) {
       auto obj = c10::ivalue::Object::create(type, n);
       // XXX: Do not optimize __setstate__, so that we don't try to
@@ -155,11 +172,18 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
           input, set_state.getSchema().arguments().at(1).type());
       set_state({obj, input});
       postSetStateValidate(obj);
+      std::cout << "jit obj has setstate, num dict: " << n  << " obj name: " << obj->name() << " method_name: " << set_state.name() << " slot number: " << n << std::endl;
+      for(auto i = 0; i < n; i++) {
+        std::cout << "att name: " << cls->getAttributeName(i) << std::endl;
+      }
       return obj;
     } else {
+//      input.dump();
       auto dict = std::move(input).toGenericDict();
       auto obj = c10::ivalue::Object::create(type, n);
+      std::cout << "cls size: " << n << " dict size: " << dict.size() << " obj name: " << obj->name() << std::endl;
       for (size_t i = 0; i < n; ++i) {
+        std::cout << "att name: " << cls->getAttributeName(i) << std::endl;
         obj->setSlot(i, dict.at(cls->getAttributeName(i)));
       }
       return obj;
@@ -235,6 +259,23 @@ graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_ze
   }
 }
 
+void set_train_recurse(ObjectPtr obj, bool on) {
+  if (auto slot = obj->type()->findAttributeSlot("training")) {
+    obj->setSlot(*slot, on);
+    std::cout << "jit success recurse at . " << obj->name() << std::endl;
+  } else {
+    std::cout << "jit fail recurse. " << std::endl;
+  }
+  int i = 0;
+  for (const auto& slot : obj->slots()) {
+    // slots is a list of IValue. Continue setting training attribute only
+    // if the slot is an Object and a module.
+    if (slot.isObject() && slot.toObjectRef().type()->is_module()) {
+      set_train_recurse(slot.toObject(), on);
+    }
+  }
+}
+
 Module ScriptModuleDeserializer::deserialize(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
@@ -263,7 +304,11 @@ Module ScriptModuleDeserializer::deserialize(
   for (auto constant : tuple->elements()) {
     constants_table_.push_back(constant.toIValue());
   }
+
   auto m = Module(readArchive("data").toObject());
+//  auto obj = m._ivalue();
+  auto obj = readArchive("data").toObject();
+  set_train_recurse(obj, true);
   rewriteQuantizedConvForBC(m);
   return m;
 }

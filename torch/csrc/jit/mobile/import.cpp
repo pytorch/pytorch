@@ -154,25 +154,35 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     return nullptr;
   };
   if (setstate) {
-    auto obj = c10::ivalue::Object::create(type, 0);
+    int numSlots = 0;
+    if(input.isTuple()) {
+      auto vals = input.toTuple()->elements();
+      std::cout << "vals size" << vals.size();
+      numSlots = vals.size();
+    }
+    auto obj = c10::ivalue::Object::create(type, numSlots);
     Stack stack({obj, input});
     setstate->run(stack);
+    std::cout << "mobile obj has setstate: " << obj->name() << " method_name: " << method_name.name() << std::endl;
     return obj;
   } else if (auto custom_class_type = find_custom_class_with_setstate()) {
     auto obj = c10::ivalue::Object::create(
         c10::StrongTypePtr(nullptr, custom_class_type), 1);
     Stack stack({obj, input});
     custom_class_type->getMethod("__setstate__").run(stack);
+    std::cout << "mobile custom obj has setstate: " << obj->name() << std::endl;
     return obj;
   } else {
     auto dict = std::move(input).toGenericDict();
     size_t ndict = dict.size();
     auto obj = c10::ivalue::Object::create(type, ndict);
     auto it = dict.begin();
+    std::cout << "mobile dict size: " << ndict << " obj name: " << obj->name() << std::endl;
     for (size_t i = 0; i < ndict; ++i) {
       std::stringstream name;
       name << it->key();
       cls->addOrCheckAttribute(name.str(), it->key().type());
+      std::cout << "att name: " << name.str() << std::endl;
       obj->setSlot(i, it->value());
       ++it;
     }
@@ -507,6 +517,23 @@ mobile::Module BytecodeDeserializer::deserialize(
   return deserialize(device);
 }
 
+void set_train_recurse(ObjectPtr obj, bool on) {
+  if (auto slot = obj->type()->findAttributeSlot("training")) {
+    obj->setSlot(*slot, on);
+    std::cout << "mobile success recurse at . " << obj->name() << std::endl;
+  } else {
+    std::cout << "mobile fail recurse at. " << obj->name() << std::endl;
+  }
+  int i = 0;
+  for (const auto& slot : obj->slots()) {
+    // slots is a list of IValue. Continue setting training attribute only
+    // if the slot is an Object and a module.
+    if (slot.isObject() && slot.toObjectRef().type()->is_module()) {
+      set_train_recurse(slot.toObject(), on);
+    }
+  }
+}
+
 mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
   device_ = device;
@@ -530,7 +557,10 @@ mobile::Module BytecodeDeserializer::deserialize(
   }
   parseMethods(bvals, debug_handles, *mcu);
   auto meta_dict = readMobileMetadata(mcu);
-  auto m = mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
+  auto data_obj = readArchive("data", mcu).toObject();
+  set_train_recurse(data_obj, true);
+
+  auto m = mobile::Module(data_obj, meta_dict, mcu);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));
