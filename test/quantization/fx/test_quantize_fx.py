@@ -466,7 +466,7 @@ class TestQuantizeFx(QuantizationTestCase):
             (
                 False,
                 Conv3d,
-                conv2d_module_args,
+                conv3d_module_args,
                 (conv3d_input,),
                 ns.call_module(nnqr.Conv3d if is_reference else nnq.Conv3d),
                 None
