@@ -422,6 +422,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf

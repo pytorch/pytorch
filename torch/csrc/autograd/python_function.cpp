@@ -114,8 +114,6 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
   results.reserve(num_outputs);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  auto& input_info = py_fn->input_info;
   for (int i = 0; i != num_outputs; ++i) {
     PyObject* output = PyTuple_GET_ITEM(r.get(), i);
     bool was_variable = is_variable_input[i];
@@ -497,7 +495,6 @@ static void _trace_post_record(
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
-  variable_list output_vars(num_outputs);
   auto graph = node->owningGraph();
   node->addOutput();
   if (!unpack_output) {

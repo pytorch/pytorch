@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL,)
+import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
 
@@ -232,13 +233,27 @@ class OpInfo(object):
                  test_conjugated_samples=True,
                  ):
 
+        dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
-        for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
+        for dtype_list in dtypes_args:
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
+
+        # Attribute to verify dynamic_dtypes are used.
+        self.dynamic_dtypes = any(map(lambda dtypes: isinstance(
+            dtypes, opinfo_helper._dynamic_dispatch_dtypes), dtypes_args))
+
+        if self.dynamic_dtypes:
+            # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU
+            # This is because, below we set dtypesIfCUDA to dtypes if they are None.
+            assert isinstance(dtypesIfCUDA, opinfo_helper._dynamic_dispatch_dtypes), \
+                (f"To use dynamic dypes for operator {name}, "
+                 "acquire the dtypes dynamically for argument `dtypesIfCUDA`."
+                 "This is to ensure that CUDA dtypes are acquired correctly as they"
+                 "differ from CPU dtypes occasionally")
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
@@ -3283,6 +3298,13 @@ def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(lhs, args=(3.14,)),
     ]
 
+def sample_inputs_isin(op_info, device, dtype, requires_grad):
+    element = make_tensor((L,), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    indices = torch.randint(0, L, size=[S])
+    test_elements = element[indices].clone()
+    return [
+        SampleInput(element, args=(test_elements,))
+    ]
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3429,6 +3451,9 @@ def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         for shape, n in product(tensor_shapes, ns):
             min_val = compute_min_val(n)
+            if not dtype.is_floating_point:
+                # Round-up minimum value for integral dtypes
+                min_val += 1
             yield SampleInput(make_arg(shape, low=min_val), args=(n,))
 
     return list(generator())
@@ -3466,10 +3491,11 @@ class MvlGammaInfo(UnaryUfuncInfo):
             variant_test_name=variant_test_name,
             domain=domain,
             decorators=(precisionOverride({torch.float16: 5e-2}),),
-            dtypes=floating_types(),
-            dtypesIfCUDA=floating_types_and(torch.half),
+            dtypes=all_types_and(torch.bool),
+            dtypesIfCUDA=all_types_and(torch.bool, torch.half),
             sample_inputs_func=sample_inputs_mvlgamma,
             supports_out=False,
+            safe_casts_outputs=True,
             skips=skips,
             sample_kwargs=sample_kwargs)
 
@@ -5336,6 +5362,11 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('isin',
+           dtypesIfCPU=all_types(),
+           dtypesIfCUDA=all_types_and(torch.half),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.float16),
@@ -5907,19 +5938,23 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_mode,),
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',
-                 domain=(1e-4, float('inf')),
+                 domain=(1, float('inf')),
                  skips=skips_mvlgamma(),
                  sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_3',
-                 domain=(1.1, float('inf')),
+                 domain=(2, float('inf')),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                     # bool can't represent the low value from the domain
+                     SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.bool,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_5',
-                 domain=(2.1, float('inf')),
+                 domain=(3, float('inf')),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                     # bool can't represent the low value from the domain
+                     SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.bool,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     OpInfo('ne',
@@ -7071,6 +7106,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True),
     UnaryUfuncInfo('digamma',
                    ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,
+                   aliases=('special.psi', 'special.digamma',),
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
