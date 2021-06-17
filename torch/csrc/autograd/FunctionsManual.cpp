@@ -2740,11 +2740,12 @@ Tensor _det_lu_based_helper_backward(
   auto d = at::diag_embed((det_grad * det.conj()).unsqueeze(-1).expand(det_expanded_sizes));
 
   if (self.device().type() == at::kCPU) {
-    condition_diagonal(lu);
+    auto lu_clone = lu.clone();
+    condition_diagonal(lu_clone);
 
     auto trans = self.is_complex() ? "C" : "T";
 
-    return at::_lu_solve_trans(d, lu, pivs, trans);
+    return at::_lu_solve_trans(d, lu_clone, pivs, trans);
   }
   // lu_solve is less stable than two trinagular_solve for CUDA tensors.
   else {
