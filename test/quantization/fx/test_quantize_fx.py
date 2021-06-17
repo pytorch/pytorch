@@ -2511,6 +2511,21 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def test_trace_quantize_per_tensor(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        # Make sure this runs without error
+        m = torch.fx.Transformer(m).transform()
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
