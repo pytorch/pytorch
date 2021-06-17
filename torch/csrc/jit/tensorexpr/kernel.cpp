@@ -2481,33 +2481,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::sum:
     case aten::softmax:
     case aten::log_softmax:
+    case aten::conv2d:
     case aten::addmm:
     case aten::mean:
     case aten::adaptive_avg_pool2d:
-    case aten::conv2d: {
-      std::vector<ArgValue> argInputs;
-      for (auto inp : inputs) {
-        argInputs.push_back(toArg(inp));
-      }
-      auto outputType = findDtypeForValue(v->node()->output());
-      std::vector<ExprHandle> outputShape = {};
-      // shape inference not implemented for sum
-      if (v->node()->kind() != aten::sum) {
-        outputShape = sizesForValue(v);
-      }
-      return computeOperandValue(
-          v->node()->kind(), argInputs, outputShape, outputType, device_);
-    } break;
-
     case aten::to: {
       std::vector<ArgValue> argInputs;
-      argInputs.push_back(toArg(inputs[0]));
-      auto outputType = findDtypeForValue(v->node()->output());
-      std::vector<ExprHandle> outputShape = {};
-      // shape inference not implemented for sum
-      if (v->node()->kind() != aten::sum) {
-        outputShape = sizesForValue(v);
+      if (v->node()->kind() != aten::to) {
+        for (auto inp : inputs) {
+          argInputs.push_back(toArg(inp));
+        }
+      } else {
+        argInputs.push_back(toArg(inputs[0]));
       }
+      auto outputType = findDtypeForValue(v->node()->output());
+      std::vector<ExprHandle> outputShape = sizesForValue(v);
       return computeOperandValue(
           v->node()->kind(), argInputs, outputShape, outputType, device_);
     } break;
